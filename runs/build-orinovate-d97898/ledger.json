@@ -1,0 +1,549 @@
+{
+  "run_id": "build-orinovate-d97898",
+  "schema_version": 1,
+  "mode": "real",
+  "created_at": null,
+  "job": {
+    "company_url": "https://www.orinovate.com",
+    "goal": "A brand explainer that introduces the product and what it does",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "status": "completed_with_warnings",
+  "phase": "delivered",
+  "pricing": {
+    "currency": "usd",
+    "target_margin": 0.6,
+    "scenes": [
+      {
+        "id": "opening-title",
+        "type": "title",
+        "tool": "motion-graphics",
+        "model": null,
+        "est_cost_cents": 0,
+        "note": "title -> motion-graphics (free, $0 marginal)",
+        "per_scene_budget_cents": 0
+      },
+      {
+        "id": "cinematic-aerial",
+        "type": "cinematic",
+        "tool": "higgsfield-scene",
+        "model": "seedance_2_0",
+        "est_cost_cents": 22,
+        "note": "cinematic via seedance_2_0 -- higgsfield preview: 22.5 credits",
+        "per_scene_budget_cents": 22
+      },
+      {
+        "id": "cinematic-dashboard",
+        "type": "cinematic",
+        "tool": "higgsfield-scene",
+        "model": "gpt_image_2",
+        "est_cost_cents": 7,
+        "note": "cinematic via gpt_image_2 -- higgsfield preview: 7 credits",
+        "per_scene_budget_cents": 7
+      },
+      {
+        "id": "walkthrough-setup",
+        "type": "walkthrough",
+        "tool": "walk-agent",
+        "model": null,
+        "est_cost_cents": 0,
+        "note": "walkthrough -> walk-agent (free, $0 marginal)",
+        "per_scene_budget_cents": 0
+      },
+      {
+        "id": "closing-cta",
+        "type": "title",
+        "tool": "motion-graphics",
+        "model": null,
+        "est_cost_cents": 0,
+        "note": "title -> motion-graphics (free, $0 marginal)",
+        "per_scene_budget_cents": 0
+      }
+    ],
+    "voiceover": {
+      "id": "__voiceover__",
+      "type": "voiceover",
+      "tool": "elevenlabs-tts",
+      "model": "Adam",
+      "est_cost_cents": 14,
+      "note": "ElevenLabs: 469 chars @ 30c/1k chars",
+      "per_scene_budget_cents": 14
+    },
+    "total_cogs_cents": 43,
+    "suggested_price_cents": 500,
+    "production_budget_cents": 0,
+    "pricing_mode": "cost_plus",
+    "selection": {
+      "quality": "standard"
+    },
+    "quality": "standard",
+    "menu": {
+      "model": "cost_plus",
+      "quality": "standard",
+      "line_items": [
+        {
+          "key": "video_production",
+          "label": "Video production",
+          "qty": 1,
+          "unit_price_cents": 500,
+          "unit_cogs_cents": 0,
+          "price_cents": 500,
+          "cogs_cents": 0
+        }
+      ],
+      "base_price_cents": 500,
+      "plan_cogs_cents": 0,
+      "total_price_cents": 500,
+      "total_cogs_cents": 0,
+      "margin": 1.0
+    },
+    "menu_total_cogs_cents": 0
+  },
+  "earn": {
+    "enabled": true,
+    "provider": "stripe",
+    "mode": "test",
+    "status": "paid",
+    "session_id": "cs_test_a1IQDybX7ZwLJXMvUHc2mapdBMbVnfCSHbMBH3TKgs2ocZWyhlzIXZ4af4",
+    "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_a1IQDybX7ZwLJXMvUHc2mapdBMbVnfCSHbMBH3TKgs2ocZWyhlzIXZ4af4#fidnandhYHdWcXxpYCc%2FJ2FgY2RwaXEnKSdicGRmZGhqaWBTZHdsZGtxJz8nZmprcXdqaScpJ2R1bE5gfCc%2FJ3VuWnFgdnFaMDRRUXx1PERvNnBPcWkzMlc8SHxhVjxEMndgMjw8cU1fRG9%2FQVBAXVRXT2tySjxVcmo3dDZMRjxRYlA1R0FLNW1TMzFvTnBWSl9OQGdGYkFuSEYxTDRWQFQ1NXNcNUw8f1FAJyknY3dqaFZgd3Ngdyc%2FcXdwYCknZ2RmbmJ3anBrYUZqaWp3Jz8nJmNjY2NjYycpJ2lkfGpwcVF8dWAnPyd2bGtiaWBabHFgaCcpJ2BrZGdpYFVpZGZgbWppYWB3dic%2FcXdwYHgl",
+    "price_cents": 500,
+    "currency": "usd",
+    "product_name": "orinovate.com promo video",
+    "livemode": false,
+    "payment_status": "paid"
+  },
+  "card": {
+    "enabled": false,
+    "provider": "simulated",
+    "spending_limit_cents": 0,
+    "card_id": "ic_sim_budget",
+    "note": "Simulated Issuing card."
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "type": "title",
+      "order": 0,
+      "brief": "Show the Orinovate logo and tagline on a clean background.",
+      "model": null,
+      "duration_s": 2,
+      "spent_before_cents": 0,
+      "decision": "free",
+      "tool": "motion-graphics",
+      "preview_cost_cents": 0,
+      "spent_cents": 0,
+      "remaining_after_cents": 0,
+      "final_model": null,
+      "status": "produced",
+      "output_path": "clips/00_opening-title.mp4",
+      "stripe_authorization": null,
+      "studio": null
+    },
+    {
+      "id": "cinematic-aerial",
+      "type": "cinematic",
+      "order": 1,
+      "brief": "A sweeping aerial shot over a modern factory floor, highlighting Orinovate's smart manufacturing platform in action.",
+      "model": "seedance_2_0",
+      "duration_s": 9,
+      "spent_before_cents": 0,
+      "decision": "standard",
+      "tool": "motion-graphics",
+      "preview_cost_cents": 0,
+      "spent_cents": 0,
+      "remaining_after_cents": 0,
+      "final_model": null,
+      "status": "produced",
+      "output_path": "clips/01_cinematic-aerial.mp4",
+      "stripe_authorization": null,
+      "studio": null
+    },
+    {
+      "id": "cinematic-dashboard",
+      "type": "cinematic",
+      "order": 2,
+      "brief": "A composed hero image of the Orinovate dashboard interface displaying real-time analytics and AI insights.",
+      "model": "gpt_image_2",
+      "duration_s": 9,
+      "spent_before_cents": 0,
+      "decision": "standard",
+      "tool": "motion-graphics",
+      "preview_cost_cents": 0,
+      "spent_cents": 0,
+      "remaining_after_cents": 0,
+      "final_model": null,
+      "status": "produced",
+      "output_path": "clips/02_cinematic-dashboard.mp4",
+      "stripe_authorization": null,
+      "studio": null
+    },
+    {
+      "id": "walkthrough-setup",
+      "type": "walkthrough",
+      "order": 3,
+      "brief": "Demonstrate the user navigating the Orinovate app to set up a new production line, from selecting a template to confirming the launch.",
+      "model": null,
+      "duration_s": 8,
+      "spent_before_cents": 0,
+      "status": "failed",
+      "decision": "failed",
+      "error": "AdapterError: walk-agent failed for scene 'walkthrough-setup' (rc=2, output_exists=False); log: /Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/build-orinovate-d97898/clips/03_walkthrough-setup.walkagent.log\n[tutorial-maker] FAILED: no actions recorded. Cannot produce video.",
+      "output_path": null,
+      "remaining_after_cents": 0,
+      "spent_cents": 0
+    },
+    {
+      "id": "closing-cta",
+      "type": "title",
+      "order": 4,
+      "brief": "Display the call-to-action: 'Start building smarter with Orinovate today' with website URL.",
+      "model": null,
+      "duration_s": 2,
+      "spent_before_cents": 0,
+      "decision": "free",
+      "tool": "motion-graphics",
+      "preview_cost_cents": 0,
+      "spent_cents": 0,
+      "remaining_after_cents": 0,
+      "final_model": null,
+      "status": "produced",
+      "output_path": "clips/04_closing-cta.mp4",
+      "stripe_authorization": null,
+      "studio": null
+    }
+  ],
+  "voiceover": {
+    "id": "__voiceover__",
+    "type": "voiceover",
+    "chars": 469,
+    "preview_cost_cents": 0,
+    "spent_before_cents": 0,
+    "beats_total": 5,
+    "beats_aligned": 4,
+    "beats_dropped": [
+      "walkthrough-setup"
+    ],
+    "cost_overrun_cents": -14,
+    "segments": [
+      {
+        "scene_id": "opening-title",
+        "start_s": 0.0,
+        "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/build-orinovate-d97898/voiceover.beat00.mp3",
+        "dur_s": 3.72
+      },
+      {
+        "scene_id": "cinematic-aerial",
+        "start_s": 2.048,
+        "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/build-orinovate-d97898/voiceover.beat01.mp3",
+        "dur_s": 9.288
+      },
+      {
+        "scene_id": "cinematic-dashboard",
+        "start_s": 11.048,
+        "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/build-orinovate-d97898/voiceover.beat02.mp3",
+        "dur_s": 8.592
+      },
+      {
+        "scene_id": "closing-cta",
+        "start_s": 20.048,
+        "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/build-orinovate-d97898/voiceover.beat03.mp3",
+        "dur_s": 2.256
+      }
+    ],
+    "decision": "approve",
+    "spent_cents": 0,
+    "remaining_after_cents": 0,
+    "status": "produced",
+    "provider": "edge-tts",
+    "voice": "en-US-AndrewNeural",
+    "output_path": "voiceover.mp3"
+  },
+  "stitch": {
+    "output_path": "final.mp4",
+    "duration_s": 22.0,
+    "has_audio": true,
+    "clip_count": 4,
+    "verified": true,
+    "scenes_included": [
+      "opening-title",
+      "cinematic-aerial",
+      "cinematic-dashboard",
+      "closing-cta"
+    ],
+    "scenes_cut": []
+  },
+  "pnl": {
+    "price_cents": 500,
+    "cogs_spent_cents": 0,
+    "overage_avoided_cents": 0,
+    "gross_profit_cents": 500,
+    "margin": 1.0,
+    "declines": [],
+    "cost_lines": [
+      {
+        "id": "opening-title",
+        "type": "title",
+        "decision": "free",
+        "spent_cents": 0
+      },
+      {
+        "id": "cinematic-aerial",
+        "type": "cinematic",
+        "decision": "standard",
+        "spent_cents": 0
+      },
+      {
+        "id": "cinematic-dashboard",
+        "type": "cinematic",
+        "decision": "standard",
+        "spent_cents": 0
+      },
+      {
+        "id": "walkthrough-setup",
+        "type": "walkthrough",
+        "decision": "failed",
+        "spent_cents": 0
+      },
+      {
+        "id": "closing-cta",
+        "type": "title",
+        "decision": "free",
+        "spent_cents": 0
+      },
+      {
+        "id": "__voiceover__",
+        "type": "voiceover",
+        "decision": "approve",
+        "spent_cents": 0
+      }
+    ]
+  },
+  "events": [
+    {
+      "seq": 1,
+      "level": "info",
+      "msg": "storyboard decided: 5 scenes, 5 narration beats (469 chars)"
+    },
+    {
+      "seq": 2,
+      "level": "info",
+      "msg": "plan validated: 5 scenes"
+    },
+    {
+      "seq": 3,
+      "level": "info",
+      "msg": "priced: COGS 43c, price 500c, budget LOCKED at 0c"
+    },
+    {
+      "seq": 4,
+      "level": "info",
+      "msg": "COST-PLUS: quality=standard (price 500c, COGS 0c)"
+    },
+    {
+      "seq": 5,
+      "level": "money",
+      "msg": "EARN: payment received via Stripe Checkout",
+      "session_id": "cs_test_a1IQDybX7ZwLJXMvUHc2mapdBMbVnfCSHbMBH3TKgs2ocZWyhlzIXZ4af4"
+    },
+    {
+      "seq": 6,
+      "level": "info",
+      "msg": "PARALLEL: walkthrough generation kicked off off-thread (1 scene(s)) \u2014 overlapping the remaining scenes"
+    },
+    {
+      "seq": 7,
+      "level": "info",
+      "msg": "FREE scene 'opening-title' (title) produced \u2014 $0"
+    },
+    {
+      "seq": 8,
+      "level": "info",
+      "msg": "STANDARD scene 'cinematic-aerial' (cinematic -> designed Remotion, no Higgsfield) produced \u2014 $0"
+    },
+    {
+      "seq": 9,
+      "level": "info",
+      "msg": "STANDARD scene 'cinematic-dashboard' (cinematic -> designed Remotion, no Higgsfield) produced \u2014 $0"
+    },
+    {
+      "seq": 10,
+      "level": "error",
+      "msg": "SCENE FAILED 'walkthrough-setup' (walkthrough) \u2014 isolated; run continues. AdapterError: walk-agent failed for scene 'walkthrough-setup' (rc=2, output_exists=False); log: /Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/build-orinovate-d97898/clips/03_walkthrough-setup.walkagent.log\n[tutorial-maker] FAILED: no actions recorded. Cannot produce video.",
+      "scene": "walkthrough-setup"
+    },
+    {
+      "seq": 11,
+      "level": "info",
+      "msg": "FREE scene 'closing-cta' (title) produced \u2014 $0"
+    },
+    {
+      "seq": 12,
+      "level": "info",
+      "msg": "VOICEOVER: dropped 1 beat(s) for cut/absent scenes: walkthrough-setup"
+    },
+    {
+      "seq": 13,
+      "level": "gate",
+      "msg": "GATE voiceover: APPROVE \u2014 0c vs remaining 0c"
+    },
+    {
+      "seq": 14,
+      "level": "info",
+      "msg": "STANDARD VO: clean synthetic voice via edge-tts ($0)"
+    },
+    {
+      "seq": 15,
+      "level": "spend",
+      "msg": "VOICEOVER: 4 scene-aligned beat(s) synthesized via edge-tts (0c) \u2014 remaining 0c"
+    },
+    {
+      "seq": 16,
+      "level": "info",
+      "msg": "STITCHED final.mp4 \u2014 22.0s, 4 clips, audio=True, watermark=None"
+    },
+    {
+      "seq": 17,
+      "level": "info",
+      "msg": "PREMIUM LEDGER: 1 line item(s), price 500c, COGS 0c"
+    },
+    {
+      "seq": 18,
+      "level": "info",
+      "msg": "COMPLETED WITH WARNINGS \u2014 1 scene(s) failed but the run shipped: walkthrough-setup"
+    },
+    {
+      "seq": 19,
+      "level": "info",
+      "msg": "DELIVERED \u2014 price 500c, spent 0c, margin 100.0%, overage avoided 0c"
+    }
+  ],
+  "plan": {
+    "voiceover": {
+      "script": "Orinovate introduces its smart manufacturing platform. A sweeping aerial view glides over a bustling factory floor, showcasing Orinovate's smart manufacturing platform operating in real time. The Orinovate dashboard displays live analytics, AI-driven insights, and key performance metrics in a clean, intuitive layout. The user selects a template, configures machine parameters, and launches the new production line with a single click. Build smarter with Orinovate now",
+      "voice": "Adam",
+      "beats": [
+        {
+          "scene_id": "opening-title",
+          "text": "Orinovate introduces its smart manufacturing platform."
+        },
+        {
+          "scene_id": "cinematic-aerial",
+          "text": "A sweeping aerial view glides over a bustling factory floor, showcasing Orinovate's smart manufacturing platform operating in real time."
+        },
+        {
+          "scene_id": "cinematic-dashboard",
+          "text": "The Orinovate dashboard displays live analytics, AI-driven insights, and key performance metrics in a clean, intuitive layout."
+        },
+        {
+          "scene_id": "walkthrough-setup",
+          "text": "The user selects a template, configures machine parameters, and launches the new production line with a single click."
+        },
+        {
+          "scene_id": "closing-cta",
+          "text": "Build smarter with Orinovate now"
+        }
+      ]
+    },
+    "scenes": [
+      {
+        "id": "opening-title",
+        "type": "title",
+        "model": null,
+        "duration_s": 2,
+        "brief": "Show the Orinovate logo and tagline on a clean background."
+      },
+      {
+        "id": "cinematic-aerial",
+        "type": "cinematic",
+        "model": "seedance_2_0",
+        "duration_s": 9,
+        "brief": "A sweeping aerial shot over a modern factory floor, highlighting Orinovate's smart manufacturing platform in action."
+      },
+      {
+        "id": "cinematic-dashboard",
+        "type": "cinematic",
+        "model": "gpt_image_2",
+        "duration_s": 9,
+        "brief": "A composed hero image of the Orinovate dashboard interface displaying real-time analytics and AI insights."
+      },
+      {
+        "id": "walkthrough-setup",
+        "type": "walkthrough",
+        "model": null,
+        "duration_s": 8,
+        "brief": "Demonstrate the user navigating the Orinovate app to set up a new production line, from selecting a template to confirming the launch."
+      },
+      {
+        "id": "closing-cta",
+        "type": "title",
+        "model": null,
+        "duration_s": 2,
+        "brief": "Display the call-to-action: 'Start building smarter with Orinovate today' with website URL."
+      }
+    ]
+  },
+  "premium": {
+    "enabled": true,
+    "model": "cost_plus",
+    "quality": "standard",
+    "selection": {
+      "quality": "standard"
+    },
+    "watermark": false,
+    "menu": {
+      "model": "cost_plus",
+      "quality": "standard",
+      "line_items": [
+        {
+          "key": "video_production",
+          "label": "Video production",
+          "qty": 1,
+          "unit_price_cents": 500,
+          "unit_cogs_cents": 0,
+          "price_cents": 500,
+          "cogs_cents": 0
+        }
+      ],
+      "base_price_cents": 500,
+      "plan_cogs_cents": 0,
+      "total_price_cents": 500,
+      "total_cogs_cents": 0,
+      "margin": 1.0
+    },
+    "line_items": [
+      {
+        "key": "video_production",
+        "label": "Video production",
+        "qty": 1,
+        "unit_price_cents": 500,
+        "unit_cogs_cents": 0,
+        "price_cents": 500,
+        "cogs_cents": 0
+      }
+    ],
+    "ledger": {
+      "line_items": [
+        {
+          "key": "video_production",
+          "label": "Video production",
+          "qty": 1,
+          "price_cents": 500,
+          "cogs_cents": 0,
+          "margin": 1.0
+        }
+      ],
+      "total_price_cents": 500,
+      "total_cogs_cents": 0,
+      "margin": 1.0
+    }
+  },
+  "warnings": [
+    {
+      "id": "walkthrough-setup",
+      "type": "walkthrough",
+      "error": "AdapterError: walk-agent failed for scene 'walkthrough-setup' (rc=2, output_exists=False); log: /Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/build-orinovate-d97898/clips/03_walkthrough-setup.walkagent.log\n[tutorial-maker] FAILED: no actions recorded. Cannot produce video."
+    }
+  ]
+}

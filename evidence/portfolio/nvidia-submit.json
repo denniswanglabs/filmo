@@ -1,0 +1,29 @@
+[
+  {
+    "id": "4721b6ca-5eb2-4a3b-90d8-027a021875ff",
+    "status": "completed",
+    "display_name": "Seedance 2.0",
+    "job_set_type": "seedance_2_0",
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_193146_4721b6ca-5eb2-4a3b-90d8-027a021875ff.mp4",
+    "created_at": 1781897506.522029,
+    "params": {
+      "width": 1280,
+      "height": 720,
+      "prompt": "Establishing opener plate for NVIDIA, the accelerated-computing and AI hardware company. A premium dark studio: a single sleek GPU compute module as the hero object, machined metal and dark heatsink fins catching a cool key light, drifting in slow push-in over a glossy reflective floor with soft volumetric haze and shallow depth of field.. cinematic product still, 50mm f1.8, shallow depth of field, soft cool key light with brand-accent rim light, premium dark studio, subtle volumetric haze, filmic high-contrast color grade, glossy reflection, centered composition, the look of an Apple-keynote product shot. a single hero object as the sole focal point, clean uncluttered composition, one device or product silhouette, no array of cards, no grid of panels, no multiple stacked UI windows. vivid saturated brand-accent palette: #76B900 and #9ED220 on a deep, premium background. surfaces carry only soft diffuse light, gentle glow and creamy bokeh, abstract luminous shapes melting into shallow-focus blur. wide open negative space reserved for a title overlay, the hero object resolving in the lower third with soft glow drifting around it. no text, no words, no letters, no wordmarks, no watermarks, no UI labels.",
+      "genre": "auto",
+      "medias": [],
+      "duration": 6,
+      "resolution": "720p",
+      "aspect_ratio": "16:9",
+      "generate_audio": true,
+      "multi_shots": false,
+      "multi_shot_mode": "custom",
+      "multi_prompt": [],
+      "speedramp": "auto",
+      "reference_elements": [],
+      "prompt_language": "en",
+      "mode": "std",
+      "model": "seedance_2_0"
+    }
+  }
+]

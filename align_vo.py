@@ -1,0 +1,408 @@
+#!/usr/bin/env python3
+"""align_vo.py -- Phase 1 module 1: VOICE ALIGNMENT.
+
+Turns a VO script (per-scene beats from the plan) into one audio file PLUS
+word-level timestamps, with every word mapped back to the scene that owns it.
+The rest of the pivot pipeline (build_timeline.py + the Remotion <Timeline>
+composition) builds the picture FROM this voice, so the picture can never drift.
+
+$0 by default. FREE tier = edge-tts synth (reused from adapters) + local
+whisper-cli for word timing. PREMIUM tier = ElevenLabs text-to-speech with
+per-character timestamps (function shape ONLY here -- never called without an
+explicit premium request AND a key present; otherwise falls back to free).
+
+CLI:
+  python3 align_vo.py --beats-file beats.json \\
+      --out runs/<id>/vo_alignment.json [--tier free|premium] \\
+      [--lang en] [--voice <name>]
+
+beats.json: ordered per-scene VO segments -- [{scene_id, text}, ...] -- the same
+shape the planner already emits under voiceover.beats (see plan_schema.resolve_vo_beats).
+
+Output contract (vo_alignment.json), EXACTLY:
+  {
+    "audio_path": "runs/<id>/voiceover.mp3",
+    "lang": "en",
+    "voice": "<resolved voice>",
+    "tier": "free",
+    "total_duration_s": 3.21,
+    "words": [{"word": "Stripe", "start_s": 0.24, "end_s": 0.39,
+               "beat_scene_id": "title-open"}, ...],
+    "beats": [{"scene_id": "title-open", "start_s": 0.24, "end_s": 2.9,
+               "text": "..."}, ...]
+  }
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+# whisper-cli + model locations (audit-confirmed installed on this machine).
+WHISPER_BIN = "/opt/homebrew/bin/whisper-cli"
+WHISPER_MODEL = os.path.expanduser("~/.cache/whisper/ggml-base.en.bin")
+
+_WORD_RE = re.compile(r"\w+(?:'\w+)?", re.UNICODE)
+
+
+class AlignError(Exception):
+    pass
+
+
+def _norm(token):
+    """Lowercase + strip non-alphanumerics for sequence comparison only.
+
+    Robust to whisper mishears (Stripe->Strike) -- we DO NOT rely on exact text
+    match for mapping; the sequence position carries the scene ownership.
+    """
+    return re.sub(r"[^a-z0-9]", "", (token or "").lower())
+
+
+def tokenize(text):
+    """Split a beat's text into comparable word tokens (script side)."""
+    return _WORD_RE.findall(text or "")
+
+
+def build_word_index(beats):
+    """Concatenate beat texts and record the cumulative WORD-INDEX range each
+    beat owns, so every script word knows its scene.
+
+    Returns (owners, script_tokens) where owners is a list parallel to
+    script_tokens giving each token's beat_scene_id, and `beats` are the
+    cleaned beats (blank-text dropped).
+    """
+    owners = []
+    script_tokens = []
+    clean = []
+    for b in beats or []:
+        sid = b.get("scene_id")
+        text = (b.get("text") or "").strip()
+        if not sid or not text:
+            continue
+        toks = tokenize(text)
+        if not toks:
+            continue
+        clean.append({"scene_id": sid, "text": text})
+        for _ in toks:
+            owners.append(sid)
+        script_tokens.extend(toks)
+    return owners, script_tokens, clean
+
+
+def _resolve_voice_for_synth(voice):
+    """Default voice name passed through to adapters.synthesize_voiceover."""
+    return voice or "Adam"
+
+
+# --------------------------------------------------------------------------- #
+# 2. SYNTH -- one audio file of the FULL script                               #
+# --------------------------------------------------------------------------- #
+def synth_full_script(script, voice, out_path, tier, *, synth_fn=None,
+                      elevenlabs_key=None):
+    """Render the whole concatenated script to ONE audio file.
+
+    FREE (default): reuse adapters.synthesize_voiceover (edge-tts). Returns
+    (audio_path, resolved_voice, "free", el_alignment=None).
+
+    PREMIUM: only when tier == "premium" AND a key is present do we take the
+    ElevenLabs with-timestamps path (which yields alignment directly, so whisper
+    is skipped). If premium is requested WITHOUT a key, log a warning and fall
+    back to free. NOTE: the ElevenLabs call itself is NOT invoked here in this
+    build (no key, no spend) -- _elevenlabs_synth_with_timestamps is shape-only
+    and raises if reached so a test cannot silently spend.
+
+    `synth_fn` is injectable for tests (defaults to adapters.synthesize_voiceover).
+    """
+    voice = _resolve_voice_for_synth(voice)
+    key = elevenlabs_key
+    if key is None:
+        key = os.environ.get("ELEVENLABS_API_KEY")
+
+    if tier == "premium" and key:
+        # Premium path: ElevenLabs returns char/word timestamps with the audio.
+        info = _elevenlabs_synth_with_timestamps(script, voice, out_path, key)
+        return out_path, info.get("voice", voice), "premium", info.get("alignment")
+
+    if tier == "premium" and not key:
+        sys.stderr.write(
+            "align_vo: WARNING premium tier requested but no ELEVENLABS_API_KEY; "
+            "falling back to FREE (edge-tts + whisper).\n")
+
+    fn = synth_fn
+    if fn is None:
+        import adapters
+        fn = adapters.synthesize_voiceover
+    info = fn(script, voice, out_path, "edge")
+    return out_path, info.get("voice", voice), "free", None
+
+
+def _elevenlabs_synth_with_timestamps(script, voice, out_path, key):  # pragma: no cover
+    """PREMIUM tier shape ONLY -- do NOT call in this build (no key, no spend).
+
+    The real implementation would POST to
+    /v1/text-to-speech/<voice_id>/with-timestamps, decode base64 audio into
+    out_path, and return {"voice": voice_id, "alignment": <el-char-timing>}.
+    Guarded so an accidental premium-with-key path during testing still cannot
+    spend money unless someone deliberately implements it.
+    """
+    raise AlignError(
+        "ElevenLabs premium path is wired as shape-only in this build "
+        "(no spend). Implement _elevenlabs_synth_with_timestamps to enable.")
+
+
+# --------------------------------------------------------------------------- #
+# 3. WORD TIMESTAMPS                                                           #
+# --------------------------------------------------------------------------- #
+def whisper_words(audio_path, *, whisper_bin=WHISPER_BIN, model=WHISPER_MODEL,
+                  runner=None):
+    """Run local whisper-cli on the audio and parse per-word timestamps.
+
+    Uses `-ml 1 -sow` (split on word) + `-oj` (JSON) so each transcription
+    segment is one word with millisecond offsets. Returns
+    [{word, start_s, end_s}] in spoken order (empty-text segments dropped).
+    `runner` is injectable for tests (defaults to a real subprocess call).
+    """
+    if not os.path.exists(whisper_bin):
+        raise AlignError("whisper-cli not found at %s (install whisper-cpp)" % whisper_bin)
+    if not os.path.exists(model):
+        raise AlignError(
+            "whisper model not found at %s -- download ggml-base.en.bin there" % model)
+
+    base = audio_path.rsplit(".", 1)[0]
+    json_path = base + ".json"
+    cmd = [whisper_bin, "-m", model, "-f", audio_path,
+           "-ml", "1", "-sow", "-oj", "-of", base]
+    if runner is None:
+        runner = _default_whisper_runner
+    runner(cmd)
+    if not os.path.exists(json_path):
+        raise AlignError("whisper produced no JSON at %s" % json_path)
+    with open(json_path) as f:
+        data = json.load(f)
+    return parse_whisper_json(data)
+
+
+def _default_whisper_runner(cmd):  # pragma: no cover - real subprocess
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, timeout=300)
+
+
+def parse_whisper_json(data):
+    """Parse whisper-cli -oj output into [{word, start_s, end_s}].
+
+    Each `transcription` item has `text` (leading-space, sometimes empty) and
+    `offsets: {from, to}` in milliseconds.
+    """
+    out = []
+    for seg in (data.get("transcription") or []):
+        word = (seg.get("text") or "").strip()
+        if not word:
+            continue
+        off = seg.get("offsets") or {}
+        try:
+            start_s = round(float(off.get("from", 0)) / 1000.0, 3)
+            end_s = round(float(off.get("to", 0)) / 1000.0, 3)
+        except (TypeError, ValueError):
+            continue
+        out.append({"word": word, "start_s": start_s, "end_s": end_s})
+    return out
+
+
+def parse_elevenlabs_alignment(alignment):
+    """PREMIUM parser: group ElevenLabs per-CHARACTER timestamps into words.
+
+    ElevenLabs returns parallel arrays:
+      characters, character_start_times_seconds, character_end_times_seconds.
+    A word boundary is any run of non-whitespace characters. Each word's
+    start = first char start, end = last char end. Returns [{word,start_s,end_s}].
+    (Not called in this build -- premium synth is shape-only -- but fully
+    implemented + unit-tested so wiring the API later is a one-line swap.)
+    """
+    chars = (alignment or {}).get("characters") or []
+    starts = (alignment or {}).get("character_start_times_seconds") or []
+    ends = (alignment or {}).get("character_end_times_seconds") or []
+    words = []
+    cur, cur_start, cur_end = [], None, None
+    for i, ch in enumerate(chars):
+        if ch is not None and not str(ch).isspace():
+            if not cur:
+                cur_start = starts[i] if i < len(starts) else cur_start
+            cur.append(ch)
+            if i < len(ends):
+                cur_end = ends[i]
+        else:
+            if cur:
+                words.append({"word": "".join(cur),
+                              "start_s": round(float(cur_start or 0), 3),
+                              "end_s": round(float(cur_end or 0), 3)})
+                cur, cur_start, cur_end = [], None, None
+    if cur:
+        words.append({"word": "".join(cur),
+                      "start_s": round(float(cur_start or 0), 3),
+                      "end_s": round(float(cur_end or 0), 3)})
+    return words
+
+
+# --------------------------------------------------------------------------- #
+# 4. MAP each transcribed word to its beat/scene by SEQUENCE                   #
+# --------------------------------------------------------------------------- #
+def map_words_to_beats(hyp_words, owners, script_tokens):
+    """Assign each transcribed (hypothesis) word an owning beat_scene_id by
+    SEQUENCE alignment against the script tokens -- robust to tokenization drift
+    (whisper mishears, merges, or splits words, so counts/strings rarely match
+    exactly).
+
+    Algorithm: a monotonic two-pointer walk. We advance a cursor through the
+    script tokens as we consume hypothesis words. When the next script token
+    matches (normalized) within a small look-ahead window we snap the cursor to
+    it; otherwise the hypothesis word takes the current cursor's owner and the
+    cursor advances by one. This keeps each hypothesis word attributed to a
+    plausible script position even when boundaries drift, and never runs off the
+    end (it clamps to the last token's owner). Returns a list of beat_scene_id
+    parallel to hyp_words.
+
+    `owners` and `script_tokens` are parallel (owners[i] owns script_tokens[i]).
+    """
+    out = []
+    if not owners:
+        return [None] * len(hyp_words)
+    n = len(script_tokens)
+    cursor = 0
+    LOOKAHEAD = 4
+    norm_tokens = [_norm(t) for t in script_tokens]
+    for hw in hyp_words:
+        hn = _norm(hw.get("word"))
+        # Try to snap the cursor forward to a matching script token nearby.
+        snapped = None
+        for j in range(cursor, min(cursor + 1 + LOOKAHEAD, n)):
+            if hn and norm_tokens[j] == hn:
+                snapped = j
+                break
+        if snapped is not None:
+            # Real match: attribute to this token, then consume it.
+            cursor = snapped
+            out.append(owners[min(cursor, n - 1)])
+            if cursor < n - 1:
+                cursor += 1
+        else:
+            # No match nearby -> this hypothesis word is a SPLIT/insertion (e.g.
+            # 'checkout' heard as 'check'+'out') or a mishear of the current
+            # token. Attribute it to the CURRENT cursor's owner WITHOUT consuming
+            # a script token, so an extra hypothesis word can't push the cursor
+            # past the beat boundary prematurely.
+            out.append(owners[min(cursor, n - 1)])
+    return out
+
+
+def _beats_from_words(words, clean_beats):
+    """Roll word timings up into per-beat spans: each beat's start_s = first
+    owned word start, end_s = last owned word end. A beat that got NO words
+    (e.g. fully misaligned/dropped) is still emitted with null spans so the
+    downstream timeline can fall back to a minimum hold for it.
+    """
+    by_scene = {}
+    for w in words:
+        sid = w.get("beat_scene_id")
+        if sid is None:
+            continue
+        slot = by_scene.setdefault(sid, [w["start_s"], w["end_s"]])
+        slot[0] = min(slot[0], w["start_s"])
+        slot[1] = max(slot[1], w["end_s"])
+    out = []
+    for b in clean_beats:
+        sid = b["scene_id"]
+        span = by_scene.get(sid)
+        out.append({
+            "scene_id": sid,
+            "start_s": span[0] if span else None,
+            "end_s": span[1] if span else None,
+            "text": b["text"],
+        })
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 5. TOP-LEVEL ORCHESTRATOR                                                    #
+# --------------------------------------------------------------------------- #
+def align(beats, out_path, *, tier="free", lang="en", voice=None,
+          synth_fn=None, whisper_fn=None, elevenlabs_key=None):
+    """Full alignment: beats -> audio + word timings -> vo_alignment.json dict.
+
+    Injectable seams for deterministic tests:
+      synth_fn(script, voice, out, provider) -> {"voice": ...}
+      whisper_fn(audio_path) -> [{word, start_s, end_s}]  (replaces whisper-cli)
+    """
+    owners, script_tokens, clean_beats = build_word_index(beats)
+    if not clean_beats:
+        raise AlignError("no usable beats (every beat had empty scene_id/text)")
+    script = " ".join(b["text"] for b in clean_beats).strip()
+
+    audio_path, resolved_voice, real_tier, el_alignment = synth_full_script(
+        script, voice, out_path.rsplit(".", 1)[0] + ".audio.mp3"
+        if out_path.endswith(".json") else out_path,
+        tier, synth_fn=synth_fn, elevenlabs_key=elevenlabs_key)
+    # Normalize: audio sits beside the alignment json as voiceover.mp3.
+    audio_final = os.path.join(os.path.dirname(os.path.abspath(out_path)),
+                               "voiceover.mp3")
+    if os.path.abspath(audio_path) != os.path.abspath(audio_final) \
+            and os.path.exists(audio_path):
+        os.replace(audio_path, audio_final)
+        audio_path = audio_final
+    elif os.path.exists(audio_path):
+        audio_path = audio_final
+
+    # Word timestamps: premium = parse ElevenLabs alignment; free = whisper-cli.
+    if real_tier == "premium" and el_alignment is not None:
+        hyp_words = parse_elevenlabs_alignment(el_alignment)
+    else:
+        wfn = whisper_fn or whisper_words
+        hyp_words = wfn(audio_path)
+
+    scene_for = map_words_to_beats(hyp_words, owners, script_tokens)
+    words = []
+    for hw, sid in zip(hyp_words, scene_for):
+        words.append({"word": hw["word"], "start_s": hw["start_s"],
+                      "end_s": hw["end_s"], "beat_scene_id": sid})
+
+    total = round(max((w["end_s"] for w in words), default=0.0), 3)
+    out_beats = _beats_from_words(words, clean_beats)
+    return {
+        "audio_path": audio_path,
+        "lang": lang,
+        "voice": resolved_voice,
+        "tier": real_tier,
+        "total_duration_s": total,
+        "words": words,
+        "beats": out_beats,
+    }
+
+
+def main(argv=None):
+    import argparse
+
+    p = argparse.ArgumentParser(description="VO word-alignment (align_vo)")
+    p.add_argument("--beats-file", required=True, help="JSON: [{scene_id, text}]")
+    p.add_argument("--out", required=True, help="output vo_alignment.json path")
+    p.add_argument("--tier", default="free", choices=["free", "premium"])
+    p.add_argument("--lang", default="en")
+    p.add_argument("--voice", default=None)
+    args = p.parse_args(argv)
+
+    with open(args.beats_file) as f:
+        beats = json.load(f)
+    if not isinstance(beats, list):
+        raise AlignError("beats-file must be a JSON array of {scene_id, text}")
+
+    result = align(beats, out_path=args.out, tier=args.tier, lang=args.lang,
+                   voice=args.voice)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
+    with open(args.out, "w") as f:
+        json.dump(result, f, indent=2)
+    print("align_vo: wrote %s (%d words, %d beats, %.2fs)"
+          % (args.out, len(result["words"]), len(result["beats"]),
+             result["total_duration_s"]))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

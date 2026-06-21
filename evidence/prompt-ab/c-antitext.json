@@ -1,0 +1,21 @@
+[
+  {
+    "id": "9426f3bc-010c-49af-ad2a-748f1e404791",
+    "status": "completed",
+    "display_name": "GPT Image 2",
+    "job_set_type": "gpt_image_2",
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_180029_9426f3bc-010c-49af-ad2a-748f1e404791.png",
+    "created_at": 1781892029.224981,
+    "params": {
+      "width": 2688,
+      "height": 1520,
+      "prompt": "Hero plate evoking a developer dashboard, shown in soft focus and abstraction. Cinematic product still: 50mm lens at f1.8, shallow depth of field, soft cool key light, premium dark studio, filmic grade, glossy reflective surface, centered composition, Apple-keynote look. The interface is intentionally BLURRED and out of focus with heavy bokeh — NO readable text, NO legible labels, NO words, NO numbers, NO logos, NO wordmarks, NO buttons with text; only abstract glowing UI panels, charts as soft color blocks, and ambient light. Treat all text as illegible soft shapes.",
+      "medias": [],
+      "aspect_ratio": "16:9",
+      "quality": "high",
+      "resolution": "2k",
+      "model": "videotape-alpha",
+      "reference_elements": []
+    }
+  }
+]

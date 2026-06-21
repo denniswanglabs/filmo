@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Walk Studio — Producer Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2084%2084'%3E%3Crect%20width='84'%20height='84'%20rx='22'%20fill='%23FFF1EE'/%3E%3Crect%20x='1'%20y='1'%20width='82'%20height='82'%20rx='21'%20fill='none'%20stroke='%23F0BFB3'%20stroke-width='1.5'/%3E%3Cg%20fill='%23EAB6A9'%3E%3Crect%20x='10'%20y='17'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='10'%20y='38'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='10'%20y='59'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='68.5'%20y='17'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='68.5'%20y='38'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='68.5'%20y='59'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3C/g%3E%3Cpath%20d='M32%2020%20L32%2064%20L42.8%2053.4%20L50.4%2068.2%20L57.6%2064.6%20L50%2049.8%20L62.8%2049.8%20Z'%20fill='%23D6351C'%20stroke='%23D6351C'%20stroke-width='1.4'%20stroke-linejoin='round'/%3E%3C/svg%3E" type="image/svg+xml" />
+<link rel="stylesheet" href="/dashboard/styles.css" />
+</head>
+<body>
+
+<!-- inline icon sprite (no emoji, no external assets) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M20 11a8 8 0 1 0-.6 4M20 5v6h-6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4 2 20h20L12 4zM12 10v5M12 18h.01"/></symbol>
+  <symbol id="i-cut" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path stroke-linecap="round" d="M8 7.5 20 17M8 16.5 20 7"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M4 12.5 9.5 18 20 6"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m9 8-5 4 5 4M15 8l5 4-5 4"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="5" width="19" height="14" rx="2.4"/><path d="M2.5 9.5h19"/></g></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 5v13M6 12l6 6 6-6"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M12 3a9 9 0 1 0 9 9"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M8 5.5v13l11-6.5z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V4.5h6V7M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m8 10 4 4 4-4"/></symbol>
+  <symbol id="i-plan" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></g></symbol>
+  <symbol id="i-coin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M14.6 9.2c-.6-.7-1.6-1.1-2.6-1.1-1.6 0-2.8.9-2.8 2.1 0 2.8 5.6 1.5 5.6 3.9 0 1.2-1.3 2-2.8 2-1.1 0-2.1-.4-2.7-1.2"/></g></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 4.5v15M17 4.5v15M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></g></symbol>
+  <symbol id="i-ship" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 11 12 3l8.5 8"/><path d="M5.5 9.5V20h13V9.5"/><path d="M9.5 20v-5h5v5"/></g></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h13M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.6 2.6M15.4 15.4 18 18M18 6l-2.6 2.6M8.6 15.4 6 18"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></g></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M12 6v12M6 12h12"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M6 12h12"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.6" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M12 3.5l2.6 5.3 5.9.85-4.25 4.15 1 5.85L12 17.9l-5.25 2.6 1-5.85L3.5 9.65l5.9-.85z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16.5 12 21l9-4.5"/></g></symbol>
+  <symbol id="i-brand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 11.5 3a2 2 0 0 1 2.83 0l6.67 6.67a2 2 0 0 1 0 2.83L12.5 21 3 11.5z"/><circle cx="8.2" cy="8.2" r="1.3"/></g></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></g></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-6 3 15 3-19 3 16 2-6h3"/></symbol>
+</svg>
+
+<div class="grain" aria-hidden="true"></div>
+
+<!-- ============================================================================
+     CLAUDE / CHATGPT-STYLE SHELL — collapsible left sidebar + center main column.
+     Sidebar: logo, "New build", past builds. Center: composer (empty state) OR the
+     live build view (#detail). Single coral accent, near-white surfaces, calm.
+     ========================================================================== -->
+<div class="shell" id="shell">
+
+  <aside class="rail" id="rail">
+    <!-- brand: the inline horizontal Walk Studio mark, moved here from the old top bar -->
+    <div class="rail-brand">
+      <svg class="bar-logo" viewBox="0 0 432 120" role="img" aria-label="Walk Studio">
+        <g transform="translate(18 18)">
+          <rect x="0" y="0" width="84" height="84" rx="22" fill="#FFF1EE"/>
+          <rect x="1" y="1" width="82" height="82" rx="21" fill="none" stroke="#F0BFB3" stroke-width="1.5"/>
+          <g fill="#EAB6A9">
+            <rect x="10" y="17" width="5.5" height="8" rx="2.75"/>
+            <rect x="10" y="38" width="5.5" height="8" rx="2.75"/>
+            <rect x="10" y="59" width="5.5" height="8" rx="2.75"/>
+            <rect x="68.5" y="17" width="5.5" height="8" rx="2.75"/>
+            <rect x="68.5" y="38" width="5.5" height="8" rx="2.75"/>
+            <rect x="68.5" y="59" width="5.5" height="8" rx="2.75"/>
+          </g>
+          <path d="M32 20 L32 64 L42.8 53.4 L50.4 68.2 L57.6 64.6 L50 49.8 L62.8 49.8 Z" fill="#D6351C" stroke="#D6351C" stroke-width="1.4" stroke-linejoin="round"/>
+        </g>
+        <text x="120" y="78" font-family="Söhne, Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#16181D">Walk</text>
+        <text x="248" y="78" font-family="Söhne, Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#D6351C">Studio</text>
+      </svg>
+      <button class="rail-collapse" id="rail-collapse" title="Hide sidebar" aria-label="Hide sidebar"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
+    </div>
+
+    <!-- the single primary action: start a fresh build (returns the center to the composer) -->
+    <button class="rail-new" id="rail-new" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span>New build</span></button>
+
+    <!-- recency-grouped build list — section labels are emitted by renderRail.
+         #rail-stats is kept (hidden) so app.js's existing wiring stays valid. -->
+    <span id="rail-stats" hidden aria-hidden="true"></span>
+    <div id="rail-list" class="rail-list"></div>
+
+    <div class="rail-foot">
+      <!-- ABOUT (customer-facing): how the agent works end-to-end + the curation
+           thesis (why our videos are better) where the curated lookbook now lives.
+           Mirrors the Analytics entry's mechanism. Also openable via ?view=about. -->
+      <button id="rail-about" class="rail-analytics rail-about" type="button" title="About Walk Studio — how it works &amp; why our videos are better"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><span>About</span></button>
+      <!-- OPERATOR entry point (quiet): the Analytics tab — the P&L across every
+           build (revenue, COGS, gross profit, margin, the overage the budget gate
+           auto-saved). NOT shown to customers; this is Dennis's view. Also openable
+           via ?view=analytics. -->
+      <button id="rail-analytics" class="rail-analytics" type="button" title="Operator analytics — P&amp;L across all builds"><svg class="ic" aria-hidden="true"><use href="#i-coin"/></svg><span>Analytics</span></button>
+      <div class="rail-conn">
+        <span class="rec"><span class="rec-dot" id="conn-dot"></span><span id="conn-text">connecting</span></span>
+        <button id="refresh" class="btn rail-sync" title="Reload runs"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg><span>SYNC</span></button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <!-- floating button to reopen the sidebar when collapsed -->
+    <button class="rail-reopen" id="rail-reopen" title="Show sidebar" aria-label="Show sidebar"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
+
+    <!-- ====================================================================
+         EMPTY / NEW-BUILD STATE — a calm, centered Claude-style home screen:
+         greeting + prompt composer (URL + goal) + a compact options row +
+         understated example cards (the styles gallery). NO pricing UI here —
+         the agent prices the video cost-plus during planning and the quote is
+         shown at the pay-gate (see payGate() in app.js).
+         ==================================================================== -->
+    <div class="stage-empty" id="stage-empty">
+      <!-- HIRO-FEEL: a soft, warm coral radial glow centered behind the hero on the
+           near-white canvas (light, not harsh). Purely decorative. -->
+      <div class="hero-glow" aria-hidden="true"></div>
+
+      <div class="stage-empty-inner">
+
+        <!-- ONE bold, large, centered personalized greeting. The word-by-word build
+             keeps the polished entrance; the name lands last in coral. Body copy
+             removed — the composer is the focus. #stage-empty-msg is kept as a tiny
+             muted line (also read by showEmpty()). -->
+        <h1 class="hero-title hiro-greet" id="hero-title" data-setup="Got a video idea," data-accent="Dennis?">Got a video idea, Dennis?</h1>
+        <p class="hero-sub hiro-sub" id="stage-empty-msg">The agent does the rest.</p>
+
+        <!-- PILLS ABOVE THE COMPOSER — clean outlined chips (Hiro-style). An aspect
+             pill (default Widescreen 16:9) + the pacing pill. The pacing pill keeps
+             the #build-pace id/.pace-opt buttons app.js wires (state.pace). -->
+        <div class="hiro-pills">
+          <div class="hpill" id="aspect-pill" role="group" aria-label="Aspect ratio">
+            <svg class="ic" aria-hidden="true"><use href="#i-film"/></svg>
+            <span class="hpill-lbl">Widescreen 16:9</span>
+          </div>
+          <div class="hpill hpill-pace" id="build-pace" role="group" aria-labelledby="build-pace-lbl">
+            <span class="cmp-pace-lbl" id="build-pace-lbl">Pacing</span>
+            <button type="button" class="pace-opt" data-pace="snappy" title="Quick cuts — punchy, social-ready">Snappy</button>
+            <button type="button" class="pace-opt is-on" data-pace="standard" title="Balanced pacing — the default">Standard</button>
+            <button type="button" class="pace-opt" data-pace="cinematic" title="Slower, held shots — premium feel">Cinematic</button>
+          </div>
+        </div>
+
+        <!-- THE COMPOSER — a polished white card. The goal is the main prompt line;
+             the company URL is a small clean field below. Bottom row: subtle mock
+             toggle (left) + a coral circular SEND button (right) that triggers Build.
+             Same ids app.js wires: #build-url #build-goal #build-mock #build-go. -->
+        <div class="composer hiro-composer" id="composer">
+          <div class="cmp-fields">
+            <input id="build-goal" class="build-in cmp-in cmp-goal" placeholder="What should the video show? e.g. how to find your API keys" autocomplete="off" spellcheck="false" />
+            <div class="cmp-url-row">
+              <svg class="ic cmp-url-ic" aria-hidden="true"><use href="#i-link"/></svg>
+              <input id="build-url" class="build-in cmp-in cmp-url" placeholder="Company URL — e.g. stripe.com" autocomplete="off" spellcheck="false" inputmode="url" />
+            </div>
+          </div>
+
+          <!-- QUALITY — the one upfront choice that changes WHAT the agent makes.
+               Standard = Remotion designed motion-graphics + a clean synthetic
+               voice (free, fast). Premium = cinematic AI footage (Higgsfield) + a
+               natural studio voice (ElevenLabs) (richer, costs more). Wired in
+               app.js (#cmp-quality .q-opt -> state.selection.quality). Each option
+               carries a small explanation. -->
+          <div class="cmp-quality" id="cmp-quality" role="group" aria-label="Video quality">
+            <button type="button" class="q-opt is-on" data-quality="standard">
+              <span class="q-head"><span class="q-name">Standard</span><span class="q-price">from $5</span></span>
+              <span class="q-desc">Designed motion graphics + a clean synthetic voice. Fast and free to make.</span>
+            </button>
+            <button type="button" class="q-opt" data-quality="premium">
+              <span class="q-head"><span class="q-name">Premium</span><span class="q-price">from $6</span></span>
+              <span class="q-desc">Cinematic AI footage (Higgsfield) + a natural studio voice (ElevenLabs). Richer and more lifelike.</span>
+            </button>
+          </div>
+
+          <div class="cmp-bar">
+            <div class="cmp-opts">
+              <label class="build-mode" title="Real production runs Higgsfield + walk-agent ($). Tick for a $0 dev/mock run."><input type="checkbox" id="build-mock" /> <span>mock · $0</span></label>
+            </div>
+            <button id="build-go" class="build-go cmp-send" title="Build this video" aria-label="Build this video"><svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+          </div>
+        </div>
+
+        <!-- EXAMPLES — a quiet divider, then concise use-case starter chips that FILL
+             the goal field when clicked (Hiro-style). Wired in app.js (init). -->
+        <div class="ex-divider"><span>Examples</span></div>
+        <div class="ex-chips" id="ex-chips">
+          <button type="button" class="ex-chip" data-fill="A brand explainer that introduces the product and what it does"><svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg><span>Brand explainer</span></button>
+          <button type="button" class="ex-chip" data-fill="A short punchy social ad highlighting the main value prop"><svg class="ic" aria-hidden="true"><use href="#i-film"/></svg><span>Social ad</span></button>
+          <button type="button" class="ex-chip" data-fill="A cinematic launch film that builds to the new release"><svg class="ic" aria-hidden="true"><use href="#i-ship"/></svg><span>Launch film</span></button>
+        </div>
+
+        <p class="hero-foot hiro-foot" id="stage-empty-foot"><button class="hero-sample-link" id="hero-sample" type="button" data-run="demo-1-approve">See a finished example</button> &mdash; or open any build in the sidebar.</p>
+        <!-- hidden hook kept for app.js init() (focuses the URL field); no longer a
+             visible CTA button now the composer is the focus. -->
+        <button class="hero-start-hidden" id="hero-start" type="button" hidden aria-hidden="true"></button>
+
+        <!-- The lookbook of curated films used to live here. It moved to the ABOUT
+             view ("Why our videos are better") so the front page stays the clean
+             Hiro composer. Open it from the sidebar (About) or ?view=about. -->
+      </div>
+    </div>
+
+    <!-- ACTIVE-BUILD STATE — the live build view (status, phase track, storyboard,
+         P&L, script, agent feed, pay-gate, delivered hero). Rendered by app.js. -->
+    <div class="detail" id="detail" hidden></div>
+  </main>
+</div>
+
+<script src="/dashboard/app.js"></script>
+</body>
+</html>

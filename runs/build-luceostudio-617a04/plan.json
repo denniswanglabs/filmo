@@ -1,0 +1,80 @@
+{
+  "job": {
+    "company_url": "https://luceostudio.com",
+    "goal": "A brand explainer that introduces the product and what it does",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "type": "title",
+      "brief": "Display the Luceo Studio logo and tagline on a clean background.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "cinematic-1",
+      "type": "cinematic",
+      "brief": "A dynamic tracking shot of the Luceo Studio team collaborating on a project in a bright workspace.",
+      "model": "seedance_2_0",
+      "duration_s": 8,
+      "input_image": null
+    },
+    {
+      "id": "cinematic-2",
+      "type": "cinematic",
+      "brief": "A composed still frame showcasing a finished brand video playing on a modern device.",
+      "model": "gpt_image_2",
+      "duration_s": 8,
+      "input_image": null
+    },
+    {
+      "id": "cinematic-3",
+      "type": "cinematic",
+      "brief": "A fast\u2011cut montage of diverse clients from tech, fashion, and food industries benefiting from Luceo Studio\u2019s work.",
+      "model": "seedance_2_0",
+      "duration_s": 8,
+      "input_image": null
+    },
+    {
+      "id": "closing-title",
+      "type": "title",
+      "brief": "Show the Luceo Studio logo with a call\u2011to\u2011action tagline.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    }
+  ],
+  "voiceover": {
+    "voice": "Adam",
+    "beats": [
+      {
+        "scene_id": "opening-title",
+        "text": "Luceo Studio: crafting stunning visual stories."
+      },
+      {
+        "scene_id": "cinematic-1",
+        "text": "At Luceo Studio, our talented team blends strategy, design, and technology to bring ideas to life."
+      },
+      {
+        "scene_id": "cinematic-2",
+        "text": "We deliver polished brand videos that capture attention, convey messages, and drive engagement across platforms."
+      },
+      {
+        "scene_id": "cinematic-3",
+        "text": "From startups to global brands, clients trust Luceo Studio to turn vision into compelling visual experiences."
+      },
+      {
+        "scene_id": "closing-title",
+        "text": "Start building your story today at luceostudio.com"
+      }
+    ],
+    "script": "Luceo Studio: crafting stunning visual stories. At Luceo Studio, our talented team blends strategy, design, and technology to bring ideas to life. We deliver polished brand videos that capture attention, convey messages, and drive engagement across platforms. From startups to global brands, clients trust Luceo Studio to turn vision into compelling visual experiences. Start building your story today at luceostudio.com"
+  },
+  "selection": {
+    "quality": "standard"
+  }
+}

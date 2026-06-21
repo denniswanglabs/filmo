@@ -1,0 +1,100 @@
+{
+  "fps": 30,
+  "total_frames": 300,
+  "audio_path": "vo-fixture.wav",
+  "lang": "en",
+  "theme": {
+    "bg": "#ffffff",
+    "bgCard": "#ffffff",
+    "bgCardRaised": "#f5f5f7",
+    "navy": "#1a2847",
+    "navyBright": "#4d7acc",
+    "accent": "#ff6b5c",
+    "ok": "#22c55e",
+    "text": "#1d1d1f",
+    "textMuted": "#3d4250",
+    "textDim": "#86868b",
+    "border": "#e8e8ed",
+    "fontPrimary": "SF Pro Display, -apple-system, BlinkMacSystemFont, Helvetica Neue, sans-serif",
+    "fontMono": "ui-monospace, SF Mono, Menlo, monospace",
+    "fontDisplay": "SF Pro Display, -apple-system, BlinkMacSystemFont, Helvetica Neue, sans-serif",
+    "wordmark": "Benchling"
+  },
+  "scenes": [
+    {
+      "id": "apple-open",
+      "archetype": "apple-hero",
+      "in_frame": 0,
+      "out_frame": 110,
+      "cues": [
+        { "label": "kicker-in", "word": "introducing", "at_frame": 8 },
+        { "label": "title-in", "word": "every", "at_frame": 36 },
+        { "label": "punch", "word": "connected", "at_frame": 60 },
+        { "label": "product-in", "word": "registry", "at_frame": 72 },
+        { "label": "subtitle-in", "word": "experiment", "at_frame": 92 }
+      ],
+      "data": {
+        "kicker": "INTRODUCING",
+        "title": "Every result, connected",
+        "punchWord": "connected",
+        "product": "Benchling Registry",
+        "subtitle": "One source of truth for every experiment."
+      }
+    },
+    {
+      "id": "apple-grid",
+      "archetype": "apple-registry",
+      "in_frame": 110,
+      "out_frame": 220,
+      "cues": [
+        { "label": "heading-in", "word": "registry", "at_frame": 118 },
+        { "label": "pill", "word": "runs", "at_frame": 134 },
+        { "label": "card-1", "word": "plasmid", "at_frame": 150 },
+        { "label": "card-2", "word": "protein", "at_frame": 162 },
+        { "label": "card-3", "word": "cell", "at_frame": 174 },
+        { "label": "card-4", "word": "sample", "at_frame": 186 },
+        { "label": "card-5", "word": "assay", "at_frame": 198 },
+        { "label": "card-6", "word": "run", "at_frame": 206 }
+      ],
+      "data": {
+        "heading": "One registry, every entity",
+        "segments": ["All", "Samples", "Runs"],
+        "selectedSegment": 2,
+        "selected": 5,
+        "entityColors": {
+          "plasmid": "#4d7acc",
+          "protein": "#a78bfa",
+          "cell": "#22c55e",
+          "sample": "#f59e0b",
+          "assay": "#ff6b5c",
+          "run": "#1a2847"
+        },
+        "entities": [
+          { "code": "pl-0142", "name": "pCMV-GFP-Kan", "meta": "1,432 bp - v3", "type": "plasmid" },
+          { "code": "pr-0217", "name": "SpyTag-mCherry", "meta": "289 aa - 32 kDa", "type": "protein" },
+          { "code": "cl-0051", "name": "HEK293T B4", "meta": "Passage 12 - GFP+", "type": "cell" },
+          { "code": "sm-2264", "name": "Lysate batch 27-A", "meta": "2 mL - freezer 3", "type": "sample" },
+          { "code": "as-0093", "name": "Binding affinity KD", "meta": "Octet - pH 7.4", "type": "assay" },
+          { "code": "rn-1148", "name": "Run 27 expression", "meta": "BR B-04 - 72h", "type": "run" }
+        ]
+      }
+    },
+    {
+      "id": "apple-thesis",
+      "archetype": "apple-statement",
+      "in_frame": 220,
+      "out_frame": 300,
+      "cues": [
+        { "label": "line-1", "word": "science", "at_frame": 228 },
+        { "label": "line-2", "word": "moves", "at_frame": 246 },
+        { "label": "line-3", "word": "together", "at_frame": 264 },
+        { "label": "footnote-in", "word": "benchling", "at_frame": 284 }
+      ],
+      "data": {
+        "lines": ["Science moves", "faster when it", "moves together"],
+        "accentLine": 2,
+        "footnote": "benchling.com"
+      }
+    }
+  ]
+}

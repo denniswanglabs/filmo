@@ -1,0 +1,55 @@
+{
+  "job": {
+    "company_url": "https://stripe.com",
+    "goal": "30-second explainer plus a short walkthrough of how to find your API keys",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "scenes": [
+    {
+      "id": "title-open",
+      "type": "title",
+      "brief": "Stripe wordmark and tagline",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "cine-establish",
+      "type": "cinematic",
+      "brief": "Cinematic establishing shot of what Stripe does",
+      "model": "seedance_2_0",
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "walkthrough",
+      "type": "walkthrough",
+      "brief": "30-second explainer plus a short walkthrough of how to find your API keys",
+      "model": null,
+      "duration_s": 10,
+      "input_image": null
+    },
+    {
+      "id": "cine-hero",
+      "type": "cinematic",
+      "brief": "Clean hero plate of the Stripe product UI",
+      "model": "gpt_image_2",
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "title-close",
+      "type": "title",
+      "brief": "Call to action: get started with Stripe",
+      "model": null,
+      "duration_s": 5,
+      "input_image": null
+    }
+  ],
+  "voiceover": {
+    "script": "Stripe helps you do more with less. Here is how it works, end to end. Get started today.",
+    "voice": "Adam"
+  }
+}

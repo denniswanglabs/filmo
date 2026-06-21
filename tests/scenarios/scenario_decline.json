@@ -1,0 +1,76 @@
+{
+  "job": {
+    "company_url": "https://docs.stripe.com",
+    "goal": "30-second explainer plus a walkthrough of finding your API keys",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "scenes": [
+    {
+      "id": "title-open",
+      "type": "title",
+      "brief": "Stripe wordmark and tagline",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "cine-establish",
+      "type": "cinematic",
+      "brief": "Sweeping look at a global payments network",
+      "model": "seedance_2_0",
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "walkthrough",
+      "type": "walkthrough",
+      "brief": "Open the Dashboard, go to Developers, reveal the API keys",
+      "model": null,
+      "duration_s": 10,
+      "input_image": null
+    },
+    {
+      "id": "hero-still",
+      "type": "cinematic",
+      "brief": "Elaborate hero plate: the Stripe Dashboard rendered as a luminous control room, dense typographic detail",
+      "model": "gpt_image_2",
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "title-close",
+      "type": "title",
+      "brief": "Call to action: start building at docs.stripe.com",
+      "model": null,
+      "duration_s": 5,
+      "input_image": null
+    }
+  ],
+  "voiceover": {
+    "voice": "Adam",
+    "beats": [
+      {
+        "scene_id": "title-open",
+        "text": "Stripe. Payments for the internet."
+      },
+      {
+        "scene_id": "cine-establish",
+        "text": "One platform powering global payments and billing."
+      },
+      {
+        "scene_id": "walkthrough",
+        "text": "Open the Dashboard, click Developers, then API keys, and copy your keys."
+      },
+      {
+        "scene_id": "hero-still",
+        "text": "A luminous control room for your entire business."
+      },
+      {
+        "scene_id": "title-close",
+        "text": "Start building today at docs dot stripe dot com."
+      }
+    ]
+  }
+}

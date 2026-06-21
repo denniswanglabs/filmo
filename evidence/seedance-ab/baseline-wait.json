@@ -1,0 +1,27 @@
+{
+  "id": "bf30d9a8-ed35-4778-9740-d4b80ddf1bb0",
+  "status": "completed",
+  "display_name": "Seedance 2.0",
+  "job_set_type": "seedance_2_0",
+  "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_182102_bf30d9a8-ed35-4778-9740-d4b80ddf1bb0.mp4",
+  "created_at": 1781893262.941808,
+  "params": {
+    "width": 1280,
+    "height": 720,
+    "prompt": "Clean hero plate of the Stripe Dashboard developer tools",
+    "genre": "auto",
+    "medias": [],
+    "duration": 6,
+    "resolution": "720p",
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "multi_shots": false,
+    "multi_shot_mode": "custom",
+    "multi_prompt": [],
+    "speedramp": "auto",
+    "reference_elements": [],
+    "prompt_language": "en",
+    "mode": "std",
+    "model": "seedance_2_0"
+  }
+}

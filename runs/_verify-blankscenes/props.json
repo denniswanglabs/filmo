@@ -1,0 +1,103 @@
+{
+  "fps": 30,
+  "total_frames": 907,
+  "audio_path": "vo-_verify-blankscenes.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#ffffff",
+    "bgCard": "#ffffff",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#1a3a5c",
+    "navyBright": "#4a7aa8",
+    "accent": "#2563eb",
+    "ok": "#10b981",
+    "text": "#0f2338",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "Inter, system-ui, -apple-system, sans-serif",
+    "fontMono": "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "fontDisplay": "Inter, system-ui, sans-serif",
+    "wordmark": "Orinovate"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 106,
+      "cues": [],
+      "data": {
+        "kicker": "ORINOVATE",
+        "title": "On-demand manufacturing, instant quotes",
+        "subtitle": "On-demand manufacturing, instant quotes"
+      }
+    },
+    {
+      "id": "cinematic-aerial",
+      "archetype": "explainer-card",
+      "in_frame": 106,
+      "out_frame": 382,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "A sweeping aerial shot over a modern factory",
+        "subtitle": "On-demand manufacturing, instant quotes",
+        "bullets": [
+          "3D Printing",
+          "CNC Machining",
+          "Sheet Metal",
+          "Laser Sintering"
+        ]
+      }
+    },
+    {
+      "id": "cinematic-dashboard",
+      "archetype": "explainer-card",
+      "in_frame": 382,
+      "out_frame": 637,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "A composed hero image of the Orinovate",
+        "subtitle": "On-demand manufacturing, instant quotes",
+        "bullets": [
+          "3D Printing",
+          "CNC Machining",
+          "Sheet Metal",
+          "Laser Sintering"
+        ]
+      }
+    },
+    {
+      "id": "walkthrough-setup",
+      "archetype": "explainer-card",
+      "in_frame": 637,
+      "out_frame": 838,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Demonstrate the user navigating the Orinovate",
+        "subtitle": "On-demand manufacturing, instant quotes",
+        "bullets": [
+          "3D Printing",
+          "CNC Machining",
+          "Sheet Metal",
+          "Laser Sintering"
+        ]
+      }
+    },
+    {
+      "id": "closing-cta",
+      "archetype": "hero-title",
+      "in_frame": 838,
+      "out_frame": 907,
+      "cues": [],
+      "data": {
+        "kicker": "ORINOVATE",
+        "title": "On-demand manufacturing, instant quotes",
+        "subtitle": "On-demand manufacturing, instant quotes"
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+<svg viewBox="0 0 426 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Walk Studio">
+<g transform="translate(16 18)">
+<rect x="0" y="0" width="84" height="84" rx="20" fill="#FFF1EE"/>
+<rect x="0.75" y="0.75" width="82.5" height="82.5" rx="19.25" fill="none" stroke="#F4C9BF" stroke-width="1.5"/>
+<g fill="#F4C9BF">
+<rect x="9" y="16" width="6" height="9" rx="2"/>
+<rect x="9" y="37.5" width="6" height="9" rx="2"/>
+<rect x="9" y="59" width="6" height="9" rx="2"/>
+<rect x="69" y="16" width="6" height="9" rx="2"/>
+<rect x="69" y="37.5" width="6" height="9" rx="2"/>
+<rect x="69" y="59" width="6" height="9" rx="2"/>
+</g>
+<path d="M31 21 L31 63 L41.5 52.5 L49.5 67 L58 62.5 L50 48 L63 48 Z" fill="#D6351C"/>
+</g>
+<text x="120" y="78" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-0.5" fill="#16181D">Walk</text>
+<text x="256" y="78" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-0.5" fill="#D6351C">Studio</text>
+</svg>

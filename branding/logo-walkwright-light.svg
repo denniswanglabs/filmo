@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" width="520" height="120" role="img" aria-label="Walkwright">
+  <defs>
+    <style>
+      .wm { font-family: "Söhne", "Inter", system-ui, -apple-system, sans-serif; font-weight: 700; letter-spacing: -0.035em; }
+      .wt { font-family: "Söhne", "Inter", system-ui, sans-serif; font-weight: 700; letter-spacing: -0.035em; }
+    </style>
+  </defs>
+
+  <!-- GLYPH: a click-cursor (Walk lineage) whose tail resolves into a play triangle —
+       "walk a UI -> ship a video". Set in a soft coral chip so it reads as a header app-mark. -->
+  <g transform="translate(16 18)">
+    <!-- chip -->
+    <rect x="0" y="0" width="84" height="84" rx="20" fill="#FFF1EE"/>
+    <rect x="0.75" y="0.75" width="82.5" height="82.5" rx="19.25" fill="none" stroke="#F4C9BF" stroke-width="1.5"/>
+    <!-- cursor body (deep coral) -->
+    <path d="M28 22 L28 64 L38.5 53.5 L46.5 68 L55 63.5 L47 49 L60 49 Z"
+          fill="#D6351C"/>
+    <!-- play-triangle echo emitting from the cursor tip (lighter coral) -->
+    <path d="M52 30 L66 38 L52 46 Z" fill="#F26B52"/>
+  </g>
+
+  <!-- WORDMARK: "Walk" (parent, deep coral) + "wright" (near-ink) -->
+  <text class="wm" x="120" y="78" font-size="58">
+    <tspan fill="#D6351C">Walk</tspan><tspan fill="#16181D">wright</tspan>
+  </text>
+</svg>

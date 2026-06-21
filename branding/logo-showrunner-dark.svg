@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" width="560" height="120" role="img" aria-label="Showrunner">
+  <defs>
+    <style>
+      .wm { font-family: "Söhne", "Inter", system-ui, -apple-system, sans-serif; font-weight: 700; letter-spacing: -0.03em; }
+    </style>
+  </defs>
+
+  <g transform="translate(18 24)">
+    <rect x="0" y="0" width="72" height="72" rx="20" fill="#1A1D24"/>
+    <rect x="0.75" y="0.75" width="70.5" height="70.5" rx="19.25" fill="none" stroke="#33373F" stroke-width="1.5"/>
+    <path d="M20 24 L33 36 L20 48" fill="none" stroke="#7A4036" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M31 24 L44 36 L31 48" fill="none" stroke="#C25542" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M42 23 L58 36 L42 49 Z" fill="#FF6A4F"/>
+  </g>
+
+  <text class="wm" x="110" y="78" font-size="56">
+    <tspan fill="#F4F5F7">Show</tspan><tspan fill="#FF6A4F">runner</tspan>
+  </text>
+</svg>

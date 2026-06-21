@@ -1,0 +1,780 @@
+{
+	"systeminfo": "WHISPER : COREML = 0 | OPENVINO = 0 | MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | SME = 1 | ACCELERATE = 1 | OPENMP = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "base",
+		"multilingual": false,
+		"vocab": 51864,
+		"audio": {
+			"ctx": 1500,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"text": {
+			"ctx": 448,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"mels": 80,
+		"ftype": 1
+	},
+	"params": {
+		"model": "/Users/dennis/.cache/whisper/ggml-base.en.bin",
+		"language": "en",
+		"translate": false
+	},
+	"result": {
+		"language": "en"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:00,000",
+				"to": "00:00:00,150"
+			},
+			"offsets": {
+				"from": 0,
+				"to": 150
+			},
+			"text": ""
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,150",
+				"to": "00:00:00,710"
+			},
+			"offsets": {
+				"from": 150,
+				"to": 710
+			},
+			"text": " Arinivate"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,710",
+				"to": "00:00:01,380"
+			},
+			"offsets": {
+				"from": 710,
+				"to": 1380
+			},
+			"text": " introduces"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,380",
+				"to": "00:00:01,660"
+			},
+			"offsets": {
+				"from": 1380,
+				"to": 1660
+			},
+			"text": " its"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,660",
+				"to": "00:00:01,980"
+			},
+			"offsets": {
+				"from": 1660,
+				"to": 1980
+			},
+			"text": " smart"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,980",
+				"to": "00:00:02,950"
+			},
+			"offsets": {
+				"from": 1980,
+				"to": 2950
+			},
+			"text": " manufacturing"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,950",
+				"to": "00:00:03,680"
+			},
+			"offsets": {
+				"from": 2950,
+				"to": 3680
+			},
+			"text": " platform."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,680",
+				"to": "00:00:03,830"
+			},
+			"offsets": {
+				"from": 3680,
+				"to": 3830
+			},
+			"text": " A"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,830",
+				"to": "00:00:04,390"
+			},
+			"offsets": {
+				"from": 3830,
+				"to": 4390
+			},
+			"text": " sweeping"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,390",
+				"to": "00:00:04,770"
+			},
+			"offsets": {
+				"from": 4390,
+				"to": 4770
+			},
+			"text": " aerial"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,770",
+				"to": "00:00:05,060"
+			},
+			"offsets": {
+				"from": 4770,
+				"to": 5060
+			},
+			"text": " view"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,060",
+				"to": "00:00:05,520"
+			},
+			"offsets": {
+				"from": 5060,
+				"to": 5520
+			},
+			"text": " glides"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,520",
+				"to": "00:00:05,800"
+			},
+			"offsets": {
+				"from": 5520,
+				"to": 5800
+			},
+			"text": " over"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,800",
+				"to": "00:00:05,870"
+			},
+			"offsets": {
+				"from": 5800,
+				"to": 5870
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,870",
+				"to": "00:00:06,440"
+			},
+			"offsets": {
+				"from": 5870,
+				"to": 6440
+			},
+			"text": " bustling"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,440",
+				"to": "00:00:06,960"
+			},
+			"offsets": {
+				"from": 6440,
+				"to": 6960
+			},
+			"text": " factory"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,960",
+				"to": "00:00:07,600"
+			},
+			"offsets": {
+				"from": 6960,
+				"to": 7600
+			},
+			"text": " floor,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,600",
+				"to": "00:00:08,310"
+			},
+			"offsets": {
+				"from": 7600,
+				"to": 8310
+			},
+			"text": " showcasing"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,310",
+				"to": "00:00:09,120"
+			},
+			"offsets": {
+				"from": 8310,
+				"to": 9120
+			},
+			"text": " Arinivate's"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:09,120",
+				"to": "00:00:09,430"
+			},
+			"offsets": {
+				"from": 9120,
+				"to": 9430
+			},
+			"text": " smart"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:09,430",
+				"to": "00:00:10,390"
+			},
+			"offsets": {
+				"from": 9430,
+				"to": 10390
+			},
+			"text": " manufacturing"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:10,390",
+				"to": "00:00:11,410"
+			},
+			"offsets": {
+				"from": 10390,
+				"to": 11410
+			},
+			"text": " platform"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,410",
+				"to": "00:00:11,760"
+			},
+			"offsets": {
+				"from": 11410,
+				"to": 11760
+			},
+			"text": " operating"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,760",
+				"to": "00:00:11,930"
+			},
+			"offsets": {
+				"from": 11760,
+				"to": 11930
+			},
+			"text": " in"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,930",
+				"to": "00:00:12,270"
+			},
+			"offsets": {
+				"from": 11930,
+				"to": 12270
+			},
+			"text": " real"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,270",
+				"to": "00:00:12,880"
+			},
+			"offsets": {
+				"from": 12270,
+				"to": 12880
+			},
+			"text": " time."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,880",
+				"to": "00:00:13,100"
+			},
+			"offsets": {
+				"from": 12880,
+				"to": 13100
+			},
+			"text": " The"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,100",
+				"to": "00:00:13,780"
+			},
+			"offsets": {
+				"from": 13100,
+				"to": 13780
+			},
+			"text": " Arinivate"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,780",
+				"to": "00:00:14,540"
+			},
+			"offsets": {
+				"from": 13780,
+				"to": 14540
+			},
+			"text": " Dashboard"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:14,540",
+				"to": "00:00:15,060"
+			},
+			"offsets": {
+				"from": 14540,
+				"to": 15060
+			},
+			"text": " displays"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,060",
+				"to": "00:00:15,360"
+			},
+			"offsets": {
+				"from": 15060,
+				"to": 15360
+			},
+			"text": " live"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,360",
+				"to": "00:00:16,240"
+			},
+			"offsets": {
+				"from": 15360,
+				"to": 16240
+			},
+			"text": " analytics,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:16,240",
+				"to": "00:00:16,990"
+			},
+			"offsets": {
+				"from": 16240,
+				"to": 16990
+			},
+			"text": " AI-driven"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:16,990",
+				"to": "00:00:17,680"
+			},
+			"offsets": {
+				"from": 16990,
+				"to": 17680
+			},
+			"text": " insights,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:17,680",
+				"to": "00:00:17,890"
+			},
+			"offsets": {
+				"from": 17680,
+				"to": 17890
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:17,890",
+				"to": "00:00:18,090"
+			},
+			"offsets": {
+				"from": 17890,
+				"to": 18090
+			},
+			"text": " key"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:18,090",
+				"to": "00:00:18,860"
+			},
+			"offsets": {
+				"from": 18090,
+				"to": 18860
+			},
+			"text": " performance"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:18,860",
+				"to": "00:00:19,360"
+			},
+			"offsets": {
+				"from": 18860,
+				"to": 19360
+			},
+			"text": " metrics"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,360",
+				"to": "00:00:19,500"
+			},
+			"offsets": {
+				"from": 19360,
+				"to": 19500
+			},
+			"text": " in"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,500",
+				"to": "00:00:19,570"
+			},
+			"offsets": {
+				"from": 19500,
+				"to": 19570
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,570",
+				"to": "00:00:20,110"
+			},
+			"offsets": {
+				"from": 19570,
+				"to": 20110
+			},
+			"text": " clean,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:20,110",
+				"to": "00:00:20,690"
+			},
+			"offsets": {
+				"from": 20110,
+				"to": 20690
+			},
+			"text": " intuitive"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:20,690",
+				"to": "00:00:21,360"
+			},
+			"offsets": {
+				"from": 20690,
+				"to": 21360
+			},
+			"text": " layout."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:21,360",
+				"to": "00:00:21,560"
+			},
+			"offsets": {
+				"from": 21360,
+				"to": 21560
+			},
+			"text": " The"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:21,560",
+				"to": "00:00:21,810"
+			},
+			"offsets": {
+				"from": 21560,
+				"to": 21810
+			},
+			"text": " user"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:21,810",
+				"to": "00:00:22,290"
+			},
+			"offsets": {
+				"from": 21810,
+				"to": 22290
+			},
+			"text": " selects"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:22,290",
+				"to": "00:00:22,350"
+			},
+			"offsets": {
+				"from": 22290,
+				"to": 22350
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:22,350",
+				"to": "00:00:23,040"
+			},
+			"offsets": {
+				"from": 22350,
+				"to": 23040
+			},
+			"text": " template,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:23,040",
+				"to": "00:00:23,790"
+			},
+			"offsets": {
+				"from": 23040,
+				"to": 23790
+			},
+			"text": " configures"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:23,790",
+				"to": "00:00:24,300"
+			},
+			"offsets": {
+				"from": 23790,
+				"to": 24300
+			},
+			"text": " machine"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:24,300",
+				"to": "00:00:25,040"
+			},
+			"offsets": {
+				"from": 24300,
+				"to": 25040
+			},
+			"text": " parameters,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:25,040",
+				"to": "00:00:25,220"
+			},
+			"offsets": {
+				"from": 25040,
+				"to": 25220
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:25,220",
+				"to": "00:00:25,750"
+			},
+			"offsets": {
+				"from": 25220,
+				"to": 25750
+			},
+			"text": " launches"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:25,750",
+				"to": "00:00:25,880"
+			},
+			"offsets": {
+				"from": 25750,
+				"to": 25880
+			},
+			"text": " the"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:25,880",
+				"to": "00:00:26,060"
+			},
+			"offsets": {
+				"from": 25880,
+				"to": 26060
+			},
+			"text": " new"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:26,060",
+				"to": "00:00:26,700"
+			},
+			"offsets": {
+				"from": 26060,
+				"to": 26700
+			},
+			"text": " production"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:26,700",
+				"to": "00:00:26,900"
+			},
+			"offsets": {
+				"from": 26700,
+				"to": 26900
+			},
+			"text": " line"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:26,900",
+				"to": "00:00:27,140"
+			},
+			"offsets": {
+				"from": 26900,
+				"to": 27140
+			},
+			"text": " with"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:27,140",
+				"to": "00:00:27,200"
+			},
+			"offsets": {
+				"from": 27140,
+				"to": 27200
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:27,200",
+				"to": "00:00:27,560"
+			},
+			"offsets": {
+				"from": 27200,
+				"to": 27560
+			},
+			"text": " single"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:27,560",
+				"to": "00:00:28,080"
+			},
+			"offsets": {
+				"from": 27560,
+				"to": 28080
+			},
+			"text": " click."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:28,080",
+				"to": "00:00:28,230"
+			},
+			"offsets": {
+				"from": 28080,
+				"to": 28230
+			},
+			"text": ""
+		},
+		{
+			"timestamps": {
+				"from": "00:00:28,230",
+				"to": "00:00:28,430"
+			},
+			"offsets": {
+				"from": 28230,
+				"to": 28430
+			},
+			"text": " Build"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:28,430",
+				"to": "00:00:28,910"
+			},
+			"offsets": {
+				"from": 28430,
+				"to": 28910
+			},
+			"text": " smarter"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:28,910",
+				"to": "00:00:29,200"
+			},
+			"offsets": {
+				"from": 28910,
+				"to": 29200
+			},
+			"text": " with"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:29,200",
+				"to": "00:00:29,270"
+			},
+			"offsets": {
+				"from": 29200,
+				"to": 29270
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:29,270",
+				"to": "00:00:29,870"
+			},
+			"offsets": {
+				"from": 29270,
+				"to": 29870
+			},
+			"text": " renovate"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:29,870",
+				"to": "00:00:30,240"
+			},
+			"offsets": {
+				"from": 29870,
+				"to": 30240
+			},
+			"text": " now."
+		}
+	]
+}

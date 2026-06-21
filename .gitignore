@@ -1,0 +1,70 @@
+# ── Secrets / credentials (NEVER commit) ────────────────────────────
+.env
+.env.*
+*.env
+*.key
+*.pem
+*secret*
+*credentials*
+client_secrets.json
+.hermes/
+
+# ── Dependencies / build artifacts ──────────────────────────────────
+node_modules/
+# studio/node_modules is a symlink into a sibling project
+studio/node_modules
+studio/out/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Backups (the many .bak / .pre-*.bak snapshots) ──────────────────
+*.bak
+*.pre-*.bak
+
+# ── Generated / large media ─────────────────────────────────────────
+*.mp4
+*.mov
+*.mp3
+*.wav
+*.m4a
+*.aac
+# generated run artifacts (keep small ledger.json refs — see below)
+runs/*/clips/
+runs/**/*.mp4
+runs/**/*.mp3
+runs/**/*.wav
+runs/**/*.png
+runs/**/*.jpg
+# evidence/ holds large render stills + clips — keep only small refs
+evidence/**/*.png
+evidence/**/*.jpg
+evidence/**/*.jpeg
+evidence/**/*.mp4
+evidence/**/*.mov
+# studio public render fixtures (large)
+studio/public/*.wav
+studio/public/*.mp3
+studio/public/*.mp4
+
+# ── Logs / orchestrator session tooling ─────────────────────────────
+logs/
+*.log
+*.output
+.watchdog.py
+
+# ── OS / tmp cruft ──────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+tmp/
+.tmp/
+
+# Keep small lookbook style thumbnails (dashboard/assets/styles/*.jpg)
+# and branding/*.svg — they are intentionally NOT ignored above.
+!dashboard/assets/styles/*.jpg

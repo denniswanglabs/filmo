@@ -1,0 +1,16 @@
+{
+  "name": "hermes-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion studio where the producer agent renders the motion-graphics scenes it writes. The agent generates a real component into src/generated/active.tsx; Root registers it as the 'Scene' composition and the orchestrator renders it. node_modules is symlinked to the shared Remotion install.",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts Scene out/scene.mp4 --codec=h264"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.450",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.450"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "fps": 30,
+  "total_frames": 300,
+  "audio_path": "vo-fixture.wav",
+  "lang": "en",
+  "theme": {
+    "bg": "#ffffff",
+    "bgCard": "#ffffff",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#1a3a5c",
+    "navyBright": "#4a7aa8",
+    "accent": "#2563eb",
+    "ok": "#10b981",
+    "text": "#0f2338",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "Inter, system-ui, -apple-system, sans-serif",
+    "fontMono": "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "fontDisplay": "Inter, system-ui, sans-serif",
+    "wordmark": "Orinovate"
+  },
+  "scenes": [
+    {
+      "id": "hero-open",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 130,
+      "cues": [
+        { "label": "kicker-in", "word": "introducing", "at_frame": 6 },
+        { "label": "title-in", "word": "instant", "at_frame": 42 },
+        { "label": "punch", "word": "seconds", "at_frame": 70 },
+        { "label": "subtitle-in", "word": "quotes", "at_frame": 92 }
+      ],
+      "data": {
+        "kicker": "INTRODUCING",
+        "title": "Quotes in seconds",
+        "punchWord": "seconds",
+        "subtitle": "One upload. Instant pricing."
+      }
+    },
+    {
+      "id": "value-cards",
+      "archetype": "card-ui",
+      "in_frame": 130,
+      "out_frame": 300,
+      "cues": [
+        { "label": "heading-in", "word": "ship", "at_frame": 138 },
+        { "label": "card-1", "word": "printing", "at_frame": 164 },
+        { "label": "card-2", "word": "machining", "at_frame": 188 },
+        { "label": "card-3", "word": "sheet", "at_frame": 212 },
+        { "label": "card-4", "word": "laser", "at_frame": 236 }
+      ],
+      "data": {
+        "heading": "Ship in 24 hours",
+        "headingAccent": "24 hours",
+        "cards": [
+          { "label": "3D Printing", "value": "24h", "sub": "FDM / SLA / SLS / MJF", "accent": true },
+          { "label": "CNC Machining", "sub": "Milling / Turning / 5-axis" },
+          { "label": "Sheet Metal", "sub": "Laser cut / Forming" },
+          { "label": "Laser Sintering", "sub": "Aluminum / Steel / Titanium" }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "a3710ba5-2b43-4570-a053-c9715502fcd5",
+  "status": "in_progress",
+  "display_name": "Seedance 2.0",
+  "job_set_type": "seedance_2_0",
+  "result_url": "",
+  "created_at": 1781901611.482511,
+  "params": {
+    "width": 1280,
+    "height": 720,
+    "prompt": "A sleek matte audio console device resting alone on a reflective studio floor, slow cinematic dolly-in, volumetric haze, premium product hero shot, single subject, no people, no text, no logos.. cinematic product still, 50mm f1.8, shallow depth of field, soft cool key light with brand-accent rim light, premium dark studio, subtle volumetric haze, filmic high-contrast color grade, glossy reflection, centered composition, the look of an Apple-keynote product shot. a single hero object as the sole focal point, clean uncluttered composition, one device or product silhouette, no array of cards, no grid of panels, no multiple stacked UI windows. vivid saturated brand-accent palette: #1CB953 and #1ED760 on a deep, premium background. emerald green-dominant color grade, the entire scene bathed in emerald green (#1CB953) light, its glow tinting the volumetric haze, the reflections and the background, emerald green (#1CB953) as the single dominant color of the whole frame. surfaces carry only soft diffuse light, gentle glow and creamy bokeh, abstract luminous shapes melting into shallow-focus blur. wide open negative space reserved for a title overlay, the hero object resolving in the lower third with soft glow drifting around it. no text, no words, no letters, no wordmarks, no watermarks, no UI labels.",
+    "genre": "auto",
+    "medias": [],
+    "duration": 6,
+    "resolution": "720p",
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "multi_shots": false,
+    "multi_shot_mode": "custom",
+    "multi_prompt": [],
+    "speedramp": "auto",
+    "reference_elements": [],
+    "prompt_language": "en",
+    "mode": "std",
+    "model": "seedance_2_0"
+  }
+}

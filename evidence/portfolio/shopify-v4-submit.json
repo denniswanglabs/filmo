@@ -1,0 +1,27 @@
+{
+  "id": "2b7b82dd-c933-4cc0-8f9f-8134d8e79a9d",
+  "status": "completed",
+  "display_name": "Seedance 2.0",
+  "job_set_type": "seedance_2_0",
+  "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_202758_2b7b82dd-c933-4cc0-8f9f-8134d8e79a9d.mp4",
+  "created_at": 1781900878.064142,
+  "params": {
+    "width": 1280,
+    "height": 720,
+    "prompt": "Establishing opener plate for Shopify, the commerce platform merchants use to run online stores. A premium dark studio: a single sleek e-commerce storefront device, one hero product silhouette drifting in soft focus over a glossy reflective floor, gentle volumetric haze, shallow depth of field.. cinematic product still, 50mm f1.8, shallow depth of field, soft cool key light with brand-accent rim light, premium dark studio, subtle volumetric haze, filmic high-contrast color grade, glossy reflection, centered composition, the look of an Apple-keynote product shot. a single hero object as the sole focal point, clean uncluttered composition, one device or product silhouette, no array of cards, no grid of panels, no multiple stacked UI windows. vivid saturated brand-accent palette: #468E15 and #86BF1D on a deep, premium background. olive green-dominant color grade, the entire scene bathed in olive green (#468E15) light, its glow tinting the volumetric haze, the reflections and the background, olive green (#468E15) as the single dominant color of the whole frame. surfaces carry only soft diffuse light, gentle glow and creamy bokeh, abstract luminous shapes melting into shallow-focus blur. wide open negative space reserved for a title overlay, the hero object resolving in the lower third with soft glow drifting around it. no text, no words, no letters, no wordmarks, no watermarks, no UI labels.",
+    "genre": "auto",
+    "medias": [],
+    "duration": 6,
+    "resolution": "720p",
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "multi_shots": false,
+    "multi_shot_mode": "custom",
+    "multi_prompt": [],
+    "speedramp": "auto",
+    "reference_elements": [],
+    "prompt_language": "en",
+    "mode": "std",
+    "model": "seedance_2_0"
+  }
+}

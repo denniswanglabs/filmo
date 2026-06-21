@@ -1,0 +1,89 @@
+{
+  "job": {
+    "company_url": "https://figma.com",
+    "goal": "30-second explainer plus a short walkthrough",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "type": "title",
+      "brief": "Show Figma logo with tagline 'Design together'.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "cinematic-1",
+      "type": "cinematic",
+      "brief": "A dynamic shot of designers collaborating in real-time on a Figma file, with cursors moving across the canvas.",
+      "model": "seedance_2_0",
+      "duration_s": 7,
+      "input_image": null
+    },
+    {
+      "id": "cinematic-2",
+      "type": "cinematic",
+      "brief": "A still hero image of a diverse product team reviewing a Figma prototype on laptops and tablets.",
+      "model": "gpt_image_2",
+      "duration_s": 7,
+      "input_image": null
+    },
+    {
+      "id": "motion-graphic-divider",
+      "type": "motion_graphic",
+      "brief": "A simple animated divider with Figma's brand colors and the text 'Built for teams'.",
+      "model": null,
+      "duration_s": 2,
+      "input_image": null
+    },
+    {
+      "id": "walkthrough",
+      "type": "walkthrough",
+      "brief": "Navigate to the assets panel, drag a button component onto the frame, and rename its label to 'Submit'.",
+      "model": null,
+      "duration_s": 8,
+      "input_image": null
+    },
+    {
+      "id": "closing-title",
+      "type": "title",
+      "brief": "Display call-to-action: 'Start designing for free at figma.com' with Figma logo.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    }
+  ],
+  "voiceover": {
+    "voice": "Adam",
+    "beats": [
+      {
+        "scene_id": "opening-title",
+        "text": "Figma enables teams to design together, anywhere."
+      },
+      {
+        "scene_id": "cinematic-1",
+        "text": "Designers collaborate live, moving cursors and editing layers instantly across the canvas, seeing changes in real time."
+      },
+      {
+        "scene_id": "cinematic-2",
+        "text": "A diverse team reviews a Figma prototype, sharing feedback and aligning on the product vision."
+      },
+      {
+        "scene_id": "motion-graphic-divider",
+        "text": "Built for teams, powered by Figma."
+      },
+      {
+        "scene_id": "walkthrough",
+        "text": "Open the assets panel, drag a button component onto the frame, and rename its label to 'Submit'."
+      },
+      {
+        "scene_id": "closing-title",
+        "text": "Start designing for free today at figma.com."
+      }
+    ],
+    "script": "Figma enables teams to design together, anywhere. Designers collaborate live, moving cursors and editing layers instantly across the canvas, seeing changes in real time. A diverse team reviews a Figma prototype, sharing feedback and aligning on the product vision. Built for teams, powered by Figma. Open the assets panel, drag a button component onto the frame, and rename its label to 'Submit'. Start designing for free today at figma.com."
+  }
+}

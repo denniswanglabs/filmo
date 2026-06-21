@@ -1,0 +1,27 @@
+{
+  "id": "0a7115ab-85b3-49e0-b716-106ffd6b6803",
+  "status": "completed",
+  "display_name": "Seedance 2.0",
+  "job_set_type": "seedance_2_0",
+  "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_181801_0a7115ab-85b3-49e0-b716-106ffd6b6803.mp4",
+  "created_at": 1781893081.48927,
+  "params": {
+    "width": 1280,
+    "height": 720,
+    "prompt": "Clean hero plate of the Stripe Dashboard developer tools. cinematic product still, 50mm f1.8, shallow depth of field, soft cool key light with brand-accent rim light, premium dark studio, subtle volumetric haze, filmic high-contrast color grade, glossy reflection, centered composition, the look of an Apple-keynote product shot. brand-accent palette: #635BFF and #80E9FF on a deep, premium background. all interface text illegible — only soft blurred light shapes and bokeh; no readable words, no wordmarks, no watermarks. wide negative space with room for a title overlay, UI elements drifting in the lower third.",
+    "genre": "auto",
+    "medias": [],
+    "duration": 6,
+    "resolution": "720p",
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "multi_shots": false,
+    "multi_shot_mode": "custom",
+    "multi_prompt": [],
+    "speedramp": "auto",
+    "reference_elements": [],
+    "prompt_language": "en",
+    "mode": "std",
+    "model": "seedance_2_0"
+  }
+}

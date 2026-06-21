@@ -1,0 +1,63 @@
+{
+  "job": {
+    "company_url": "https://docs.stripe.com",
+    "goal": "30-second promo plus a short product walkthrough",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "type": "title",
+      "brief": "Opening brand card showing Stripe logo and tagline.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "cinematic-motion",
+      "type": "cinematic",
+      "brief": "Dynamic aerial view of global payment flows illustrating Stripe's worldwide reach.",
+      "model": "seedance_2_0",
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "cinematic-still",
+      "type": "cinematic",
+      "brief": "Clean hero image of code editor with Stripe API documentation on screen.",
+      "model": "gpt_image_2",
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "walkthrough",
+      "type": "walkthrough",
+      "brief": "Navigate the Stripe Dashboard to create a payment link for a product.",
+      "model": null,
+      "duration_s": 8,
+      "input_image": null
+    },
+    {
+      "id": "motion-divider",
+      "type": "motion_graphic",
+      "brief": "Simple animated divider with the text 'Built for developers' and subtle motion.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "closing-title",
+      "type": "title",
+      "brief": "Closing card with call\u2011to\u2011action: Start building with Stripe today.",
+      "model": null,
+      "duration_s": 4,
+      "input_image": null
+    }
+  ],
+  "voiceover": {
+    "script": "Stripe powers global commerce for businesses of all sizes. With a suite of APIs and tools, developers can accept payments, manage subscriptions, and move money worldwide\u2014all from a single platform. Now, let's see how to create a payment link in the Stripe Dashboard: click Products, select Payment Links, create a new link, set your product name and price, then copy and share the link with customers. Start building with Stripe today.",
+    "voice": "Adam"
+  }
+}

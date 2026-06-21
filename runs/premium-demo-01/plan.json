@@ -1,0 +1,64 @@
+{
+  "job": {
+    "company_url": "https://docs.stripe.com",
+    "goal": "30s brand explainer + product walkthrough of the Stripe Docs developer experience",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "selection": {
+    "tier": "studio",
+    "boosters": [
+      "rush",
+      "multi_format",
+      "founder_voice"
+    ],
+    "options": {
+      "formats": 2,
+      "languages": 0,
+      "revisions": 0,
+      "consent": {
+        "attested": true,
+        "owner": "Dennis Wang"
+      }
+    }
+  },
+  "scenes": [
+    {
+      "id": "s1_title",
+      "type": "title",
+      "brief": "Open on a title card: 'Stripe Docs' kicker, 'Build payments faster' headline, indigo accent.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "s2_hero",
+      "type": "cinematic",
+      "brief": "Cinematic slow push-in over a developer's desk at dusk, warm screen glow, code reflected in glasses, shallow depth of field, premium fintech mood.",
+      "model": "seedance_2_0",
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "s3_walkthrough",
+      "type": "walkthrough",
+      "brief": "Walk through docs.stripe.com: open the API reference, navigate to Create a PaymentIntent, show the curl example and the language tabs.",
+      "model": null,
+      "duration_s": 9,
+      "input_image": null
+    },
+    {
+      "id": "s4_close",
+      "type": "title",
+      "brief": "Closing title: 'Build payments faster, with Stripe' with the wordmark, indigo accent.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    }
+  ],
+  "voiceover": {
+    "script": "Stripe Docs gets developers from zero to a live payment in minutes. Search the full API reference, copy a ready-to-run request in your language, and ship with confidence. Build payments faster, with Stripe.",
+    "voice": "rachel"
+  }
+}

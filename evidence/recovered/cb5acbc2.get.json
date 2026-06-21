@@ -1,0 +1,27 @@
+{
+  "id": "cb5acbc2-4ff0-49a8-a785-9c933a5ebd13",
+  "status": "completed",
+  "display_name": "Seedance 2.0",
+  "job_set_type": "seedance_2_0",
+  "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_161431_cb5acbc2-4ff0-49a8-a785-9c933a5ebd13.mp4",
+  "created_at": 1781885671.991108,
+  "params": {
+    "width": 1280,
+    "height": 720,
+    "prompt": "Show a dynamic aerial view of a modern workspace transitioning into the Orinovate software interface.",
+    "genre": "auto",
+    "medias": [],
+    "duration": 7,
+    "resolution": "720p",
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "multi_shots": false,
+    "multi_shot_mode": "custom",
+    "multi_prompt": [],
+    "speedramp": "auto",
+    "reference_elements": [],
+    "prompt_language": "en",
+    "mode": "std",
+    "model": "seedance_2_0"
+  }
+}

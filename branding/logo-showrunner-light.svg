@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" width="560" height="120" role="img" aria-label="Showrunner">
+  <defs>
+    <style>
+      .wm { font-family: "Söhne", "Inter", system-ui, -apple-system, sans-serif; font-weight: 700; letter-spacing: -0.03em; }
+    </style>
+  </defs>
+
+  <!-- GLYPH: a play-triangle built from THREE nested chevrons that accelerate to the right —
+       "press play" + "run the whole production forward". The leading chevron is solid (the ship);
+       the trailing two fade (the pipeline of scenes behind it). Reads as a single confident mark. -->
+  <g transform="translate(18 24)">
+    <rect x="0" y="0" width="72" height="72" rx="20" fill="#FFF1EE"/>
+    <rect x="0.75" y="0.75" width="70.5" height="70.5" rx="19.25" fill="none" stroke="#F4C9BF" stroke-width="1.5"/>
+    <!-- trailing chevrons (the queue behind the head) -->
+    <path d="M20 24 L33 36 L20 48" fill="none" stroke="#F8B6A8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M31 24 L44 36 L31 48" fill="none" stroke="#F0826B" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- the head: a solid play triangle (the shipped video) -->
+    <path d="M42 23 L58 36 L42 49 Z" fill="#D6351C"/>
+  </g>
+
+  <!-- WORDMARK: "Show" near-ink + "runner" deep coral -->
+  <text class="wm" x="110" y="78" font-size="56">
+    <tspan fill="#16181D">Show</tspan><tspan fill="#D6351C">runner</tspan>
+  </text>
+</svg>

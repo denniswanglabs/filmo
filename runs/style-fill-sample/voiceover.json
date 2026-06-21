@@ -1,0 +1,461 @@
+{
+	"systeminfo": "WHISPER : COREML = 0 | OPENVINO = 0 | MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | SME = 1 | ACCELERATE = 1 | OPENMP = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "base",
+		"multilingual": false,
+		"vocab": 51864,
+		"audio": {
+			"ctx": 1500,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"text": {
+			"ctx": 448,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"mels": 80,
+		"ftype": 1
+	},
+	"params": {
+		"model": "/Users/dennis/.cache/whisper/ggml-base.en.bin",
+		"language": "en",
+		"translate": false
+	},
+	"result": {
+		"language": "en"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:00,000",
+				"to": "00:00:00,070"
+			},
+			"offsets": {
+				"from": 0,
+				"to": 70
+			},
+			"text": ""
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,070",
+				"to": "00:00:00,150"
+			},
+			"offsets": {
+				"from": 70,
+				"to": 150
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,150",
+				"to": "00:00:00,860"
+			},
+			"offsets": {
+				"from": 150,
+				"to": 860
+			},
+			"text": " renovate"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,860",
+				"to": "00:00:01,050"
+			},
+			"offsets": {
+				"from": 860,
+				"to": 1050
+			},
+			"text": " turns"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,050",
+				"to": "00:00:01,390"
+			},
+			"offsets": {
+				"from": 1050,
+				"to": 1390
+			},
+			"text": " your"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,390",
+				"to": "00:00:01,730"
+			},
+			"offsets": {
+				"from": 1390,
+				"to": 1730
+			},
+			"text": " part"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,730",
+				"to": "00:00:01,950"
+			},
+			"offsets": {
+				"from": 1730,
+				"to": 1950
+			},
+			"text": " into"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,950",
+				"to": "00:00:02,020"
+			},
+			"offsets": {
+				"from": 1950,
+				"to": 2020
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,020",
+				"to": "00:00:03,060"
+			},
+			"offsets": {
+				"from": 2020,
+				"to": 3060
+			},
+			"text": " manufacturing"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,060",
+				"to": "00:00:03,500"
+			},
+			"offsets": {
+				"from": 3060,
+				"to": 3500
+			},
+			"text": " quote"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,500",
+				"to": "00:00:03,670"
+			},
+			"offsets": {
+				"from": 3500,
+				"to": 3670
+			},
+			"text": " in"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,670",
+				"to": "00:00:04,480"
+			},
+			"offsets": {
+				"from": 3670,
+				"to": 4480
+			},
+			"text": " seconds."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,480",
+				"to": "00:00:04,720"
+			},
+			"offsets": {
+				"from": 4480,
+				"to": 4720
+			},
+			"text": " One"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,720",
+				"to": "00:00:05,350"
+			},
+			"offsets": {
+				"from": 4720,
+				"to": 5350
+			},
+			"text": " upload,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,350",
+				"to": "00:00:05,900"
+			},
+			"offsets": {
+				"from": 5350,
+				"to": 5900
+			},
+			"text": " instant"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,900",
+				"to": "00:00:06,620"
+			},
+			"offsets": {
+				"from": 5900,
+				"to": 6620
+			},
+			"text": " pricing,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,620",
+				"to": "00:00:06,940"
+			},
+			"offsets": {
+				"from": 6620,
+				"to": 6940
+			},
+			"text": " ship"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,940",
+				"to": "00:00:07,050"
+			},
+			"offsets": {
+				"from": 6940,
+				"to": 7050
+			},
+			"text": " in"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,050",
+				"to": "00:00:07,540"
+			},
+			"offsets": {
+				"from": 7050,
+				"to": 7540
+			},
+			"text": " 24"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,540",
+				"to": "00:00:07,980"
+			},
+			"offsets": {
+				"from": 7540,
+				"to": 7980
+			},
+			"text": " hours"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,980",
+				"to": "00:00:08,300"
+			},
+			"offsets": {
+				"from": 7980,
+				"to": 8300
+			},
+			"text": " across"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,300",
+				"to": "00:00:09,110"
+			},
+			"offsets": {
+				"from": 8300,
+				"to": 9110
+			},
+			"text": " four"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:09,110",
+				"to": "00:00:09,880"
+			},
+			"offsets": {
+				"from": 9110,
+				"to": 9880
+			},
+			"text": " processes,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:09,880",
+				"to": "00:00:10,080"
+			},
+			"offsets": {
+				"from": 9880,
+				"to": 10080
+			},
+			"text": " 3D"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:10,080",
+				"to": "00:00:10,800"
+			},
+			"offsets": {
+				"from": 10080,
+				"to": 10800
+			},
+			"text": " printing,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:10,800",
+				"to": "00:00:11,020"
+			},
+			"offsets": {
+				"from": 10800,
+				"to": 11020
+			},
+			"text": " CNC"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,020",
+				"to": "00:00:11,870"
+			},
+			"offsets": {
+				"from": 11020,
+				"to": 11870
+			},
+			"text": " machining,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,870",
+				"to": "00:00:12,260"
+			},
+			"offsets": {
+				"from": 11870,
+				"to": 12260
+			},
+			"text": " sheet"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,260",
+				"to": "00:00:12,800"
+			},
+			"offsets": {
+				"from": 12260,
+				"to": 12800
+			},
+			"text": " metal,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,800",
+				"to": "00:00:13,030"
+			},
+			"offsets": {
+				"from": 12800,
+				"to": 13030
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,030",
+				"to": "00:00:13,450"
+			},
+			"offsets": {
+				"from": 13030,
+				"to": 13450
+			},
+			"text": " laser"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,450",
+				"to": "00:00:14,400"
+			},
+			"offsets": {
+				"from": 13450,
+				"to": 14400
+			},
+			"text": " centering."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:14,400",
+				"to": "00:00:14,730"
+			},
+			"offsets": {
+				"from": 14400,
+				"to": 14730
+			},
+			"text": " Start"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:14,730",
+				"to": "00:00:15,320"
+			},
+			"offsets": {
+				"from": 14730,
+				"to": 15320
+			},
+			"text": " your"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,320",
+				"to": "00:00:15,430"
+			},
+			"offsets": {
+				"from": 15320,
+				"to": 15430
+			},
+			"text": " quote"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,430",
+				"to": "00:00:15,740"
+			},
+			"offsets": {
+				"from": 15430,
+				"to": 15740
+			},
+			"text": " today"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,740",
+				"to": "00:00:15,880"
+			},
+			"offsets": {
+				"from": 15740,
+				"to": 15880
+			},
+			"text": " at"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,880",
+				"to": "00:00:16,200"
+			},
+			"offsets": {
+				"from": 15880,
+				"to": 16200
+			},
+			"text": " a"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:16,200",
+				"to": "00:00:16,880"
+			},
+			"offsets": {
+				"from": 16200,
+				"to": 16880
+			},
+			"text": " renovate."
+		}
+	]
+}

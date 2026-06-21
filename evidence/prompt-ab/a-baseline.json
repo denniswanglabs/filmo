@@ -1,0 +1,21 @@
+[
+  {
+    "id": "4bb25c32-2ab8-4260-9bec-d3127cef2d01",
+    "status": "completed",
+    "display_name": "GPT Image 2",
+    "job_set_type": "gpt_image_2",
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_175451_4bb25c32-2ab8-4260-9bec-d3127cef2d01.png",
+    "created_at": 1781891691.692569,
+    "params": {
+      "width": 2688,
+      "height": 1520,
+      "prompt": "Clean hero plate of the Stripe Dashboard developer tools",
+      "medias": [],
+      "aspect_ratio": "16:9",
+      "quality": "high",
+      "resolution": "2k",
+      "model": "videotape-alpha",
+      "reference_elements": []
+    }
+  }
+]

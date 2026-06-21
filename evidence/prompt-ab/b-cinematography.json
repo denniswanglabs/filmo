@@ -1,0 +1,21 @@
+[
+  {
+    "id": "bff3f522-3076-4527-acfe-190c0cb7b5dd",
+    "status": "completed",
+    "display_name": "GPT Image 2",
+    "job_set_type": "gpt_image_2",
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_175756_bff3f522-3076-4527-acfe-190c0cb7b5dd.png",
+    "created_at": 1781891876.467034,
+    "params": {
+      "width": 2688,
+      "height": 1520,
+      "prompt": "Clean hero plate of the Stripe Dashboard developer tools. Cinematic product still: shot on a 50mm lens at f1.8, shallow depth of field, soft key light from upper left with cool rim light, premium dark studio environment, subtle volumetric haze, high-contrast filmic color grade, glossy reflective surface, centered three-quarter composition, 8k commercial render, the look of an Apple keynote product shot.",
+      "medias": [],
+      "aspect_ratio": "16:9",
+      "quality": "high",
+      "resolution": "2k",
+      "model": "videotape-alpha",
+      "reference_elements": []
+    }
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "id": "b35b8fc2-d482-471b-bf4a-29ca732a3e0c",
+  "status": "completed",
+  "display_name": "Seedance 2.0",
+  "job_set_type": "seedance_2_0",
+  "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_201112_b35b8fc2-d482-471b-bf4a-29ca732a3e0c.mp4",
+  "created_at": 1781899872.97548,
+  "params": {
+    "width": 1280,
+    "height": 720,
+    "prompt": "Establishing opener plate for Slack, the team messaging and collaboration platform. A premium dark studio: a single sleek messaging device as the hero object, one rounded chat surface silhouette drifting in slow push-in over a glossy reflective floor, gentle volumetric haze, shallow depth of field.. cinematic product still, 50mm f1.8, shallow depth of field, soft cool key light with brand-accent rim light, premium dark studio, subtle volumetric haze, filmic high-contrast color grade, glossy reflection, centered composition, the look of an Apple-keynote product shot. a single hero object as the sole focal point, clean uncluttered composition, one device or product silhouette, no array of cards, no grid of panels, no multiple stacked UI windows. vivid saturated brand-accent palette: #8A158C and #7F158C on a deep, premium background. magenta-dominant color grade, the entire scene bathed in magenta light (#8A158C), magenta glow tinting the volumetric haze, the reflections and the background, magenta as the single dominant color of the whole frame. surfaces carry only soft diffuse light, gentle glow and creamy bokeh, abstract luminous shapes melting into shallow-focus blur. wide open negative space reserved for a title overlay, the hero object resolving in the lower third with soft glow drifting around it. no text, no words, no letters, no wordmarks, no watermarks, no UI labels.",
+    "genre": "auto",
+    "medias": [],
+    "duration": 6,
+    "resolution": "720p",
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "multi_shots": false,
+    "multi_shot_mode": "custom",
+    "multi_prompt": [],
+    "speedramp": "auto",
+    "reference_elements": [],
+    "prompt_language": "en",
+    "mode": "std",
+    "model": "seedance_2_0"
+  }
+}

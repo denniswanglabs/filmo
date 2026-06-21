@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" width="520" height="120" role="img" aria-label="Walkwright">
+  <defs>
+    <style>
+      .wm { font-family: "Söhne", "Inter", system-ui, -apple-system, sans-serif; font-weight: 700; letter-spacing: -0.035em; }
+    </style>
+  </defs>
+
+  <!-- GLYPH: click-cursor + play-triangle echo, on a graphite chip for dark headers. -->
+  <g transform="translate(16 18)">
+    <rect x="0" y="0" width="84" height="84" rx="20" fill="#1A1D24"/>
+    <rect x="0.75" y="0.75" width="82.5" height="82.5" rx="19.25" fill="none" stroke="#33373F" stroke-width="1.5"/>
+    <path d="M28 22 L28 64 L38.5 53.5 L46.5 68 L55 63.5 L47 49 L60 49 Z"
+          fill="#FF6A4F"/>
+    <path d="M52 30 L66 38 L52 46 Z" fill="#FFB29F"/>
+  </g>
+
+  <!-- WORDMARK -->
+  <text class="wm" x="120" y="78" font-size="58">
+    <tspan fill="#FF6A4F">Walk</tspan><tspan fill="#F4F5F7">wright</tspan>
+  </text>
+</svg>

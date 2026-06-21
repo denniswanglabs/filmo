@@ -1,0 +1,21 @@
+[
+  {
+    "id": "385ac12c-0d49-4804-8266-d0ef5b0874fd",
+    "status": "completed",
+    "display_name": "GPT Image 2",
+    "job_set_type": "gpt_image_2",
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_180502_385ac12c-0d49-4804-8266-d0ef5b0874fd.png",
+    "created_at": 1781892302.804155,
+    "params": {
+      "width": 2688,
+      "height": 1520,
+      "prompt": "Cinematic establishing plate for a premium fintech brand film, in the world of Stripe. Subject: an abstract, out-of-focus developer dashboard floating in a dark studio. Cinematography: 35mm anamorphic, shallow depth of field, soft cool key light with violet rim, gentle volumetric haze, filmic high-contrast grade, subtle lens bloom. Palette: deep navy (#0A2540) base, indigo-violet (#635BFF) glow, cyan (#80E9FF) accents. Composition: wide negative space, UI panels drifting in the lower third, room for a title. CRITICAL: all interface text must be illegible — render labels, numbers and logos only as soft blurred light shapes and bokeh; no readable words, no wordmarks, no watermarks. Clean, modern, expensive, the feel of an Apple keynote opening shot.",
+      "medias": [],
+      "aspect_ratio": "16:9",
+      "quality": "high",
+      "resolution": "2k",
+      "model": "videotape-alpha",
+      "reference_elements": []
+    }
+  }
+]

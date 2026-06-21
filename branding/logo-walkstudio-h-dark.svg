@@ -1,0 +1,17 @@
+<svg viewBox="0 0 432 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Walk Studio">
+<g transform="translate(18 18)">
+<rect x="0" y="0" width="84" height="84" rx="22" fill="#2A1C1A"/>
+<rect x="1" y="1" width="82" height="82" rx="21" fill="none" stroke="#6E433B" stroke-width="1.5"/>
+<g fill="#8A5249">
+<rect x="10" y="17" width="5.5" height="8" rx="2.75"/>
+<rect x="10" y="38" width="5.5" height="8" rx="2.75"/>
+<rect x="10" y="59" width="5.5" height="8" rx="2.75"/>
+<rect x="68.5" y="17" width="5.5" height="8" rx="2.75"/>
+<rect x="68.5" y="38" width="5.5" height="8" rx="2.75"/>
+<rect x="68.5" y="59" width="5.5" height="8" rx="2.75"/>
+</g>
+<path d="M32 20 L32 64 L42.8 53.4 L50.4 68.2 L57.6 64.6 L50 49.8 L62.8 49.8 Z" fill="#FF6A4F" stroke="#FF6A4F" stroke-width="1.4" stroke-linejoin="round"/>
+</g>
+<text x="120" y="78" font-family="Söhne, Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#F4F5F7">Walk</text>
+<text x="248" y="78" font-family="Söhne, Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#FF6A4F">Studio</text>
+</svg>

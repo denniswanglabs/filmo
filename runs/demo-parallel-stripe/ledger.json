@@ -1,0 +1,413 @@
+{
+  "run_id": "demo-parallel-stripe",
+  "schema_version": 1,
+  "mode": "real",
+  "created_at": null,
+  "job": {
+    "company_url": "https://docs.stripe.com",
+    "goal": "30s brand explainer + product walkthrough of the Stripe Docs developer experience",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "status": "running",
+  "phase": "stitching",
+  "pricing": {
+    "currency": "usd",
+    "target_margin": 0.6,
+    "scenes": [
+      {
+        "id": "s1_title",
+        "type": "title",
+        "tool": "motion-graphics",
+        "model": null,
+        "est_cost_cents": 0,
+        "note": "title -> motion-graphics (free, $0 marginal)",
+        "per_scene_budget_cents": 0
+      },
+      {
+        "id": "s2_hero",
+        "type": "cinematic",
+        "tool": "higgsfield-scene",
+        "model": "seedance_2_0",
+        "est_cost_cents": 22,
+        "note": "cinematic via seedance_2_0 -- higgsfield preview: 22.5 credits",
+        "per_scene_budget_cents": 22
+      },
+      {
+        "id": "s3_abstract",
+        "type": "cinematic",
+        "tool": "higgsfield-scene",
+        "model": "seedance_2_0",
+        "est_cost_cents": 22,
+        "note": "cinematic via seedance_2_0 -- higgsfield preview: 22.5 credits",
+        "per_scene_budget_cents": 22
+      },
+      {
+        "id": "s4_network",
+        "type": "cinematic",
+        "tool": "higgsfield-scene",
+        "model": "seedance_2_0",
+        "est_cost_cents": 22,
+        "note": "cinematic via seedance_2_0 -- higgsfield preview: 22.5 credits",
+        "per_scene_budget_cents": 22
+      },
+      {
+        "id": "s5_walkthrough",
+        "type": "walkthrough",
+        "tool": "walk-agent",
+        "model": null,
+        "est_cost_cents": 0,
+        "note": "walkthrough -> walk-agent (free, $0 marginal)",
+        "per_scene_budget_cents": 0
+      }
+    ],
+    "voiceover": {
+      "id": "__voiceover__",
+      "type": "voiceover",
+      "tool": "elevenlabs-tts",
+      "model": "rachel",
+      "est_cost_cents": 9,
+      "note": "ElevenLabs: 293 chars @ 30c/1k chars",
+      "per_scene_budget_cents": 9
+    },
+    "total_cogs_cents": 75,
+    "suggested_price_cents": 188,
+    "production_budget_cents": 75
+  },
+  "earn": {
+    "enabled": false,
+    "provider": "dev",
+    "status": "dev_mode",
+    "price_cents": 188,
+    "currency": "usd",
+    "payment_link": null,
+    "note": "No Stripe key configured \u2014 DEV MODE, payment gate skipped.",
+    "key": {
+      "present": true,
+      "source": "~/.hermes/.env",
+      "kind": "test",
+      "length": 107
+    }
+  },
+  "card": {
+    "enabled": false,
+    "provider": "simulated",
+    "spending_limit_cents": 75,
+    "card_id": "ic_sim_budget",
+    "note": "Simulated Issuing card."
+  },
+  "scenes": [
+    {
+      "id": "s1_title",
+      "type": "title",
+      "order": 0,
+      "brief": "Open on a title card: 'Stripe Docs' kicker, 'Build payments faster' headline, indigo accent.",
+      "model": null,
+      "duration_s": 3,
+      "spent_before_cents": 0,
+      "decision": "free",
+      "tool": "motion-graphics",
+      "preview_cost_cents": 0,
+      "spent_cents": 0,
+      "remaining_after_cents": 75,
+      "final_model": null,
+      "status": "produced",
+      "output_path": "clips/00_s1_title.mp4",
+      "stripe_authorization": null,
+      "studio": null
+    },
+    {
+      "id": "s2_hero",
+      "type": "cinematic",
+      "order": 1,
+      "brief": "Cinematic slow push-in over a developer's desk at dusk, warm screen glow, code reflected in glasses, shallow depth of field, premium fintech mood.",
+      "model": "seedance_2_0",
+      "duration_s": 6,
+      "spent_before_cents": 0,
+      "status": "failed",
+      "decision": "approve",
+      "error": "AdapterError: no asset url in higgsfield result: {\n  \"id\": \"af5fd389-1964-4746-bf5e-666260231240\",\n  \"status\": \"nsfw\",\n  \"display_name\": \"Seedance 2.0\",\n  \"job_set_type\": \"seedance_2_0\",\n  \"result_url\": \"\",\n  \"created_at\": 1781926989.937215,\n  \"params\": {\n    \"width\": 1280,\n    \"height\": 720,\n    \"prompt\": \"Cinematic slow push-in over a developer's desk at dusk, warm screen glow, code reflected in glasses, shallow depth of field, premium fintech mood.. cinematic product still, 50mm f1.8, shallow depth of field, soft cool key light with brand-accent rim light, premium dark studio, subtle volumetric haze, filmic high-contrast color grade, glossy reflection, centered composition, the look of an Apple-keynote product shot. a single hero object as the sole focal point, clean uncluttered composition, one device or product silhouette, no array of cards, no grid of panels, no multiple stacked UI windows. vivid saturated brand-accent palette: #3126FF and #26D9FF on a deep, premium background. blue-dominant color grade, the entire scene bathed in blue (#3126FF) light, its glow tinting the volumetric haze, the reflections and the background, blue (#3126FF) as the single dominant color of the whole frame. surfaces carry only soft diffuse lig\u2026 [truncated 662 chars]",
+      "output_path": null,
+      "remaining_after_cents": 53,
+      "spent_cents": 22,
+      "preview_cost_cents": 22,
+      "stripe_authorization": {
+        "id": "iauth_sim_79242761",
+        "object": "issuing.authorization",
+        "simulated": true,
+        "amount_cents": 22,
+        "approved": true,
+        "decline_reason": null,
+        "remaining_budget_cents": 75
+      }
+    },
+    {
+      "id": "s3_abstract",
+      "type": "cinematic",
+      "order": 2,
+      "brief": "Abstract flowing ribbons of indigo and violet light forming an API request arc across a dark stage, particles, cinematic depth, 24fps motion-blur.",
+      "model": "seedance_2_0",
+      "duration_s": 5,
+      "spent_before_cents": 22,
+      "decision": "approve",
+      "tool": "higgsfield-scene",
+      "preview_cost_cents": 22,
+      "spent_cents": 22,
+      "final_model": "seedance_2_0",
+      "remaining_after_cents": 31,
+      "status": "produced",
+      "output_path": "clips/02_s3_abstract.mp4",
+      "stripe_authorization": {
+        "id": "iauth_sim_38922786",
+        "object": "issuing.authorization",
+        "simulated": true,
+        "amount_cents": 22,
+        "approved": true,
+        "decline_reason": null,
+        "remaining_budget_cents": 53
+      },
+      "studio": null
+    },
+    {
+      "id": "s4_network",
+      "type": "cinematic",
+      "order": 3,
+      "brief": "A clean isometric world of connected payment nodes lighting up in sequence across a globe, soft volumetric haze, cinematic camera orbit.",
+      "model": "seedance_2_0",
+      "duration_s": 5,
+      "spent_before_cents": 44,
+      "decision": "approve",
+      "tool": "higgsfield-scene",
+      "preview_cost_cents": 22,
+      "spent_cents": 22,
+      "final_model": "seedance_2_0",
+      "remaining_after_cents": 9,
+      "status": "produced",
+      "output_path": "clips/03_s4_network.mp4",
+      "stripe_authorization": {
+        "id": "iauth_sim_36254014",
+        "object": "issuing.authorization",
+        "simulated": true,
+        "amount_cents": 22,
+        "approved": true,
+        "decline_reason": null,
+        "remaining_budget_cents": 31
+      },
+      "studio": null
+    },
+    {
+      "id": "s5_walkthrough",
+      "type": "walkthrough",
+      "order": 4,
+      "brief": "Walk through docs.stripe.com: open the API reference, navigate to Create a PaymentIntent, show the curl example and the language tabs.",
+      "model": null,
+      "duration_s": 9,
+      "spent_before_cents": 66,
+      "decision": "free",
+      "tool": "walk-agent",
+      "preview_cost_cents": 0,
+      "spent_cents": 0,
+      "remaining_after_cents": 9,
+      "final_model": null,
+      "status": "produced",
+      "output_path": "clips/04_s5_walkthrough.mp4",
+      "stripe_authorization": null,
+      "studio": null
+    }
+  ],
+  "voiceover": {
+    "id": "__voiceover__",
+    "type": "voiceover",
+    "chars": 293,
+    "preview_cost_cents": 9,
+    "spent_before_cents": 66,
+    "beats_total": 4,
+    "beats_aligned": 3,
+    "beats_dropped": [
+      "s2_hero"
+    ],
+    "segments": [
+      {
+        "scene_id": "s1_title",
+        "start_s": 0.0,
+        "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/demo-parallel-stripe/voiceover.beat00.mp3",
+        "dur_s": 4.92
+      },
+      {
+        "scene_id": "s3_abstract",
+        "start_s": 3.051,
+        "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/demo-parallel-stripe/voiceover.beat01.mp3",
+        "dur_s": 5.808
+      },
+      {
+        "scene_id": "s4_network",
+        "start_s": 8.136,
+        "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/demo-parallel-stripe/voiceover.beat02.mp3",
+        "dur_s": 3.096
+      }
+    ],
+    "decision": "approve",
+    "spent_cents": 9,
+    "remaining_after_cents": 0,
+    "status": "produced",
+    "provider": "edge-tts",
+    "voice": "en-US-AriaNeural",
+    "output_path": "voiceover.mp3"
+  },
+  "stitch": null,
+  "pnl": null,
+  "events": [
+    {
+      "seq": 1,
+      "level": "info",
+      "msg": "storyboard decided: 5 scenes, 4 narration beats (293 chars)"
+    },
+    {
+      "seq": 2,
+      "level": "info",
+      "msg": "plan validated: 5 scenes"
+    },
+    {
+      "seq": 3,
+      "level": "info",
+      "msg": "priced: COGS 75c, price 188c, budget LOCKED at 75c"
+    },
+    {
+      "seq": 4,
+      "level": "info",
+      "msg": "EARN: DEV MODE \u2014 no Stripe key, payment gate skipped"
+    },
+    {
+      "seq": 5,
+      "level": "info",
+      "msg": "PARALLEL: walkthrough generation kicked off off-thread (1 scene(s)) \u2014 overlapping the remaining scenes"
+    },
+    {
+      "seq": 6,
+      "level": "info",
+      "msg": "FREE scene 's1_title' (title) produced \u2014 $0"
+    },
+    {
+      "seq": 7,
+      "level": "gate",
+      "msg": "GATE 's2_hero': APPROVE \u2014 proposed 22c fits remaining budget 75c",
+      "scene": "s2_hero",
+      "proposed_cents": 22,
+      "remaining_cents": 75
+    },
+    {
+      "seq": 8,
+      "level": "error",
+      "msg": "SCENE FAILED 's2_hero' (cinematic) \u2014 isolated; run continues. AdapterError: no asset url in higgsfield result: {\n  \"id\": \"af5fd389-1964-4746-bf5e-666260231240\",\n  \"status\": \"nsfw\",\n  \"display_name\": \"Seedance 2.0\",\n  \"job_set_type\": \"seedance_2_0\",\n  \"result_url\": \"\",\n  \"created_at\": 1781926989.937215,\n  \"params\": {\n    \"width\": 1280,\n    \"height\": 720,\n    \"prompt\": \"Cinematic slow push-in over a developer's desk at dusk, warm screen glow, code reflected in glasses, shallow depth of field, premium fintech mood.. cinematic product still, 50mm f1.8, shallow depth of field, soft cool key light with brand-accent rim light, premium dark studio, subtle volumetric haze, filmic high-contrast color grade, glossy reflection, centered composition, the look of an Apple-keynote product shot. a single hero object as the sole focal point, clean uncluttered composition, one device or product silhouette, no array of cards, no grid of panels, no multiple stacked UI windows. vivid saturated brand-accent palette: #3126FF and #26D9FF on a deep, premium background. blue-dominant color grade, the entire scene bathed in blue (#3126FF) light, its glow tinting the volumetric haze, the reflections and the background, blue (#3126FF) as the single dominant color of the whole frame. surfaces carry only soft diffuse lig\u2026 [truncated 662 chars]",
+      "scene": "s2_hero"
+    },
+    {
+      "seq": 9,
+      "level": "gate",
+      "msg": "GATE 's3_abstract': APPROVE \u2014 proposed 22c fits remaining budget 53c",
+      "scene": "s3_abstract",
+      "proposed_cents": 22,
+      "remaining_cents": 53
+    },
+    {
+      "seq": 10,
+      "level": "spend",
+      "msg": "SPENT 22c on 's3_abstract' (seedance_2_0) \u2014 remaining 31c"
+    },
+    {
+      "seq": 11,
+      "level": "gate",
+      "msg": "GATE 's4_network': APPROVE \u2014 proposed 22c fits remaining budget 31c",
+      "scene": "s4_network",
+      "proposed_cents": 22,
+      "remaining_cents": 31
+    },
+    {
+      "seq": 12,
+      "level": "spend",
+      "msg": "SPENT 22c on 's4_network' (seedance_2_0) \u2014 remaining 9c"
+    },
+    {
+      "seq": 13,
+      "level": "info",
+      "msg": "FREE scene 's5_walkthrough' (walkthrough) produced \u2014 $0"
+    },
+    {
+      "seq": 14,
+      "level": "info",
+      "msg": "VOICEOVER: dropped 1 beat(s) for cut/absent scenes: s2_hero"
+    },
+    {
+      "seq": 15,
+      "level": "gate",
+      "msg": "GATE voiceover: APPROVE \u2014 9c vs remaining 9c"
+    },
+    {
+      "seq": 16,
+      "level": "spend",
+      "msg": "VOICEOVER: 3 scene-aligned beat(s) synthesized via edge-tts (9c) \u2014 remaining 0c"
+    }
+  ],
+  "plan": {
+    "voiceover": {
+      "script": "Stripe Docs gets developers from zero to a live payment in minutes. Search the full API reference, copy a ready-to-run request in your language, and ship with confidence. From your first PaymentIntent to production webhooks, every answer is one search away. Build payments faster, with Stripe.",
+      "voice": "rachel",
+      "beats": [
+        {
+          "scene_id": "s1_title",
+          "text": "Stripe Docs gets developers from zero to a live payment in minutes."
+        },
+        {
+          "scene_id": "s2_hero",
+          "text": "Search the full API reference, copy a ready-to-run request in your language, and ship with confidence."
+        },
+        {
+          "scene_id": "s3_abstract",
+          "text": "From your first PaymentIntent to production webhooks, every answer is one search away."
+        },
+        {
+          "scene_id": "s4_network",
+          "text": "Build payments faster, with Stripe."
+        }
+      ]
+    },
+    "scenes": [
+      {
+        "id": "s1_title",
+        "type": "title",
+        "model": null,
+        "duration_s": 3,
+        "brief": "Open on a title card: 'Stripe Docs' kicker, 'Build payments faster' headline, indigo accent."
+      },
+      {
+        "id": "s2_hero",
+        "type": "cinematic",
+        "model": "seedance_2_0",
+        "duration_s": 6,
+        "brief": "Cinematic slow push-in over a developer's desk at dusk, warm screen glow, code reflected in glasses, shallow depth of field, premium fintech mood."
+      },
+      {
+        "id": "s3_abstract",
+        "type": "cinematic",
+        "model": "seedance_2_0",
+        "duration_s": 5,
+        "brief": "Abstract flowing ribbons of indigo and violet light forming an API request arc across a dark stage, particles, cinematic depth, 24fps motion-blur."
+      },
+      {
+        "id": "s4_network",
+        "type": "cinematic",
+        "model": "seedance_2_0",
+        "duration_s": 5,
+        "brief": "A clean isometric world of connected payment nodes lighting up in sequence across a globe, soft volumetric haze, cinematic camera orbit."
+      },
+      {
+        "id": "s5_walkthrough",
+        "type": "walkthrough",
+        "model": null,
+        "duration_s": 9,
+        "brief": "Walk through docs.stripe.com: open the API reference, navigate to Create a PaymentIntent, show the curl example and the language tabs."
+      }
+    ]
+  }
+}

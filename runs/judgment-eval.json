@@ -1,0 +1,56 @@
+{
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "passed": 7,
+  "total": 7,
+  "results": [
+    {
+      "id": "clear-approve",
+      "want": "approve",
+      "got": "approve",
+      "ok": true,
+      "reason": "Cost fits within remaining budget."
+    },
+    {
+      "id": "tight-approve",
+      "want": "approve",
+      "got": "approve",
+      "ok": true,
+      "reason": "The scene's cost of 7 cents fits exactly within the remaining budget of 7 cents."
+    },
+    {
+      "id": "downgrade-hero",
+      "want": "downgrade",
+      "got": "downgrade",
+      "ok": true,
+      "reason": "The scene's cost exceeds the remaining budget but a cheaper model (gpt_image_2) is available for this cinematic scene."
+    },
+    {
+      "id": "moneyshot-decline",
+      "want": "decline",
+      "got": "decline",
+      "ok": true,
+      "reason": "The scene costs 50 cents which exceeds the remaining 8 cents budget and no cheaper model is available."
+    },
+    {
+      "id": "downgrade-tight",
+      "want": "downgrade",
+      "got": "downgrade",
+      "ok": true,
+      "reason": "The seedance_2_0 generation costs 30c which exceeds the 4c remaining budget, but the cheaper gpt_image_2 model can be used instead."
+    },
+    {
+      "id": "big-headroom",
+      "want": "approve",
+      "got": "approve",
+      "ok": true,
+      "reason": "The scene's cost of 22 cents fits within the remaining budget of 200 cents."
+    },
+    {
+      "id": "over-by-one",
+      "want": "decline",
+      "got": "decline",
+      "ok": true,
+      "reason": "Cost exceeds remaining budget and no cheaper model is available."
+    }
+  ]
+}

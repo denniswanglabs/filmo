@@ -1,0 +1,21 @@
+[
+  {
+    "id": "3b4bf155-f35d-4bbc-a0b4-8e9cefc48fbd",
+    "status": "completed",
+    "display_name": "GPT Image 2",
+    "job_set_type": "gpt_image_2",
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_3DS4g5GfyekHltISG4OenvCZMPN/hf_20260619_180241_3b4bf155-f35d-4bbc-a0b4-8e9cefc48fbd.png",
+    "created_at": 1781892161.836803,
+    "params": {
+      "width": 2688,
+      "height": 1520,
+      "prompt": "Hero plate evoking the Stripe developer dashboard, in the Stripe brand world. Cinematic product still: 50mm lens at f1.8, shallow depth of field, soft cool key light, premium studio, filmic grade, glossy reflective surface, centered composition, Apple-keynote look. Color palette is unmistakably Stripe: deep navy background (#0A2540), indigo-violet accent glow (#635BFF), bright cyan highlights (#80E9FF), white UI surfaces; smooth gradient mesh in violet-to-cyan. The interface is intentionally BLURRED and out of focus with heavy bokeh — NO readable text, NO legible labels, NO words, NO numbers, NO logos, NO wordmarks; only abstract glowing UI panels and charts as soft color blocks. Premium fintech, clean, modern, the feel of Stripe's marketing site.",
+      "medias": [],
+      "aspect_ratio": "16:9",
+      "quality": "high",
+      "resolution": "2k",
+      "model": "videotape-alpha",
+      "reference_elements": []
+    }
+  }
+]
