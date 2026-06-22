@@ -9,7 +9,8 @@ scores it. When a skill mis-routes, sharpen its `description:` and re-run — th
 reads from disk, so edits show up immediately. This is the "import skills → test on
 the small model → fix the skill → re-evaluate until satisfied" loop, $0.
 
-Model = FREE nvidia/nemotron-3-super-120b-a12b. Needs NVIDIA_API_KEY (source ~/.zshrc).
+Model = FREE Nemotron Super via OpenRouter (super-free, $0). Needs OPENROUTER_API_KEY
+(source ~/.zshrc).
 Run:  source ~/.zshrc 2>/dev/null && python3 hermes_skill_eval.py
 """
 
@@ -20,8 +21,12 @@ import sys
 import urllib.request
 import urllib.error
 
-API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODEL = "nvidia/nemotron-3-super-120b-a12b"
+import brain as brain_mod
+
+# Route through the shared BRAIN registry, defaulting to the free Super (super-free,
+# $0) — the historical "free Nemotron" intent for this dev eval.
+API_URL = brain_mod.OPENROUTER_URL
+MODEL = brain_mod.brain_def("super-free")["slug"]
 SKILLS_DIR = os.path.expanduser("~/.hermes/skills")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -96,12 +101,13 @@ SYSTEM = ("You are the skill router for the Hermes agent. Given a user request a
 
 
 def call_model(messages):
-    key = os.environ.get("NVIDIA_API_KEY")
+    key = brain_mod.brain_key()
     if not key:
-        sys.exit("NVIDIA_API_KEY not set — run: source ~/.zshrc 2>/dev/null && python3 hermes_skill_eval.py")
+        sys.exit("OPENROUTER_API_KEY not set — run: source ~/.zshrc 2>/dev/null && python3 hermes_skill_eval.py")
     payload = {"model": MODEL, "messages": messages, "temperature": 0.0, "max_tokens": 6000}
     req = urllib.request.Request(API_URL, data=json.dumps(payload).encode(),
-                                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+                                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json",
+                                          "HTTP-Referer": "https://walk.studio", "X-Title": "Walk Studio"},
                                  method="POST")
     with urllib.request.urlopen(req, timeout=300) as resp:
         return json.loads(resp.read().decode())["choices"][0]["message"]["content"]

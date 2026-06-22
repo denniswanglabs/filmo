@@ -25,6 +25,7 @@ import re
 import shlex
 import subprocess
 import time
+import types
 
 import remotion_codegen
 
@@ -708,6 +709,15 @@ def _truncate(s, limit=1200):
     return s if len(s) <= limit else s[:limit] + "… [truncated %d chars]" % (len(s) - limit)
 
 
+def _as_text(v):
+    """Coerce subprocess stdout/stderr (str | bytes | None) to a str."""
+    if v is None:
+        return ""
+    if isinstance(v, bytes):
+        return v.decode("utf-8", "replace")
+    return str(v)
+
+
 def _persist_higgsfield_artifact(out_path, scene, model, raw_response, job_id=None, asset_url=None):
     """Write a sidecar JSON next to the clip recording the raw higgsfield response,
     job_id and asset_url AS SOON AS they're known — before any wait/download — so a
@@ -743,36 +753,845 @@ def _persist_higgsfield_artifact(out_path, scene, model, raw_response, job_id=No
 
 
 # ---------------------------------------------------------------------------
-# Walkthrough (walk-agent). FREE but slow in real mode; mock = color card.
+# Walkthrough (walk-agent). FREE but slow. Mock AND real run the SAME genuine
+# walk_native capture (a $0 mock build matches a paid Standard build); they
+# differ only in payment + brain. The synth color card is a last-resort fallback
+# (mock only) when the native capture fails.
 # ---------------------------------------------------------------------------
 
-def generate_walkthrough(scene, out_path, mode, job_url=None):
-    if mode == "mock":
-        synth_clip(out_path, TYPE_COLOR["walkthrough"], scene.get("duration_s", 10))
-        return {"output_path": out_path, "real": False}
-    # Real: walk-ultra tutorial-maker.sh (long-running; the caller runs it in the
-    # background and polls). We kick it off synchronously here only because the
-    # orchestrator's real path wraps this in its own background handling.
-    walk_dir = "/Users/dennis/Desktop/Projects/Hackathons/walk-ultra"
+def _norm_hex(color, fallback):
+    """Coerce a palette color (possibly '#RRGGBB' or 'RRGGBB' or None) to the bare
+    6-hex-digit form synth_clip wants (it formats `color=c=0x%s`). Falls back to
+    `fallback` (already bare) when the input is missing or not a clean hex triple."""
+    s = (color or "").strip().lstrip("#")
+    if len(s) == 6 and all(c in "0123456789abcdefABCDEF" for c in s):
+        return s.upper()
+    return fallback
+
+
+def generate_walkthrough(scene, out_path, mode, job_url=None, run_dir=None,
+                         accent_hex=None):
+    # CACHE OVERRIDE (mode-independent, $0/no-NIM): if WS_WALKTHROUGH_CACHE points at
+    # an existing mp4, use THAT clip instead of synthesizing (mock) or running
+    # walk-agent (real). The cached clip is re-encoded with +faststart into the run's
+    # out_path so OffthreadVideo can seek it. This is the verification path — a real
+    # walk-agent capture is proven; reusing the cached clip spends nothing.
+    cache = (os.environ.get("WS_WALKTHROUGH_CACHE") or "").strip()
+    if cache and os.path.exists(cache):
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        try:
+            _run([
+                "ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-i", cache,
+                "-c", "copy", "-movflags", "+faststart", out_path,
+            ], timeout=120)
+        except Exception:
+            # stream-copy can fail on odd containers; fall back to a real re-encode.
+            _run([
+                "ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-i", cache,
+                "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-an",
+                "-movflags", "+faststart", out_path,
+            ], timeout=300)
+        if not os.path.exists(out_path) or os.path.getsize(out_path) < 1000:
+            raise AdapterError("walkthrough cache re-encode produced no output: %s" % out_path)
+        # A cached clip is a PROVEN real walk-agent capture being reused ($0 verify
+        # path) — NOT a synthetic placeholder. Mark it so the orchestrator keeps it
+        # (and its narrated VO beat) just like a fresh real capture.
+        return {"output_path": out_path, "real": False, "cached": True,
+                "placeholder": False}
+
+    # NATIVE-CAPTURE DECISION. The genuine walk_native capture runs whenever we want a
+    # real per-brand walkthrough: ALWAYS in real mode, and in MOCK mode for every real
+    # product build (build_runner.run sets WS_WALKTHROUGH_NATIVE=1). That makes a $0
+    # mock build produce exactly the SAME walkthrough a paying Standard customer gets —
+    # mock and real differ only in payment (mock keeps PRODUCER_SIMULATE_PAID) and brain
+    # ($0 super-free), not in the walkthrough asset.
+    #
+    # When the flag is NOT set and mode is mock (the offline orchestrator-judgment unit
+    # tests, which call orchestrate directly and never set the flag), we keep the fast
+    # deterministic SYNTH placeholder card so the suite stays $0/offline/green and never
+    # launches a live browser capture against the scenario URL.
+    native_walkthrough = (mode == "real") or bool(
+        (os.environ.get("WS_WALKTHROUGH_NATIVE") or "").strip())
+    if not native_walkthrough:
+        # SYNTHETIC PLACEHOLDER (test/offline mock): a solid brand-accent color card,
+        # NOT a real per-brand capture. placeholder:True -> the orchestrator's gate
+        # drops the scene + its VO beat (same as a real-mode skip).
+        color = _norm_hex(accent_hex, TYPE_COLOR["walkthrough"])
+        synth_clip(out_path, color, scene.get("duration_s", 10))
+        return {"output_path": out_path, "real": False, "placeholder": True,
+                "synth_color": color}
+    # MODE-INDEPENDENT NATIVE CAPTURE: both mock (real product builds) and real run the
+    # GENUINE per-brand walk_native capture (the same code path). The synthetic color
+    # card is now a LAST-RESORT FALLBACK reached only when the native capture genuinely
+    # fails (see _walkthrough_fallback below).
+    #
+    # walk_native is a clean OUR-python Playwright subprocess (.venv-capture) — the
+    # SAME venv capture_screenshots uses — with default close_fds and a hard timeout,
+    # so it cannot inherit a gateway pipe and cannot hang the caller. (This REPLACES
+    # the old tutorial-maker.sh → NemoClaw-sandbox path, which DEADLOCKED on a pipe
+    # held open by the openshell-gateway daemon.) It also streams a live CDP screencast
+    # into <run_dir>/walk/ (frame.jpg + state.json) for the dashboard.
+    #
+    # NON-FATAL: on any failure, REAL mode returns a graceful-SKIP sentinel (None) so
+    # the orchestrator drops just this scene and still ships the build; MOCK mode falls
+    # back to the synthetic placeholder card (placeholder:True) so a test build never
+    # crashes. Either way the orchestrator's placeholder/None gate drops the scene + its
+    # VO beat, so mock and real degrade identically (no brand VO over generic footage).
+    def _walkthrough_fallback():
+        # In MOCK, never crash on a failed native capture — emit the brand-tinted
+        # synthetic card as a last resort (placeholder:True -> orchestrator drops it,
+        # same as a real-mode skip). In REAL, the contract is graceful-skip (None).
+        if mode == "mock":
+            color = _norm_hex(accent_hex, TYPE_COLOR["walkthrough"])
+            synth_clip(out_path, color, scene.get("duration_s", 10))
+            return {"output_path": out_path, "real": False, "placeholder": True,
+                    "synth_color": color}
+        return None
+
+    import capture_screenshots  # exposes CAPTURE_PY (.venv-capture/bin/python)
     url = job_url or scene.get("input_image") or ""
-    goal = scene.get("brief", "")
-    env = dict(os.environ, OPEN_RESULT="0")
-    proc = subprocess.run(
-        ["bash", "./tutorial-maker.sh", url, goal, out_path],
-        cwd=walk_dir, env=env, capture_output=True, text=True, timeout=900, check=False)
-    if proc.returncode != 0 or not os.path.exists(out_path):
-        # Don't swallow the cause. The walk-agent is the slowest + flakiest scene
-        # (a whole run died on a generic "walk-agent failed" with no diagnosable
-        # output). Capture stdout/stderr to a sidecar log next to the clip AND fold
-        # the tail into the AdapterError so the orchestrator's ledger event and the
-        # operator both see WHY it failed.
-        log_path = _write_walkagent_log(out_path, scene, proc, url, goal)
-        tail = _proc_tail(proc, lines=15)
-        raise AdapterError(
-            "walk-agent failed for scene %r (rc=%s, output_exists=%s); log: %s\n%s"
-            % (scene.get("id"), proc.returncode, os.path.exists(out_path),
-               log_path or "<unwritten>", tail))
-    return {"output_path": out_path, "real": True}
+    goal = scene.get("brief", "") or ""
+    emphasis = scene.get("emphasis") or scene.get("brief", "") or ""
+    duration = str(int(scene.get("duration_s", 12) or 12))
+    rd = run_dir or _run_dir_from_out(out_path) or os.path.dirname(
+        os.path.dirname(os.path.abspath(out_path)))
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+
+    capture_py = capture_screenshots.CAPTURE_PY
+    script = os.path.join(HERE, "walk_native.py")
+    if not os.path.exists(capture_py) or not os.path.exists(script):
+        # No Playwright venv / script → last-resort fallback (skip in real).
+        return _walkthrough_fallback()
+    try:
+        proc = subprocess.run(
+            [capture_py, script, url, goal, emphasis, out_path, rd, duration],
+            capture_output=True, text=True, timeout=200, check=False)
+    except subprocess.TimeoutExpired as e:
+        # TimeoutExpired has stdout/stderr (maybe bytes) but no .returncode, so
+        # wrap it in a tiny shim _write_walkagent_log can consume uniformly.
+        shim = types.SimpleNamespace(
+            returncode="timeout",
+            stdout=_as_text(getattr(e, "stdout", None)),
+            stderr=_as_text(getattr(e, "stderr", None)) or "walk_native timed out (>200s)")
+        _write_walkagent_log(out_path, scene, shim, url, goal)
+        return _walkthrough_fallback()  # never raise — fall back / drop the scene
+    # Success requires a real mp4; otherwise last-resort fallback (skip in real).
+    if proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+        # GENUINE per-brand capture — explicitly NOT a placeholder, so the
+        # orchestrator keeps the scene + its narrated VO beat. Same in mock and real.
+        return {"output_path": out_path, "real": True, "native": True,
+                "placeholder": False}
+    # Capture the cause to a sidecar log (same forensic trail as before) but DO
+    # NOT raise — the walkthrough is non-fatal by contract.
+    _write_walkagent_log(out_path, scene, proc, url, goal)
+    return _walkthrough_fallback()
+
+
+def generate_screenshots(url, out_dir, mode="mock", max_shots=2):
+    """Capture REAL website screenshots for the apple-screenshot archetype.
+
+    LIKE generate_walkthrough (now mode-independent native capture), screenshots
+    ALWAYS do real headless-browser capture regardless of mode — they are $0 +
+    deterministic, so a mock build shows the real site too.
+
+    On capture failure (bot-blocked or no Playwright): fall back to POPULATED,
+    BRAND-TINTED mock cards — one "home/hero" layout (slot 0) and one
+    "feature/list" layout (slot 1).  Both are distinct (different md5s) and
+    visually represent the brand via its accent colour.  Never a black box or
+    an empty "Brand" card again (R3-B fix).
+
+    Returns the capture manifest dict
+    {"url","count","shots":[{file,path,url,label,...}],"ok", "real": bool}.
+    On capture failure: {"ok": False, "real": False, "shots": [...mocks...], "error": str}.
+    """
+    import capture_screenshots
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        manifest = capture_screenshots.capture_url(url, out_dir, max_shots=max_shots)
+        manifest["real"] = True
+        return manifest
+    except Exception as e:
+        # Capture failed (no Playwright, bot-blocked, unreachable, etc.).
+        # R3-B: instead of a solid-black box, render 2 populated brand-tinted
+        # mock cards that DIFFER structurally so the two apple-screenshot scenes
+        # are visually distinct (different layouts -> different md5s).
+        shots = []
+        n_mocks = max(1, int(max_shots))
+        for slot in range(n_mocks):
+            fname = "shot-%02d.png" % (slot + 1)
+            mock_path = os.path.join(out_dir, fname)
+            try:
+                _brand_mock_png(mock_path, url, slot)
+                size = os.path.getsize(mock_path) if os.path.exists(mock_path) else 0
+                shots.append({
+                    "index": slot + 1,
+                    "file": fname,
+                    "path": mock_path,
+                    "url": url,
+                    "label": "mock-home" if slot == 0 else "mock-list",
+                    "title": "",
+                    "bytes": size,
+                    "mock": True,
+                })
+            except Exception as e2:
+                # Ultra-fallback: solid colour card (black box is gone; this
+                # colour is at least a neutral slate, not opaque black).
+                try:
+                    _synth_card_png(mock_path, "1A2436")
+                    size = os.path.getsize(mock_path) if os.path.exists(mock_path) else 0
+                    shots.append({
+                        "index": slot + 1, "file": fname, "path": mock_path,
+                        "url": url, "label": "synth-floor", "title": "",
+                        "bytes": size, "mock": True,
+                        "note": "brand-mock failed: %s" % e2,
+                    })
+                except Exception:
+                    pass
+        manifest = {"url": url, "count": len(shots), "shots": shots,
+                    "ok": False, "real": False, "error": str(e)}
+        with open(os.path.join(out_dir, "manifest.json"), "w") as fh:
+            json.dump(manifest, fh, indent=2)
+        return manifest
+
+
+def generate_screenshot_clip(scene, out_path, mode, shots_dir=None):
+    """A short clip for a `screenshot` scene from a captured shot-NN.png.
+
+    The captured PNG (runs/<id>/screenshots/shot-NN.png) is scaled/padded to the
+    frame spec and held for the scene duration. Mode-INDEPENDENT (screenshots are
+    $0 deterministic). The orchestrator's clip is bookkeeping — the customer-facing
+    picture is the VO-engine Timeline render (the apple-screenshot archetype), which
+    shows the same PNG inside a branded browser card. Falls back to a synth color
+    card if no screenshot is available so the scene is never blank.
+
+    `shots_dir` defaults to <run_dir>/screenshots derived from out_path's grandparent
+    (clips/ -> run_dir). Picks the shot by the scene's 0-based screenshot index when
+    present (scene["_shot_index"]), else the first shot.
+    """
+    dur = scene.get("duration_s", 5)
+    if not shots_dir:
+        # out_path is runs/<id>/clips/NN_<sid>.mp4 -> run_dir is two levels up.
+        run_dir = os.path.dirname(os.path.dirname(os.path.abspath(out_path)))
+        shots_dir = os.path.join(run_dir, "screenshots")
+    shot_path = None
+    manifest_path = os.path.join(shots_dir, "manifest.json")
+    shots = []
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path) as f:
+                shots = (json.load(f).get("shots") or [])
+        except (OSError, ValueError):
+            shots = []
+    idx = int(scene.get("_shot_index", 0) or 0)
+    if shots:
+        s = shots[idx] if idx < len(shots) else shots[0]
+        cand = s.get("path") or os.path.join(shots_dir, s.get("file", ""))
+        if cand and os.path.exists(cand):
+            shot_path = cand
+    if not shot_path and os.path.isdir(shots_dir):
+        import glob
+        pics = sorted(glob.glob(os.path.join(shots_dir, "shot-*.png")))
+        if pics:
+            shot_path = pics[idx] if idx < len(pics) else pics[0]
+    if not shot_path:
+        # never-blank floor: a synth card so the scene still ships a clip.
+        synth_clip(out_path, TYPE_COLOR.get("title", "0A0D0C"), dur)
+        return {"output_path": out_path, "real": False, "note": "no screenshot captured"}
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    d = max(1, int(dur))
+    _run([
+        "ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+        "-loop", "1", "-t", "%d" % d, "-i", shot_path,
+        "-vf", ("scale=%d:%d:force_original_aspect_ratio=decrease,"
+                "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=white,format=yuv420p,setsar=1"
+                % (W, H, W, H)),
+        "-r", "%d" % FPS, "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+        "-movflags", "+faststart", out_path,
+    ], timeout=120)
+    if not os.path.exists(out_path) or os.path.getsize(out_path) < 1000:
+        raise AdapterError("screenshot clip produced no output: %s" % out_path)
+    return {"output_path": out_path, "real": True, "screenshot": shot_path}
+
+
+def _synth_card_png(out_path, color_hex):
+    """A single solid-color PNG (bare capture-failure floor). Uses ffmpeg so we don't
+    take a PIL dependency. Real PNG at the shared frame spec.
+
+    NOTE: callers that have brand context should use _brand_mock_png() instead —
+    it produces a populated, brand-tinted card rather than a solid-color box.
+    This is kept for non-brand contexts (e.g. format-cut stubs, test helpers).
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    _run([
+        "ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=0x%s:s=%dx%d:d=1" % (color_hex, W, H),
+        "-frames:v", "1", out_path,
+    ], timeout=30)
+    if not os.path.exists(out_path) or os.path.getsize(out_path) < 200:
+        raise AdapterError("synth card png produced no output: %s" % out_path)
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Brand-tinted mock card (R3-B / R10-Y): the populated placeholder the
+# apple-screenshot scene shows when real capture fails / is bot-blocked
+# (shopify, tripadvisor.com.tw, huckberry all bot-wall the headless browser).
+#
+# It is a BRANDED PLACEHOLDER, never a claimed real screenshot. The bar (Dim-5):
+# it must read as a populated product SURFACE, not an empty green skeleton.
+#
+# Design goals:
+#   1. ON-BRAND ACCENT — the mock's accent is the brand's REAL extracted accent
+#      (huckberry rust #BE512D, shopify green #96BF48, tripadvisor green
+#      #34E0A1) so the card MATCHES the rest of the video, NOT a generic green.
+#      The real accent lives in runs/<id>/brand_theme.json (palette.accent) the
+#      brand-extract step already wrote — `palette_for()` only knows the dark
+#      mint `_default`, which is the source of the old "generic green" bug.
+#   2. POPULATED — a genre-appropriate product scaffold: an e-commerce listing
+#      grid (filled card tiles + product labels + price chips) for retail
+#      brands, or a review/listing feed (rated rows + score badges) for travel
+#      brands, under a header bar carrying the real brand WORDMARK. Solid filled
+#      elements with realistic proportions + a couple of plausible numbers
+#      (prices / ratings), NOT empty outline bars.
+#   3. DE-DUPLICATED — slot 0 ("home / catalog") and slot 1 ("feature / detail")
+#      differ structurally so the two apple-screenshot scenes look different.
+#
+# Rendered with Pillow (real text: wordmark + labels + price/rating numbers).
+# Falls back to an ffmpeg drawbox card if Pillow is unavailable (ffmpeg here has
+# no drawtext, so that path is text-free — Pillow is the primary path).
+# ---------------------------------------------------------------------------
+
+# Known-brand accent map (by normalised hostname token) — the LAST resort if a
+# run-local brand_theme.json is unavailable. Covers the full 12-brand roster so
+# the mock is on-brand even outside a build dir. Hex with leading '#'.
+_BRAND_ACCENT_FALLBACK = {
+    "tripadvisor": "#34E0A1",   # TripAdvisor green
+    "shopify": "#96BF48",       # Shopify lime-green
+    "huckberry": "#BE512D",     # Huckberry rust/clay
+    "stripe": "#635BFF",        # Stripe indigo
+    "linear": "#5E6AD2",        # Linear purple-blue
+    "plaid": "#1D64DC",         # Plaid blue
+    "vercel": "#111111",        # Vercel mono (near-black; brand-true)
+    "notion": "#2383E2",        # Notion blue
+    "allbirds": "#F0C511",      # Allbirds yellow
+    "airbnb": "#FF385C",        # Airbnb rausch/coral
+    "theverge": "#BE2D62",      # The Verge magenta
+    "webflow": "#146EF5",       # Webflow blue
+}
+
+# Genre signal by hostname token → which scaffold the mock draws. Travel and
+# media read as review/listing feeds; retail/e-commerce read as product grids;
+# everything else gets a generic SaaS dashboard scaffold.
+_BRAND_GENRE = {
+    "shopify": "shop", "huckberry": "shop", "allbirds": "shop",
+    "tripadvisor": "travel", "airbnb": "travel",
+    "theverge": "media",
+}
+
+# Per-genre realistic, on-brand-but-generic placeholder content. Short labels
+# (NOT lorem ipsum) + plausible numbers (price / rating). Used to populate the
+# scaffold; the wordmark itself comes from the real brand name.
+_MOCK_CONTENT = {
+    "shop": {
+        "nav": ["Shop", "New", "Collections", "Sale"],
+        "hero": "Shop the new arrivals",
+        "sub": "Free shipping over $75 · 30-day returns",
+        "cta": "Shop now",
+        "cards": [
+            ("Field Jacket", "$148"), ("Waxed Canvas Bag", "$98"),
+            ("Merino Crewneck", "$72"), ("Trail Boots", "$215"),
+            ("Flannel Shirt", "$64"), ("Leather Wallet", "$58"),
+            ("Wool Beanie", "$34"), ("Insulated Flask", "$42"),
+        ],
+        "rows": [
+            ("Best Sellers", "Shop the most-loved gear", "$58–$215"),
+            ("New This Week", "Fresh drops from the workshop", "32 items"),
+            ("Last Chance", "Final markdowns, while they last", "Up to 40% off"),
+        ],
+    },
+    "travel": {
+        "nav": ["Hotels", "Things to Do", "Restaurants", "Forums"],
+        "hero": "Find your next stay",
+        "sub": "Compare prices across 1M+ hotels worldwide",
+        "cta": "Search hotels",
+        "cards": [
+            ("Harbor View Hotel", "4.8"), ("Old Town Guesthouse", "4.6"),
+            ("Seaside Resort & Spa", "4.9"), ("City Center Suites", "4.5"),
+            ("Mountain Lodge", "4.7"), ("Riverside Inn", "4.4"),
+            ("Boutique Hotel No. 9", "4.8"), ("Grand Plaza", "4.6"),
+        ],
+        "rows": [
+            ("Harbor View Hotel", "1,284 traveler reviews · Free cancellation", "4.8"),
+            ("Old Town Guesthouse", "902 reviews · Breakfast included", "4.6"),
+            ("Seaside Resort & Spa", "3,517 reviews · Beachfront", "4.9"),
+        ],
+    },
+    "media": {
+        "nav": ["Tech", "Reviews", "Science", "Video"],
+        "hero": "The latest in tech",
+        "sub": "Reviews, news, and how the future is made",
+        "cta": "Read more",
+        "cards": [
+            ("The week in gadgets", "Reviews"), ("Inside the new chip", "Feature"),
+            ("Hands-on first look", "Hands-on"), ("The state of AI", "Analysis"),
+            ("Best laptops 2026", "Buyer's guide"), ("What we're watching", "Culture"),
+            ("Space, explained", "Science"), ("The big interview", "Interview"),
+        ],
+        "rows": [
+            ("Hands-on with the new flagship", "12 min read · Reviews", "★ Editor's pick"),
+            ("The chip race heats up", "8 min read · Analysis", "Trending"),
+            ("Everything announced today", "5 min read · News", "Live"),
+        ],
+    },
+    "saas": {
+        "nav": ["Product", "Solutions", "Pricing", "Docs"],
+        "hero": "Build faster, ship sooner",
+        "sub": "The platform teams trust to move quickly",
+        "cta": "Get started",
+        "cards": [
+            ("Active projects", "24"), ("Deploys today", "318"),
+            ("Avg build time", "1.4s"), ("Uptime", "99.99%"),
+            ("Team members", "57"), ("Open issues", "12"),
+            ("Requests / min", "9.2k"), ("P95 latency", "84ms"),
+        ],
+        "rows": [
+            ("Workspace overview", "All projects, one dashboard", "24 active"),
+            ("Recent activity", "Deploys, builds, and reviews", "Live"),
+            ("Usage this month", "Within plan limits", "62%"),
+        ],
+    },
+}
+
+
+def _hex_to_rgb(hex_str: str):
+    """Parse '#RRGGBB' or 'RRGGBB' -> (r, g, b) ints. Returns (79,110,245) on error."""
+    s = (hex_str or "").strip().lstrip("#")
+    if len(s) != 6:
+        return (79, 110, 245)
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return (79, 110, 245)
+
+
+def _mix_rgb(a, b, t):
+    """Linear blend of two (r,g,b) tuples; t=0 -> a, t=1 -> b."""
+    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+
+
+def _relative_luminance(rgb):
+    """Perceptual luminance 0..1 (sRGB approximation) for contrast decisions."""
+    r, g, b = (c / 255.0 for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _on_accent_text(accent_rgb):
+    """Pick white or near-black text that reads on the accent (contrast)."""
+    return (17, 17, 17) if _relative_luminance(accent_rgb) > 0.6 else (255, 255, 255)
+
+
+def _run_dir_from_out(out_path: str) -> str:
+    """out_path is <run_dir>/screenshots/shot-NN.png → return <run_dir> (or '')."""
+    try:
+        screenshots_dir = os.path.dirname(os.path.abspath(out_path))
+        return os.path.dirname(screenshots_dir)
+    except Exception:
+        return ""
+
+
+def _accent_from_brand_theme(run_dir: str) -> str:
+    """Read the REAL extracted accent from <run_dir>/brand_theme.json (palette.accent).
+
+    This is the canonical brand accent the rest of the video uses, so the mock
+    matches it. Returns '' when no usable accent is found.
+    """
+    if not run_dir:
+        return ""
+    path = os.path.join(run_dir, "brand_theme.json")
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path) as f:
+            theme = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    pal = theme.get("palette") if isinstance(theme, dict) else None
+    accent = ""
+    if isinstance(pal, dict):
+        accent = (pal.get("accent") or "").strip()
+    if not accent and isinstance(theme, dict):
+        accent = (theme.get("accent") or "").strip()
+    return accent
+
+
+def _wordmark_from_brand_theme(run_dir: str) -> str:
+    """Read the real brand display name from <run_dir>/brand_theme.json."""
+    if not run_dir:
+        return ""
+    path = os.path.join(run_dir, "brand_theme.json")
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path) as f:
+            theme = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(theme, dict):
+        return ""
+    name = (theme.get("wordmark") or theme.get("name") or theme.get("brand") or "").strip()
+    if name.lower() in ("", "the product"):
+        return ""
+    return name
+
+
+def _host_token(url: str) -> str:
+    """Normalised brand token from a URL host: tripadvisor.com.tw -> 'tripadvisor'."""
+    try:
+        return remotion_codegen._brand_name(url).lower()
+    except Exception:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).netloc.lower().lstrip("www.")
+            return host.split(".")[0] if host else ""
+        except Exception:
+            return ""
+
+
+def _is_default_palette_accent(url: str, accent: str) -> bool:
+    """True when `accent` is just the generic dark-mint `_default` (the green bug)."""
+    try:
+        pal = remotion_codegen.palette_for(url)
+        if pal.get("_brand") in (None, "", "generic"):
+            return True  # _default palette -> its accent is the generic green
+    except Exception:
+        pass
+    return (accent or "").strip().lower() == "#7cffb2"
+
+
+def _brand_accent_for_url(url: str, run_dir: str = "") -> str:
+    """Resolve the REAL brand accent for the mock, never the generic green default.
+
+    Priority: (1) the run's brand_theme.json palette.accent (what the rest of the
+    video uses), (2) the curated known-brand map, (3) palette_for() ONLY when it
+    matched a real BRAND_PALETTES entry (NOT _default), (4) a generic blue.
+    """
+    # 1. Run-local extracted accent (canonical — matches the video).
+    accent = _accent_from_brand_theme(run_dir)
+    if accent:
+        return accent
+    # 2. Curated known-brand map (covers the bot-blocked roster incl. huckberry).
+    token = _host_token(url)
+    if token and token in _BRAND_ACCENT_FALLBACK:
+        return _BRAND_ACCENT_FALLBACK[token]
+    # 2b. Substring match for hosts the token split missed.
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lower()
+        for brand, color in _BRAND_ACCENT_FALLBACK.items():
+            if brand in host:
+                return color
+    except Exception:
+        pass
+    # 3. palette_for(), but ONLY a real brand entry — skip the _default green.
+    try:
+        pal = remotion_codegen.palette_for(url)
+        cand = (pal.get("accent") or "").strip()
+        if cand and pal.get("_brand") not in (None, "", "generic"):
+            return cand
+    except Exception:
+        pass
+    # 4. Generic blue (last resort — never the leaked _default mint).
+    return "#4F6EF5"
+
+
+def _genre_for_url(url: str) -> str:
+    """Map a brand to a mock scaffold genre: 'shop' | 'travel' | 'media' | 'saas'."""
+    token = _host_token(url)
+    if token in _BRAND_GENRE:
+        return _BRAND_GENRE[token]
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lower()
+        for brand, genre in _BRAND_GENRE.items():
+            if brand in host:
+                return genre
+    except Exception:
+        pass
+    return "saas"
+
+
+def _load_mock_font(size: int, bold: bool = False):
+    """Load a real TrueType face at `size` (bold optional), with graceful fallbacks."""
+    from PIL import ImageFont
+    candidates = (
+        ["/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+         "/System/Library/Fonts/Helvetica.ttc",
+         "/Library/Fonts/Arial Bold.ttf"]
+        if bold else
+        ["/System/Library/Fonts/Supplemental/Arial.ttf",
+         "/System/Library/Fonts/Helvetica.ttc",
+         "/Library/Fonts/Arial.ttf",
+         "/System/Library/Fonts/Geneva.ttf"]
+    )
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except (OSError, ValueError):
+                continue
+    return ImageFont.load_default()
+
+
+def _brand_mock_png(out_path: str, url: str, slot: int) -> str:
+    """Render a populated, on-brand mock product surface PNG (1920x1000).
+
+    `slot` 0 -> "home / catalog" view (hero + product/listing grid).
+    `slot` 1 -> "feature / detail" view (header + ranked rows with scores).
+
+    The accent is the brand's REAL extracted accent (run-local brand_theme.json
+    when available, else the curated map) so it matches the rest of the video —
+    NOT the generic green default. Content is a genre-appropriate scaffold
+    (product grid for retail, review feed for travel, etc.) with real text:
+    wordmark, short labels, and plausible price/rating numbers. The two slots
+    differ structurally so their md5s differ.
+
+    Primary renderer is Pillow (real text). On any Pillow failure it falls back
+    to the legacy ffmpeg drawbox card (text-free but still brand-tinted).
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    run_dir = _run_dir_from_out(out_path)
+    accent_hex = _brand_accent_for_url(url, run_dir)
+    wordmark = _wordmark_from_brand_theme(run_dir) or _host_token(url).capitalize() or "Brand"
+    genre = _genre_for_url(url)
+    try:
+        return _brand_mock_png_pil(out_path, accent_hex, wordmark, genre, slot)
+    except Exception as e:
+        # Pillow unavailable / failed — fall back to the brand-tinted ffmpeg card
+        # so the scene still ships a populated-ish, on-accent placeholder.
+        try:
+            return _brand_mock_png_ffmpeg(out_path, accent_hex, slot)
+        except Exception:
+            raise AdapterError("brand mock png produced no output: %s (%s)" % (out_path, e))
+
+
+def _brand_mock_png_pil(out_path, accent_hex, wordmark, genre, slot):
+    """Pillow renderer — the credible, text-bearing product surface."""
+    from PIL import Image, ImageDraw
+
+    Wm, Hm = 1920, 1000
+    accent = _hex_to_rgb(accent_hex)
+    bg = (247, 248, 250)
+    panel = (255, 255, 255)
+    border = (228, 231, 236)
+    ink = (28, 33, 45)
+    sub = (124, 132, 146)
+    accent_soft = _mix_rgb(accent, (255, 255, 255), 0.86)   # tinted wash
+    accent_chip = _mix_rgb(accent, (255, 255, 255), 0.0)    # solid accent
+    on_accent = _on_accent_text(accent)
+    content = _MOCK_CONTENT.get(genre, _MOCK_CONTENT["saas"])
+
+    img = Image.new("RGB", (Wm, Hm), bg)
+    d = ImageDraw.Draw(img)
+
+    f_word = _load_mock_font(34, bold=True)
+    f_nav = _load_mock_font(22)
+    f_hero = _load_mock_font(58, bold=True)
+    f_sub = _load_mock_font(26)
+    f_card = _load_mock_font(24, bold=True)
+    f_price = _load_mock_font(26, bold=True)
+    f_small = _load_mock_font(20)
+    f_chip = _load_mock_font(22, bold=True)
+
+    def text(x, y, s, font, fill):
+        d.text((x, y), s, font=font, fill=fill)
+
+    def text_right(x_right, y, s, font, fill):
+        w = d.textlength(s, font=font)
+        d.text((x_right - w, y), s, font=font, fill=fill)
+
+    # --- Header bar (accent) with real wordmark + nav, both slots ---
+    nav_h = 84
+    d.rectangle([0, 0, Wm, nav_h], fill=accent)
+    text(48, 24, wordmark, f_word, on_accent)
+    # nav items (right-aligned cluster)
+    nav_items = content["nav"]
+    nx = Wm - 48
+    for label in reversed(nav_items):
+        w = d.textlength(label, font=f_nav)
+        nx -= w
+        text(nx, 31, label, f_nav, on_accent)
+        nx -= 40
+
+    if slot == 0:
+        # ---- SLOT 0: home / catalog ----
+        # Hero band (soft accent wash) with headline + sub + CTA pill.
+        hero_top, hero_bot = nav_h, nav_h + 300
+        d.rectangle([0, hero_top, Wm, hero_bot], fill=accent_soft)
+        d.rectangle([0, hero_top, 10, hero_bot], fill=accent)  # accent edge
+        text(60, hero_top + 60, content["hero"], f_hero, ink)
+        text(60, hero_top + 140, content["sub"], f_sub, sub)
+        # CTA pill
+        cta = content["cta"]
+        cw = d.textlength(cta, font=f_chip)
+        d.rounded_rectangle([60, hero_top + 200, 60 + cw + 56, hero_top + 252],
+                            radius=26, fill=accent)
+        text(60 + 28, hero_top + 212, cta, f_chip, on_accent)
+
+        # Product / listing GRID: 4 cards across, 2 rows.
+        cards = content["cards"]
+        grid_top = hero_bot + 40
+        cols, rows = 4, 2
+        gutter = 28
+        margin = 48
+        cw_tile = (Wm - 2 * margin - (cols - 1) * gutter) // cols
+        ch_tile = (Hm - grid_top - margin - (rows - 1) * gutter) // rows
+        for i in range(min(cols * rows, len(cards))):
+            r, c = divmod(i, cols)
+            x = margin + c * (cw_tile + gutter)
+            y = grid_top + r * (ch_tile + gutter)
+            # tile
+            d.rounded_rectangle([x, y, x + cw_tile, y + ch_tile], radius=14,
+                                fill=panel, outline=border, width=2)
+            # image area (accent-tinted block)
+            img_h = ch_tile - 96
+            d.rounded_rectangle([x + 1, y + 1, x + cw_tile - 1, y + img_h], radius=14,
+                                fill=accent_soft)
+            # a little accent motif in the image area
+            d.rounded_rectangle([x + 24, y + img_h - 44, x + 24 + 56, y + img_h - 20],
+                                radius=10, fill=accent)
+            label, num = cards[i]
+            text(x + 20, y + img_h + 14, label, f_card, ink)
+            # price/score chip bottom-right
+            num_is_rating = genre == "travel"
+            chip = ("★ " + num) if num_is_rating else num
+            pcw = d.textlength(chip, font=f_price)
+            d.rounded_rectangle([x + cw_tile - pcw - 36, y + img_h + 48,
+                                 x + cw_tile - 12, y + img_h + 84],
+                                radius=16, fill=accent)
+            text(x + cw_tile - pcw - 24, y + img_h + 52, chip, f_price, on_accent)
+            # a faint secondary label line
+            d.rectangle([x + 20, y + img_h + 58, x + 20 + int(cw_tile * 0.45), y + img_h + 62],
+                        fill=border)
+    else:
+        # ---- SLOT 1: feature / detail (ranked rows + scores) ----
+        # Filter tab strip under the header.
+        tab_top = nav_h
+        d.rectangle([0, tab_top, Wm, tab_top + 56], fill=(238, 240, 244))
+        tabs = ["All", "Top Rated", "Nearby", "Newest"]
+        tx = 48
+        for i, t in enumerate(tabs):
+            tw = d.textlength(t, font=f_small)
+            if i == 0:
+                d.rounded_rectangle([tx - 14, tab_top + 12, tx + tw + 14, tab_top + 44],
+                                    radius=16, fill=accent)
+                text(tx, tab_top + 16, t, f_small, on_accent)
+            else:
+                text(tx, tab_top + 16, t, f_small, sub)
+            tx += tw + 48
+        # result count (a number)
+        text_right(Wm - 48, tab_top + 16, "248 results", f_small, sub)
+
+        # Ranked rows (3) with rank badge, title, sub, and a score on the right.
+        rows = content["rows"]
+        row_top = tab_top + 56 + 24
+        row_h = 250
+        for i, (title, subline, score) in enumerate(rows[:3]):
+            y = row_top + i * (row_h + 18)
+            d.rounded_rectangle([48, y, Wm - 48, y + row_h], radius=16,
+                                fill=panel, outline=border, width=2)
+            # accent rank stripe + number
+            d.rounded_rectangle([48, y, 60, y + row_h], radius=8, fill=accent)
+            d.ellipse([88, y + 28, 144, y + 84], fill=accent_soft, outline=accent, width=3)
+            rank = str(i + 1)
+            rw = d.textlength(rank, font=f_card)
+            text(88 + 28 - rw / 2, y + 42, rank, f_card, accent)
+            # thumbnail block
+            d.rounded_rectangle([176, y + 28, 176 + 280, y + row_h - 28], radius=12,
+                                fill=accent_soft)
+            d.rounded_rectangle([200, y + row_h - 84, 200 + 72, y + row_h - 56],
+                                radius=8, fill=accent)
+            # title + subline
+            tx0 = 176 + 280 + 40
+            text(tx0, y + 40, title, f_hero if False else _load_mock_font(34, bold=True), ink)
+            text(tx0, y + 96, subline, f_sub, sub)
+            # secondary detail bars (filled, not empty outlines)
+            d.rounded_rectangle([tx0, y + 150, tx0 + 360, y + 168], radius=6, fill=(232, 235, 240))
+            d.rounded_rectangle([tx0, y + 182, tx0 + 240, y + 200], radius=6, fill=(232, 235, 240))
+            # score badge (a real number) on the right
+            score_str = str(score)
+            sw = d.textlength(score_str, font=f_price)
+            bx1 = Wm - 80
+            bx0 = bx1 - sw - 44
+            d.rounded_rectangle([bx0, y + 36, bx1, y + 36 + 56], radius=16, fill=accent)
+            text(bx0 + 22, y + 48, score_str, f_price, on_accent)
+            text_right(Wm - 80, y + 110, "Reviews", f_small, sub)
+
+    img.save(out_path, "PNG")
+    if not os.path.exists(out_path) or os.path.getsize(out_path) < 500:
+        raise AdapterError("brand mock png (pil) produced no output: %s" % out_path)
+    return out_path
+
+
+def _brand_mock_png_ffmpeg(out_path, accent_hex, slot):
+    """Legacy brand-tinted card via ffmpeg drawbox (no text). Defensive fallback
+    when Pillow is unavailable — still uses the REAL accent, not the green default."""
+    acc = "0x" + (accent_hex or "#4F6EF5").lstrip("#")
+    bg   = "0xF7F8FA"
+    mid  = "0xE2E5EA"
+    dark = "0xC8CDD5"
+    base = "color=c=%s:s=%dx%d:d=1" % (bg, W, 1000)
+    if slot == 0:
+        filters = [
+            "drawbox=x=0:y=0:w=%d:h=84:color=%s@1.0:t=fill" % (W, acc),
+            "drawbox=x=48:y=24:w=240:h=36:color=0xFFFFFF@0.92:t=fill",
+            "drawbox=x=%d:y=28:w=160:h=32:color=0xFFFFFF@0.30:t=fill" % (W - 200),
+            "drawbox=x=0:y=84:w=%d:h=300:color=%s@0.14:t=fill" % (W, acc),
+            "drawbox=x=0:y=84:w=10:h=300:color=%s@0.95:t=fill" % acc,
+            "drawbox=x=60:y=160:w=820:h=56:color=%s@0.22:t=fill" % acc,
+            "drawbox=x=60:y=232:w=620:h=28:color=%s@0.14:t=fill" % acc,
+            "drawbox=x=60:y=300:w=240:h=52:color=%s@0.95:t=fill" % acc,
+        ]
+        # product grid: 4 x 2 filled tiles
+        margin, gutter, cols, rows_n = 48, 28, 4, 2
+        cw = (W - 2 * margin - (cols - 1) * gutter) // cols
+        gtop = 420
+        ch = (1000 - gtop - margin - (rows_n - 1) * gutter) // rows_n
+        for i in range(cols * rows_n):
+            r, c = divmod(i, cols)
+            x = margin + c * (cw + gutter)
+            y = gtop + r * (ch + gutter)
+            filters.append("drawbox=x=%d:y=%d:w=%d:h=%d:color=0xFFFFFF@1.0:t=fill" % (x, y, cw, ch))
+            filters.append("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@0.16:t=fill" % (x, y, cw, ch - 90, acc))
+            filters.append("drawbox=x=%d:y=%d:w=%d:h=20:color=%s@0.30:t=fill" % (x + 16, y + ch - 70, int(cw * 0.6), acc))
+            filters.append("drawbox=x=%d:y=%d:w=70:h=30:color=%s@0.95:t=fill" % (x + cw - 86, y + ch - 40, acc))
+    else:
+        filters = [
+            "drawbox=x=0:y=0:w=%d:h=84:color=%s@1.0:t=fill" % (W, acc),
+            "drawbox=x=48:y=24:w=220:h=36:color=0xFFFFFF@0.92:t=fill",
+            "drawbox=x=0:y=84:w=%d:h=56:color=%s@1.0:t=fill" % (W, mid),
+            "drawbox=x=48:y=98:w=150:h=28:color=%s@0.40:t=fill" % acc,
+            "drawbox=x=216:y=98:w=130:h=28:color=%s@1.0:t=fill" % dark,
+        ]
+        row_top, row_h = 164, 250
+        for i in range(3):
+            y = row_top + i * (row_h + 18)
+            filters.append("drawbox=x=48:y=%d:w=%d:h=%d:color=0xFFFFFF@1.0:t=fill" % (y, W - 96, row_h))
+            filters.append("drawbox=x=48:y=%d:w=12:h=%d:color=%s@0.95:t=fill" % (y, row_h, acc))
+            filters.append("drawbox=x=176:y=%d:w=280:h=%d:color=%s@0.16:t=fill" % (y + 28, row_h - 56, acc))
+            filters.append("drawbox=x=496:y=%d:w=420:h=30:color=%s@0.30:t=fill" % (y + 40, acc))
+            filters.append("drawbox=x=496:y=%d:w=360:h=18:color=%s@1.0:t=fill" % (y + 96, dark))
+            filters.append("drawbox=x=%d:y=%d:w=140:h=56:color=%s@0.95:t=fill" % (W - 220, y + 36, acc))
+    vf = ",".join(filters)
+    _run([
+        "ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+        "-f", "lavfi", "-i", base,
+        "-vf", vf,
+        "-frames:v", "1", out_path,
+    ], timeout=60)
+    if not os.path.exists(out_path) or os.path.getsize(out_path) < 500:
+        raise AdapterError("brand mock png (ffmpeg) produced no output: %s" % out_path)
+    return out_path
 
 
 def _proc_tail(proc, lines=15):
@@ -889,7 +1708,12 @@ def studio_placeholder(scene, out_path, palette):
     creative code; the real media is Higgsfield/walk-agent in --mode real)."""
     source, meta = remotion_codegen.generate_placeholder(scene, palette)
     render_ms = _studio_render(source, out_path)
+    # `real: True` here means "a real MP4 was rendered" (a labelled storyboard frame),
+    # NOT a genuine walk-agent/Higgsfield capture. `placeholder: True` is the honest
+    # signal the orchestrator gates on so a brand VO never narrates over this stand-in
+    # in a real walkthrough delivery.
     return {"output_path": out_path, "real": True, "kind": "placeholder",
+            "placeholder": True,
             "archetype": "placeholder", "render_ms": render_ms, "composition": "Scene"}
 
 

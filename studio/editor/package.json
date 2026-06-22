@@ -1,0 +1,15 @@
+{
+  "name": "hermes-studio-editor",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "EXPERIMENTAL in-browser visual editor for a generated video's props.json. Loads a run's props, shows a live @remotion/player preview, lets a non-coder edit text/lists/geometry/theme/timing, and re-exports the mp4 WITHOUT prompting an LLM. Additive + isolated: does not modify the studio compositions or the python pipeline.",
+  "scripts": {
+    "editor": "vite --port 3040 --host 127.0.0.1",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.3.0"
+  }
+}

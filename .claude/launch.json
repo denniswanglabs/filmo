@@ -5,7 +5,20 @@
       "name": "hermes-dashboard",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["dashboard/serve.py"],
-      "port": 3030
+      "port": 3030,
+      "autoPort": false
+    },
+    {
+      "name": "hermes-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "3099", "--bind", "127.0.0.1", "--directory", "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent"],
+      "port": 3099
+    },
+    {
+      "name": "hermes-editor",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/studio/editor", "run", "editor"],
+      "port": 3040
     }
   ]
 }

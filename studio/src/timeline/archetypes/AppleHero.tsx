@@ -23,6 +23,9 @@ import {
   EASE_IN_OUT_CUBIC,
   EASE_OUT_QUART,
   alphaHex,
+  actNum,
+  actLabel,
+  splitToLines,
 } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
@@ -40,8 +43,19 @@ export const AppleHero: React.FC<{
   cues: Cue[];
   theme: Theme;
   durationInFrames: number;
-}> = ({ data, cues, theme, durationInFrames }) => {
+  // 1-based act index among content-beat scenes (-1 = no badge)
+  actIndex?: number;
+  // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
+  sceneId?: string;
+}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId }) => {
   const frame = useCurrentFrame();
+
+  // OPTIONAL geometry overrides (data.geo). `data.geo?.KEY ?? LITERAL` so when geo
+  // is absent (every production run) the original literal is used and output is
+  // byte-identical. The visual editor writes these keys.
+  const geo = data.geo;
+  const titleFontSize = geo?.titleFontSize ?? 140;
+  const subtitleFontSize = geo?.subtitleFontSize ?? 32;
 
   const kickerAt = cueAt(cues, "kicker-in", 8);
   const titleAt = cueAt(cues, "title-in", 30);
@@ -50,7 +64,11 @@ export const AppleHero: React.FC<{
   const subAt = cueAt(cues, "subtitle-in", productAt + 22);
 
   const kicker = appleRise(frame, kickerAt, 20, 18);
-  const title = appleMaskRise(frame, titleAt, 56, 28);
+  // Title staged reveal: split into display lines; each line slides up in sequence.
+  // AppleHero uses appleMaskRise (clip-mask + ease-out-quart) per the Apple pattern.
+  const TITLE_STAGGER = 18;
+  const titleTextRaw = (data.title ?? "").trim();
+  const titleLines = splitToLines(titleTextRaw, 18);
   const sub = appleRise(frame, subAt, 24, 22);
 
   // Accent punch word: fades to its accent color on the punch cue (cubic).
@@ -80,7 +98,9 @@ export const AppleHero: React.FC<{
     easing: EASE_IN_OUT_CUBIC,
   });
 
-  const { pre, hit, post } = splitPunch(data.title ?? "", data.punchWord);
+  // Act badge label from kicker (≤2 words, all-caps).
+  const badgeLabel = actIndex > 0 ? actLabel(data.kicker) : "";
+  const badgeText = actIndex > 0 ? `${actNum(actIndex)}${badgeLabel ? ` — ${badgeLabel}` : ""}` : "";
 
   return (
     <AbsoluteFill
@@ -127,6 +147,8 @@ export const AppleHero: React.FC<{
 
         {/* Kicker eyebrow */}
         <div
+          data-scene-id={sceneId}
+          data-field="kicker"
           style={{
             opacity: kicker.opacity,
             transform: kicker.transform,
@@ -141,39 +163,64 @@ export const AppleHero: React.FC<{
           {data.kicker}
         </div>
 
-        {/* Title — slide-up with clip mask (the Apple keynote title) */}
+        {/* Title — staged line-by-line reveal (D2 pacing — R4).
+            Each line uses appleMaskRise (clip mask + ease-out-quart) staggered by
+            18f. Two-tone: pending lines render at textDim; active/arrived lines at
+            full text color. Punch word gets accent color on its line. */}
         <div
+          data-scene-id={sceneId}
+          data-field="title"
           style={{
-            opacity: title.opacity,
-            clipPath: title.clipPath,
-            transform: title.transform,
-            fontSize: 140,
-            fontWeight: 700,
-            letterSpacing: "-0.03em",
-            lineHeight: 1.02,
-            color: theme.text,
-            textAlign: "center",
-            maxWidth: 1500,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 2,
           }}
         >
-          {pre}
-          {hit && (
-            <span
-              style={{
-                // ease the punch word from base text color into the brand accent
-                color: punchP > 0.5 ? theme.accent : theme.text,
-                textShadow: `0 0 ${36 * punchP}px ${theme.accent}${alphaHex(punchP * 0.45)}`,
-              }}
-            >
-              {hit}
-            </span>
-          )}
-          {post}
+          {titleLines.map((line, li) => {
+            const lineStart = titleAt + li * TITLE_STAGGER;
+            const m = appleMaskRise(frame, lineStart, 56, 28);
+            // Two-tone: colorP < 0.5 → pending (textDim), ≥ 0.5 → active (text).
+            const lineColor = m.p > 0.5 ? theme.text : theme.textDim;
+            const { pre, hit, post } = splitPunch(line, data.punchWord);
+            return (
+              <div
+                key={li}
+                style={{
+                  opacity: m.opacity,
+                  clipPath: m.clipPath,
+                  transform: m.transform,
+                  fontSize: titleFontSize,
+                  fontWeight: 700,
+                  letterSpacing: "-0.03em",
+                  lineHeight: 1.02,
+                  color: lineColor,
+                  textAlign: "center",
+                  maxWidth: 1500,
+                }}
+              >
+                {pre}
+                {hit && (
+                  <span
+                    style={{
+                      color: punchP > 0.5 ? theme.accent : theme.text,
+                      textShadow: `0 0 ${36 * punchP}px ${theme.accent}${alphaHex(punchP * 0.45)}`,
+                    }}
+                  >
+                    {hit}
+                  </span>
+                )}
+                {post}
+              </div>
+            );
+          })}
         </div>
 
         {/* Glass product plate with edge-light sweep */}
         {data.product && (
           <div
+            data-scene-id={sceneId}
+            data-field="product"
             style={{
               opacity: plate.opacity,
               transform: plate.transform,
@@ -213,12 +260,29 @@ export const AppleHero: React.FC<{
           </div>
         )}
 
+        {/* Accent underline rule — always visible on any background (light or dark).
+            Appears after the last title line arrives (fires at punchAt). Width eases
+            so it reads as part of the settled lockup. */}
+        <div
+          style={{
+            opacity: interpolate(frame, [punchAt, punchAt + 16], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_OUT_QUART }),
+            width: interpolate(punchP, [0, 1], [80, 100]),
+            height: 4,
+            borderRadius: 2,
+            backgroundColor: theme.accent,
+            boxShadow: `0 0 ${14 * punchP}px ${theme.accent}88`,
+            marginTop: -8,
+          }}
+        />
+
         {/* Subtitle */}
         <div
+          data-scene-id={sceneId}
+          data-field="subtitle"
           style={{
             opacity: sub.opacity,
             transform: sub.transform,
-            fontSize: 32,
+            fontSize: subtitleFontSize,
             fontWeight: 400,
             color: theme.textMuted,
             maxWidth: 1100,
@@ -229,6 +293,27 @@ export const AppleHero: React.FC<{
           {data.subtitle}
         </div>
       </AbsoluteFill>
+
+      {/* Numbered act badge — top-left eyebrow: "NN — LABEL".
+          Rendered LAST (highest z-order) so it paints over the mesh + lockup. */}
+      {actIndex > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: 60,
+            top: 52,
+            opacity: kicker.opacity,
+            fontSize: 22,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: theme.accent,
+            fontFamily: theme.fontMono,
+          }}
+        >
+          {badgeText}
+        </div>
+      )}
     </AbsoluteFill>
   );
 };

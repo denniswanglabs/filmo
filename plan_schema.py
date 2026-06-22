@@ -9,7 +9,7 @@ spending a single (mock or real) cycle on it.
 Returns a list of human-readable problems; an empty list means the plan is valid.
 """
 
-ALLOWED_TYPES = {"title", "cinematic", "walkthrough", "motion_graphic"}
+ALLOWED_TYPES = {"title", "cinematic", "walkthrough", "motion_graphic", "screenshot"}
 CINEMATIC_MODELS = {"seedance_2_0", "gpt_image_2", "nano_banana_flash", "nano_banana_2"}
 
 # Cost-plus selection vocabulary. The active model has NO tiers and ONE customer
@@ -159,6 +159,9 @@ def validate_plan(plan, *, strict_durations=False):
     if not isinstance(job, dict):
         problems.append("job is not an object")
         job = {}
+    # Required job keys (presence only — extras like the optional "emphasis" hint,
+    # which carries the feature to demonstrate in the STANDARD walkthrough, are
+    # tolerated so a grounded plan validates).
     for k in ("company_url", "goal", "target_duration_s", "target_margin", "currency"):
         if k not in job:
             problems.append("job missing %r" % k)
@@ -195,7 +198,7 @@ def validate_plan(plan, *, strict_durations=False):
                     "cinematic scene %r model=%r not in %s"
                     % (sid, s.get("model"), sorted(CINEMATIC_MODELS))
                 )
-        elif stype in {"title", "walkthrough", "motion_graphic"}:
+        elif stype in {"title", "walkthrough", "motion_graphic", "screenshot"}:
             if s.get("model") is not None:
                 problems.append("%s scene %r model should be null" % (stype, sid))
 

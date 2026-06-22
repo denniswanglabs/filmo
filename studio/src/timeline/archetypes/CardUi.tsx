@@ -8,7 +8,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
-import { ease, reveal, alphaHex } from "../motion";
+import { ease, reveal, alphaHex, actNum, actLabel } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
@@ -24,7 +24,11 @@ export const CardUi: React.FC<{
   cues: Cue[];
   theme: Theme;
   durationInFrames: number;
-}> = ({ data, cues, theme, durationInFrames }) => {
+  // 1-based act index among content-beat scenes (-1 = no badge)
+  actIndex?: number;
+  // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
+  sceneId?: string;
+}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId }) => {
   const frame = useCurrentFrame();
 
   const headingAt = cueAt(cues, "heading-in", 6);
@@ -46,6 +50,14 @@ export const CardUi: React.FC<{
   const exitFade = ease(frame, durationInFrames - 12, durationInFrames, 1, 0);
   const { pre, hit } = splitAccent(data.heading ?? "", data.headingAccent);
 
+  // Act badge: replaces the hardcoded "Capabilities" chapter label.
+  // When actIndex > 0, render "NN — LABEL"; otherwise fall back to "Capabilities".
+  const badgeLabel = actIndex > 0 ? actLabel(data.kicker ?? data.heading) : "";
+  const badgeText =
+    actIndex > 0
+      ? `${actNum(actIndex)}${badgeLabel ? ` — ${badgeLabel}` : ""}`
+      : "Capabilities";
+
   return (
     <AbsoluteFill
       style={{
@@ -54,26 +66,28 @@ export const CardUi: React.FC<{
         opacity: exitFade,
       }}
     >
-      {/* Chapter label (kinetic-light eyebrow) */}
+      {/* Chapter / act badge eyebrow (kinetic-light top-left) */}
       <div
         style={{
           position: "absolute",
           left: 96,
           top: 96,
           opacity: chapOpacity,
-          fontSize: 26,
-          fontWeight: 500,
-          letterSpacing: 6,
+          fontSize: actIndex > 0 ? 22 : 26,
+          fontWeight: actIndex > 0 ? 700 : 500,
+          letterSpacing: actIndex > 0 ? "0.18em" : 6,
           textTransform: "uppercase",
           color: theme.accent,
           fontFamily: theme.fontMono,
         }}
       >
-        Capabilities
+        {badgeText}
       </div>
 
       {/* Big accent-split heading */}
       <div
+        data-scene-id={sceneId}
+        data-field="heading"
         style={{
           position: "absolute",
           left: 96,
@@ -92,6 +106,8 @@ export const CardUi: React.FC<{
 
       {/* 2x2 card grid — each card deals in on its cue frame */}
       <div
+        data-scene-id={sceneId}
+        data-field="cards"
         style={{
           position: "absolute",
           left: 96,

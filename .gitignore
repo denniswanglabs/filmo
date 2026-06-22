@@ -14,6 +14,10 @@ node_modules/
 # studio/node_modules is a symlink into a sibling project
 studio/node_modules
 studio/out/
+# built editor bundle (regenerate with: cd studio/editor && npm run build)
+studio/editor/dist/
+# dedicated Playwright capture venv (screenshot capture; ~chromium binary)
+.venv-capture/
 __pycache__/
 *.pyc
 *.pyo
@@ -55,6 +59,12 @@ logs/
 *.log
 *.output
 .watchdog.py
+
+# ── Pre-share exclusions (kept locally, NOT pushed to the Nous-shared repo) ──
+# Candid internal strategy docs that critique our own entry / name a competitor.
+# Untracked at Dennis's request before sharing the repo with Nous Research.
+COMPETITION-COMPLIANCE-REVIEW.md
+WINNING-STRATEGY.md
 
 # ── OS / tmp cruft ──────────────────────────────────────────────────
 .DS_Store

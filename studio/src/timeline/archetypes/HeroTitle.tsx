@@ -10,7 +10,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
-import { ease, alphaHex, interpClamp } from "../motion";
+import { ease, alphaHex, interpClamp, splitToLines, stagedLine } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
@@ -27,23 +27,52 @@ export const HeroTitle: React.FC<{
   cues: Cue[];
   theme: Theme;
   durationInFrames: number;
-}> = ({ data, cues, theme, durationInFrames }) => {
+  // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
+  sceneId?: string;
+}> = ({ data, cues, theme, durationInFrames, sceneId }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const kickerAt = cueAt(cues, "kicker-in", 6);
-  const titleAt = cueAt(cues, "title-in", 36);
-  const punchAt = cueAt(cues, "punch", titleAt + 24);
-  const subAt = cueAt(cues, "subtitle-in", punchAt + 20);
+  // OPTIONAL geometry overrides (data.geo). Each reads `data.geo?.KEY ?? LITERAL`
+  // so when geo is absent (every production run) the original literal is used and
+  // output is byte-identical. The visual editor writes these keys.
+  const geo = data.geo;
+  const plateW = geo?.plateW ?? 1200;
+  const plateH = geo?.plateH ?? 720;
+  // Plate position nudge (px from center). Absent -> 0,0 so output is identical.
+  const plateOffsetX = geo?.plateOffsetX ?? 0;
+  const plateOffsetY = geo?.plateOffsetY ?? 0;
+  const kickerFontSize = geo?.kickerFontSize ?? 26;
+  const titleFontSize = geo?.titleFontSize ?? 132;
+  const subtitleFontSize = geo?.subtitleFontSize ?? 34;
 
-  // Title springs in (kinetic-light damping 16) — rise + slight scale overshoot.
+  // Fallback cue frames must fit SHORT scenes (a 31-frame title beat can't wait
+  // for a hard-coded 36-frame title-in or the title never appears — the
+  // blank-scenes fix). Scale the entrance to the scene length so the title +
+  // subtitle always land with time to read on the hold.
+  const titleFallback = Math.min(36, Math.round(durationInFrames * 0.22));
+  const kickerAt = cueAt(cues, "kicker-in", Math.min(6, Math.round(durationInFrames * 0.05)));
+  const titleAt = cueAt(cues, "title-in", titleFallback);
+  const punchAt = cueAt(cues, "punch", titleAt + Math.round((durationInFrames - titleAt) * 0.4));
+  const subAt = cueAt(cues, "subtitle-in", titleAt + Math.min(20, Math.round((durationInFrames - titleAt) * 0.35)));
+
+  // HARD never-empty guard (blank-scenes fix): an empty title falls back to the
+  // brand wordmark so the hero ALWAYS shows legible content, never a bare glow.
+  const titleText = (data.title ?? "").trim() || theme.wordmark || "";
+
+  // Title staged reveal: split into lines, each line fades+rises in sequence.
+  // The first line fires on titleAt; subsequent lines stagger by 18f.
+  const TITLE_STAGGER = 18;
+  const TITLE_DUR = 18;
+  const titleLines = splitToLines(titleText, 20);
+  // Scale: springs in on the first line's arrival (kinetic-light damping 16).
   const titleSpring = spring({
     frame: frame - titleAt,
     fps,
     config: { damping: 16, stiffness: 150, mass: 0.8 },
   });
-  const titleY = interpolate(titleSpring, [0, 1], [40, 0]);
   const titleScale = interpolate(titleSpring, [0, 0.7, 1], [0.9, 1.04, 1]);
+  // Overall container opacity: starts fading in at titleAt (first line).
   const titleOpacity = ease(frame, titleAt, titleAt + 16, 0, 1);
 
   // Punch word: accent glow that pops on the punch cue, then a slow tail pulse
@@ -76,8 +105,6 @@ export const HeroTitle: React.FC<{
   const subOpacity = ease(frame, subAt, subAt + 16, 0, 1);
   const subY = ease(frame, subAt, subAt + 16, 14, 0);
 
-  const { pre, hit, post } = splitPunch(data.title ?? "", data.punchWord);
-
   return (
     <AbsoluteFill
       style={{
@@ -89,13 +116,15 @@ export const HeroTitle: React.FC<{
     >
       {/* Soft brand-navy radial glow behind the lockup */}
       <div
+        data-scene-id={sceneId}
+        data-field="plate"
         style={{
           position: "absolute",
           top: "50%",
           left: "50%",
-          width: 1200,
-          height: 720,
-          transform: `translate(-50%, -50%) scale(${glowPulse})`,
+          width: plateW,
+          height: plateH,
+          transform: `translate(calc(-50% + ${plateOffsetX}px), calc(-50% + ${plateOffsetY}px)) scale(${glowPulse})`,
           background: `radial-gradient(ellipse, ${theme.navy}22 0%, ${theme.navy}00 65%)`,
         }}
       />
@@ -111,25 +140,28 @@ export const HeroTitle: React.FC<{
           transform: `scale(${breathe})`,
         }}
       >
-        {/* Wordmark */}
-        <div
-          style={{
-            opacity: kickerOpacity,
-            fontSize: 46,
-            fontWeight: 600,
-            letterSpacing: -1,
-            color: theme.navy,
-          }}
-        >
-          {theme.wordmark}
-        </div>
+        {/* Wordmark — hidden when the title already IS the wordmark (the
+            never-empty fallback case) so it isn't shown twice. */}
+        {theme.wordmark && theme.wordmark.trim() !== titleText.trim() ? (
+          <div
+            style={{
+              opacity: kickerOpacity,
+              fontSize: 46,
+              fontWeight: 600,
+              letterSpacing: -1,
+              color: theme.navy,
+            }}
+          >
+            {theme.wordmark}
+          </div>
+        ) : null}
 
         {/* Kicker eyebrow */}
         <div
           style={{
             opacity: kickerOpacity,
             transform: `translateY(${kickerY}px)`,
-            fontSize: 26,
+            fontSize: kickerFontSize,
             fontWeight: 600,
             letterSpacing: 6,
             textTransform: "uppercase",
@@ -140,40 +172,83 @@ export const HeroTitle: React.FC<{
           {data.kicker}
         </div>
 
-        {/* Title with accent punch word */}
+        {/* Title — staged line-by-line reveal with two-tone active/pending treatment.
+            Each line fades+rises in sequence. Lines not yet active render dimmed;
+            the arriving line brightens to full text color. Single-line titles fall
+            through with the original spring scale behavior. */}
+        <div
+          data-scene-id={sceneId}
+          data-field="title"
+          style={{
+            transform: `scale(${titleScale})`,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          {titleLines.map((line, li) => {
+            const sl = stagedLine(frame, li, titleAt, TITLE_STAGGER, 36, TITLE_DUR);
+            // Two-tone: pending lines dim to textDim, active/arrived lines are full text.
+            const lineColor = sl.colorP > 0.5 ? theme.text : theme.textDim;
+            // Accent punch word only on the line that contains punchWord.
+            const { pre, hit, post } = splitPunch(line, data.punchWord);
+            return (
+              <div
+                key={li}
+                style={{
+                  opacity: sl.opacity,
+                  transform: sl.transform,
+                  fontSize: titleFontSize,
+                  fontWeight: 900,
+                  letterSpacing: -4,
+                  lineHeight: 1.02,
+                  color: lineColor,
+                  textAlign: "center",
+                  maxWidth: 1500,
+                  transition: "color 0s", // color is frame-driven, not CSS transition
+                }}
+              >
+                {pre}
+                {hit && (
+                  <span
+                    style={{
+                      color: theme.accent,
+                      textShadow: `0 0 ${48 * punchGlow}px ${theme.accent}${alphaHex(punchGlow * 0.7)}`,
+                    }}
+                  >
+                    {hit}
+                  </span>
+                )}
+                {post}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Accent underline rule — always visible on any background (light or dark).
+            Slides in with the title so the brand color is never absent, even when
+            there is no punchWord to anchor the accent glow. Width pulses gently on
+            the breath so it stays alive on the hold. */}
         <div
           style={{
             opacity: titleOpacity,
-            transform: `translateY(${titleY}px) scale(${titleScale})`,
-            fontSize: 132,
-            fontWeight: 900,
-            letterSpacing: -4,
-            lineHeight: 1.02,
-            color: theme.text,
-            textAlign: "center",
-            maxWidth: 1500,
+            width: interpolate(breathe, [1, 1.015], [96, 108]),
+            height: 4,
+            borderRadius: 2,
+            backgroundColor: theme.accent,
+            boxShadow: `0 0 ${16 * punchGlow}px ${theme.accent}88`,
           }}
-        >
-          {pre}
-          {hit && (
-            <span
-              style={{
-                color: theme.accent,
-                textShadow: `0 0 ${48 * punchGlow}px ${theme.accent}${alphaHex(punchGlow * 0.7)}`,
-              }}
-            >
-              {hit}
-            </span>
-          )}
-          {post}
-        </div>
+        />
 
         {/* Subtitle */}
         <div
+          data-scene-id={sceneId}
+          data-field="subtitle"
           style={{
             opacity: subOpacity,
             transform: `translateY(${subY}px)`,
-            fontSize: 34,
+            fontSize: subtitleFontSize,
             fontWeight: 400,
             color: theme.textMuted,
             maxWidth: 1100,

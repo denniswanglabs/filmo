@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Walk Studio — Video Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,400..800;1,400..600&family=Newsreader:ital,opsz,wght@0,6..72,400..600&display=swap"
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2084%2084'%3E%3Crect%20width='84'%20height='84'%20rx='20'%20fill='%23FFF1EE'/%3E%3Crect%20x='1'%20y='1'%20width='82'%20height='82'%20rx='19'%20fill='none'%20stroke='%23F0BFB3'%20stroke-width='1.5'/%3E%3Cpath%20d='M32%2020%20L32%2064%20L42.8%2053.4%20L50.4%2068.2%20L57.6%2064.6%20L50%2049.8%20L62.8%2049.8%20Z'%20fill='%23D6351C'%20stroke='%23D6351C'%20stroke-width='1.4'%20stroke-linejoin='round'/%3E%3C/svg%3E"
+      type="image/svg+xml"
+    />
+    <style>
+      :root {
+        /* ===================================================================
+           WALK STUDIO — canonical palette (= the dashboard's). The editor and
+           the dashboard are ONE app: light chrome, hairline borders, soft
+           neutral shadows, a single CORAL accent used sparingly. Only the
+           VIDEO canvas stays dark on purpose.
+           Token NAMES are kept identical to the prior dark theme so every
+           CSS-var reference in the JSX cascades to the new values in one place.
+           The TIMELINE track is now light (off-white well + white clip cards);
+           only the VIDEO stage stays dark on purpose.
+           Source of truth: dashboard/styles.css :root.
+           =================================================================== */
+
+        /* ---- light page / chrome surfaces (step UP toward white for cards) ---- */
+        --bg:        #F4F5F7;   /* page canvas — a hair cooler than card white */
+        --bg-1:      #FFFFFF;   /* primary card / panel surface */
+        --bg-2:      #F7F8FA;   /* recessed control / hover wells */
+        --stage:     #0C0E12;   /* the dark VIDEO stage backdrop (the one dark inversion) */
+
+        /* ---- panel / card / control surfaces (light, like the dashboard) ---- */
+        --glass:     #FFFFFF;   /* "floating" chrome is now a clean white card */
+        --glass-2:   #F7F8FA;   /* nested wells / control fills */
+        --panel:     #FFFFFF;   /* right inspector surface */
+        --panel-2:   #FFFFFF;   /* card surface inside the inspector */
+        --panel-3:   #EEF0F4;   /* recessed control wells / row hovers */
+        --chrome:    #FFFFFF;   /* header fill */
+        --field:     #F7F8FA;   /* input / control field fill */
+        --field-2:   #EEF0F4;   /* input hover */
+        --clip:      #FFFFFF;   /* timeline clip base fill — clean white card on the off-white track */
+        --clip-2:    #F7F8FA;   /* timeline clip hover well */
+        --rail:      #F7F8FA;   /* timeline rail / ruler trough — off-white recessed well */
+
+        /* ---- hairlines + borders (thin, neutral, like the dashboard) ---- */
+        --line:      #E4E7EC;   /* standard hairline divider */
+        --line-2:    #D5DAE2;   /* stronger control outline */
+        --line-soft: #E4E7EC;   /* faint inner divider */
+        --glass-edge: #E4E7EC;            /* card border (kept name; now a hairline) */
+        --glass-edge-soft: rgba(255,255,255,.6); /* inset top highlight on cards */
+
+        /* ---- ink ---- */
+        --text:    #14171C;   /* primary */
+        --text-2:  #3D4654;   /* secondary */
+        --muted:   #6B7686;   /* tertiary / labels */
+        --dim:     #98A1B0;   /* quietest / placeholder / ruler ticks */
+
+        /* ---- one confident CORAL accent, used SPARINGLY ---- */
+        --accent:      #D6351C;   /* PRIMARY ACCENT — refined coral (was lime) */
+        --accent-soft: #F26B52;   /* lighter coral */
+        --accent-deep: #B42C16;   /* deeper coral (pressed / borders) */
+        --accent-ink:  #FFFFFF;                  /* text/icon that rides ON the coral fill */
+        --accent-glow: rgba(214,53,28,.22);      /* focus halo (subtle, hugs the edge) */
+        --accent-glow-strong: rgba(214,53,28,.30);
+        --accent-tint: rgba(214,53,28,.06);      /* selected well — soft coral tint */
+        --accent-tint-2: rgba(214,53,28,.10);
+        --accent-line: rgba(214,53,28,.55);      /* selected border — clean 1px coral */
+        /* PRIMARY actions: a solid coral (dashboard's CTA recipe), NOT a multi-hue glow */
+        --accent-grad: linear-gradient(180deg, #E14730, #D6351C);
+        --accent-grad-soft: rgba(214,53,28,.06); /* soft coral wash for the active-scene header */
+
+        /* ---- reserved semantics (match the dashboard) ---- */
+        --pos:       #0E9F6E;   /* approve / ok status */
+        --neg:       #C01A2B;   /* decline / error status */
+        --video-bg:  #0C0E12;   /* dark video tone (alias of --stage for clarity) */
+
+        /* ---- type system (matches Walk Studio dashboard) ---- */
+        --ui:     "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --serif:  "Newsreader", ui-serif, Georgia, "Times New Roman", serif;
+        --code:   ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+        /* ---- radius scale — pulled back to the dashboard's modest tiers ---- */
+        --r-ctl:  11px;   /* buttons, inputs, chips */
+        --r-card: 15px;   /* panels, cards, sections */
+        --r-lg:   18px;   /* the preview canvas (dark surface may keep a touch more round) */
+        --r-pill: 999px;
+
+        /* ---- motion ---- */
+        --ease:    cubic-bezier(.2,.7,.2,1);
+        --ease-out: cubic-bezier(.16,1,.3,1);
+
+        /* ---- soft NEUTRAL shadows (the dashboard's card elevation) ---- */
+        --shadow-card: 0 1px 2px rgba(20,23,28,.04), 0 8px 22px rgba(20,23,28,.06);
+        --shadow-pop:  0 2px 8px rgba(20,23,28,.10), 0 24px 60px rgba(20,23,28,.14);
+        --shadow-float: 0 1px 2px rgba(20,23,28,.05), 0 14px 34px rgba(20,23,28,.08);
+        --shadow-glow: 0 1px 2px rgba(20,23,28,.18), 0 6px 16px rgba(214,53,28,.30), inset 0 1px 0 rgba(255,255,255,.22);
+      }
+
+      * { box-sizing: border-box; }
+      html, body, #root { height: 100%; margin: 0; }
+      body {
+        /* Clean LIGHT canvas, like the dashboard. No aurora, no glow — just the
+           near-white page tone with the faintest neutral paper-grain so large flat
+           areas don't read as a dead template. The single coral bloom stays VERY
+           low so near-white dominates (matches dashboard/styles.css .grain). */
+        background:
+          radial-gradient(70% 60% at 92% -4%, rgba(214,53,28,.04), transparent 60%),
+          var(--bg);
+        color: var(--text);
+        font-family: var(--ui);
+        font-size: 13px;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow: hidden;
+      }
+
+      /* ---- card surface utility: clean white card with a hairline + soft neutral
+             shadow (kept the .ws-glass class name so existing JSX cascades, but it
+             is NO LONGER glassy — it's the dashboard's floating-card recipe). ---- */
+      .ws-glass {
+        background: var(--glass);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow-float);
+      }
+
+      /* ---- scrollbars: slim, on light surfaces ---- */
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-thumb {
+        background: var(--line-2);
+        border-radius: 999px;
+        border: 3px solid transparent;
+        background-clip: padding-box;
+      }
+      ::-webkit-scrollbar-thumb:hover { background: #B6BDC8; background-clip: padding-box; }
+      ::-webkit-scrollbar-track { background: transparent; }
+
+      button, input, textarea, select { font-family: inherit; }
+      button { cursor: pointer; }
+
+      /* selection — soft coral tint */
+      ::selection { background: var(--accent-tint-2); color: var(--text); }
+
+      /* ---- native form polish (focus, placeholder) ---- */
+      input::placeholder, textarea::placeholder { color: var(--dim); }
+      .ws-input:focus-visible,
+      .ws-textarea:focus-visible {
+        border-color: var(--accent-line);
+        box-shadow: 0 0 0 3px var(--accent-glow);
+      }
+      .ws-input, .ws-textarea {
+        transition: border-color .14s var(--ease), box-shadow .14s var(--ease), background .14s var(--ease);
+      }
+      .ws-input:hover:not(:focus-visible),
+      .ws-textarea:hover:not(:focus-visible) { background: var(--field-2); border-color: var(--line-2); }
+
+      /* ---- back-to-dashboard control (neutral secondary; never coral) ---- */
+      .ws-backnav {
+        transition: background .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease), transform .1s var(--ease);
+      }
+      .ws-backnav:hover { background: var(--bg-2); border-color: var(--line-2); color: var(--text); transform: translateY(-1px); }
+
+      /* ---- custom range slider ---- */
+      input.ws-range {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 22px;
+        background: transparent;
+        cursor: pointer;
+        margin: 0;
+      }
+      input.ws-range::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 999px;
+        /* filled portion driven by --pct via a CSS var set inline */
+        background:
+          linear-gradient(rgba(214,53,28,.62), rgba(214,53,28,.62)) 0/var(--pct,50%) 100% no-repeat,
+          var(--panel-3);
+      }
+      input.ws-range::-moz-range-track {
+        height: 4px; border-radius: 999px; background: var(--panel-3);
+      }
+      input.ws-range::-moz-range-progress {
+        height: 4px; border-radius: 999px; background: var(--accent);
+      }
+      input.ws-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 15px; height: 15px;
+        margin-top: -5.5px;
+        border-radius: 50%;
+        background: #fff;
+        border: 1px solid var(--accent-deep);
+        box-shadow: 0 1px 3px rgba(20,23,28,.25), 0 0 0 0 var(--accent-glow);
+        transition: box-shadow .14s var(--ease), transform .12s var(--ease);
+      }
+      input.ws-range::-moz-range-thumb {
+        width: 15px; height: 15px; border-radius: 50%;
+        background: #fff; border: 1px solid var(--accent-deep);
+        box-shadow: 0 1px 3px rgba(20,23,28,.25);
+      }
+      input.ws-range:hover::-webkit-slider-thumb { transform: scale(1.08); }
+      input.ws-range:focus-visible { outline: none; }
+      input.ws-range:focus-visible::-webkit-slider-thumb {
+        box-shadow: 0 1px 4px rgba(0,0,0,.5), 0 0 0 4px var(--accent-glow);
+      }
+
+      /* ---- native color input chrome reset ---- */
+      input[type="color"].ws-swatch {
+        -webkit-appearance: none;
+        appearance: none;
+        border: none;
+        padding: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type="color"].ws-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+      input[type="color"].ws-swatch::-webkit-color-swatch { border: none; border-radius: 7px; }
+
+      /* ---- timeline scrub bar (the seek bar under the preview) ---- */
+      input.ws-scrub {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 18px;
+        background: transparent;
+        cursor: pointer;
+        margin: 0;
+        display: block;
+      }
+      input.ws-scrub::-webkit-slider-runnable-track {
+        height: 6px;
+        border-radius: 999px;
+        background:
+          linear-gradient(90deg, var(--accent-deep), var(--accent)) 0/var(--pct,0%) 100% no-repeat,
+          var(--panel-3);
+      }
+      input.ws-scrub::-moz-range-track { height: 6px; border-radius: 999px; background: var(--panel-3); }
+      input.ws-scrub::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
+      input.ws-scrub::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 16px; height: 16px; margin-top: -5px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid var(--accent);
+        box-shadow: 0 1px 4px rgba(20,23,28,.3), 0 0 0 0 var(--accent-glow);
+        transition: box-shadow .14s var(--ease), transform .12s var(--ease);
+      }
+      input.ws-scrub::-moz-range-thumb {
+        width: 16px; height: 16px; border-radius: 50%;
+        background: #fff; border: 2px solid var(--accent);
+        box-shadow: 0 1px 4px rgba(20,23,28,.3);
+      }
+      input.ws-scrub:hover::-webkit-slider-thumb { transform: scale(1.12); box-shadow: 0 2px 6px rgba(0,0,0,.55), 0 0 0 5px var(--accent-glow); }
+      input.ws-scrub:focus-visible { outline: none; }
+      input.ws-scrub:focus-visible::-webkit-slider-thumb { box-shadow: 0 2px 6px rgba(0,0,0,.55), 0 0 0 5px var(--accent-glow); }
+
+      /* ---- timeline clip: hover lift handled inline; this is the thumbnail wash ---- */
+      .ws-clip-thumb { transition: transform .2s var(--ease); }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; animation: none !important; }
+      }
+
+      @keyframes ws-spin { to { transform: rotate(360deg); } }
+      @keyframes ws-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+      @keyframes ws-shimmer { 0% { background-position: -160px 0; } 100% { background-position: 220px 0; } }
+      @keyframes ws-breathe { 0%,100% { box-shadow: 0 0 0 1px var(--accent-line), 0 0 0 0 var(--accent-glow); } 50% { box-shadow: 0 0 0 1px var(--accent-line), 0 0 14px 1px var(--accent-glow); } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

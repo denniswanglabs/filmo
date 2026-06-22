@@ -91,9 +91,15 @@ class TestStandardQuality(unittest.TestCase):
         self.assertIsNone(data["voiceover"].get("premium_vo"))
         self.assertEqual(data["voiceover"]["provider"], "edge-tts")
         self.assertFalse(data["voiceover"].get("real", False))
-        # Price floors at $5 (no paid spend at all on a standard run).
-        self.assertEqual(data["premium"]["menu"]["total_price_cents"], 500)
-        self.assertEqual(data["premium"]["menu"]["plan_cogs_cents"], 0)
+        # Dynamic-banded pricing: a standard run prices WITHIN the standard band
+        # [$5,$10] (this scenario earns scene/duration extras over the $5 base) and
+        # never below production COGS. No paid spend -> plan COGS is $0.
+        menu = data["premium"]["menu"]
+        self.assertEqual(menu["band"], {"min_cents": 500, "max_cents": 1000})
+        self.assertGreaterEqual(menu["total_price_cents"], menu["band"]["min_cents"])
+        self.assertLessEqual(menu["total_price_cents"], menu["band"]["max_cents"])
+        self.assertGreaterEqual(menu["total_price_cents"], menu["total_cogs_cents"])
+        self.assertEqual(menu["plan_cogs_cents"], 0)
 
 
 class TestPremiumQualityMock(unittest.TestCase):
@@ -177,9 +183,11 @@ class TestLedgerMatchesCostPlus(unittest.TestCase):
         data, _ = run(plan, "t-q-ledger")
 
         led = data["premium"]["ledger"]
-        quality = data["premium"]["quality"]
-        plan_cogs = data["premium"]["menu"]["plan_cogs_cents"]
-        expected = pricing.price_for_plan(plan_cogs, quality=quality)
+        # Dynamic-banded pricing is SIGNALS-aware: the produced ledger must match the
+        # SAME itemized menu the orchestrator built (the one the dashboard P&L reads),
+        # so the ledger and on-screen P&L never drift. (A bare price_for_plan() with
+        # no storyboard signals would only yield the base fee -- not the produced menu.)
+        expected = data["premium"]["menu"]
 
         self.assertEqual([li["label"] for li in led["line_items"]],
                          [li["label"] for li in expected["line_items"]])

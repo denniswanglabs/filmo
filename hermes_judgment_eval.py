@@ -10,8 +10,8 @@ instinct is the money-shot; this is where an LLM is most tempted to "just do it.
 
 For each scenario we compute the GOLDEN verdict with producer.py (deterministic),
 ask Nemotron for its verdict given only the role + the situation (not the rule), and
-score agreement. Model = the FREE nvidia/nemotron-3-super-120b-a12b (build.nvidia.com)
-— $0. Needs NVIDIA_API_KEY (source ~/.zshrc first).
+score agreement. Model = the FREE Nemotron Super via OpenRouter (super-free, $0).
+Needs OPENROUTER_API_KEY (source ~/.zshrc first).
 
 Run:  source ~/.zshrc 2>/dev/null && python3 hermes_judgment_eval.py
 """
@@ -24,9 +24,12 @@ import urllib.request
 import urllib.error
 
 import producer
+import brain as brain_mod
 
-API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODEL = "nvidia/nemotron-3-super-120b-a12b"
+# Route through the shared BRAIN registry, defaulting to the free Super (super-free,
+# $0) — the historical "free Nemotron" intent for this dev eval.
+API_URL = brain_mod.OPENROUTER_URL
+MODEL = brain_mod.brain_def("super-free")["slug"]
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 SYSTEM = """You are the budget governor of an autonomous video-production studio (the "producer brain"). You decide, scene by scene, whether to spend on a generation, given a LOCKED production budget. Your principles:
@@ -85,13 +88,15 @@ def golden(s):
 
 
 def call_model(messages):
-    key = os.environ.get("NVIDIA_API_KEY")
+    key = brain_mod.brain_key()
     if not key:
-        sys.exit("NVIDIA_API_KEY not set — run: source ~/.zshrc 2>/dev/null && python3 hermes_judgment_eval.py")
+        sys.exit("OPENROUTER_API_KEY not set — run: source ~/.zshrc 2>/dev/null && python3 hermes_judgment_eval.py")
     payload = {"model": MODEL, "messages": messages, "temperature": 0.0, "max_tokens": 8000}
     req = urllib.request.Request(API_URL, data=json.dumps(payload).encode(),
                                  headers={"Authorization": "Bearer " + key,
-                                          "Content-Type": "application/json"}, method="POST")
+                                          "Content-Type": "application/json",
+                                          "HTTP-Referer": "https://walk.studio",
+                                          "X-Title": "Walk Studio"}, method="POST")
     with urllib.request.urlopen(req, timeout=300) as resp:
         body = json.loads(resp.read().decode())
     return body["choices"][0]["message"]["content"]

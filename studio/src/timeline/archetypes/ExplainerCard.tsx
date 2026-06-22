@@ -13,7 +13,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
-import { ease, reveal, interpClamp, alphaHex } from "../motion";
+import { ease, reveal, interpClamp, alphaHex, actNum, actLabel, splitToLines, stagedLine } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
@@ -23,7 +23,11 @@ export const ExplainerCard: React.FC<{
   cues: Cue[];
   theme: Theme;
   durationInFrames: number;
-}> = ({ data, cues, theme, durationInFrames }) => {
+  // 1-based act index among content-beat scenes (-1 = no badge)
+  actIndex?: number;
+  // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
+  sceneId?: string;
+}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -31,6 +35,13 @@ export const ExplainerCard: React.FC<{
   const titleAt = cueAt(cues, "title-in", 14);
   const subAt = cueAt(cues, "subtitle-in", titleAt + 18);
   const bullets = (data.bullets ?? []).slice(0, 4);
+
+  // HARD never-empty guard (blank-scenes fix): if the upstream copy is empty,
+  // render an on-brand fallback (wordmark + tagline) so the scene ALWAYS shows
+  // legible content — never just the background + a faint glow. The fallback
+  // title is the brand wordmark; the subtitle is the threaded subtitle/tagline.
+  const titleText = (data.title ?? "").trim() || theme.wordmark || "";
+  const subText = (data.subtitle ?? "").trim();
   // Bullets stagger after the subtitle; prefer explicit point-N cues when present.
   const bulletAt = (i: number) =>
     cueAt(cues, `point-${i + 1}`, subAt + 16 + i * 16);
@@ -38,16 +49,22 @@ export const ExplainerCard: React.FC<{
   // Left navy rail slides up as the scene opens (Orinovate sidebar motif).
   const railGrow = ease(frame, 0, 18, 0, 1);
 
-  // Title word-rises with a spring (kinetic-light damping 16) + a blue underline
-  // that sweeps in just after the title settles.
+  // Title staged line-by-line reveal (D2 pacing — R4): each line fades+rises in
+  // sequence; pending lines render at textDim, active/arrived lines at full text.
+  const TITLE_STAGGER = 16;
+  const TITLE_DUR = 16;
+  const titleLines = splitToLines(titleText, 24);
+  // Spring on the outer wrapper (kinetic-light damping 16) fires on titleAt.
   const titleSpring = spring({
     frame: frame - titleAt,
     fps,
     config: { damping: 16, stiffness: 150, mass: 0.8 },
   });
-  const titleY = interpolate(titleSpring, [0, 1], [42, 0]);
+  const titleContainerY = interpolate(titleSpring, [0, 1], [20, 0]);
   const titleOpacity = ease(frame, titleAt, titleAt + 16, 0, 1);
-  const underline = ease(frame, titleAt + 12, titleAt + 34, 0, 1);
+  // Underline sweeps in after the last line settles.
+  const lastLineStart = titleAt + (Math.max(1, titleLines.length) - 1) * TITLE_STAGGER;
+  const underline = ease(frame, lastLineStart + 12, lastLineStart + 34, 0, 1);
 
   // Subtitle settle.
   const subOpacity = ease(frame, subAt, subAt + 16, 0, 1);
@@ -64,6 +81,10 @@ export const ExplainerCard: React.FC<{
   const exitFade = ease(frame, durationInFrames - 12, durationInFrames, 1, 0);
   const exitShift = ease(frame, durationInFrames - 12, durationInFrames, 0, -18);
 
+  // Act badge label: derives from kicker if present (≤2 words, all-caps).
+  const badgeLabel = actIndex > 0 ? actLabel(data.kicker) : "";
+  const badgeText = actIndex > 0 ? `${actNum(actIndex)}${badgeLabel ? ` — ${badgeLabel}` : ""}` : "";
+
   return (
     <AbsoluteFill
       style={{
@@ -73,6 +94,26 @@ export const ExplainerCard: React.FC<{
         transform: `translateY(${exitShift}px)`,
       }}
     >
+      {/* Numbered act badge — top-left eyebrow: "NN — LABEL" */}
+      {actIndex > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: 140,
+            top: 52,
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            fontSize: 22,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: theme.accent,
+            fontFamily: theme.fontMono,
+          }}
+        >
+          {badgeText}
+        </div>
+      )}
+
       {/* Soft brand-accent radial glow behind the content */}
       <div
         style={{
@@ -115,6 +156,8 @@ export const ExplainerCard: React.FC<{
       >
         {/* Kicker eyebrow + wordmark */}
         <div
+          data-scene-id={sceneId}
+          data-field="kicker"
           style={{
             display: "flex",
             alignItems: "baseline",
@@ -142,22 +185,40 @@ export const ExplainerCard: React.FC<{
           ) : null}
         </div>
 
-        {/* Title with a blue underline sweep */}
-        <div style={{ position: "relative", display: "inline-block" }}>
-          <div
-            style={{
-              opacity: titleOpacity,
-              transform: `translateY(${titleY}px)`,
-              fontSize: 96,
-              fontWeight: 900,
-              letterSpacing: -3,
-              lineHeight: 1.04,
-              color: theme.text,
-              maxWidth: 1500,
-            }}
-          >
-            {data.title}
-          </div>
+        {/* Title — staged line-by-line reveal with two-tone active/pending treatment.
+            Each line fades+rises in sequence (16f stagger). The outer wrapper
+            keeps the kinetic-light spring for the whole title block. */}
+        <div
+          data-scene-id={sceneId}
+          data-field="title"
+          style={{
+            position: "relative",
+            display: "inline-block",
+            opacity: titleOpacity,
+            transform: `translateY(${titleContainerY}px)`,
+          }}
+        >
+          {titleLines.map((line, li) => {
+            const sl = stagedLine(frame, li, titleAt, TITLE_STAGGER, 28, TITLE_DUR);
+            const lineColor = sl.colorP > 0.5 ? theme.text : theme.textDim;
+            return (
+              <div
+                key={li}
+                style={{
+                  opacity: sl.opacity,
+                  transform: sl.transform,
+                  fontSize: 96,
+                  fontWeight: 900,
+                  letterSpacing: -3,
+                  lineHeight: 1.04,
+                  color: lineColor,
+                  maxWidth: 1500,
+                }}
+              >
+                {line}
+              </div>
+            );
+          })}
           <div
             style={{
               marginTop: 14,
@@ -171,8 +232,10 @@ export const ExplainerCard: React.FC<{
         </div>
 
         {/* Subtitle */}
-        {data.subtitle ? (
+        {subText ? (
           <div
+            data-scene-id={sceneId}
+            data-field="subtitle"
             style={{
               opacity: subOpacity,
               transform: `translateY(${subY}px)`,
@@ -182,13 +245,13 @@ export const ExplainerCard: React.FC<{
               maxWidth: 1200,
             }}
           >
-            {data.subtitle}
+            {subText}
           </div>
         ) : null}
 
         {/* Staggered capability bullets — numbered badges (NO emoji) */}
         {bullets.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 18, marginTop: 12 }}>
+          <div data-scene-id={sceneId} data-field="bullets" style={{ display: "flex", flexDirection: "column", gap: 18, marginTop: 12 }}>
             {bullets.map((b, i) => {
               const at = bulletAt(i);
               const r = reveal(frame, at, 22, 16);

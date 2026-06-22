@@ -9,9 +9,11 @@ always proceed. Stdlib only.
 
 import json
 import os
+import re
 import sys
 
 import validate_planner as vp
+import brain as brain_mod
 from plan_schema import validate_plan
 
 # --- Style differentiation -------------------------------------------------
@@ -59,15 +61,49 @@ VALID_QUALITIES = ("standard", "premium")
 # is visibly different from standard; standard forbids cinematic (Remotion-only).
 _QUALITY_PROMPT = {
     "standard": (
-        "\n\nQUALITY: STANDARD (Remotion-only). For THIS plan you may use ONLY the "
-        "scene types \"title\" and \"motion_graphic\". Do NOT plan any \"cinematic\" "
-        "scene and do NOT use the models \"seedance_2_0\" or \"gpt_image_2\" — there "
-        "is NO Higgsfield/AI-footage stage in a standard build. OVERRIDE structure "
-        "rule 2: instead of 2-4 cinematic scenes, plan 2-3 \"motion_graphic\" feature "
-        "beats (designed, animated cards) between the opening and closing title cards "
-        "to convey the company's positioning. Every non-title scene is a "
-        "\"motion_graphic\" with model null. Keep the opening \"title\", the closing "
-        "\"title\" CTA, and the durations summing to EXACTLY target_duration_s."
+        "\n\nQUALITY: STANDARD (Remotion + real site capture). For THIS plan you may "
+        "use ONLY the scene types \"title\", \"screenshot\", and \"walkthrough\". Do "
+        "NOT plan any \"cinematic\" scene and do NOT use the models \"seedance_2_0\" "
+        "or \"gpt_image_2\" — there is NO Higgsfield/AI-footage stage in a standard "
+        "build. OVERRIDE structure rule 2 and the no-walkthrough rule. A STANDARD plan "
+        "has EXACTLY this shape, in order:\n"
+        "  1. an opening \"title\" card (the brand lockup),\n"
+        "  2. ONE or TWO \"screenshot\" scenes (model null) — each is a real captured "
+        "view of the company's website shown in a branded browser card; the first is "
+        "the homepage, an optional second is a key inner page,\n"
+        "  3. ONE \"walkthrough\" scene (model null) — a guided, multi-step screen "
+        "demonstration of the emphasized feature (a recorded product tour),\n"
+        "  4. a closing \"title\" CTA.\n"
+        "Every scene's model is null. Keep the durations summing to EXACTLY "
+        "target_duration_s. Do NOT emit \"motion_graphic\" or \"cinematic\" scenes.\n"
+        "COPY (this is the load-bearing part): every voiceover beat must be GROUNDED "
+        "and CONCRETE about the REAL product — name a REAL feature, the REAL audience, "
+        "or a real benefit with a real-looking specific number. NEVER write hollow, "
+        "self-referential filler that describes the website or the video instead of "
+        "the product. These exact lines (and close paraphrases) are BANNED: \"This is "
+        "<Brand> — straight from the real site.\", \"Here is the product, exactly as "
+        "you would see it.\", \"See the product in action, step by step.\", \"See how "
+        "to use the …\". Write the screenshot/walkthrough beats as benefit-driven "
+        "lines naming the REAL capability on screen (e.g. \"Accept payments in 135+ "
+        "currencies.\", \"Read millions of real traveler reviews before you book.\"). "
+        "Use tight IMPERATIVE couplets where the line is short, like the reference "
+        "films (\"Clock in. / Cash out.\"). RHYTHM: keep every beat TIGHT — one crisp "
+        "idea, AT MOST one comma, never a comma-chained run-on of three or more "
+        "clauses (e.g. NOT \"Pick your destination, compare hotel prices, read "
+        "verified reviews, and book your stay—all in a few taps…\"). When a beat "
+        "needs two ideas, split it into a SETUP -> PAYOFF of two short sentences "
+        "(\"Compare every hotel. Book the best one.\") — never one breathless line. "
+        "Hard cap ~16 words per beat; if longer, split or cut a clause. If the "
+        "COMPANY FACTS are thin but the "
+        "brand is recognizable, use your own knowledge of that REAL company — never go "
+        "hollow. THE OPENING BEAT IS LOAD-BEARING: the first scene's voiceover beat "
+        "MUST be a COMPLETE value-prop sentence that names the company AND a real, "
+        "named feature or a real-looking metric (e.g. \"Linear is the issue tracker "
+        "built for fast product teams.\", \"Plaid connects your app to over 12,000 "
+        "banks.\"). NEVER make the opening beat a bare wordmark or single word "
+        "(\"Linear.\", \"Plaid.\") — a one- or two-word opening beat is an automatic "
+        "FAIL. Every beat is a full sentence; the wordmark lives on the title card as "
+        "a visual, not as the spoken line."
     ),
     "premium": (
         "\n\nQUALITY: PREMIUM (Higgsfield cinematic). This plan MUST include AT LEAST "
@@ -93,21 +129,46 @@ def _normalize_quality(quality):
 
 
 def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
-             currency="usd", style="standard", quality="standard"):
+             currency="usd", style="standard", quality="standard",
+             brain="super-free", company_facts=None, emphasis=None):
     style = style if style in VALID_STYLES else "standard"
     quality = _normalize_quality(quality)
-    plan = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality)
+    # BRAIN: the operator-chosen planner LLM (all via OpenRouter). Defaults to
+    # super-free ($0) so nothing bills unless the operator deliberately picks a paid
+    # brain. Orthogonal to style/quality; only changes WHICH LLM plans the storyboard.
+    brain = brain_mod.normalize_brain(brain)
+    # COMPANY FACTS: the REAL brand facts (wordmark/tagline/features) resolved by the
+    # caller (build_runner) from the curated fixture or brand_extract. Threaded into
+    # the planner USER prompt so the voiceover + scene briefs describe the ACTUAL
+    # product instead of an invented one (the VO-vs-visual incoherence fix). None /
+    # empty => the prompt block is omitted and planning is unchanged.
+    # BRAND NAME: prefer the already-resolved brand name from company_facts (which is
+    # public-suffix-aware via brand_extract) over re-parsing the URL. This fixes ccTLD
+    # sites (e.g. tripadvisor.com.tw) where _brand_name(url) returns "Com" instead of
+    # "Tripadvisor". Fall back to _brand_name() when company_facts is absent.
+    _wm = (company_facts or {}).get("wordmark", "").strip() if company_facts else ""
+    _resolved_brand = _wm if _wm and _wm.lower() != "the product" else _brand_name(company_url)
+    emphasis = (emphasis or "").strip()
+    plan = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality,
+                               brain, company_facts)
     if plan is None:
-        plan = _template_plan(company_url, goal, target_duration_s, style, quality)
-    # force the brief fields so the rest of the pipeline is consistent
+        plan = _template_plan(company_url, goal, target_duration_s, style, quality,
+                              brand=_resolved_brand, emphasis=emphasis,
+                              company_facts=company_facts)
+    # force the brief fields so the rest of the pipeline is consistent. emphasis +
+    # the resolved wordmark are stamped onto job BEFORE _enforce_quality so the
+    # STANDARD structure backstop can name the emphasized feature in the walkthrough
+    # goal and use the real brand name. emphasis is NOT a frozen-schema job key (it's
+    # an internal hint), so the schema validators ignore it.
     plan.setdefault("job", {})
     plan["job"].update({"company_url": company_url, "goal": goal,
                         "target_duration_s": target_duration_s,
-                        "target_margin": target_margin, "currency": currency})
-    # Deterministic quality guard. STANDARD: coerce any cinematic/walkthrough to a
-    # Remotion motion_graphic (title + motion_graphic only). PREMIUM: guarantee >= 2
-    # cinematic by upgrading feature beats if the live model under-delivered. Runs
-    # even when the model ignored the prompt.
+                        "target_margin": target_margin, "currency": currency,
+                        "emphasis": emphasis, "_wordmark": _resolved_brand})
+    # Deterministic quality guard. STANDARD: force the real-capture structure (title
+    # -> 1-2 screenshot -> walkthrough -> title). PREMIUM: guarantee >= 2 cinematic by
+    # upgrading feature beats if the live model under-delivered. Runs even when the
+    # model ignored the prompt.
     plan = _enforce_quality(plan, quality)
     # If PREMIUM still lacks >= 2 cinematic (too few non-title scenes to upgrade),
     # fall back to the deterministic premium template, which always has cinematic.
@@ -115,7 +176,8 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
         n_cine = sum(1 for s in (plan.get("scenes") or [])
                      if isinstance(s, dict) and s.get("type") == "cinematic")
         if n_cine < 2:
-            plan = _template_plan(company_url, goal, target_duration_s, style, quality)
+            plan = _template_plan(company_url, goal, target_duration_s, style, quality,
+                                  brand=_resolved_brand)
             plan["job"].update({"company_url": company_url, "goal": goal,
                                 "target_duration_s": target_duration_s,
                                 "target_margin": target_margin, "currency": currency})
@@ -123,11 +185,35 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # rhythm differs even when the LLM ignores the prompt guidance. No-op for
     # standard (and for any plan that already matches the target shape closely).
     plan = _restyle_durations(plan, style, target_duration_s)
+    # Deterministic stage-direction backstop (runs for BOTH the LLM and template
+    # paths): rewrite any VO beat that is an INSTRUCTION / STAGE DIRECTION rather than
+    # spoken copy. Small planners leak the scene BRIEF or a prompt fragment into the
+    # beat text — e.g. notion's "Show call-to-action: 'Start" rendered as a VO line.
+    # A stage direction is NEVER something a narrator says; replace it with a grounded
+    # value-prop / CTA line for THIS brand. Runs BEFORE the bare-wordmark pass so a
+    # rewrite that still reads thin is caught there too.
+    plan = _degut_stage_direction_beats(plan, _resolved_brand, company_url,
+                                        company_facts, emphasis)
+    # Deterministic grounding backstop (runs for BOTH the LLM and template paths):
+    # rewrite any VO beat that is just the brand name or a fragment into a full
+    # value-prop sentence. Small planners (and the legacy template) emit a bare
+    # "Linear." / "Plaid." opening beat — the D3=2 thin-grounding bug — even when the
+    # body beats are grounded. Use _resolved_brand + company_facts so the rewrite
+    # names a real feature/metric (world-knowledge first, then scraped features).
+    plan = _degut_bare_wordmark_beats(plan, _resolved_brand, company_url,
+                                      company_facts, emphasis)
+    # Drop the internal-only `_wordmark` hint before validation/return — `emphasis`
+    # stays (a recognized optional job key), but `_wordmark` is a private plumbing
+    # field that must not leak into the persisted plan or the strict planner schema.
+    (plan.get("job") or {}).pop("_wordmark", None)
     problems = validate_plan(plan)
     if problems:
         # one more chance on the deterministic template before giving up
-        plan = _template_plan(company_url, goal, target_duration_s, style, quality)
-        plan["job"].update({"target_margin": target_margin, "currency": currency})
+        plan = _template_plan(company_url, goal, target_duration_s, style, quality,
+                              brand=_resolved_brand, emphasis=emphasis,
+                              company_facts=company_facts)
+        plan["job"].update({"target_margin": target_margin, "currency": currency,
+                            "emphasis": emphasis})
         problems = validate_plan(plan)
         if problems:
             raise ValueError("planner produced an invalid plan: " + "; ".join(problems))
@@ -140,9 +226,13 @@ def _enforce_quality(plan, quality):
     The SYSTEM_PROMPT + _QUALITY_PROMPT already steer the model, but small models
     drift, so this guarantees the contract no matter what the LLM returns:
 
-    - STANDARD: coerce any cinematic/walkthrough scene to a Remotion motion_graphic
-      (model null). A STANDARD plan can NEVER carry a cinematic or walkthrough scene
-      by the time it leaves plan_job.
+    - STANDARD: GUARANTEE the Standard structure (the same defense-in-depth idea as
+      the premium upgrade backstop) — opening title -> 1-2 screenshot scenes -> one
+      walkthrough scene -> closing title. Stray cinematic/motion_graphic content
+      scenes are RE-TYPED into that shape (the first becomes a screenshot, the next a
+      walkthrough); a plan that already has screenshot/walkthrough scenes is left
+      alone. If the model produced no usable content scenes, deterministic ones are
+      synthesized so a Standard plan ALWAYS carries the real-capture pillars.
     - PREMIUM: GUARANTEE at least 2 cinematic scenes. If the model under-delivers
       (returns < 2 cinematic — the live-Nemotron bug), upgrade enough non-title
       feature beats (preferring motion_graphic, then any non-title) to cinematic so
@@ -157,11 +247,7 @@ def _enforce_quality(plan, quality):
     q = _normalize_quality(quality)
     scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
     if q == "standard":
-        for s in scenes:
-            if s.get("type") in ("cinematic", "walkthrough"):
-                s["type"] = "motion_graphic"
-                s["model"] = None
-        return plan
+        return _enforce_standard_structure(plan, scenes)
 
     # PREMIUM: ensure >= 2 cinematic scenes with valid Higgsfield models.
     # First, normalize any stray walkthrough to cinematic (walkthrough is retired).
@@ -189,6 +275,112 @@ def _enforce_quality(plan, quality):
     for s, model in zip(candidates[:need], upgrade_models):
         s["type"] = "cinematic"
         s["model"] = model
+    return plan
+
+
+def _walkthrough_brief_for_emphasis(brand, emphasis):
+    """A SPECIFIC, multi-step walkthrough goal from the emphasis input.
+
+    A vague goal makes walk-agent loop on one nav link (the P2 failure: 13x "Click
+    Pricing"). Naming the feature AND demanding 2-3 distinct steps gives the agent a
+    concrete target to reach. When no emphasis is supplied, fall back to a generic
+    but still multi-step product tour so the goal is never a one-link loop.
+    """
+    emphasis = (emphasis or "").strip()
+    if emphasis:
+        # Use the emphasis phrase verbatim (it may already read "the pricing page" /
+        # "instant quoting") — don't wrap it in "the ... feature of {brand}", which
+        # produced ungrammatical "the the pricing page feature" double-articles.
+        return ("From the homepage, navigate to and demonstrate %s, showing 2-3 "
+                "distinct steps." % emphasis)
+    return ("From the homepage, take a short guided tour of %s, showing 2-3 distinct "
+            "steps through its core product flow." % brand)
+
+
+def _enforce_standard_structure(plan, scenes):
+    """Deterministically force the Standard shape: title -> 1-2 screenshot ->
+    walkthrough -> title (model null everywhere). Defense-in-depth so a STANDARD
+    plan ALWAYS carries the real-capture pillars regardless of what the LLM returned.
+
+    Strategy (preserve ids/durations/order where possible):
+      - Title scenes keep type "title" / model null.
+      - Existing screenshot/walkthrough content scenes are kept as-is (model null).
+      - Stray content scenes (cinematic / motion_graphic / other) are RE-TYPED to
+        fill any missing pillar: the first available becomes a "screenshot", the next
+        a "walkthrough"; any remaining stray content scenes also become screenshots
+        (so nothing is left as an unrenderable cinematic/motion_graphic).
+      - If the plan has NO content scene at all to host a walkthrough, one is
+        synthesized between the title cards (rare; only when the LLM emitted a
+        title-only plan).
+    The walkthrough scene's brief is rewritten to the emphasis-specific multi-step
+    goal so capture has a concrete target.
+    """
+    job = plan.get("job") or {}
+    brand = _brand_name(job.get("company_url"))
+    _wm = (job.get("_wordmark") or "").strip()
+    if _wm and _wm.lower() != "the product":
+        brand = _wm
+    emphasis = job.get("emphasis")
+
+    content = [s for s in scenes if s.get("type") != "title"]
+    has_walk = any(s.get("type") == "walkthrough" for s in content)
+    has_shot = any(s.get("type") == "screenshot" for s in content)
+
+    # Re-type stray content scenes (cinematic / motion_graphic / unknown) into the
+    # missing pillars, in scene order.
+    stray = [s for s in content if s.get("type") not in ("screenshot", "walkthrough")]
+    if not has_shot and stray:
+        s = stray.pop(0)
+        s["type"] = "screenshot"
+        s["model"] = None
+        has_shot = True
+    if not has_walk and stray:
+        s = stray.pop(0)
+        s["type"] = "walkthrough"
+        s["model"] = None
+        has_walk = True
+    # Anything still stray becomes an extra screenshot (never leave a cinematic/
+    # motion_graphic in a Standard plan).
+    for s in stray:
+        s["type"] = "screenshot"
+        s["model"] = None
+    # Normalize models on the kept pillars.
+    for s in content:
+        if s.get("type") in ("screenshot", "walkthrough"):
+            s["model"] = None
+
+    # If no walkthrough could be sourced from existing scenes, synthesize one and
+    # insert it just before the closing title (or at the end if no closing title).
+    if not has_walk:
+        wt = {"id": "walkthrough", "type": "walkthrough",
+              "brief": "", "model": None,
+              "duration_s": 8, "input_image": None}
+        all_scenes = plan.get("scenes") or []
+        insert_at = len(all_scenes)
+        for i in range(len(all_scenes) - 1, -1, -1):
+            if isinstance(all_scenes[i], dict) and all_scenes[i].get("type") == "title":
+                insert_at = i
+                break
+        all_scenes.insert(insert_at, wt)
+        plan["scenes"] = all_scenes
+        content.append(wt)
+        # rebalance: steal a couple seconds from the longest non-title scene so the
+        # total still sums to target (the duration backstop also re-checks below).
+        donors = sorted((s for s in all_scenes if isinstance(s, dict)
+                         and s.get("type") == "title" or s.get("type") == "screenshot"),
+                        key=lambda s: int(s.get("duration_s", 2)), reverse=True)
+        steal = wt["duration_s"]
+        for d in donors:
+            if steal <= 0:
+                break
+            give = min(steal, max(0, int(d.get("duration_s", 2)) - 2))
+            d["duration_s"] = int(d.get("duration_s", 2)) - give
+            steal -= give
+
+    # Rewrite the walkthrough brief to the emphasis-specific multi-step goal.
+    for s in content:
+        if s.get("type") == "walkthrough":
+            s["brief"] = _walkthrough_brief_for_emphasis(brand, emphasis)
     return plan
 
 
@@ -264,79 +456,865 @@ def _restyle_durations(plan, style, target_duration_s):
 
 
 def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
-                        quality="standard"):
-    if not os.environ.get("NVIDIA_API_KEY"):
+                        quality="standard", brain="super-free", company_facts=None):
+    # Gate on the OpenRouter key now that the planner brain routes through OpenRouter
+    # (all 3 brains). When it's unset, return None so plan_job falls back to the
+    # deterministic template plan (the live console always proceeds at $0).
+    if not brain_mod.brain_key():
         return None
+    brain = brain_mod.normalize_brain(brain)
+    # GENRE HINT: detect the brand's business model (media/marketplace/ecommerce/
+    # fintech/social/services/dev-tool) so the LLM speaks to the RIGHT audience and
+    # value — not the SaaS "gives your team" default for every brand (the R7-G3 bug
+    # that made The Verge, a media publication, get B2B-SaaS framing). Empty string for
+    # the dev-tool default so the historical SaaS prompt is byte-unchanged for SaaS.
+    genre = detect_genre(company_url, company_facts)
+    genre_hint = genre_hint_text(genre)
     # Quality guidance goes LAST so its scene-type constraint overrides any style
-    # text that mentions cinematic/seedance (e.g. the cinematic style preset).
-    system = (vp.SYSTEM_PROMPT + (_STYLE_PROMPT.get(style) or "")
+    # text that mentions cinematic/seedance (e.g. the cinematic style preset). The
+    # genre hint goes between style and quality (it's audience/value guidance, not a
+    # scene-type rule, so it must not override the quality scene-type constraint).
+    system = (vp.SYSTEM_PROMPT + (_STYLE_PROMPT.get(style) or "") + genre_hint
               + (_QUALITY_PROMPT.get(_normalize_quality(quality)) or ""))
+    # Ground the brain in the REAL brand facts so the VO + briefs describe the actual
+    # product, not an invented one. The block is appended to the USER prompt (after
+    # the brief) and is "" when no facts were resolved — in which case the user prompt
+    # is byte-identical to the historical one (graceful, behavior unchanged).
+    # Pass company_url too: when the scrape is thin/empty (bot-blocked brands), the
+    # facts block uses world-knowledge of the recognizable brand instead of going
+    # hollow. Call unconditionally so even a None/empty facts dict still grounds on
+    # the URL's brand.
+    facts_block = vp.company_facts_block(company_facts or {}, company_url=company_url,
+                                         genre=genre)
     user = ("Build the scene plan for this brief. Output JSON only.\n\n"
             "company_url: %s\ngoal: %s\ntarget_duration_s: %d\n"
             % (company_url, goal, target_duration_s))
+    if facts_block:
+        user = user + facts_block
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": user}]
     try:
-        raw = vp.call_model(messages)
+        raw = vp.call_model(messages, brain=brain)
         try:
             return vp.extract_json(raw)
         except (ValueError, json.JSONDecodeError):
             repair = messages + [
                 {"role": "assistant", "content": raw},
                 {"role": "user", "content": "Your previous output did not parse. Return ONLY the corrected JSON object."}]
-            return vp.extract_json(vp.call_model(repair))
+            return vp.extract_json(vp.call_model(repair, brain=brain))
     except Exception:
         return None  # any network/model failure -> fall back to the template
 
 
-def _standard_template_plan(brand, company_url, goal, target_duration_s, style):
-    """Remotion-only deterministic plan: title + motion_graphic feature beats + title.
+# --- GENRE-aware grounding -------------------------------------------------
+# The 12-brand generality test exposed a SaaS-ONLY assumption: The Verge (a media
+# publication) got a B2B-SaaS voiceover ("Theverge gives your team the latest quick
+# posts"). The grounding had no genre awareness beyond dev-tool/SaaS, so a news site,
+# a marketplace, and a retail store all got "gives your team" tool-framing and the
+# wrong audience.
+#
+# A GENRE classifies the brand's BUSINESS MODEL so the VO speaks to the RIGHT audience
+# and the RIGHT value. Genres (broad, by audience/value, not by industry):
+#   - "dev-tool"      developer / engineering tools + B2B SaaS (Linear, Vercel,
+#                      Notion, Webflow) -> teams ship/build/work faster.
+#   - "fintech"       payments / banking APIs (Stripe, Plaid) -> businesses move money.
+#   - "marketplace"   two-sided platforms (Airbnb, Tripadvisor) -> hosts/guests,
+#                      listings, booking.
+#   - "ecommerce"     DTC retail / online stores (Allbirds, Huckberry, Shopify-stores)
+#                      -> products, materials, shop, collection.
+#   - "media"         publications / news / journalism (The Verge) -> coverage,
+#                      reporting, readers/audience. NEVER "gives your team".
+#   - "social"        social networks / communities -> people, posts, connection.
+#   - "services"      professional / local services -> clients, bookings, results.
+# Each genre carries (a) an AUDIENCE word, (b) a VALUE verb-frame, and (c) a generic
+# (brand-agnostic) fallback 5-tuple used when the brand isn't in the world-knowledge
+# map AND the scrape is thin — so a NEW media/retail/marketplace brand still gets
+# genre-appropriate copy instead of the SaaS "gives your team" template.
+GENRE_DEFAULT = "dev-tool"
 
-    No cinematic, no walkthrough — every content scene is a designed motion_graphic
-    (model null) so a standard build renders entirely in Remotion. Durations sum to
-    EXACTLY target_duration_s here (and stay summed after _restyle_durations).
+# Keyword signals -> genre. Matched against the URL host + the scraped tagline +
+# feature text (lowercased). Order matters: the FIRST genre whose keywords match wins,
+# so more specific genres (media, marketplace, ecommerce) are checked before the broad
+# dev-tool/SaaS catch-all. Host-name hints are the strongest single signal.
+_GENRE_HOST_HINTS = {
+    "theverge.com": "media",
+    "airbnb.com": "marketplace",
+    "tripadvisor": "marketplace",
+    "allbirds.com": "ecommerce",
+    "huckberry.com": "ecommerce",
+    "shopify.com": "ecommerce",
+    "vercel.com": "dev-tool",
+    "notion.so": "dev-tool",
+    "webflow.com": "dev-tool",
+    "linear.app": "dev-tool",
+    "stripe.com": "fintech",
+    "plaid.com": "fintech",
+}
+
+# Keyword buckets for genre inference from tagline/feature text when the host isn't a
+# known hint. Checked in this order (specific -> broad).
+_GENRE_KEYWORDS = [
+    ("media", (
+        "news", "journalism", "magazine", "publication", "editorial", "reporting",
+        "reviews and news", "tech news", "coverage", "headlines", "articles",
+        "podcast", "newsroom", "reporters", "stories", "the verge", "blog",
+    )),
+    ("marketplace", (
+        "marketplace", "book a", "booking", "hosts", "guests", "listings",
+        "travelers", "rentals", "stays", "vacation rental", "find a place",
+        "two-sided", "buyers and sellers", "trips",
+    )),
+    ("ecommerce", (
+        "shop", "store", "cart", "checkout", "free shipping", "collection",
+        "new arrivals", "add to bag", "add to cart", "products", "wool", "footwear",
+        "apparel", "outfit", "gear", "sale", "buy now", "shoes", "merch",
+    )),
+    ("fintech", (
+        "payments", "banking", "transactions", "money", "fraud", "payouts",
+        "invoices", "billing", "financial", "fintech", "ach", "cards", "wallet",
+    )),
+    ("social", (
+        "social network", "friends", "followers", "community", "feed", "posts",
+        "share photos", "connect with people", "messaging",
+    )),
+    ("services", (
+        "consulting", "agency", "appointments", "schedule a call", "clients",
+        "salon", "clinic", "law firm", "book an appointment",
+    )),
+    ("dev-tool", (
+        "developer", "developers", "api", "sdk", "deploy", "build", "ship",
+        "issue tracker", "workflow", "productivity", "no-code", "platform",
+        "dashboard", "integrations", "your team", "engineering", "software",
+        "saas", "automate", "collaborate",
+    )),
+]
+
+# Per-genre framing used by the deterministic template (and exposed to the LLM as a
+# GENRE HINT). Each entry:
+#   audience    -> who the value is FOR (the spoken "audience" of the VO)
+#   value_verb  -> the core value framing the VO should lead with
+#   open_fmt    -> generic opening value-prop when no world-knowledge + thin scrape;
+#                  "%(brand)s" is filled in. Genre-appropriate, NEVER SaaS for media.
+#   home_fmt / inner_fmt / walk_phrase / cta_fmt -> the rest of the generic 5-tuple.
+_GENRE_FRAMING = {
+    "dev-tool": {
+        "audience": "teams who build software",
+        "value_verb": "helps your team ship faster",
+        "open_fmt": "%(brand)s helps product teams build and ship faster.",
+        "home_fmt": "Everything your team needs in one workspace.",
+        "inner_fmt": "Built to help your team move faster every day.",
+        "walk_phrase": "the core workflow",
+        "cta_fmt": "Get started with %(brand)s.",
+    },
+    "fintech": {
+        "audience": "businesses that move money",
+        "value_verb": "powers payments and financial data",
+        "open_fmt": "%(brand)s powers payments and financial data for businesses.",
+        "home_fmt": "Move money and connect accounts in one place.",
+        "inner_fmt": "Built-in fraud protection and instant payouts.",
+        "walk_phrase": "the payment flow",
+        "cta_fmt": "Start building with %(brand)s.",
+    },
+    "marketplace": {
+        "audience": "hosts and guests",
+        "value_verb": "connects hosts and guests",
+        "open_fmt": "%(brand)s connects hosts and guests around the world.",
+        "home_fmt": "Browse unique listings and book in a few taps.",
+        "inner_fmt": "Compare places, read real reviews, then book with confidence.",
+        "walk_phrase": "finding and booking a listing",
+        "cta_fmt": "Find your next stay on %(brand)s.",
+    },
+    "ecommerce": {
+        "audience": "shoppers",
+        "value_verb": "sells products you actually want",
+        "open_fmt": "%(brand)s makes products built to last, shipped to your door.",
+        "home_fmt": "Shop the collection and find your fit.",
+        "inner_fmt": "Premium materials, honest pricing, free returns.",
+        "walk_phrase": "browsing the collection and checking out",
+        "cta_fmt": "Shop the collection at %(brand)s.",
+    },
+    "media": {
+        "audience": "readers",
+        "value_verb": "covers the stories that matter",
+        "open_fmt": "%(brand)s covers technology, science, and culture for millions of readers.",
+        "home_fmt": "The latest reporting, reviews, and analysis every day.",
+        "inner_fmt": "In-depth features, breaking news, and expert reviews.",
+        "walk_phrase": "reading the latest coverage",
+        "cta_fmt": "Read the latest at %(brand)s.",
+    },
+    "social": {
+        "audience": "people and communities",
+        "value_verb": "connects people",
+        "open_fmt": "%(brand)s connects people and communities around the things they love.",
+        "home_fmt": "Share, follow, and discover what people are talking about.",
+        "inner_fmt": "Find your people and join the conversation.",
+        "walk_phrase": "sharing your first post",
+        "cta_fmt": "Join the community on %(brand)s.",
+    },
+    "services": {
+        "audience": "clients",
+        "value_verb": "delivers results for clients",
+        "open_fmt": "%(brand)s delivers results for the clients who count on it.",
+        "home_fmt": "Everything you need, handled by people who care.",
+        "inner_fmt": "Book in minutes and get real results.",
+        "walk_phrase": "booking an appointment",
+        "cta_fmt": "Book with %(brand)s today.",
+    },
+}
+
+
+def detect_genre(company_url, company_facts=None):
+    """Classify a brand's GENRE (business model) from the URL host + scraped facts.
+
+    Returns one of _GENRE_FRAMING's keys. Priority:
+      1. A known HOST hint (theverge.com -> media, airbnb.com -> marketplace, …) —
+         the strongest, most reliable single signal.
+      2. Keyword inference from the tagline + feature text (specific genres first).
+      3. GENRE_DEFAULT ("dev-tool"/SaaS) as the historical catch-all.
+
+    Genre-awareness is the R7-G3 fix: before this, EVERY brand was grounded as a B2B
+    SaaS tool, so a media publication (The Verge) got "gives your team" tool-framing.
+    Stdlib only; never raises.
     """
-    # Three motion-graphic feature beats give the standard plan the same 5-scene
-    # shape as the premium template, so pacing/pricing surfaces look familiar.
+    host = (company_url or "").lower()
+    host = host.replace("https://", "").replace("http://", "").replace("www.", "")
+    host = host.split("/")[0]
+    for hint, genre in _GENRE_HOST_HINTS.items():
+        if hint in host:
+            return genre
+
+    facts = company_facts if isinstance(company_facts, dict) else {}
+    tagline = str(facts.get("tagline") or "")
+    feats = facts.get("features") or []
+    feat_text = []
+    for f in feats:
+        if isinstance(f, dict):
+            f = f.get("label") or f.get("title") or ""
+        feat_text.append(str(f))
+    hay = " ".join([host, tagline] + feat_text).lower()
+
+    for genre, keywords in _GENRE_KEYWORDS:
+        for kw in keywords:
+            if kw in hay:
+                return genre
+    return GENRE_DEFAULT
+
+
+def genre_hint_text(genre):
+    """A one-paragraph GENRE HINT appended to the planner prompt so the LLM speaks to
+    the RIGHT audience and value for this brand's business model — NOT the SaaS
+    "gives your team" default for every brand. Returns "" for the dev-tool default so
+    the historical SaaS prompt is byte-unchanged for SaaS brands."""
+    g = genre if genre in _GENRE_FRAMING else GENRE_DEFAULT
+    if g == "dev-tool":
+        return ""  # historical default — leave the SaaS-tuned prompt unchanged
+    fr = _GENRE_FRAMING[g]
+    label = {
+        "fintech": "FINTECH / payments",
+        "marketplace": "MARKETPLACE (two-sided platform)",
+        "ecommerce": "E-COMMERCE / retail store",
+        "media": "MEDIA / publication",
+        "social": "SOCIAL network / community",
+        "services": "professional / local SERVICES",
+    }.get(g, g.upper())
+    extra = ""
+    if g == "media":
+        extra = (
+            " This is a PUBLICATION, not a B2B tool — NEVER write \"gives your team\", "
+            "\"for your team\", \"your workspace\", \"productivity\", or any SaaS-tool "
+            "framing. The audience is READERS, not customers buying software. Speak "
+            "about COVERAGE, reporting, reviews, and the stories the publication "
+            "delivers to its readers."
+        )
+    elif g == "marketplace":
+        extra = (
+            " The audience is HOSTS and GUESTS (or buyers and sellers) — speak about "
+            "listings, booking, and trips, NOT a SaaS tool \"for your team\"."
+        )
+    elif g == "ecommerce":
+        extra = (
+            " The audience is SHOPPERS — speak about the PRODUCTS, materials, the "
+            "collection, and the shopping experience, NOT a SaaS tool \"for your team\"."
+        )
+    return (
+        "\n\nGENRE HINT: This brand is a %s. Its audience is %s, and its core value is "
+        "that it %s. Write the voiceover for THAT audience and value — do NOT default "
+        "to generic B2B-SaaS \"gives your team\" / \"for your workspace\" framing unless "
+        "this brand is actually a software tool for teams.%s"
+        % (label, fr["audience"], fr["value_verb"], extra)
+    )
+
+
+# World-knowledge value props for RECOGNIZABLE brands. Used by the deterministic
+# template fallback (LLM unavailable) AND as the OPENING-beat backstop so even the
+# offline path — and any plan whose opening beat the LLM emitted as a bare wordmark —
+# writes grounded, concrete, imperative copy instead of hollow filler. Keyed by a
+# host substring. Each entry is a 5-tuple:
+#   (open_line, screenshot-home line, screenshot-inner line, walkthrough verb-phrase,
+#    closing CTA)
+# `open_line` is a FULL value-prop sentence naming a real feature/metric — it
+# REPLACES the bare "Linear." / "Plaid." wordmark beat (the D3=2 root cause). These
+# describe the REAL product and never the website/animation; never invents a
+# DIFFERENT business. The new (non-SaaS) brands are GENRE-grounded: theverge speaks to
+# readers/coverage (NOT "gives your team"), airbnb to hosts/guests, allbirds/huckberry
+# to products/materials.
+_BRAND_WORLD_KNOWLEDGE = {
+    "stripe": (
+        "Stripe powers online payments for millions of businesses worldwide.",
+        "Accept payments online in over 135 currencies.",
+        "Recurring billing, fraud protection, and instant payouts.",
+        "set up a payment in minutes",
+        "Start accepting payments at stripe.com.",
+    ),
+    "tripadvisor": (
+        "Tripadvisor guides over a billion trips with real traveler reviews.",
+        "Read millions of real traveler reviews before you book.",
+        "Compare hotels, restaurants, and things to do worldwide.",
+        "find and book your next trip",
+        "Plan your next trip on Tripadvisor.",
+    ),
+    "shopify": (
+        "Shopify powers millions of online stores selling in every market.",
+        "Launch an online store and start selling today.",
+        "Run payments, shipping, and inventory from one dashboard.",
+        "set up your store and add a product",
+        "Start your store at shopify.com.",
+    ),
+    "linear": (
+        "Linear is the issue tracker built for high-performance product teams.",
+        "Plan with Cycles and Projects, then ship faster as a team.",
+        "Triage bugs and move issues in sub-second, keyboard-first flow.",
+        "create an issue and move it through the board",
+        "Build your product roadmap on Linear.",
+    ),
+    "plaid": (
+        "Plaid connects your app to over 12,000 banks and financial institutions.",
+        "Use Link to connect a bank account in seconds.",
+        "Verify balances and identity with Auth, Balance, and Signal.",
+        "link an account through the Plaid Link flow",
+        "Connect financial data with Plaid.",
+    ),
+    # --- R7-G3 new (non-SaaS) brands, GENRE-grounded ---
+    # MEDIA: readers/coverage, NEVER "gives your team".
+    "theverge": (
+        "The Verge covers technology, science, and culture for millions of readers.",
+        "Breaking tech news, in-depth reviews, and sharp analysis every day.",
+        "From gadget reviews to policy reporting, all in one feed.",
+        "reading the latest coverage",
+        "Read the latest at theverge.com.",
+    ),
+    # MARKETPLACE: hosts/guests, listings, booking.
+    "airbnb": (
+        "Airbnb connects travelers with unique homes and experiences worldwide.",
+        "Book stays from millions of homes hosted by real people.",
+        "Become a host and earn by sharing your space.",
+        "finding and booking a stay",
+        "Find your next stay on Airbnb.",
+    ),
+    # E-COMMERCE: products, materials, shop.
+    "allbirds": (
+        "Allbirds makes comfortable shoes from natural, sustainable materials.",
+        "Shop wool runners and tree sneakers made to last.",
+        "Made with merino wool and eucalyptus, designed to lower carbon.",
+        "browsing the collection and checking out",
+        "Shop the collection at allbirds.com.",
+    ),
+    # E-COMMERCE: men's outdoor / adventure gear.
+    "huckberry": (
+        "Huckberry curates rugged gear and apparel for the modern adventurer.",
+        "Shop field-tested clothing, boots, and outdoor essentials.",
+        "Handpicked brands and exclusives you won't find anywhere else.",
+        "browsing the shop and checking out",
+        "Gear up at huckberry.com.",
+    ),
+    # DEV-TOOL / frontend deploy.
+    "vercel": (
+        "Vercel is the platform for frontend developers to deploy and ship fast.",
+        "Push to git and get a live preview deployment in seconds.",
+        "Edge network, instant rollbacks, and zero-config builds.",
+        "deploying a project and opening a preview",
+        "Deploy your frontend on Vercel.",
+    ),
+    # DEV-TOOL / docs + wiki + projects.
+    "notion": (
+        "Notion is the connected workspace for docs, wikis, and projects.",
+        "Write docs, build wikis, and track projects in one place.",
+        "Databases, templates, and AI built into every page.",
+        "creating a page and turning it into a database",
+        "Build your workspace on Notion.",
+    ),
+    # DEV-TOOL / visual web design, no-code.
+    "webflow": (
+        "Webflow lets you design and ship responsive websites without code.",
+        "Build pixel-perfect sites visually, then publish in one click.",
+        "A built-in CMS, hosting, and clean production-ready code.",
+        "designing a page and publishing it",
+        "Build your site on Webflow.",
+    ),
+}
+
+
+def _world_knowledge_for(brand, company_url):
+    """Return the (home, inner, walk_phrase, cta) tuple for a recognizable brand, or
+    None. Matches on the URL host first (most reliable), then the brand name."""
+    hay = ("%s %s" % (company_url or "", brand or "")).lower()
+    for key, props in _BRAND_WORLD_KNOWLEDGE.items():
+        if key in hay:
+            return props
+    return None
+
+
+def _genre_open_frame(brand, feature_phrase, genre):
+    """The OPENING value-prop sentence for the scraped-features path, framed for the
+    brand's GENRE. The old code hardcoded "%s gives your team %s." (SaaS-tool framing)
+    for EVERY brand — that is exactly the bug that made The Verge (media) say
+    "Theverge gives your team the latest quick posts". Each genre gets a verb-frame
+    that fits its audience: media COVERS, marketplace CONNECTS, ecommerce MAKES, etc.
+    `feature_phrase` is the real scraped top capability (already lowercased, no period).
+    """
+    g = genre if genre in _GENRE_FRAMING else GENRE_DEFAULT
+    fp = (feature_phrase or "").strip()
+    if g == "media":
+        return "%s brings you %s." % (brand, fp)
+    if g == "marketplace":
+        return "%s connects you with %s." % (brand, fp)
+    if g == "ecommerce":
+        return "%s brings you %s." % (brand, fp)
+    if g == "fintech":
+        return "%s powers %s for your business." % (brand, fp)
+    if g == "social":
+        return "%s connects people through %s." % (brand, fp)
+    if g == "services":
+        return "%s delivers %s for its clients." % (brand, fp)
+    # dev-tool / default — historical SaaS framing (unchanged for SaaS brands).
+    return "%s gives your team %s." % (brand, fp)
+
+
+def _grounded_template_beats(brand, company_url, emphasis, features, company_facts=None):
+    """Build grounded, concrete, imperative open/screenshot/walkthrough/CTA copy for
+    the deterministic STANDARD fallback. Priority:
+      1. RECOGNIZABLE brand -> world-knowledge value props (real feature names).
+      2. Real scraped `features` -> name the actual capabilities (GENRE-framed open).
+      3. Genre-appropriate generic benefit lines (last resort) — still NOT the banned
+         hollow filler ("straight from the real site", "exactly as you would see it"),
+         and NOT SaaS "gives your team" framing for a media/marketplace/retail brand.
+    The OPENING beat is a FULL value-prop sentence naming a real feature/metric —
+    NEVER a bare wordmark ("Linear." / "Plaid.") which is the D3=2 root cause. Also
+    fixes the grammar bug: the walkthrough beat is an IMPERATIVE ("Watch <verb
+    phrase>") with no "use the <noun>" stitch.
+
+    `company_facts` (with `company_url`) drives GENRE detection so a non-SaaS brand
+    speaks to the RIGHT audience even when it isn't in the world-knowledge map.
+
+    Returns (open_line, home_line, inner_line, walk_line, cta_line).
+    """
+    emphasis = (emphasis or "").strip()
+    # Strip a leading article so "the pricing page" reads cleanly in an imperative.
+    emph_label = re.sub(r"^(the|a|an)\s+", "", emphasis, flags=re.IGNORECASE).strip()
+    feats = [str(f).strip() for f in (features or []) if str(f).strip()]
+    genre = detect_genre(company_url, company_facts)
+    fr = _GENRE_FRAMING.get(genre, _GENRE_FRAMING[GENRE_DEFAULT])
+
+    wk = _world_knowledge_for(brand, company_url)
+    if wk:
+        open_line, home_line, inner_line, walk_phrase, cta_line = wk
+        # If the customer emphasized a specific feature, let the walkthrough follow it.
+        if emph_label:
+            walk_phrase = emph_label
+        walk_line = "Watch %s, step by step." % walk_phrase
+        return open_line, home_line, inner_line, walk_line, cta_line
+
+    if feats:
+        f0 = feats[0]
+        f1 = feats[1] if len(feats) > 1 else None
+        # Sentence-case + end with a period (real feature names rarely carry one).
+        home_core = (f0[:1].upper() + f0[1:]).strip()
+        home_line = home_core if home_core.endswith((".", "!", "?")) else home_core + "."
+        # second line: name the next real feature as a concrete benefit.
+        if f1:
+            f1_core = (f1[:1].lower() + f1[1:]).strip().rstrip(".!?")
+            inner_line = "Plus %s — built right into the product." % f1_core
+        else:
+            inner_line = fr["inner_fmt"]
+        walk_phrase = emph_label or f0.lower().rstrip(".!?")
+        walk_line = "Watch %s, step by step." % walk_phrase
+        cta_line = fr["cta_fmt"] % {"brand": brand}
+        # Opening value-prop names the brand AND its top real feature, framed for the
+        # brand's GENRE (NOT a hardcoded SaaS "gives your team" for every brand).
+        f0_core = f0.lower().rstrip(".!?")
+        open_line = _genre_open_frame(brand, f0_core, genre)
+        return open_line, home_line, inner_line, walk_line, cta_line
+
+    # Last resort: honest, benefit-driven, NOT hollow/self-referential, and framed for
+    # the brand's GENRE so a media/marketplace/retail brand never gets SaaS framing.
+    open_line = fr["open_fmt"] % {"brand": brand}
+    home_line = fr["home_fmt"]
+    inner_line = fr["inner_fmt"]
+    walk_phrase = emph_label or fr["walk_phrase"]
+    walk_line = "Watch %s, step by step." % walk_phrase
+    cta_line = fr["cta_fmt"] % {"brand": brand}
+    return open_line, home_line, inner_line, walk_line, cta_line
+
+
+def _is_bare_wordmark_beat(text, brand):
+    """True if a VO beat is a single-word / bare-wordmark fragment rather than a full
+    value-prop sentence. Catches "Linear.", "Plaid", "Stripe!", a lone brand token,
+    or any beat that is just one or two words with no real content. These are the
+    D3=2 thin-grounding failure: a beat must always be a complete value-prop sentence.
+    """
+    t = (text or "").strip()
+    if not t:
+        return True
+    # Strip surrounding punctuation/whitespace for the word count + brand compare.
+    core = t.strip(" .!?,:;—-").strip()
+    if not core:
+        return True
+    words = core.split()
+    # 1 or 2 words is never a value-prop sentence (e.g. "Linear.", "Plaid.",
+    # "Get started.") — treat as bare. The reference films use SHORT imperative
+    # COUPLETS, but those carry a verb+object (>=2 content words) and live in feature
+    # cards, not the grounded opening beat we backstop here.
+    if len(words) <= 1:
+        return True
+    # Exactly the brand name (case-insensitive), optionally with trailing punctuation.
+    if core.lower() == (brand or "").strip().lower():
+        return True
+    return False
+
+
+# Stage-direction / instruction prefixes that must NEVER appear as spoken VO copy.
+# These are directions to the renderer, not lines a narrator says. Mirrors (and is
+# kept in sync with) style_fill._is_prompt_artifact, but applied at the BEAT level so
+# the artifact is killed at the PLANNER source — before it reaches alignment/TTS or a
+# title — not only at the display layer. The notion artifact ("Show call-to-action:
+# 'Start") is the canonical case.
+_STAGE_DIRECTION_PREFIXES = (
+    "show call-to-action",
+    "show cta",
+    "show a call",
+    "show the call",
+    "display the ",
+    "display a ",
+    "display an ",
+    "present the ",
+    "present a ",
+    "animate ",
+    "animated ",
+    "insert ",
+    "place a ",
+    "place the ",
+    "add a cta",
+    "add cta",
+    "add a call",
+    "overlay ",
+    "scene:",
+    "title:",
+    "subtitle:",
+    "cta:",
+    "headline:",
+    "caption:",
+    "brief:",
+    "voiceover:",
+    "narration:",
+    "call-to-action:",
+    "call to action:",
+)
+
+# Stage-direction substrings that are a dead giveaway anywhere in the beat (a beat
+# should describe the PRODUCT, never the call-to-action mechanic or the card itself).
+_STAGE_DIRECTION_SUBSTRINGS = (
+    "call-to-action:",
+    "call to action:",
+    "wordmark and tagline",
+    "in a branded browser card",
+)
+
+# Fancy unicode hyphens/minus that small planners (and copy-pasted META descriptions)
+# emit instead of an ASCII '-'. Normalizing them to '-' is what lets the
+# "call-to-action" substring match "call‑to‑action" (the notion-rebuild leak: the
+# fancy hyphen U+2011 in "Closing call‑to‑action card urging users" defeated the plain
+# ASCII substring test, so the meta-description phrasing slipped past the planner).
+_FANCY_HYPHENS = "‐‑‒–—―−"
+_HYPHEN_TRANS = {ord(c): "-" for c in _FANCY_HYPHENS}
+
+
+def _norm_hyphens(s):
+    """Lowercase + map every fancy unicode hyphen/minus (U+2010–U+2015, U+2212) to an
+    ASCII '-' so hyphenated stage-direction phrasing matches regardless of which dash
+    glyph the planner emitted. Stdlib only; never raises."""
+    return (s or "").lower().translate(_HYPHEN_TRANS)
+
+
+# META-DESCRIPTION phrasing class: a beat that DESCRIBES the card/scene/CTA mechanic
+# ("Closing call-to-action card urging users …", "Call-to-action card using the brand
+# color", "card urging users to …") instead of speaking TO the user. This is the
+# notion-rebuild leak — it is NOT caught by a stage-direction PREFIX (the beat opens
+# with "Closing"/"Call-to-action", not "Show"/"Display") and the existing
+# "call-to-action:" substring requires a trailing colon, so "call-to-action card" slips
+# through. Matched anywhere in the HYPHEN-NORMALIZED beat. Each entry is meta-talk that
+# only appears when copy is describing the artifact, never in real spoken product copy.
+_META_DESCRIPTION_SUBSTRINGS = (
+    "call-to-action",
+    "call to action",
+    "closing card",
+    "closing call",
+    "urging users",
+    "card urging",
+    "cta card",
+    "the cta",
+    "using the brand",
+    "brand color",
+    "the wordmark",
+    "stage direction",
+)
+
+# Stage-OPENER verbs: a beat that STARTS with one of these and then describes a
+# card/scene/title (rather than speaking to the user) is a stage direction, e.g.
+# "Closing call-to-action card …", "Show the title card", "Present the closing scene".
+# The opener alone is NOT enough (real copy starts with "Show your work to the world");
+# it must ALSO mention a scene/card noun to qualify, so legit imperative copy is kept.
+_STAGE_OPENER_VERBS = ("closing", "show", "display", "animate", "present")
+
+# Scene/card nouns that, when a beat OPENS with a stage-opener verb, mark the beat as
+# describing the artifact (the card/scene), not addressing the viewer.
+_STAGE_SCENE_NOUNS = (
+    "card", "scene", "title card", "cta", "call-to-action", "call to action",
+    "lockup", "wordmark", "browser card", "screen", "closing title", "opening title",
+)
+
+
+def _is_meta_description_text(norm):
+    """True when the (hyphen-normalized, lowercased) beat is META-DESCRIPTION phrasing —
+    it describes the CTA/card/scene mechanic instead of being spoken product copy.
+
+    Two signals:
+      1. a dead-giveaway META substring anywhere (_META_DESCRIPTION_SUBSTRINGS), OR
+      2. a STAGE-OPENER shape: the beat STARTS with Closing/Show/Display/Animate/Present
+         AND mentions a card/scene/cta noun (so it is describing the artifact, not
+         addressing the user). The noun requirement is what preserves legit copy that
+         merely opens with one of those verbs ("Show your work to the world",
+         "Closing time") — those carry no scene/card noun, so they are NOT flagged.
+    """
+    if not norm:
+        return False
+    for sub in _META_DESCRIPTION_SUBSTRINGS:
+        if sub in norm:
+            return True
+    first = norm.split()[0] if norm.split() else ""
+    if first in _STAGE_OPENER_VERBS:
+        for noun in _STAGE_SCENE_NOUNS:
+            if noun in norm:
+                return True
+    return False
+
+
+def _is_stage_direction_text(text):
+    """True when a VO beat is an INSTRUCTION / STAGE DIRECTION rather than spoken copy.
+
+    A stage direction tells the renderer what to do ("Show call-to-action: 'Start",
+    "Display the pricing table", "Animated feature beat …", or a leaked scene brief
+    like "<Brand> wordmark and tagline"). It also covers META-DESCRIPTION phrasing that
+    describes the CARD/SCENE mechanic instead of being spoken copy ("Closing
+    call-to-action card urging users …") — this is the notion-rebuild leak that opens
+    with "Closing"/"Call-to-action" rather than a known prefix. It is NEVER a line a
+    narrator speaks, so it must never become a VO beat or a title. Conservative: only
+    flags strings whose WHOLE shape is an instruction (a known prefix), that carry a
+    dead-giveaway stage-direction / meta-description substring, or that open with a
+    stage-opener verb AND name a card/scene noun — not strings that merely contain a
+    verb like "show".
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    lower = t.lower()
+    for prefix in _STAGE_DIRECTION_PREFIXES:
+        if lower.startswith(prefix):
+            return True
+    for sub in _STAGE_DIRECTION_SUBSTRINGS:
+        if sub in lower:
+            return True
+    # META-DESCRIPTION / stage-opener phrasing — normalize fancy hyphens first so
+    # "call‑to‑action card" (fancy U+2011) matches "call-to-action".
+    if _is_meta_description_text(_norm_hyphens(t)):
+        return True
+    return False
+
+
+def _degut_stage_direction_beats(plan, brand, company_url, company_facts, emphasis):
+    """Rewrite any VO beat that is an instruction / stage direction into real spoken
+    copy for THIS brand. Defense-in-depth: runs on the FINAL plan no matter whether the
+    beats came from the LLM or the template, because small planners leak the scene
+    BRIEF (or a prompt fragment) into the beat text — e.g. notion's
+    "Show call-to-action: 'Start" rendered as a spoken VO line.
+
+    Replacement, genre-grounded for THIS brand (never invents a different business):
+      - a CLOSING title beat / any beat that reads like a CTA -> the grounded CTA line;
+      - any other stage-direction beat -> the grounded opening value-prop line.
+    No-op when no beat is a stage direction (the common case).
+    """
+    vo = (plan or {}).get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list) or not beats:
+        return plan
+    scenes = {s.get("id"): s for s in (plan.get("scenes") or []) if isinstance(s, dict)}
+
+    # Normalize scraped features to capability strings (same shape the template uses)
+    # so the rewrite names a real feature.
+    raw_feats = (company_facts or {}).get("features") or []
+    feats = []
+    for f in raw_feats:
+        if isinstance(f, dict):
+            f = f.get("label") or f.get("title") or ""
+        if str(f).strip():
+            feats.append(str(f).strip())
+
+    open_line, home_line, _inner, _walk, cta_line = _grounded_template_beats(
+        brand, company_url, emphasis, feats, company_facts=company_facts)
+
+    # Identify the closing (last) title scene id so a CTA-shaped artifact -> CTA copy.
+    title_scene_ids = [s.get("id") for s in (plan.get("scenes") or [])
+                       if isinstance(s, dict) and s.get("type") == "title"]
+    last_title_id = title_scene_ids[-1] if title_scene_ids else None
+
+    for b in beats:
+        if not isinstance(b, dict):
+            continue
+        if not _is_stage_direction_text(b.get("text")):
+            continue
+        sid = b.get("scene_id")
+        scene = scenes.get(sid) or {}
+        artifact = (b.get("text") or "").lower()
+        is_cta = (
+            sid == last_title_id
+            or "call-to-action" in artifact or "call to action" in artifact
+            or artifact.startswith(("show cta", "add cta", "add a cta"))
+        )
+        if is_cta:
+            b["text"] = cta_line
+        elif scene.get("type") == "title":
+            b["text"] = open_line
+        else:
+            b["text"] = home_line or open_line
+    return plan
+
+
+def _degut_bare_wordmark_beats(plan, brand, company_url, company_facts, emphasis):
+    """Rewrite any bare-wordmark / single-word VO beat into a full value-prop sentence.
+
+    Defense-in-depth: runs on the FINAL plan no matter whether the beats came from the
+    LLM or the deterministic template, because small planners still emit a single-word
+    opening beat ("Linear." / "Plaid.") even when the body is grounded. The replacement
+    is a real value-prop naming a feature/metric:
+      - for the OPENING title beat: prefer the world-knowledge opening line (names a
+        real feature/metric), else the brand's first scraped feature, else an honest
+        full sentence;
+      - for any other bare beat: a grounded benefit line.
+    Never invents a different business — pulls only from world-knowledge or scraped
+    facts for THIS brand. No-op when every beat is already a full sentence.
+    """
+    vo = (plan or {}).get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list) or not beats:
+        return plan
+    scenes = {s.get("id"): s for s in (plan.get("scenes") or []) if isinstance(s, dict)}
+
+    # Normalize scraped features to a list of capability strings (same shape as the
+    # template path uses) so the rewrite can name a real feature.
+    raw_feats = (company_facts or {}).get("features") or []
+    feats = []
+    for f in raw_feats:
+        if isinstance(f, dict):
+            f = f.get("label") or f.get("title") or ""
+        if str(f).strip():
+            feats.append(str(f).strip())
+
+    open_line, home_line, inner_line, _walk_line, _cta_line = _grounded_template_beats(
+        brand, company_url, emphasis, feats, company_facts=company_facts)
+
+    # Find the first/opening title scene id so we can give it the strongest open line.
+    first_title_id = None
+    for s in (plan.get("scenes") or []):
+        if isinstance(s, dict) and s.get("type") == "title":
+            first_title_id = s.get("id")
+            break
+
+    for b in beats:
+        if not isinstance(b, dict):
+            continue
+        if not _is_bare_wordmark_beat(b.get("text"), brand):
+            continue
+        sid = b.get("scene_id")
+        scene = scenes.get(sid) or {}
+        # The opening title gets the value-prop open line; any other bare beat gets a
+        # grounded benefit line (home line, else the honest open line as a fallback).
+        if sid == first_title_id or scene.get("type") == "title":
+            b["text"] = open_line
+        else:
+            b["text"] = home_line or open_line
+    return plan
+
+
+def _standard_template_plan(brand, company_url, goal, target_duration_s, style,
+                            emphasis=None, company_facts=None):
+    """Standard deterministic plan: title -> 2 screenshot -> walkthrough -> title.
+
+    The real-capture pillars (model null everywhere): the opening title, two captured
+    website views, one guided walkthrough of the emphasized feature, the closing CTA.
+    No cinematic / motion_graphic — a standard build renders the titles in Remotion
+    and fills the screenshot/walkthrough scenes with real captured assets. Durations
+    sum to EXACTLY target_duration_s here (and stay summed after _restyle_durations).
+
+    Beats are GROUNDED and IMPERATIVE (no hollow "straight from the real site"
+    filler, no "use the <noun>" grammar bug) — see _grounded_template_beats.
+    """
     open_d, close_d = 3, 5
-    body = max(2, target_duration_s - open_d - close_d)
-    n = 3
-    base = max(2, body // n)
-    feat_durs = [base] * n
-    rem = body - base * n
-    i = 0
-    while rem > 0:
-        feat_durs[i % n] += 1
-        rem -= 1
-        i += 1
-    while rem < 0:
-        k = i % n
-        if feat_durs[k] > 2:
-            feat_durs[k] -= 1
-            rem += 1
-        i += 1
+    body = max(6, target_duration_s - open_d - close_d)
+    # Split the body across two screenshots + one (longer) walkthrough; the
+    # walkthrough gets the larger share so the demo can breathe.
+    walk_d = max(6, body // 2)
+    shot_rem = max(4, body - walk_d)
+    shot1 = max(2, shot_rem // 2)
+    shot2 = max(2, shot_rem - shot1)
+    # Correct any rounding so the four content+title scenes sum to target exactly.
+    total = open_d + shot1 + shot2 + walk_d + close_d
+    walk_d += (target_duration_s - total)
+    if walk_d < 2:  # pathological tiny target — clamp and re-derive
+        walk_d = 2
 
     scenes = [
         {"id": "title-open", "type": "title", "brief": "%s wordmark and tagline" % brand,
          "model": None, "duration_s": open_d, "input_image": None},
-        {"id": "feature-what", "type": "motion_graphic",
-         "brief": "Animated feature beat: what %s is and who it serves" % brand,
-         "model": None, "duration_s": feat_durs[0], "input_image": None},
-        {"id": "feature-how", "type": "motion_graphic",
-         "brief": "Animated feature beat highlighting how %s works" % brand,
-         "model": None, "duration_s": feat_durs[1], "input_image": None},
-        {"id": "feature-why", "type": "motion_graphic",
-         "brief": "Animated stat/feature card on why %s matters" % brand,
-         "model": None, "duration_s": feat_durs[2], "input_image": None},
+        {"id": "screenshot-home", "type": "screenshot",
+         "brief": "Real captured homepage of %s in a branded browser card" % brand,
+         "model": None, "duration_s": shot1, "input_image": None},
+        {"id": "screenshot-inner", "type": "screenshot",
+         "brief": "Real captured key page of %s showing the product" % brand,
+         "model": None, "duration_s": shot2, "input_image": None},
+        {"id": "walkthrough", "type": "walkthrough",
+         "brief": _walkthrough_brief_for_emphasis(brand, emphasis),
+         "model": None, "duration_s": walk_d, "input_image": None},
         {"id": "title-close", "type": "title", "brief": "Call to action: get started with %s" % brand,
          "model": None, "duration_s": close_d, "input_image": None},
     ]
+    # Normalize scraped features (may be strings or {label}/{title} dicts) to a list
+    # of real capability strings for grounding.
+    raw_feats = (company_facts or {}).get("features") or []
+    feats = []
+    for f in raw_feats:
+        if isinstance(f, dict):
+            f = f.get("label") or f.get("title") or ""
+        if str(f).strip():
+            feats.append(str(f).strip())
+    open_line, home_line, inner_line, walk_line, cta_line = _grounded_template_beats(
+        brand, company_url, emphasis, feats, company_facts=company_facts)
     beats = [
-        {"scene_id": "title-open", "text": "%s." % brand},
-        {"scene_id": "feature-what", "text": "%s helps you do more with less." % brand},
-        {"scene_id": "feature-how", "text": "Here is how it works."},
-        {"scene_id": "feature-why", "text": "Built for the way you work."},
-        {"scene_id": "title-close", "text": "Get started with %s today." % brand},
+        # OPENING beat is a full value-prop sentence (a real feature/metric), NOT the
+        # bare "%s." wordmark — bare wordmark beats are the D3=2 thin-grounding bug.
+        {"scene_id": "title-open", "text": open_line},
+        {"scene_id": "screenshot-home", "text": home_line},
+        {"scene_id": "screenshot-inner", "text": inner_line},
+        {"scene_id": "walkthrough", "text": walk_line},
+        {"scene_id": "title-close", "text": cta_line},
     ]
     return {
         "job": {"company_url": company_url, "goal": goal,
@@ -347,18 +1325,21 @@ def _standard_template_plan(brand, company_url, goal, target_duration_s, style):
 
 
 def _template_plan(company_url, goal, target_duration_s, style="standard",
-                   quality="standard"):
-    brand = _brand_name(company_url)
+                   quality="standard", brand=None, emphasis=None, company_facts=None):
+    brand = brand or _brand_name(company_url)
     quality = _normalize_quality(quality)
 
-    # STANDARD: Remotion-only deterministic fallback. NO cinematic, NO walkthrough —
-    # an opening title, 2-3 motion_graphic feature beats, a closing title CTA. This
-    # is the path the NVIDIA_API_KEY-unset console uses, so it must satisfy the
-    # standard=Remotion-only contract on its own. (PREMIUM keeps the cinematic
-    # template below.) _restyle_durations re-times the holds for snappy/cinematic
-    # style while keeping the scene TYPES Remotion-only.
+    # STANDARD: deterministic real-capture fallback. An opening title, two captured
+    # website screenshots, one guided walkthrough of the emphasized feature, a closing
+    # title CTA. This is the path the OPENROUTER-key-unset console uses, so it must
+    # satisfy the standard structure contract on its own. (PREMIUM keeps the cinematic
+    # template below.) _restyle_durations is a no-op for standard (it returns the plan
+    # untouched for style="standard"); for snappy/cinematic style it only re-times the
+    # holds while keeping the scene TYPES intact.
     if quality == "standard":
-        plan = _standard_template_plan(brand, company_url, goal, target_duration_s, style)
+        plan = _standard_template_plan(brand, company_url, goal, target_duration_s,
+                                       style, emphasis=emphasis,
+                                       company_facts=company_facts)
         return _restyle_durations(plan, style, target_duration_s)
 
     # durations sum to target (3 + 6 + feat + 6 + close). `feat` is the middle
@@ -468,13 +1449,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
     ap.add_argument("--goal", default="")
+    ap.add_argument("--emphasis", default="",
+                    help="the feature/area to emphasize; becomes the STANDARD "
+                         "walkthrough's specific multi-step goal")
     ap.add_argument("--duration", type=int, default=30)
     ap.add_argument("--style", choices=list(VALID_STYLES), default="standard")
     ap.add_argument("--quality", choices=list(VALID_QUALITIES), default="standard",
-                    help="standard => Remotion-only (title + motion_graphic, no cinematic); "
+                    help="standard => real-capture (title + screenshot + walkthrough); "
                          "premium => cinematic shots allowed")
+    ap.add_argument("--brain", choices=list(brain_mod.VALID_BRAINS), default=brain_mod.DEFAULT_BRAIN,
+                    help="planner LLM (operator, via OpenRouter): "
+                         "ultra-paid | super-free (default, $0) | super-paid")
     a = ap.parse_args()
     p = plan_job(a.url, a.goal or ("%d-second promo" % a.duration), a.duration,
-                 style=a.style, quality=a.quality)
+                 style=a.style, quality=a.quality, brain=a.brain, emphasis=a.emphasis)
     json.dump(p, sys.stdout, indent=2)
     print()

@@ -75,19 +75,65 @@ BRAND_PALETTES = {
 _DEFAULT_FONT = '"SF Pro Display", "Helvetica Neue", "Avenir Next", ' + _FALLBACK_SANS
 
 
+# Common MULTI-PART public suffixes (country-code second-level domains). Without
+# this set, a naive "second-to-last label" pick treats `tripadvisor.com.tw` as the
+# brand "Com" (the confirmed build-com bug) and `foo.co.uk` as "Co". The registrable
+# brand label is the one immediately to the LEFT of the public suffix, where the
+# suffix may be one OR two labels. This is a pragmatic subset of the public suffix
+# list (no network dependency) covering the country TLDs real brands use.
+_MULTI_TLDS = frozenset((
+    "com.tw", "com.au", "com.br", "com.cn", "com.hk", "com.mx", "com.sg",
+    "com.tr", "com.ar", "com.co", "com.my", "com.ph", "com.vn", "com.ua",
+    "com.pl", "com.ru", "com.sa", "com.eg", "com.ng", "com.pk",
+    "co.uk", "co.jp", "co.kr", "co.in", "co.nz", "co.za", "co.id", "co.il",
+    "co.th", "org.uk", "net.au", "ne.jp", "or.jp", "gov.uk", "ac.uk",
+))
+
+
+def _host_labels(url):
+    """Strip scheme/www/path/port and return the dotted host's labels.
+    https://www.docs.stripe.com:443/x -> ['docs', 'stripe', 'com']."""
+    u = (url or "").lower().strip()
+    u = u.replace("https://", "").replace("http://", "")
+    u = u.split("/")[0].split("?")[0]      # host[:port]
+    u = u.split(":")[0]                    # drop port
+    if u.startswith("www."):
+        u = u[4:]
+    return [p for p in u.split(".") if p]
+
+
+def _registrable_label(parts):
+    """The brand's registrable label given host labels: the label immediately to
+    the LEFT of the public suffix, where the suffix may be a 2-label country SLD.
+    tripadvisor.com.tw -> 'tripadvisor'; foo.co.uk -> 'foo'; stripe.com -> 'stripe';
+    app.example.com -> 'example'. Returns '' when there is no label left of the TLD."""
+    if not parts:
+        return ""
+    if len(parts) >= 3 and ".".join(parts[-2:]) in _MULTI_TLDS:
+        return parts[-3]               # label left of a 2-part public suffix
+    if len(parts) >= 2:
+        return parts[-2]               # label left of a single-label TLD
+    return parts[0]                    # bare label, no dot
+
+
 def _brand_name(url):
-    """Display brand name from a URL: https://docs.stripe.com -> 'Stripe'."""
-    u = (url or "").lower().replace("https://", "").replace("http://", "").replace("www.", "")
-    parts = [p for p in u.split("/")[0].split(".") if p]
-    name = parts[-2] if len(parts) >= 2 else (parts[0] if parts else "")
+    """Display brand name from a URL: https://docs.stripe.com -> 'Stripe';
+    https://www.tripadvisor.com.tw -> 'Tripadvisor'; foo.co.uk -> 'Foo'."""
+    name = _registrable_label(_host_labels(url))
     return name.capitalize() if name else "The product"
 
 
 def _root_host(url):
-    """Bare root host for the CTA: https://docs.stripe.com -> 'stripe.com'."""
-    u = (url or "").lower().replace("https://", "").replace("http://", "").replace("www.", "")
-    parts = [p for p in u.split("/")[0].split(".") if p]
-    return ".".join(parts[-2:]) if len(parts) >= 2 else (parts[0] if parts else "")
+    """Bare REGISTRABLE host for the CTA: https://docs.stripe.com -> 'stripe.com';
+    https://www.tripadvisor.com.tw -> 'tripadvisor.com.tw'; foo.co.uk -> 'foo.co.uk'."""
+    parts = _host_labels(url)
+    if not parts:
+        return ""
+    if len(parts) >= 3 and ".".join(parts[-2:]) in _MULTI_TLDS:
+        return ".".join(parts[-3:])    # brand + 2-part public suffix
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])    # brand + single-label TLD
+    return parts[0]
 
 
 def palette_for(company_url):

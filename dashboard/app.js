@@ -3,7 +3,7 @@
    gate as an NLE filmstrip, the Studio view (the agent typing its real Remotion
    code), the final cut, and the Stripe/events log. */
 
-const state = { runs: [], selected: null, ledger: null, typer: null, scriptTyper: null, scriptShown: null, shareTimer: null, liveGoalShown: null, payForShown: null, pace: "standard",
+const state = { runs: [], selected: null, ledger: null, typer: null, scriptTyper: null, scriptShown: null, shareTimer: null, liveGoalShown: null, payForShown: null, walkTimer: null, pace: "standard",
   /* COST-PLUS PRICING — `pricing` is the fetched canonical pricing.json (the
      SINGLE source of truth; numbers are NEVER hand-duplicated). There are NO
      tiers and NO boosters: the agent prices each video cost-plus from its own
@@ -17,6 +17,26 @@ const state = { runs: [], selected: null, ledger: null, typer: null, scriptTyper
      into the /api/build payload as { quality }. */
   pricing: null,
   view: null,   // null = build console; "analytics" = the operator P&L view
+  /* BRAIN — the OPERATOR choice of which LLM plans the storyboard (all via
+     OpenRouter): "ultra-paid" | "super-free" | "super-paid". Default super-free
+     ($0) so nothing bills by accident. Picked in the sidebar footer control (NOT
+     the customer composer) and sent in the /api/build payload. */
+  brain: "super-free",
+  /* EDITOR-LOADABLE RUN IDS — the set of run ids the in-browser editor can deep-load
+     (i.e. runs that have a props.json; see /api/editor/runs). Cached once so the
+     delivered view can decide, with ZERO extra round-trips per render, whether the
+     "Edit video" affordance links into the editor or shows a clear "not editable yet"
+     note instead of silently opening a DIFFERENT video. null = not yet fetched. */
+  editorRuns: null,
+  /* PER-RENDER CACHE-BUST TOKEN for runs/<id>/*.mp4 video srcs. A re-rendered file
+     keeps the SAME run-id and URL, so a long-open session can keep showing the old
+     bytes from cache. We append ?t=<token> to every runs/<id> video src; the token
+     is the ledger.json `Last-Modified` header (the ledger is rewritten at delivery,
+     i.e. render time) captured on the ledger fetch. STABLE across reloads of an
+     UNCHANGED file (no needless re-download) but CHANGES when the file is re-rendered.
+     NOT Date.now() — that would defeat caching and re-download every load. null until
+     the first ledger fetch resolves. */
+  ledgerToken: null,
   selection: { quality: "standard" } };
 
 const $ = (id) => document.getElementById(id);
@@ -25,6 +45,12 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => (
 const cents = (c) => (c == null ? "—" : "$" + (c / 100).toFixed(2));
 const pct = (f) => (f == null ? "—" : (f * 100).toFixed(1) + "%");
 const icon = (id, cls) => `<svg class="${cls || "ic"}" aria-hidden="true"><use href="#${id}"/></svg>`;
+/* Cache-bust suffix for a runs/<id>/*.mp4 video src. Returns "?t=<token>" using the
+   STABLE per-render token (ledger Last-Modified, captured on the ledger fetch) so the
+   browser re-downloads only when the file was actually re-rendered — never on every
+   load. Empty string when no token is known yet (first paint before any ledger fetch);
+   the next ledger-backed render carries the token. */
+const mp4Bust = () => (state.ledgerToken ? "?t=" + encodeURIComponent(state.ledgerToken) : "");
 
 /* ---- HERO word-by-word build (D2 + D3) -------------------------------------
    The single highest-impact "polished" move: the ONE hero line of each state
@@ -181,6 +207,14 @@ function ledgerPriceCents(l) {
 async function loadIndex(isRefresh) {
   const btn = $("refresh");
   if (isRefresh && btn) btn.classList.add("spin");
+  // Invalidate the editor-runs cache on every rail refresh (manual refresh /
+  // build-complete / SYNC). A run created or made editable AFTER the session loaded
+  // would otherwise stay falsely "Edit unavailable" forever because state.editorRuns
+  // was fetched once and cached for the life of the session. Resetting to null here
+  // makes the next ensureEditorRuns() refetch /api/editor/runs; the per-render cache
+  // (the `if (state.editorRuns) return` guard) still prevents a refetch on every
+  // single render in between refreshes.
+  state.editorRuns = null;
   try {
     const res = await fetch("/runs/index.json", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -450,6 +484,7 @@ function showEmpty(msg) {
 // Does NOT delete anything; the past builds stay in the sidebar.
 function newBuild() {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  stopLiveWalk();           // drop any live-screencast interval before leaving
   exitAnalytics();          // leaving the operator view (if it was open)
   exitAbout();              // leaving the About view (if it was open)
   state.building = null;
@@ -481,11 +516,25 @@ function replayLandingMotion() {
 }
 
 // Point the user at the single next action: focus the URL input and pulse it once
-// so the eye lands there. The pulse is a CSS class removed on the next tick (the
-// animation is one-shot, time-based via the stylesheet — no setInterval).
+// so the eye lands there. The pulse is a CALM neutral lift (no coral border — see
+// the in-nudge keyframe), so the composer opens fully calm; coral stays reserved
+// for the play button + the selected quality card. Programmatic/mouse focus shows
+// the neutral .cmp-in:focus well (no ring); only genuine keyboard :focus-visible
+// earns a faint coral ring. The pulse class is removed + re-added (one-shot,
+// time-based via the stylesheet — no setInterval).
 function focusBuildUrl() {
   const u = $("build-url");
   if (!u) return;
+  // Mark this focus as programmatic so the stylesheet suppresses the coral
+  // :focus-visible ring (some browsers match :focus-visible on a scripted
+  // .focus()). Cleared on the first real keyboard/pointer interaction so genuine
+  // keyboard focus keeps its faint coral ring. Listeners are { once:true } so they
+  // self-remove and never stack across repeated newBuild() calls.
+  u.classList.add("is-prog-focus");
+  const clearProg = () => u.classList.remove("is-prog-focus");
+  u.addEventListener("keydown", clearProg, { once: true });
+  u.addEventListener("pointerdown", clearProg, { once: true });
+  u.addEventListener("blur", clearProg, { once: true });
   try { u.focus({ preventScroll: false }); } catch (e) { u.focus(); }
   u.classList.remove("nudge");
   // reflow so re-adding the class restarts the one-shot animation
@@ -496,7 +545,31 @@ function focusBuildUrl() {
 const clip = (s, n) => { s = s || ""; return s.length > n ? s.slice(0, n - 1) + "…" : s; };
 
 /* ---------------- select + detail ---------------- */
+/* EDITOR-LOADABLE RUNS — fetch the editor's run list ONCE and cache the set of ids
+   it can deep-load. The editor (/editor/?run=<id>) only knows runs that have a
+   props.json; a delivered run WITHOUT one would otherwise deep-link to nothing and
+   the editor would silently fall back to a DEFAULT run — i.e. "Edit video" opens a
+   DIFFERENT video. We use this set to gate the Edit affordance so the click always
+   lands on the right run or says, plainly, that this one isn't editable yet.
+   Best-effort: on any failure we cache an empty set (Edit shows the not-editable
+   note rather than risking the wrong-video link). */
+async function ensureEditorRuns() {
+  if (state.editorRuns) return state.editorRuns;
+  try {
+    const res = await fetch("/api/editor/runs", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    state.editorRuns = new Set((data.runs || []).map((r) => r.id));
+  } catch (e) {
+    state.editorRuns = new Set();   // unknown → treat as not-editable, never wrong-video
+  }
+  return state.editorRuns;
+}
+// True only when the editor can actually deep-load this run (has props.json).
+const runIsEditable = (runId) => !!(state.editorRuns && state.editorRuns.has(runId));
+
 async function selectRun(runId, silent) {
+  stopLiveWalk();           // opening another build drops any live-screencast interval
   exitAnalytics();          // opening a build leaves the operator analytics view
   exitAbout();              // ...and the About view
   state.selected = runId;
@@ -511,7 +584,15 @@ async function selectRun(runId, silent) {
   try {
     const res = await fetch("/runs/" + encodeURIComponent(runId) + "/ledger.json", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
+    // Stable per-render cache-bust token for this run's video srcs: the ledger is
+    // rewritten at delivery (~render time), so its Last-Modified header is identical
+    // across reloads of an unchanged run but changes after a re-render. Fall back to
+    // the run id (no bust churn) if the header is somehow absent.
+    state.ledgerToken = res.headers.get("Last-Modified") || runId;
     state.ledger = await res.json();
+    // Know which runs the editor can deep-load BEFORE rendering, so the delivered
+    // view's "Edit video" affordance is correct on first paint (no wrong-video link).
+    await ensureEditorRuns();
     empty.hidden = true; detail.hidden = false;
     renderDetail(detail, state.ledger, runId);
     if (!silent) $("stage").scrollTo({ top: 0 });
@@ -559,6 +640,7 @@ function renderDetail(root, l, runId) {
     // delivered run lands instantly on the video, not on a code-typing animation.
     wireProofDisclosures(root, l, authored, runId);
     initDeliveredHero(l, runId);
+    initDhPlayer();
     const hv = root.querySelector(".dh-video"); if (hv) hv.load();
     return;
   }
@@ -616,12 +698,49 @@ function deliveredHero(l, runId) {
       '<span class="dh-badge">' + icon("i-check") + "DELIVERED</span>" +
       '<span class="dh-title">' + heroWordsBrand("Your", brand, "promo is", "ready") + "</span>" +
     "</div>" +
-    '<div class="dh-frame"><video class="dh-video" controls autoplay muted loop playsinline preload="metadata">' +
-      '<source src="' + src + '" type="video/mp4"></video></div>' +
+    // Custom player chrome — no native <video controls> (whose default scrubber
+    // reads generic against the premium frame). A bare looping <video> with a
+    // designed control bar over it: play/pause toggle, a coral scrub track with a
+    // current-time fill + draggable head, a tabular time readout, and a mute
+    // toggle. Wired in initDhPlayer(); the bar reveals on hover/focus and while
+    // paused, and hides during uninterrupted playback so the video stays the hero.
+    '<div class="dh-frame"><div class="dh-player" id="dh-player">' +
+      '<video class="dh-video" autoplay muted loop playsinline preload="metadata">' +
+        // ?t=<token> busts a stale cached cut after a re-render of the same run. Only
+        // the PLAYBACK src carries it; the Download/Copy-link below keep the clean URL.
+        '<source src="' + src + mp4Bust() + '" type="video/mp4"></video>' +
+      '<button class="dh-pp" id="dh-pp" type="button" aria-label="Play or pause">' +
+        '<svg class="ic dh-ic-pause" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M7 5h3.2v14H7zM13.8 5H17v14h-3.2z"/></svg>' +
+        '<svg class="ic dh-ic-play" aria-hidden="true"><use href="#i-play"/></svg></button>' +
+      '<div class="dh-ctrls">' +
+        '<button class="dh-c-pp" id="dh-c-pp" type="button" aria-label="Play or pause">' +
+          '<svg class="ic dh-ic-pause" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M7 5h3.2v14H7zM13.8 5H17v14h-3.2z"/></svg>' +
+          '<svg class="ic dh-ic-play" aria-hidden="true"><use href="#i-play"/></svg></button>' +
+        '<div class="dh-scrub" id="dh-scrub" role="slider" aria-label="Seek" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">' +
+          '<div class="dh-scrub-fill" id="dh-scrub-fill"></div><div class="dh-scrub-head" id="dh-scrub-head"></div></div>' +
+        '<div class="dh-time"><span id="dh-cur">0:00</span><span class="dh-time-sep">/</span><span id="dh-dur">0:00</span></div>' +
+        '<button class="dh-mute" id="dh-mute" type="button" aria-label="Mute or unmute">' +
+          '<svg class="ic dh-ic-muted" aria-hidden="true" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 9v6h3l5 4V5L7 9H4zM16 9l4 6M20 9l-4 6"/></svg>' +
+          '<svg class="ic dh-ic-sound" aria-hidden="true" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 9v6h3l5 4V5L7 9H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg></button>' +
+      "</div>" +
+    "</div></div>" +
     '<div class="dh-bar">' +
       '<div class="dh-meta">' + esc(meta) + "</div>" +
       '<div class="dh-actions">' +
         '<a class="dh-dl" href="' + src + '" download>' + icon("i-down") + "Download MP4</a>" +
+        // Opens the folded in-browser editor on THIS run (same app, :3030). The editor
+        // reads ?run=<id> and loads the run's props for live text/geometry/theme/timing
+        // edits + re-export — but it can ONLY load runs that have a props.json. We gate
+        // on that here so a click always lands on THIS run, never a silent fall-back to
+        // a different one. Editable → real link (neutral secondary, coral stays on
+        // Download). Not editable → a disabled control with a plain inline reason, so
+        // there are no wasted clicks hunting for the right video.
+        (runIsEditable(runId)
+          ? '<a class="dh-edit" href="/editor/?run=' + encodeURIComponent(runId) + '">' + icon("i-layers") +
+              "Edit video</a>"
+          : '<span class="dh-edit dh-edit-off" role="button" aria-disabled="true" tabindex="0" ' +
+              'title="This delivered run has no editable project yet, so the editor can\'t open it. Download the MP4 above, or re-render the build to make it editable.">' +
+              icon("i-layers") + "Edit unavailable</span>") +
         '<button class="dh-share" id="dh-share" data-src="' + src + '">' + icon("i-link") +
           '<span class="dh-share-txt">Copy link</span></button>' +
       "</div>" +
@@ -673,6 +792,70 @@ function shareConfirmed(btn) {
   state.shareTimer = requestAnimationFrame(frame);
 }
 
+/* ---- custom delivered-hero player chrome ------------------------------------
+   Drives the designed control bar over the bare looping <video> (no native
+   controls): play/pause toggles, the scrub track reflects + seeks currentTime,
+   the time readout updates, and the mute toggle flips audio. The bar auto-shows
+   on hover/focus + while paused and fades during uninterrupted playback so the
+   video stays the hero. All listeners hang off the freshly-rendered nodes; a new
+   delivered render replaces them wholesale, so nothing leaks. */
+function initDhPlayer() {
+  const player = $("dh-player");
+  if (!player) return;
+  const v = player.querySelector(".dh-video");
+  const scrub = $("dh-scrub"), fill = $("dh-scrub-fill"), head = $("dh-scrub-head");
+  const cur = $("dh-cur"), dur = $("dh-dur"), mute = $("dh-mute");
+  if (!v || !scrub) return;
+
+  const fmt = (s) => {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+    return m + ":" + String(ss).padStart(2, "0");
+  };
+  const setPlaying = (playing) => player.classList.toggle("is-playing", playing);
+  const toggle = () => { if (v.paused) v.play().catch(() => {}); else v.pause(); };
+  ["dh-pp", "dh-c-pp"].forEach((id) => { const b = $(id); if (b) b.onclick = toggle; });
+  v.addEventListener("play", () => setPlaying(true));
+  v.addEventListener("pause", () => setPlaying(false));
+  setPlaying(!v.paused);
+
+  const paint = () => {
+    const d = v.duration || 0, t = v.currentTime || 0;
+    const pct = d ? Math.min(100, (t / d) * 100) : 0;
+    fill.style.width = pct + "%";
+    head.style.left = pct + "%";
+    if (cur) cur.textContent = fmt(t);
+    scrub.setAttribute("aria-valuenow", String(Math.round(pct)));
+  };
+  v.addEventListener("timeupdate", paint);
+  v.addEventListener("seeked", paint);
+  v.addEventListener("loadedmetadata", () => { if (dur) dur.textContent = fmt(v.duration); paint(); });
+  if (v.readyState >= 1 && dur) { dur.textContent = fmt(v.duration); paint(); }
+
+  // Seek: click or drag along the track maps x -> currentTime.
+  const seekTo = (clientX) => {
+    const r = scrub.getBoundingClientRect();
+    const ratio = r.width ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;
+    if (v.duration) { v.currentTime = ratio * v.duration; paint(); }
+  };
+  let dragging = false;
+  scrub.addEventListener("pointerdown", (e) => { dragging = true; scrub.setPointerCapture(e.pointerId); seekTo(e.clientX); });
+  scrub.addEventListener("pointermove", (e) => { if (dragging) seekTo(e.clientX); });
+  scrub.addEventListener("pointerup", (e) => { dragging = false; try { scrub.releasePointerCapture(e.pointerId); } catch (_) {} });
+  scrub.addEventListener("keydown", (e) => {
+    if (!v.duration) return;
+    if (e.key === "ArrowRight") { v.currentTime = Math.min(v.duration, v.currentTime + 5); paint(); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { v.currentTime = Math.max(0, v.currentTime - 5); paint(); e.preventDefault(); }
+    else if (e.key === " " || e.key === "Enter") { toggle(); e.preventDefault(); }
+  });
+
+  if (mute) {
+    const syncMute = () => player.classList.toggle("is-muted", v.muted || v.volume === 0);
+    mute.onclick = () => { v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 1; syncMute(); };
+    syncMute();
+  }
+}
+
 function sourceMedia(sceneList, runId) {
   const cards = sceneList.map((s) => {
     const badge = s.real_media
@@ -685,7 +868,7 @@ function sourceMedia(sceneList, runId) {
     }
     const src = "/runs/" + encodeURIComponent(runId) + "/" + s.output_path;
     return '<div class="sm-card"><video controls muted playsinline preload="metadata"><source src="' +
-      src + '" type="video/mp4"></video><div class="sm-foot"><span class="sm-id">' + esc(s.id) +
+      src + mp4Bust() + '" type="video/mp4"></video><div class="sm-foot"><span class="sm-id">' + esc(s.id) +
       " · " + esc(s.type) + (s.real_media && s.real_media.model ? " · " + esc(s.real_media.model) : "") +
       "</span>" + badge + "</div></div>";
   }).join("");
@@ -860,7 +1043,7 @@ function typeCode(scene, runId) {
     state.typer = null;
     status.textContent = "rendered · " + (scene.studio.render_ms || 0) + "ms";
     dot.className = "render-dot done";
-    video.src = "/runs/" + encodeURIComponent(runId) + "/" + scene.output_path;
+    video.src = "/runs/" + encodeURIComponent(runId) + "/" + scene.output_path + mp4Bust();
     video.style.opacity = "1"; video.load(); video.play().catch(() => {});
   };
   const frame = (ts) => {
@@ -909,7 +1092,7 @@ function tokenizeTSX(src) {
 function viewer(l, runId) {
   const st = l.stitch;
   return '<div class="viewer"><video controls playsinline preload="metadata" poster="">' +
-    '<source src="/runs/' + encodeURIComponent(runId) + "/" + esc(st.output_path) + '" type="video/mp4"></video>' +
+    '<source src="/runs/' + encodeURIComponent(runId) + "/" + esc(st.output_path) + mp4Bust() + '" type="video/mp4"></video>' +
     '<div class="viewer-cap"><span>final.mp4 · ' + st.duration_s + "s · " + st.clip_count + " clips · audio " + (st.has_audio ? "on" : "off") + "</span>" +
     ((st.scenes_cut || []).length ? '<span class="cut">' + (st.scenes_cut || []).length + " scene cut by the gate</span>" : "<span>delivered</span>") + "</div></div>";
 }
@@ -945,8 +1128,22 @@ const PHASE_LABEL = { awaiting_payment: "payment" };
 
 async function startBuild() {
   const url = ($("build-url").value || "").trim();
-  if (!url) { $("build-url").focus(); return; }
+  // Visibility of system status: a silent return left the user guessing why
+  // nothing happened. Surface a clear, brief reason (the company URL is required)
+  // right under the hero and draw the eye to the empty field with its attention
+  // nudge (palette-safe — reuses the existing focusBuildUrl + in-nudge cue).
+  if (!url) {
+    const m = $("stage-empty-msg");
+    if (m) { m.textContent = "Add a company URL to start — e.g. stripe.com"; m.classList.add("hint-attn"); }
+    focusBuildUrl();
+    return;
+  }
   const goal = ($("build-goal").value || "").trim();
+  // EMPHASIS — the walkthrough target the agent steers the guided Walk Agent
+  // capture toward (becomes the STANDARD walkthrough's specific multi-step goal).
+  // Optional: empty is fine — the backend defaults emphasis="" and omits the flag.
+  const emphEl = $("build-emphasis");
+  const emphasis = emphEl ? (emphEl.value || "").trim() : "";
   // "Always real ($)": the live console produces real by default — a real customer
   // payment triggers real production. The mock box is a $0 dev/test escape hatch.
   const mock = $("build-mock");
@@ -956,7 +1153,10 @@ async function startBuild() {
   // premium), chosen on the composer — it changes WHAT the agent produces, so it
   // ships with the build and the plan is priced for it.
   const selection = buildSelectionPayload();
-  const btn = $("build-go"); btn.disabled = true; btn.textContent = "starting…";
+  // Toggle a loading CLASS (CSS swaps the play icon for a spinner) — never write
+  // textContent here: that would wipe the button's inline SVG and the play icon
+  // would vanish on first click and never return.
+  const btn = $("build-go"); btn.disabled = true; btn.classList.add("is-loading");
   try {
     // `pace` is a named pacing (D6) sent as an extra field; the backend may map
     // it to duration/pace or ignore it harmlessly — purely additive here.
@@ -964,12 +1164,17 @@ async function startBuild() {
     // prices the plan cost-plus for that quality (standard floors at $5; premium
     // includes Higgsfield + ElevenLabs COGS, ~$6-9) and the produce stack follows.
     const res = await fetch("/api/build", { method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, goal, mode, pace: state.pace, selection: selection, quality: selection.quality }) });
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, goal, emphasis, mode, pace: state.pace, selection: selection, quality: selection.quality, brain: state.brain }) });
     const j = await res.json();
     if (!res.ok || !j.run_id) throw new Error(j.error || "could not start");
     beginPoll(j.run_id);
   } catch (e) {
-    btn.disabled = false; btn.textContent = "Build";
+    btn.disabled = false; btn.classList.remove("is-loading");
+    // Surface the failure where the user is looking (the composer), not only in the
+    // sidebar connection pill which is easy to miss. Help users recognize + recover:
+    // a plain-language reason right under the hero, plus the existing pill.
+    const m = $("stage-empty-msg");
+    if (m && !$("stage-empty").hidden) { m.textContent = "Couldn't start the build — " + e.message + ". Check the URL and try again."; m.classList.add("hint-attn"); }
     setConn("err", "build failed: " + e.message);
   }
 }
@@ -992,6 +1197,7 @@ function beginPoll(runId) {
   if (state.pollTimer) clearInterval(state.pollTimer);
   if (state.typer) { cancelAnimationFrame(state.typer); state.typer = null; }
   if (state.scriptTyper) { cancelAnimationFrame(state.scriptTyper); state.scriptTyper = null; }
+  stopLiveWalk();   // a fresh build starts with no live-screencast interval running
   const empty = $("stage-empty"), detail = $("detail");
   empty.hidden = true; detail.hidden = false;
   document.querySelectorAll(".run-wrap").forEach((c) => c.classList.remove("active"));
@@ -999,9 +1205,26 @@ function beginPoll(runId) {
     try {
       const r = await fetch("/runs/" + encodeURIComponent(runId) + "/ledger.json?_=" + Date.now(), { cache: "no-store" });
       if (!r.ok) { detail.innerHTML = liveStarting(); return; }
+      // Keep the per-render video cache-bust token current during the live poll so
+      // freshly-produced scene/walkthrough clips load the new bytes (the ledger is
+      // rewritten as scenes complete). Header only — the ?_= above is a separate,
+      // intentional always-fresh buster for the LEDGER JSON itself, not the videos.
+      state.ledgerToken = r.headers.get("Last-Modified") || runId;
       const l = await r.json();
       if (l.status === "delivered") { finishBuild(runId, true); return; }
       if (l.status === "failed") { finishBuild(runId, false, l); return; }
+      // Aborted out-of-band (e.g. stopped from another tab) — stop polling and show
+      // the stopped state rather than spinning on a build that will never finish.
+      if (l.status === "aborted") {
+        if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+        stopLiveWalk();
+        state.building = null;
+        state.selected = runId;
+        const gb = $("build-go"); if (gb) { gb.disabled = false; gb.classList.remove("is-loading"); }
+        detail.innerHTML = buildStopped(runId);
+        const nb = $("bs-new"); if (nb) nb.onclick = newBuild;
+        return;
+      }
       // include earn.payment_status in the signature so the pay-gate status line
       // updates the instant the ledger poll flips unpaid -> paid.
       const sig = l.phase + "|" + ((l.earn || {}).payment_status || "") +
@@ -1015,8 +1238,9 @@ function beginPoll(runId) {
 
 function finishBuild(runId, ok, l) {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  stopLiveWalk();   // build left producing — the delivered/failed view takes over
   state.building = null;
-  const btn = $("build-go"); btn.disabled = false; btn.textContent = "Build";
+  const btn = $("build-go"); btn.disabled = false; btn.classList.remove("is-loading");
   // pin the selection to this run BEFORE refreshing the rail, so loadIndex keeps
   // it instead of auto-selecting a finished decline-run and racing us. (This also
   // matters on the FAILED path: when we land here from a ?paid return on an already-
@@ -1036,6 +1260,10 @@ function finishBuild(runId, ok, l) {
 }
 
 function renderLive(root, l, runId) {
+  // This re-renders #detail.innerHTML, orphaning any prior live-screencast <img> +
+  // its refresh interval. Stop it first; liveAgent() re-arms a fresh one if (and
+  // only if) the live-walk trigger still holds, so intervals never stack/leak.
+  stopLiveWalk();
   // Pre-production PAYMENT GATE: the agent has planned + priced the storyboard;
   // production is held until the customer pays the (real, test-mode) Checkout.
   // PRIMARY FOCUS = the pay decision. The customer sees the PRICE they pay (in the
@@ -1052,6 +1280,7 @@ function renderLive(root, l, runId) {
         { n: "·", hint: scenes.length + " scenes queued", open: false });
     initLiveScript(l);
     initPayGate(l);
+    wireLiveStop(runId);
     return;
   }
   // PRODUCTION. PRIMARY FOCUS = "what's happening now": phase track (in the
@@ -1070,6 +1299,63 @@ function renderLive(root, l, runId) {
     disclosure("Agent activity — live browser & action feed", liveAgent(l, runId),
       { n: "·", hint: (l.events || []).length + " events", open: false });
   initLiveScript(l);
+  wireLiveStop(runId);
+}
+
+/* Wire the live header's "Stop build" control. One handler per render (the button
+   node is fresh each renderLive). On click: a brief in-button confirm, then POST
+   /api/abort {id} — which kills the build's process group server-side and marks the
+   ledger aborted. We stop the poll loop and switch to the "Build stopped" view with
+   a clear path back to a New build. Idempotent: disabling the button on click stops
+   double-fires; a failed abort re-enables it and surfaces the reason. */
+function wireLiveStop(runId) {
+  const btn = $("live-stop");
+  if (!btn) return;
+  btn.onclick = async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add("is-stopping");
+    const label = btn.querySelector("span");
+    if (label) label.textContent = "Stopping…";
+    try {
+      const res = await fetch("/api/abort", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: runId }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) throw new Error((j && j.error) || "abort failed");
+      // Stop polling THIS run and tear down the live screencast, then paint the
+      // stopped state. Mirrors finishBuild's teardown (timers + state.building).
+      if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+      stopLiveWalk();
+      if (state.typer) { cancelAnimationFrame(state.typer); state.typer = null; }
+      if (state.scriptTyper) { cancelAnimationFrame(state.scriptTyper); state.scriptTyper = null; }
+      state.building = null;
+      state.selected = runId;
+      const goBtn = $("build-go"); if (goBtn) { goBtn.disabled = false; goBtn.classList.remove("is-loading"); }
+      const detail = $("detail"), empty = $("stage-empty");
+      if (empty) empty.hidden = true;
+      if (detail) { detail.hidden = false; detail.innerHTML = buildStopped(runId); }
+      const nb = $("bs-new"); if (nb) nb.onclick = newBuild;
+      loadIndex(true);   // refresh the rail so the now-aborted run reflects its status
+    } catch (e) {
+      btn.disabled = false;
+      btn.classList.remove("is-stopping");
+      if (label) label.textContent = "Stop build";
+      setConn("err", "stop failed: " + e.message);
+    }
+  };
+}
+
+/* The "Build stopped" state shown after a successful abort: a clear stopped badge,
+   a one-line explanation, and the single next action (New build). No coral. */
+function buildStopped(runId) {
+  return '<div class="live-head"><div class="live-top">' +
+    '<span class="live-pill stopped">' +
+      '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.6" fill="currentColor"/></svg>' +
+      "STOPPED</span></div>" +
+    '<div class="bs-body">' +
+      '<div class="bs-msg">Build stopped. The running production was terminated — no further work or spend.</div>' +
+      '<div class="bs-actions"><button class="bs-new" id="bs-new" type="button">' + icon("i-plus") + "New build</button></div>" +
+    "</div></div>";
 }
 
 /* ---- QUOTE / PAY GATE: the cost-plus proposal + Stripe TEST-mode Checkout ---
@@ -1128,7 +1414,7 @@ function payGate(l) {
         (j.goal ? ' &mdash; <span class="pg-prop-goal">' + esc(clip(j.goal, 80)) + "</span>" : "") + ".</div>" +
       // the big price + the cost-plus subtitle
       '<div class="pg-price-row"><div class="pg-price" id="pg-price">' + cents(total) + "</div>" +
-        '<div class="pg-for"><div class="pg-for-k">per video · priced cost&#8209;plus</div>' +
+        '<div class="pg-for"><div class="pg-for-k">per video · instant quote</div>' +
           '<div class="pg-for-v">' + payForLine(brand) + "</div></div></div>" +
       // the chosen quality (set upfront on the composer) + its one-line meaning
       qualityNote(quality) +
@@ -1137,6 +1423,7 @@ function payGate(l) {
       payBtn + statusLine +
     "</div>" +
     '<div class="pg-side">' +
+      '<div class="pg-side-h">Order summary</div>' +
       '<div class="pg-line"><span class="k">Job</span><span class="v">' + esc(clip(j.goal, 60)) + "</span></div>" +
       '<div class="pg-line"><span class="k">Quality</span><span class="v">' + esc(qualityLabel(quality)) + "</span></div>" +
       '<div class="pg-line"><span class="k">Session</span><span class="v mono">' + esc(clip(earn.session_id || "—", 22)) + "</span></div>" +
@@ -1159,14 +1446,65 @@ function qualityNote(quality) {
     '<span class="pg-quality-desc">' + esc(blurb) + "</span></div>";
 }
 
-// The itemized breakdown: one Video production line = total (no add-ons).
+// Capitalize a tier/quality string for display ("premium" -> "Premium").
+const capTier = (t) => { t = String(t == null ? "" : t).trim(); return t ? t[0].toUpperCase() + t.slice(1) : t; };
+
+// The itemized breakdown. When the backend has written a full itemized quote into
+// the ledger (`l.quote`, schema in LEDGER.md: {tier, scenes, duration_s,
+// line_items:[{label, amount_cents}], price_cents, band:{min_cents,max_cents}}),
+// render the rich "Your instant quote" card: a heading, a "{scenes} scenes ·
+// {duration_s}s · {Tier}" summary, one row per line_item (label left, $ right),
+// an emphasized Total, and a band reassurance line. Money is formatted via the
+// shared cents() helper (cents -> $X.XX, "—" when null).
+//
+// FALLBACK: older runs have no `l.quote` — render the prior single
+// "Video production = total" breakdown unchanged so nothing breaks.
 function quoteItems(l) {
+  const q = l.quote;
   const total = ledgerPriceCents(l);
-  const rows = '<div class="pg-q-row"><span class="pg-q-lbl">Video production</span>' +
-    '<span class="pg-q-amt">' + cents(total) + "</span></div>";
-  return '<div class="pg-quote" id="pg-quote">' + rows +
-    '<div class="pg-q-row pg-q-total"><span class="pg-q-lbl">Total</span>' +
-      '<span class="pg-q-amt" id="pg-q-total">' + cents(total) + "</span></div></div>";
+
+  // ---- FALLBACK (no l.quote): the original single-row breakdown, untouched. ----
+  if (!q || typeof q !== "object") {
+    const rows = '<div class="pg-q-row"><span class="pg-q-lbl">Video production</span>' +
+      '<span class="pg-q-amt">' + cents(total) + "</span></div>";
+    return '<div class="pg-quote" id="pg-quote">' + rows +
+      '<div class="pg-q-row pg-q-total"><span class="pg-q-lbl">Total</span>' +
+        '<span class="pg-q-amt" id="pg-q-total">' + cents(total) + "</span></div></div>";
+  }
+
+  // ---- FULL CARD (l.quote present): itemized "Your instant quote". ----
+  // Total: prefer the quote's own price_cents, else the resolved ledger price.
+  const totalCents = q.price_cents != null ? q.price_cents : total;
+
+  // Summary line: "{scenes} scenes · {duration_s}s · {Tier}" — each segment shown
+  // only when its value is present, joined by the dashboard's middot separator.
+  const seg = [];
+  if (q.scenes != null) seg.push(esc(q.scenes) + (Number(q.scenes) === 1 ? " scene" : " scenes"));
+  if (q.duration_s != null) seg.push(esc(q.duration_s) + "s");
+  if (q.tier) seg.push(esc(capTier(q.tier)));
+  const summary = seg.length
+    ? '<div class="pg-q-summary">' + seg.join(" &middot; ") + "</div>" : "";
+
+  // Itemized rows from line_items: label left, amount right (cents -> $X.XX).
+  const items = Array.isArray(q.line_items) ? q.line_items : [];
+  const rows = items.map((it) =>
+    '<div class="pg-q-row"><span class="pg-q-lbl">' + esc((it && it.label) || "—") + "</span>" +
+      '<span class="pg-q-amt">' + cents(it ? it.amount_cents : null) + "</span></div>"
+  ).join("");
+
+  // Total row — visually emphasized via .pg-q-total (coral --amber).
+  const totalRow = '<div class="pg-q-row pg-q-total"><span class="pg-q-lbl">Total</span>' +
+    '<span class="pg-q-amt" id="pg-q-total">' + cents(totalCents) + "</span></div>";
+
+  // Reassurance from the band cap: "Capped at $X — you'll never pay more."
+  const cap = q.band && q.band.max_cents != null
+    ? '<div class="pg-q-cap">' + icon("i-check", "ic") +
+        "<span>Capped at " + cents(q.band.max_cents) + " &mdash; you&rsquo;ll never pay more.</span></div>"
+    : "";
+
+  return '<div class="pg-quote pg-quote-full" id="pg-quote">' +
+    '<div class="pg-q-head">Your instant quote</div>' + summary +
+    rows + totalRow + cap + "</div>";
 }
 
 // The "<brand> video" caption under the price builds word-by-word with the BRAND
@@ -1215,7 +1553,7 @@ function liveScript(l) {
   const voInner = script
     ? '<div class="vo-script" id="vo-script" data-script="' + esc(script) + '"></div>' +
       (vo.voice ? '<div class="vo-voice"><span class="dot"></span>voiceover · ' + esc(vo.voice) + "</div>" : "")
-    : '<div class="vo-empty">' + icon("i-loader", "ic spin") + " the agent is still writing the narration…</div>";
+    : skeletonLines(4, "the agent is still writing the narration…");
   const voCard =
     '<div class="script-card"><div class="script-head"><span class="badge">VO</span>' +
       '<span class="h-title">Voiceover narration</span>' +
@@ -1224,8 +1562,7 @@ function liveScript(l) {
   // Ordered scene breakdown — brief + type + producing tool/model + duration.
   let shots;
   if (!scenes.length) {
-    shots = '<div class="vo-empty" style="padding:16px 18px">' + icon("i-loader", "ic spin") +
-      " deciding the shot list…</div>";
+    shots = skeletonShots(3, "deciding the shot list…");
   } else {
     shots = scenes.map((s, i) => {
       const tool = s.model ? esc(s.model) : esc(toolForType(s.type));
@@ -1249,6 +1586,50 @@ function liveScript(l) {
 function toolForType(t) {
   return { title: "motion-graphics", motion_graphic: "motion-graphics",
            walkthrough: "walk-agent" }[t] || "—";
+}
+
+/* ---- SKELETON loaders -------------------------------------------------------
+   While the agent is still writing the narration / deciding the shot list, the
+   card body shows SHIMMERING SKELETON ROWS (the Linear/Vercel pattern) instead of
+   a single thin spinner line floating in a vast empty card. Each bar is a muted
+   pill with a left-to-right sheen sweep (CSS @keyframes sk-shimmer); the last bar
+   of a paragraph is short so it reads as real prose in progress. A quiet caption
+   names what's loading. n = number of text bars. */
+function skeletonLines(n, caption) {
+  // widths taper like real wrapped copy; the final line is a short tail.
+  const widths = ["96%", "100%", "90%", "62%", "78%", "84%"];
+  let bars = "";
+  for (let i = 0; i < n; i++) {
+    const w = widths[i % widths.length];
+    bars += '<span class="sk-bar" style="width:' + w + '"></span>';
+  }
+  return '<div class="sk-lines" aria-busy="true">' + bars +
+    '<div class="sk-cap"><span class="sk-cap-dot"></span>' + esc(caption) + "</div></div>";
+}
+
+/* Skeleton for the ordered shot list: N rows, each a numbered chip placeholder +
+   a stacked brief bar and a row of tag-pill placeholders — the exact shape a real
+   .shot row resolves into, so the layout doesn't jump when scenes arrive. */
+function skeletonShots(n, caption) {
+  let rows = "";
+  for (let i = 0; i < n; i++) {
+    rows += '<div class="sk-shot">' +
+      '<span class="sk-chip"></span>' +
+      '<div class="sk-shot-body"><span class="sk-bar lg" style="width:' + (76 - i * 8) + '%"></span>' +
+        '<div class="sk-tags"><span class="sk-tag"></span><span class="sk-tag"></span><span class="sk-tag sm"></span></div>' +
+      "</div></div>";
+  }
+  return '<div class="sk-shots" aria-busy="true">' + rows +
+    '<div class="sk-cap sk-cap-pad"><span class="sk-cap-dot"></span>' + esc(caption) + "</div></div>";
+}
+
+// A representative line-glyph for a scene type — used ghosted behind the
+// storyboard's working/queued cards so each card reads as a real shot-in-waiting
+// (a film slate) rather than an empty box. Falls back to the film frame.
+function sceneGlyph(t) {
+  return { title: "i-film", motion_graphic: "i-film",
+           walkthrough: "i-link", cinematic: "i-film",
+           screenshot: "i-card", voiceover: "i-mic" }[t] || "i-film";
 }
 
 // Type out the VO narration once, time-based via rAF (setInterval throttles in
@@ -1292,27 +1673,150 @@ function liveHeader(l) {
   const firstBuild = state.liveGoalShown !== state.building;
   const goalHtml = firstBuild ? heroAuto(goal, 2) : esc(goal);
   if (firstBuild) state.liveGoalShown = state.building;
+  // Stop control — visible during EVERY in-progress phase (planning … stitching,
+  // including awaiting_payment). Killing the build genuinely terminates the running
+  // process group server-side (POST /api/abort); it disappears once the run is
+  // delivered/failed/aborted (those states render the delivered/failed/stopped view
+  // instead of liveHeader). Neutral/destructive secondary — no rationed coral, an
+  // inline stop-square SVG (no emoji). data-run carries the id the click aborts.
+  const stopBtn =
+    '<button class="live-stop" id="live-stop" type="button" data-run="' + esc(runId) + '" ' +
+      'title="Stop this build" aria-label="Stop build">' +
+      '<svg class="ic live-stop-ic" aria-hidden="true" viewBox="0 0 24 24">' +
+        '<rect x="6" y="6" width="12" height="12" rx="1.6" fill="currentColor"/></svg>' +
+      "<span>Stop build</span></button>";
   return '<div class="live-head"><div class="live-top">' +
     '<span class="live-pill"><span class="live-dot"></span>BUILDING</span>' +
-    '<span class="live-goal">' + goalHtml + "</span></div>" +
+    '<span class="live-goal">' + goalHtml + "</span>" + stopBtn + "</div>" +
     '<div class="live-url">' + esc(j.company_url || "") + "</div>" +
     '<div class="ph-track"><div class="ph-fill" style="width:' + fillPct + '%"></div>' + chips + "</div></div>";
 }
 
+/* ---- AGENT ACTIVITY: live browser screencast + action feed -------------------
+   The browser column shows ONE of three bodies, in priority order:
+     1) the FINISHED walkthrough <video> once the scene has an output_path;
+     2) the LIVE SCREENCAST — while the walk-agent is navigating (phase==producing
+        AND the walkthrough scene is status=="working" with NO output_path yet) we
+        consume the rolling JPEG the backend writes to runs/<id>/walk/frame.jpg and
+        the runs/<id>/walk/state.json sidecar (url + step + action). A dedicated
+        interval (keyed on state.walkTimer, cleared at the top of renderLive +
+        finishBuild + beginPoll + newBuild so it never stacks/leaks) re-fetches the
+        frame + state ~every 300ms; the <img> cache-busts on each tick;
+     3) otherwise the generic "working…" placeholder (the original behaviour).
+   No new visual language: it reuses the existing .browser / .browser-bar / .blive
+   chrome and a text "LIVE" pill (no emoji, `·` separators). */
 function liveAgent(l, runId) {
   const events = (l.events || []).slice(-7);
-  const walk = (l.scenes || []).find((s) => s.type === "walkthrough" && s.output_path);
+  const walkDone = (l.scenes || []).find((s) => s.type === "walkthrough" && s.output_path);
+  // The live walk: producing, the walkthrough scene is working, and no clip yet.
+  const walkScene = (l.scenes || []).find((s) => s.type === "walkthrough");
+  const liveWalk = l.phase === "producing" && walkScene &&
+    walkScene.status === "working" && !walkScene.output_path;
   const url = (l.job || {}).company_url || "";
   const last = ((l.events || []).slice(-1)[0] || {}).msg || "working…";
-  const body = walk
-    ? '<video src="/runs/' + encodeURIComponent(runId) + "/" + walk.output_path + '" muted loop autoplay playsinline style="width:100%;display:block;aspect-ratio:16/9;object-fit:cover"></video>'
-    : '<div class="agent-think">' + icon("i-code") + "<span>" + esc(last) + "</span></div>";
+
+  let body, urlInit = url;
+  if (walkDone) {
+    body = '<video src="/runs/' + encodeURIComponent(runId) + "/" + walkDone.output_path + mp4Bust() + '" muted loop autoplay playsinline style="width:100%;display:block;aspect-ratio:16/9;object-fit:cover"></video>';
+  } else if (liveWalk) {
+    // The live screencast body: a frame <img> (hidden until the first frame lands,
+    // so a 404 before the browser warms up doesn't show a broken image), a "warming
+    // up" placeholder shown meanwhile, and a caption line (step + the pulsing LIVE
+    // pill). initLiveWalk() arms the refresh interval and toggles these.
+    body =
+      '<div class="walkcast" id="walkcast">' +
+        '<img class="walkcast-img" id="walkcast-img" alt="live walk-agent screencast" ' +
+          'style="width:100%;display:none;aspect-ratio:16/9;object-fit:cover;background:var(--video-bg)" />' +
+        '<div class="agent-think walkcast-warm" id="walkcast-warm">' + icon("i-loader", "ic spin") +
+          "<span>warming up the browser…</span></div>" +
+        '<div class="walkcast-cap" id="walkcast-cap">' +
+          '<span class="wc-step" id="walkcast-step">' + esc(walkScene.brief || "navigating the site…") + "</span>" +
+          '<span class="blive"><span class="blive-dot"></span>LIVE</span>' +
+        "</div>" +
+      "</div>";
+  } else {
+    body = '<div class="agent-think">' + icon("i-code") + "<span>" + esc(last) + "</span></div>";
+  }
+
+  // Schedule the live refresh AFTER this HTML is mounted into #detail (renderLive
+  // sets innerHTML, so the nodes don't exist yet at call time). queueMicrotask runs
+  // after the synchronous innerHTML assignment in renderLive completes.
+  if (liveWalk) queueMicrotask(() => initLiveWalk(runId, url));
+  else stopLiveWalk();
+
+  // action feed — a clean header + rows. When the agent hasn't logged an action
+  // yet, show a quiet, designed empty state (a pulsing dot + "watching for the
+  // agent's next move") instead of a header floating over white.
+  const feedBody = events.length
+    ? events.map((e) => '<div class="feed-row ' + esc(e.level) + '">' + esc(e.msg) + "</div>").join("")
+    : '<div class="feed-empty"><span class="feed-empty-dot"></span>' +
+      '<span class="feed-empty-t">Watching for the agent’s next move…</span></div>';
   return '<div class="agent-grid">' +
     '<div class="browser"><div class="browser-bar"><span class="bdot"></span><span class="bdot"></span><span class="bdot"></span>' +
-    '<span class="burl">' + esc(url) + '</span><span class="blive"><span class="blive-dot"></span>live</span></div>' + body + "</div>" +
-    '<div class="feed"><div class="feed-h">action feed</div>' +
-    events.map((e) => '<div class="feed-row ' + esc(e.level) + '">' + esc(e.msg) + "</div>").join("") +
+    '<span class="burl" id="walkcast-url">' + esc(urlInit) + '</span><span class="blive"><span class="blive-dot"></span>live</span></div>' + body + "</div>" +
+    '<div class="feed"><div class="feed-h"><span class="feed-h-dot"></span>Action feed</div>' +
+    feedBody +
     "</div></div>";
+}
+
+/* Clear the live-screencast refresh interval. Idempotent — safe to call whenever
+   the panel could unmount (every renderLive re-render, finishBuild, beginPoll,
+   newBuild). Keyed on state.walkTimer so re-renders never stack intervals. */
+function stopLiveWalk() {
+  if (state.walkTimer) { clearInterval(state.walkTimer); state.walkTimer = null; }
+}
+
+/* Arm (or re-arm) the live screencast: a single setInterval (~300ms) that
+   cache-busts the frame <img> for smoothness and pulls the walk/state.json
+   sidecar to drive the .burl url bar + the step caption + a failed note. Always
+   stops any prior interval first (no stacking). Bails quietly if the panel nodes
+   aren't in the DOM (e.g. the disclosure re-rendered out from under it). */
+function initLiveWalk(runId, fallbackUrl) {
+  stopLiveWalk();
+  const base = "/runs/" + encodeURIComponent(runId) + "/walk/";
+  const imgEl = $("walkcast-img");
+  if (!imgEl) return;            // panel already gone — nothing to drive
+  let firstFrame = false;
+  // Once a frame decodes, reveal the <img> and hide the "warming up" placeholder.
+  imgEl.onload = () => {
+    if (firstFrame) return;
+    firstFrame = true;
+    imgEl.style.display = "block";
+    const warm = $("walkcast-warm");
+    if (warm) warm.style.display = "none";
+  };
+  // Before the first frame lands frame.jpg 404s — keep the placeholder (don't show
+  // a broken image). After we HAVE a frame, a transient error just keeps the last.
+  imgEl.onerror = () => { if (!firstFrame) imgEl.style.display = "none"; };
+
+  const tick = () => {
+    // If the panel was re-rendered away (new poll signature), stop cleanly.
+    if (!document.getElementById("walkcast-img")) { stopLiveWalk(); return; }
+    const bust = "?_=" + Date.now();
+    imgEl.src = base + "frame.jpg" + bust;
+    fetch(base + "state.json" + bust, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => {
+        if (!s) return;
+        const urlEl = $("walkcast-url");
+        if (urlEl) urlEl.textContent = s.url || fallbackUrl || "";
+        const stepEl = $("walkcast-step");
+        if (stepEl && s.step) stepEl.textContent = s.step;
+        // action=="failed" -> a small "walkthrough skipped" note in the caption.
+        if (s.action === "failed") {
+          const cap = $("walkcast-cap");
+          if (cap && !cap.querySelector(".wc-skip")) {
+            const note = document.createElement("span");
+            note.className = "wc-skip";
+            note.textContent = "· walkthrough skipped";
+            cap.appendChild(note);
+          }
+        }
+      })
+      .catch(() => { /* transient — keep the last good state */ });
+  };
+  tick();                                   // paint immediately, don't wait 300ms
+  state.walkTimer = setInterval(tick, 300);
 }
 
 // Storyboard section lead with a bounded "N of M scenes" counter + a thin amber
@@ -1335,14 +1839,31 @@ function liveStoryboard(scenes, runId) {
     const st = s.status || "queued";
     let body, badge;
     if (st === "produced" && s.output_path) {
-      body = '<video src="/runs/' + encodeURIComponent(runId) + "/" + s.output_path + '" muted loop autoplay playsinline></video>';
+      // The produced clip plays in a media wrapper that carries a GRACEFUL
+      // FALLBACK behind it (a ghosted scene-type glyph + "Scene ready" label on a
+      // soft slate, NOT a flat-black void). If the <video> src 404s or fails to
+      // decode, onerror flips the wrapper to .is-fallback so the slate shows
+      // through instead of the raw black <video> background. The poster gradient on
+      // .sb-media also covers the brief window before a valid clip's first frame
+      // paints, so a card is never momentarily pure black.
+      body = '<div class="sb-media">' +
+        '<video class="sb-clip" src="/runs/' + encodeURIComponent(runId) + "/" + s.output_path + mp4Bust() +
+          '" muted loop autoplay playsinline preload="metadata" ' +
+          'onerror="this.closest(\'.sb-media\').classList.add(\'is-fallback\')" ' +
+          'onstalled="this.closest(\'.sb-media\').classList.add(\'is-fallback\')"></video>' +
+        '<div class="sb-state ready sb-media-fallback">' + icon(sceneGlyph(s.type), "sb-ghost") +
+          '<span class="sb-state-t">Scene ready</span></div>' +
+        "</div>";
       badge = '<span class="sb-badge done">' + esc(s.decision || "done") + "</span>";
     } else if (s.decision === "decline" || st === "declined") {
       body = '<div class="sb-state cut">' + icon("i-cut", "cut") + "</div>"; badge = '<span class="sb-badge cut">cut</span>';
     } else if (st === "working") {
-      body = '<div class="sb-state work">' + icon("i-loader", "ic spin") + "</div>"; badge = '<span class="sb-badge work">working</span>';
+      body = '<div class="sb-state work">' + icon(sceneGlyph(s.type), "sb-ghost") +
+        '<span class="sb-spin">' + icon("i-loader", "ic spin") + "</span>" +
+        '<span class="sb-state-t">Rendering</span></div>'; badge = '<span class="sb-badge work">working</span>';
     } else {
-      body = '<div class="sb-state queue"></div>'; badge = '<span class="sb-badge queue">queued</span>';
+      body = '<div class="sb-state queue">' + icon(sceneGlyph(s.type), "sb-ghost") +
+        '<span class="sb-state-t">Queued</span></div>'; badge = '<span class="sb-badge queue">queued</span>';
     }
     return '<div class="sb-card s-' + st + '">' + body +
       '<div class="sb-foot"><span class="sb-id">' + esc(s.id) + "</span>" + badge + "</div></div>";
@@ -1683,7 +2204,7 @@ function openAbout() {
   if (shell && window.matchMedia("(max-width: 940px)").matches) shell.classList.remove("rail-open");
   const detail = $("detail"), empty = $("stage-empty");
   if (empty) empty.hidden = true;
-  if (detail) { detail.hidden = false; detail.innerHTML = aboutView(); }
+  if (detail) { detail.hidden = false; detail.innerHTML = aboutView(); wireLookbookHover(detail); }
   if ($("stage")) $("stage").scrollTo({ top: 0 });
 }
 
@@ -1697,25 +2218,64 @@ function exitAbout() {
 // here as the "bar every video is held to." Posters live under
 // /dashboard/assets/styles/. Each is a poster + brand + Watch (no style-family tag).
 const ABOUT_LOOKBOOK = [
-  { name: "Orinovate",    poster: "orinovate.jpg", yt: "https://www.youtube.com/watch?v=FNXrDx8v42I", alt: "Orinovate promo — material filter dashboard" },
-  { name: "Hotcake",      poster: "hotcake.jpg",   yt: "https://www.youtube.com/watch?v=BL8IVJ-f14Y", alt: "Hotcake promo — salon CRM member card" },
-  { name: "Kuli",         poster: "kuli.jpg",      yt: "https://www.youtube.com/watch?v=nxFYamrhC5o", alt: "Kuli promo — video analysis grid" },
-  { name: "Trayd",        poster: "trayd.jpg",     yt: "https://www.youtube.com/watch?v=w-YUqHcC9vU", alt: "Trayd promo — navy and lime payroll dashboard" },
-  { name: "JGB Property", poster: "jgb.jpg",       yt: "https://www.youtube.com/watch?v=OKW6xlPMrpo", alt: "JGB Property promo — smart-contract reveal" },
+  { name: "Orinovate",    poster: "orinovate.jpg", video: "orinovate-launch-720.mp4", yt: "https://www.youtube.com/watch?v=FNXrDx8v42I", alt: "Orinovate promo — material filter dashboard" },
+  { name: "Hotcake",      poster: "hotcake.jpg",   video: "hotcake-launch-720.mp4",   yt: "https://www.youtube.com/watch?v=BL8IVJ-f14Y", alt: "Hotcake promo — salon CRM member card" },
+  { name: "Kuli",         poster: "kuli.jpg",      video: "kuli-launch-720.mp4",      yt: "https://www.youtube.com/watch?v=nxFYamrhC5o", alt: "Kuli promo — video analysis grid" },
+  { name: "Trayd",        poster: "trayd.jpg",     video: "trayd-launch-720.mp4",     yt: "https://www.youtube.com/watch?v=w-YUqHcC9vU", alt: "Trayd promo — navy and lime payroll dashboard" },
+  { name: "JGB Property", poster: "jgb.jpg",       video: "jgb-launch-720.mp4",       yt: "https://www.youtube.com/watch?v=OKW6xlPMrpo", alt: "JGB Property promo — smart-contract reveal" },
 ];
 
+// Hover-to-play lookbook cards — mirrors luceostudio.com (VideoCard.astro): the
+// poster shows first, the muted/looped video plays on hover and resets to the
+// poster on leave (preload="none" so nothing loads until the first hover). The
+// frame stays the Watch link (opens YouTube). The poster <img> crossfades to the
+// <video> via opacity (see .sc-poster / .sc-video in styles.css); handlers are
+// wired in wireLookbookHover() after the About view renders.
 function aboutLookbookCards() {
   return ABOUT_LOOKBOOK.map((f) => {
-    const src = "/dashboard/assets/styles/" + f.poster;
+    const poster = "/dashboard/assets/styles/" + f.poster;
+    const vsrc = "/dashboard/assets/video/" + f.video;
     return '<article class="style-card">' +
       '<a class="sc-frame" href="' + f.yt + '" target="_blank" rel="noopener" aria-label="Watch ' + esc(f.name) + ' on YouTube">' +
-        '<img class="sc-poster" src="' + src + '" width="800" height="450" loading="lazy" decoding="async" alt="' + esc(f.alt) + '" />' +
+        '<img class="sc-poster" src="' + poster + '" width="800" height="450" loading="lazy" decoding="async" alt="' + esc(f.alt) + '" />' +
+        '<video class="sc-video" muted loop playsinline preload="none" poster="' + poster + '" data-loop-src="' + vsrc + '"></video>' +
         '<span class="sc-play" aria-hidden="true">' + icon("i-play") + "</span>" +
       "</a>" +
       '<div class="sc-foot"><span class="sc-name">' + esc(f.name) + "</span>" +
         '<a class="sc-watch" href="' + f.yt + '" target="_blank" rel="noopener"><span>Watch</span>' + icon("i-link") + "</a>" +
       "</div></article>";
   }).join("");
+}
+
+// Wire hover-to-play on the lookbook cards — the exact mechanism luceostudio.com
+// uses (VideoCard.astro): on pointerenter, lazily set the src (preload="none"
+// means it loads only now) and play(); on pointerleave, pause() + reset
+// currentTime to 0 so the poster returns. The play() has a load()+retry
+// self-heal so a transient load failure doesn't wedge the card. Gated on a
+// real hover-capable pointer so touch devices keep the static poster + tap-to-
+// Watch behaviour. Called after the About view's innerHTML is set.
+function wireLookbookHover(root) {
+  const scope = root || document;
+  const canHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  if (!canHover) return;
+  scope.querySelectorAll(".style-card").forEach((card) => {
+    const video = card.querySelector("video.sc-video");
+    if (!video) return;
+    const src = video.dataset.loopSrc;
+    const play = async () => {
+      if (src && !video.src) video.src = src;
+      try {
+        await video.play();
+      } catch (e) {
+        try { video.load(); await video.play(); } catch (e2) { /* poster stays */ }
+      }
+    };
+    card.addEventListener("pointerenter", play);
+    card.addEventListener("pointerleave", () => {
+      video.pause();
+      video.currentTime = 0;
+    });
+  });
 }
 
 // The pipeline diagram, drawn as native inline SVG (no raster). Seven labelled
@@ -1789,8 +2349,33 @@ function aboutStep(n, icId, title, body) {
   "</li>";
 }
 
-// The full About view markup. Section A = architecture (diagram + numbered steps);
-// Section B = the curation thesis + the relocated curated lookbook.
+/* The "Built on" credit — a slim, intentional "powered by" strip that names the
+   three stack pillars the studio runs on. NOT a logo dump: each pillar is a clean
+   styled TEXT wordmark (no fabricated official logos) over one concise line, sharing
+   the about card language (--bg-1 surface, --line border, --r-card rounding, the
+   serif/mono pairing, coral accent). Sits at the tail of the Architecture section. */
+const ABOUT_BUILT_ON = [
+  { mark: "NVIDIA", sub: "Nemotron", line: "Plans every storyboard. The agent's brain." },
+  { mark: "Stripe", sub: "",         line: "Prices, charges, and budget-gates every build." },
+  { mark: "Hermes", sub: "",         line: "The agent runtime that runs the whole studio end to end." },
+];
+function aboutBuiltOn() {
+  const cards = ABOUT_BUILT_ON.map((p) => {
+    const sub = p.sub ? '<span class="bo-sub">' + esc(p.sub) + "</span>" : "";
+    return '<div class="bo-card">' +
+      '<span class="bo-mark">' + esc(p.mark) + sub + "</span>" +
+      '<span class="bo-line">' + esc(p.line) + "</span>" +
+    "</div>";
+  }).join("");
+  return '<div class="about-built">' +
+    '<span class="about-built-k">' + icon("i-spark") + "Built on</span>" +
+    '<div class="about-built-grid">' + cards + "</div>" +
+  "</div>";
+}
+
+// The full About view markup. Section A = architecture (diagram + numbered steps +
+// the "Built on" stack credit); Section B = the curation thesis + the relocated
+// curated lookbook.
 function aboutView() {
   const head =
     '<div class="an-head about-head"><div class="an-head-l">' +
@@ -1832,10 +2417,15 @@ function aboutView() {
         '<h3 class="about-h" id="about-arch-h">One pipeline, end to end</h3>' +
         '<p class="about-lead">The agent runs the whole chain itself — read the brand, plan the ' +
           "story, find the voice, build the picture from that voice, design every scene, render, " +
-          "and settle up. The picture is built from the voice, so it always lands on the words.</p>" +
+          "and settle up. The picture is built from the voice, so it always lands on the words. " +
+          "The runtime that drives every link in this chain is <span class=\"ab-em\">Hermes</span>; " +
+          "the brain that plans each storyboard is <span class=\"ab-em\">NVIDIA Nemotron</span>; and " +
+          "<span class=\"ab-em\">Stripe</span> prices, charges, and budget-gates every build — declining " +
+          "any scene that would blow the margin, with no human in the loop.</p>" +
       "</div>" +
       '<div class="ab-diagram">' + aboutPipelineSVG() + "</div>" +
       '<ol class="ab-steps">' + steps + "</ol>" +
+      aboutBuiltOn() +
     "</section>";
 
   // ---- Section B: WHY OUR VIDEOS ARE BETTER (curation thesis + lookbook) ----
@@ -1883,7 +2473,17 @@ function init() {
   loadPricing();          // fetch the canonical pricing.json + render the premium menu
   const btn = $("refresh"); if (btn) btn.addEventListener("click", () => loadIndex(true));
   const go = $("build-go"); if (go) go.addEventListener("click", startBuild);
-  const u = $("build-url"); if (u) u.addEventListener("keydown", (e) => { if (e.key === "Enter") startBuild(); });
+  const u = $("build-url"); if (u) {
+    u.addEventListener("keydown", (e) => { if (e.key === "Enter") startBuild(); });
+    // Clear the "add a URL" / failure hint the moment the user acts on it — the
+    // subline reverts to its calm default. Keeps the attention cue honest (it only
+    // shows while the problem is unresolved).
+    u.addEventListener("input", () => {
+      const m = $("stage-empty-msg");
+      if (m && m.classList.contains("hint-attn")) { m.classList.remove("hint-attn"); m.textContent = "The agent does the rest."; }
+    });
+  }
+  const em = $("build-emphasis"); if (em) em.addEventListener("keydown", (e) => { if (e.key === "Enter") startBuild(); });
   // First-run landing actions: the ONE next step (focus the URL input) and a
   // one-click "see a finished example" that opens a real delivered run so a
   // newcomer can see the payoff before committing.
@@ -1941,6 +2541,14 @@ function init() {
   if (qual) qual.querySelectorAll(".q-opt").forEach((b) => b.addEventListener("click", () => {
     qual.querySelectorAll(".q-opt").forEach((o) => o.classList.toggle("is-on", o === b));
     state.selection.quality = b.getAttribute("data-quality") === "premium" ? "premium" : "standard";
+  }));
+  // OPERATOR planner-BRAIN control (sidebar footer): pick which LLM plans the
+  // storyboard, one selection at a time, stored on state.brain and sent with the
+  // build request. Operator-only — never shown in the clean customer composer.
+  const brainCtl = $("rail-brain");
+  if (brainCtl) brainCtl.querySelectorAll(".brain-opt").forEach((b) => b.addEventListener("click", () => {
+    brainCtl.querySelectorAll(".brain-opt").forEach((o) => o.classList.toggle("is-on", o === b));
+    state.brain = b.getAttribute("data-brain") || "super-free";
   }));
   // A return from Stripe Checkout (?paid / ?cancelled) takes priority over both the
   // in-flight-build resume and the default auto-select — it pins + shows the user's

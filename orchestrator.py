@@ -47,7 +47,7 @@ from plan_schema import validate_plan, resolve_vo_beats, vo_script_from_beats
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRODUCER = os.path.join(HERE, "producer.py")
 
-FREE_TYPES = {"title", "motion_graphic", "walkthrough"}
+FREE_TYPES = {"title", "motion_graphic", "walkthrough", "screenshot"}
 
 # Premium pricing MENU flag (mirrors producer._premium_menu_enabled + the
 # pricing-foundation handoff). Default OFF -> the produce loop + ledger are
@@ -182,9 +182,14 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
     job = plan["job"]
     led = ledger_mod.Ledger(run_id, job, mode, now=now)
     # studio overlays = the agent renders real Remotion (and writes the title/MG
-    # code on camera). A mock-mode presentation upgrade; real mode uses the real
-    # segment tools. The palette comes from the CLIENT brand (style = genre).
-    studio_active = (overlays == "studio" and mode == "mock")
+    # code on camera). DECOUPLED from mode: the white, brand-authored CARD scenes
+    # (title / motion_graphic) render in EVERY mode now, so real-mode builds no
+    # longer fall back to the flat orange synth placeholder. Real MEDIA scenes
+    # (walkthrough / cinematic) still branch on `mode` below — in real mode they
+    # run the genuine walk-agent / Higgsfield generators, NOT the studio
+    # placeholder — so this flag never suppresses real-asset generation.
+    # The palette comes from the CLIENT brand (style = genre).
+    studio_active = (overlays == "studio")
     palette = remotion_codegen.palette_for(job.get("company_url"))
     if studio_active:
         led.data["overlays"] = "studio"
@@ -360,14 +365,31 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
     spent = 0
     clips = []  # (order, path) for scenes that produced a clip
     warnings = []  # scenes that FAILED but were isolated so the run still ships
+    shot_counter = 0  # 0-based index among screenshot scenes -> shot-NN.png mapping
 
     def _walkthrough_gen(scene, out):
         """The walkthrough's generation call, as a closure (so it can run inline OR
-        off-thread). Studio mode uses a labelled placeholder; otherwise the real
-        walk-agent (or mock card). FREE + budget-independent — safe to background."""
-        if studio_active:
-            return adapters.studio_placeholder(scene, out, palette)
-        return adapters.generate_walkthrough(scene, out, mode, job_url=job.get("company_url"))
+        off-thread). Walkthrough generation is MODE-INDEPENDENT: it always calls
+        generate_walkthrough, which honors WS_WALKTHROUGH_CACHE (a cached mp4 clip,
+        the $0/no-NIM verify path), else runs the GENUINE walk_native capture in BOTH
+        mock and real mode. A $0 mock build now produces the SAME real per-brand
+        walkthrough a paying Standard customer gets — mock and real differ only in
+        payment (mock keeps PRODUCER_SIMULATE_PAID) and brain ($0 super-free), not in
+        the walkthrough asset. The synth color card is a last-resort fallback (mock
+        only) reached inside generate_walkthrough when the native capture fails.
+        FREE + budget-independent — safe to background."""
+        # Thread run_dir so the native capture (walk_native.py) streams its live
+        # screencast into <run_dir>/walk/. Returns None (graceful skip) if the native
+        # capture fails in real mode, or a brand-tinted placeholder (placeholder:True)
+        # on a mock-mode native failure — both handled at the walkthrough slot below
+        # (non-fatal): the None/placeholder gate drops the scene + its VO beat.
+        # Thread the run's BRAND ACCENT so any last-resort synthesized placeholder card
+        # is colored with the brand instead of the fixed generic teal (no-op for real
+        # captures — generate_walkthrough only uses accent_hex on its synth fallback).
+        return adapters.generate_walkthrough(scene, out, mode,
+                                             job_url=job.get("company_url"),
+                                             run_dir=run_dir,
+                                             accent_hex=palette.get("accent"))
 
     # PARALLEL (opt-in): kick off the slow/flaky walkthrough generation NOW so it
     # overlaps the other scenes. Only GENERATION is off-thread — the walkthrough is
@@ -421,6 +443,80 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
                         info = t.result_or_raise()
                     else:
                         info = _walkthrough_gen(scene, out)
+                    # NON-FATAL skip: native real-mode capture returns None when it
+                    # could not produce a clip (deadlock-proof: it never raises/hangs).
+                    # Drop just this scene — append NO clip — and continue so the build
+                    # still stitches the survivors. A paid build always ships SOMETHING.
+                    if info is None:
+                        rec.update({"decision": "skip", "status": "skipped",
+                                    "tool": adapters_tool(stype),
+                                    "preview_cost_cents": 0, "spent_cents": 0,
+                                    "remaining_after_cents": budget - spent,
+                                    "final_model": None, "output_path": None,
+                                    "stripe_authorization": None, "studio": None,
+                                    "note": "walkthrough capture unavailable — scene dropped"})
+                        warnings.append({"id": sid, "type": stype,
+                                         "error": "walkthrough capture skipped (non-fatal)"})
+                        led.event("info", "WALKTHROUGH scene %r skipped — native "
+                                  "capture unavailable; run continues without it" % sid)
+                        led.upsert_scene(rec)
+                        flush()
+                        continue
+                    # PLACEHOLDER GUARD ($0 fallback): when a build INTENDED a genuine
+                    # per-brand walkthrough, a walkthrough that came back as a synthetic
+                    # placeholder (the last-resort synth card or a studio storyboard
+                    # frame) is NOT a real capture — so shipping it would play the
+                    # brand's real-walkthrough VO over generic footage (the
+                    # audio<->visual mismatch). Drop the scene the same way a failed
+                    # native capture is dropped; the narrated VO beat then drops
+                    # automatically (it is keyed off produced clips, so a scene with no
+                    # clip never gets its beat). This is a CLEAN skip, not a warning —
+                    # the real-capture path simply fell back.
+                    #
+                    # A build INTENDED a real walkthrough whenever the native capture
+                    # ran: ALWAYS in real mode, and in MOCK for every real product build
+                    # (build_runner sets WS_WALKTHROUGH_NATIVE=1). So mock now behaves
+                    # like standard — a placeholder/failed walkthrough drops its scene +
+                    # VO in mock too.
+                    #   * offline test mock (no flag): the synth card is by-design (the
+                    #     $0 orchestrator-judgment build never shipped to a customer) —
+                    #     KEEP it, so those tests still ship the mock walkthrough.
+                    #   * real native capture  -> info["placeholder"] is False -> KEEP.
+                    #   * cached proven capture -> info["placeholder"] is False -> KEEP.
+                    intended_real_walkthrough = (
+                        mode == "real"
+                        or bool((os.environ.get("WS_WALKTHROUGH_NATIVE") or "").strip()))
+                    if (intended_real_walkthrough and isinstance(info, dict)
+                            and info.get("placeholder")):
+                        rec.update({"decision": "skip", "status": "skipped",
+                                    "tool": adapters_tool(stype),
+                                    "preview_cost_cents": 0, "spent_cents": 0,
+                                    "remaining_after_cents": budget - spent,
+                                    "final_model": None, "output_path": None,
+                                    "stripe_authorization": None, "studio": None,
+                                    "note": "walkthrough was a placeholder (no real "
+                                            "capture) — scene + its VO beat dropped so "
+                                            "the brand narration never plays over "
+                                            "generic footage"})
+                        led.event("info", "WALKTHROUGH scene %r dropped — only a "
+                                  "placeholder was produced (no genuine capture); its "
+                                  "narrated VO beat is dropped with it so the brand VO "
+                                  "never narrates generic footage" % sid)
+                        led.upsert_scene(rec)
+                        flush()
+                        continue
+                    if studio_active:
+                        studio_block = info
+                elif stype == "screenshot":
+                    # FREE + mode-independent: build a clip from the real captured
+                    # shot-NN.png (the apple-screenshot proof beat). The customer-facing
+                    # picture is the VO-engine Timeline render (same PNG in a branded
+                    # browser card); this orchestrator clip is bookkeeping. Pass the
+                    # 0-based screenshot index so the Nth screenshot scene maps to
+                    # shot-NN. Never-blank: synth card if no capture.
+                    sc = dict(scene, _shot_index=shot_counter)
+                    info = adapters.generate_screenshot_clip(sc, out, mode)
+                    shot_counter += 1
                     if studio_active:
                         studio_block = info
                 else:
@@ -507,9 +603,12 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
             # still ships the rest — never aborting the loop.
             spent += preview
             try:
-                if studio_active:
+                if studio_active and mode == "mock":
                     studio_block = adapters.studio_placeholder(scene, out, palette)
                 else:
+                    # Real mode: the gate already paid — generate the genuine
+                    # Higgsfield clip (studio overlays decoupling never replaces
+                    # a budgeted real cinematic asset with a placeholder).
                     adapters.generate_cinematic(scene, out, mode, company_url=job.get("company_url"))
             except Exception as e:  # noqa: BLE001 — isolate one scene's failure
                 _isolate_failed_scene(led, rec, sid, stype, e, budget, spent,
@@ -546,10 +645,12 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
                 # failure so the run still ships the rest.
                 spent += new_cost
                 try:
-                    if studio_active:
+                    if studio_active and mode == "mock":
                         studio_block = adapters.studio_placeholder(
                             dict(scene, model=cheaper), out, palette)
                     else:
+                        # Real mode: paid downgrade -> generate the genuine
+                        # (cheaper) Higgsfield clip, not a studio placeholder.
                         adapters.generate_cinematic(scene, out, mode, final_model=cheaper,
                                                     company_url=job.get("company_url"))
                 except Exception as e:  # noqa: BLE001 — isolate one scene's failure
@@ -870,7 +971,7 @@ def _isolate_failed_scene(led, rec, sid, stype, exc, budget, spent, warnings, fl
 
 def adapters_tool(stype):
     return {"title": "motion-graphics", "motion_graphic": "motion-graphics",
-            "walkthrough": "walk-agent"}.get(stype, "unknown")
+            "walkthrough": "walk-agent", "screenshot": "site-capture"}.get(stype, "unknown")
 
 
 def rel(path, base):

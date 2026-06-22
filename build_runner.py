@@ -37,6 +37,7 @@ import shutil
 import sys
 import time
 
+import brain as brain_mod
 import ledger as ledger_mod
 import orchestrator
 import plan_job
@@ -88,6 +89,42 @@ def _price_plan(plan, run_dir):
     return est.get("suggested_price_cents"), currency, est
 
 
+def _build_quote(est, currency="usd"):
+    """Build the itemized customer QUOTE the dashboard reads, from the producer est.
+
+    EXACT schema (a UI agent reads this — do not deviate):
+      {"tier": str, "scenes": int, "duration_s": number,
+       "line_items": [{"label": str, "amount_cents": int}],
+       "price_cents": int, "band": {"min_cents": int, "max_cents": int},
+       "currency": "usd"}
+
+    Sourced entirely from est["menu"] (the dynamic banded quote) + est["signals"]
+    (the storyboard the price was derived from). Returns None if the est carries no
+    menu (e.g. the WS_PREMIUM_MENU=OFF path), so the caller can skip the quote write.
+    """
+    menu = est.get("menu")
+    if not isinstance(menu, dict):
+        return None
+    signals = est.get("signals") or {}
+    band = menu.get("band") or {}
+    line_items = [
+        {"label": li.get("label", ""), "amount_cents": int(li.get("amount_cents") or 0)}
+        for li in (menu.get("line_items") or [])
+    ]
+    return {
+        "tier": est.get("quality") or menu.get("quality") or "standard",
+        "scenes": int(signals.get("scenes") or 0),
+        "duration_s": signals.get("duration_s") or 0,
+        "line_items": line_items,
+        "price_cents": int(menu.get("total_price_cents") or 0),
+        "band": {
+            "min_cents": int(band.get("min_cents") or 0),
+            "max_cents": int(band.get("max_cents") or 0),
+        },
+        "currency": currency,
+    }
+
+
 def _resolve_brand_theme(url, run_dir):
     """Resolve the brand_theme the VO engine fills, and write it to run_dir.
 
@@ -123,6 +160,91 @@ def _resolve_brand_theme(url, run_dir):
     return out
 
 
+def _facts_from_theme(theme):
+    """Normalize a brand_theme dict -> the planner COMPANY-FACTS contract.
+
+        {"wordmark": str, "tagline": str, "features": [str, ...]}
+
+    Handles BOTH theme shapes the resolver can return:
+      - the curated fixture (e.g. branding/orinovate-brand-theme.json): top-level
+        `wordmark` + `tagline`, `features` as [{"label", "value"?, "sub"}, ...]; and
+      - brand_extract.extract_brand output: `name` + `tagline`, `features` as
+        [{"title", "sub"}, ...].
+    Each feature is flattened to one human string ("3D Printing — FDM / SLA / SLS").
+    Returns honest-empty fields when a fact is absent; NEVER fabricates. Never raises.
+    """
+    if not isinstance(theme, dict):
+        return {"wordmark": "", "tagline": "", "features": []}
+    wordmark = (theme.get("wordmark") or theme.get("brand") or theme.get("name") or "")
+    if isinstance(wordmark, str) and wordmark.strip().lower() in ("", "the product"):
+        wordmark = ""
+    tagline = theme.get("tagline") or ""
+    if not tagline:
+        copy = theme.get("copy")
+        if isinstance(copy, dict):
+            tagline = copy.get("hook") or ""
+
+    features = []
+    for f in (theme.get("features") or []):
+        if not isinstance(f, dict):
+            if str(f).strip():
+                features.append(str(f).strip())
+            continue
+        # fixture uses "label"; brand_extract uses "title".
+        label = (f.get("label") or f.get("title") or "").strip()
+        sub = (f.get("sub") or "").strip()
+        if not label:
+            continue
+        features.append("%s — %s" % (label, sub) if sub else label)
+
+    return {
+        "wordmark": str(wordmark).strip(),
+        "tagline": str(tagline).strip(),
+        "features": features,
+    }
+
+
+def _brand_facts(url, run_dir):
+    """Resolve the REAL brand facts for the planner BEFORE planning.
+
+    Reuses _resolve_brand_theme (curated fixture preferred, brand_extract fallback)
+    — the SAME resolver the visual side already fills cards from — so the voiceover
+    the brain plans is grounded in the EXACT facts the picture shows. This is the
+    fix for the VO-vs-visual incoherence bug (Orinovate's invented "data streams").
+
+    Returns the normalized facts dict (possibly all-empty). On any failure returns
+    empty facts so planning proceeds unchanged (the brain just gets no facts block).
+    """
+    try:
+        brand_path = _resolve_brand_theme(url, run_dir)
+        with open(brand_path) as f:
+            theme = json.load(f)
+        return _facts_from_theme(theme)
+    except Exception:
+        return {"wordmark": "", "tagline": "", "features": []}
+
+
+def _capture_screenshots_for_run(url, run_dir):
+    """Capture real website screenshots into runs/<id>/screenshots/ (idempotent).
+
+    Mode-independent + $0; called ONCE per job from _run_vo_engine before the
+    render. Returns the manifest dict (or a not-ok manifest on failure). The
+    apple-screenshot archetype + style_fill stager pick the PNGs up from here; a
+    plan that has no apple-screenshot scene simply ignores them.
+    """
+    import adapters
+    shots_dir = os.path.join(run_dir, "screenshots")
+    manifest_path = os.path.join(shots_dir, "manifest.json")
+    if os.path.exists(manifest_path):
+        # already captured this run — don't re-fetch.
+        try:
+            with open(manifest_path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            pass
+    return adapters.generate_screenshots(url, shots_dir, mode="mock", max_shots=2)
+
+
 def _run_vo_engine(plan, run_id, url, run_dir):
     """Produce the PICTURE via the VO-driven <Timeline> engine and replace the
     run's final.mp4 with it. NEVER-BLANK by construction (ExplainerCard floor).
@@ -142,6 +264,17 @@ def _run_vo_engine(plan, run_id, url, run_dir):
         with open(plan_path, "w") as f:
             json.dump(plan, f, indent=2)
     brand_path = _resolve_brand_theme(url, run_dir)
+
+    # SCREENSHOTS (mode-INDEPENDENT, $0): capture the real site ONCE per job before
+    # the render so any apple-screenshot scene has a real PNG to display. Capture
+    # runs in mock AND real mode (screenshots are deterministic + free), so a mock
+    # Standard build still shows the real site in a white studio card. Best-effort:
+    # a capture failure must NOT fail the (paid, delivered) render — the
+    # apple-screenshot archetype has its own never-blank floor.
+    try:
+        _capture_screenshots_for_run(url, run_dir)
+    except Exception as e:
+        print("[build_runner] screenshot capture skipped: %s" % e, file=sys.stderr)
 
     # align_vo -> build_timeline -> style_fill.build_props -> props.json (+ stage
     # audio). do_render=False here so we render once, below, into the run's final.mp4.
@@ -166,7 +299,7 @@ def _run_vo_engine(plan, run_id, url, run_dir):
 
 
 def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="standard",
-        quality="standard"):
+        quality="standard", brain="super-free", emphasis=""):
     run_dir = os.path.join(RUNS, run_id)
     os.makedirs(run_dir, exist_ok=True)
     led_path = os.path.join(run_dir, "ledger.json")
@@ -187,6 +320,21 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
     # leaves it as today's default so the output stays byte-identical.
     style = style if style in plan_job.VALID_STYLES else "standard"
     os.environ["HERMES_STYLE"] = style
+    # BRAIN (operator): which LLM plans the storyboard, all via OpenRouter. Default
+    # super-free ($0) so a build never accidentally bills planner tokens. Stamped to
+    # the env for observability (mirrors HERMES_STYLE); threaded into the planner call.
+    brain = brain_mod.normalize_brain(brain)
+    os.environ["HERMES_BRAIN"] = brain
+    # NATIVE WALKTHROUGH in MOCK too: a real product build wants the SAME genuine
+    # per-brand walk_native walkthrough whether or not the customer paid — a $0 mock
+    # test build must match what a paying Standard customer gets. This flag makes
+    # adapters.generate_walkthrough run the real walk_native capture in mock mode
+    # (real mode always does). Mock and real then differ ONLY in payment (mock keeps
+    # the simulated PRODUCER_SIMULATE_PAID gate) and brain ($0 super-free), not in the
+    # walkthrough asset. The offline orchestrator-judgment unit tests call orchestrate
+    # directly (never this entrypoint), so they don't set the flag and keep the fast
+    # deterministic synth card — the suite stays $0/offline.
+    os.environ["WS_WALKTHROUGH_NATIVE"] = "1"
     if mode == "mock":
         os.environ.setdefault("PRODUCER_COST_STUB",
                               json.dumps({"seedance_2_0": 22, "gpt_image_2": 7, "__default__": 10}))
@@ -199,16 +347,33 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
     led.write(led_path)
 
     try:
+        # GROUND THE BRAIN IN REAL BRAND FACTS (the VO-vs-visual coherence fix).
+        # Resolve the company's real wordmark/tagline/features from the SAME brand
+        # resolver the visual cards use, BEFORE planning, and thread them into the
+        # planner. Without this the brain only saw url+goal+duration and INVENTED a
+        # product (Orinovate -> hallucinated "AI insight platform / data streams"
+        # while the cards correctly showed 3D printing / CNC / sheet metal). Empty
+        # facts => no facts block => planning is unchanged (graceful).
+        company_facts = _brand_facts(url, run_dir)
+        if any(company_facts.get(k) for k in ("wordmark", "tagline", "features")):
+            led.event("info", "grounded planner in real brand facts: %s — %d features"
+                      % (company_facts.get("wordmark") or "(no wordmark)",
+                         len(company_facts.get("features") or [])))
+            led.write(led_path)
+
         # Thread QUALITY into the planner so the storyboard's SCENE TYPES match the
         # produce stack: standard => Remotion-only (title + motion_graphic, no
         # cinematic); premium => cinematic shots allowed. (Previously quality was
         # only stamped onto plan["selection"] AFTER planning, so a standard plan
         # could still list Seedance / GPT-image cinematic scenes.)
-        plan = plan_job.plan_job(url, goal, target_duration, style=style, quality=quality)
+        plan = plan_job.plan_job(url, goal, target_duration, style=style,
+                                 quality=quality, brain=brain,
+                                 company_facts=company_facts, emphasis=emphasis)
         # Carry the upfront QUALITY choice onto the plan so producer.cmd_estimate
         # prices it (standard floors at $5; premium includes Higgsfield + ElevenLabs
-        # COGS) and orchestrate produces the matching stack.
-        plan["selection"] = {"quality": quality}
+        # COGS) and orchestrate produces the matching stack. Stamp the chosen BRAIN
+        # too (operator observability / future planner-COGS; default super-free=$0).
+        plan["selection"] = {"quality": quality, "brain": brain}
 
         # -- PRICE before producing -------------------------------------------
         price_cents, currency, est = _price_plan(plan, run_dir)
@@ -222,6 +387,17 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
                        for s in plan.get("scenes", [])],
         }
         led.set_pricing(est)
+
+        # -- ITEMIZED QUOTE (the dashboard's pay-gate card reads this) --------
+        # Write the dynamic banded quote to ledger["quote"] with the exact schema
+        # the UI agent expects. The quote's price_cents is the SOURCE OF TRUTH for
+        # what Stripe charges: force the gate price to it so earn.price_cents ==
+        # quote.price_cents (they already agree — suggested_price_cents IS
+        # menu.total_price_cents — but pin it explicitly so they can never drift).
+        quote = _build_quote(est, currency=currency)
+        if quote is not None:
+            led.data["quote"] = quote
+            price_cents = quote["price_cents"]
         led.event("info", "storyboard decided: %d scenes, priced at %sc"
                   % (len(plan.get("scenes", [])), price_cents))
 
@@ -235,9 +411,26 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         led.set_phase("producing")
         led.write(led_path)
 
+        # SCREENSHOTS (mode-independent, $0): capture the real site BEFORE orchestrate
+        # so the orchestrator's screenshot scenes build their clips from real PNGs.
+        # Idempotent: _run_vo_engine's later capture call becomes a no-op. Best-effort
+        # — a capture failure must NOT fail the paid render (the archetypes + the
+        # screenshot-clip adapter both have never-blank floors).
+        try:
+            _capture_screenshots_for_run(url, run_dir)
+        except Exception as e:
+            print("[build_runner] pre-produce screenshot capture skipped: %s" % e, file=sys.stderr)
+
         data, _ = orchestrator.orchestrate(
             plan, run_id, mode=mode,
-            overlays=("studio" if mode == "mock" else "mock"),
+            # Studio overlays (the white, brand-authored Remotion cards) render in
+            # EVERY mode now — decoupled from mock. Previously real mode forced
+            # overlays="mock", which routed title/motion_graphic scenes to the flat
+            # orange synth placeholder (TYPE_COLOR motion_graphic #B45309). Real
+            # MEDIA (walkthrough / Higgsfield) is still gated on `mode` inside
+            # orchestrate (by scene TYPE + budget), so this only changes the
+            # CARD rendering (white vs orange), never real-asset generation.
+            overlays="studio",
             earn=earn)
 
         # PICTURE via the VO-driven engine (the blank-scenes fix). The SACRED money
@@ -247,18 +440,28 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         # footage SHOWS the narrated point (ExplainerCard) instead of a blank.
         # Behind WS_VO_ENGINE (default ON); set WS_VO_ENGINE=0 for the legacy picture.
         if vo_engine_enabled():
+            # Append the VO-ENGINE event to the RICH delivered ledger orchestrate()
+            # just wrote to disk (scenes/pnl/budget-gate verdicts/status=delivered),
+            # NOT to the in-memory run-level `led` — which only holds the planning +
+            # payment-gate events. Writing `led` here would clobber the paid, delivered
+            # record (scenes=[], pnl=null, status stuck at 'running'/phase='producing').
+            # Mirrors _record_failure's reload-before-write to protect the paid record.
+            try:
+                disk_led = ledger_mod.Ledger.load(led_path)
+            except (OSError, ValueError):
+                disk_led = led  # no readable ledger on disk — keep the event somewhere
             try:
                 final = _run_vo_engine(plan, run_id, url, run_dir)
                 if final:
-                    led.event("info", "VO-ENGINE: rendered never-blank <Timeline> "
-                              "picture -> final.mp4 (WS_VO_ENGINE on)")
+                    disk_led.event("info", "VO-ENGINE: rendered never-blank <Timeline> "
+                                   "picture -> final.mp4 (WS_VO_ENGINE on)")
                 else:
-                    led.event("info", "VO-ENGINE: engine render unavailable — kept the "
-                              "legacy picture for this run")
-                led.write(led_path)
+                    disk_led.event("info", "VO-ENGINE: engine render unavailable — kept the "
+                                   "legacy picture for this run")
+                disk_led.write(led_path)
             except Exception as e:  # never let the picture step fail a delivered run
-                led.event("info", "VO-ENGINE: skipped (%s) — kept the legacy picture" % e)
-                led.write(led_path)
+                disk_led.event("info", "VO-ENGINE: skipped (%s) — kept the legacy picture" % e)
+                disk_led.write(led_path)
         return data
     except SystemExit:
         raise
@@ -385,6 +588,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
     ap.add_argument("--goal", default="")
+    ap.add_argument("--emphasis", default="",
+                    help="feature/area to emphasize; becomes the STANDARD walkthrough's "
+                         "specific multi-step goal (avoids the one-nav-link loop)")
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--mode", choices=["mock", "real"], default="mock")
     ap.add_argument("--duration", type=int, default=30)
@@ -396,9 +602,13 @@ def main():
                     help="video quality (the upfront cost-plus choice): standard "
                          "(Remotion + edge-tts, no Higgsfield/ElevenLabs, ~$5) | premium "
                          "(cinematic Higgsfield + ElevenLabs VO, ~$6-9)")
+    ap.add_argument("--brain", choices=list(brain_mod.VALID_BRAINS), default=brain_mod.DEFAULT_BRAIN,
+                    help="planner LLM (operator), all via OpenRouter: ultra-paid | "
+                         "super-free (default, $0) | super-paid")
     a = ap.parse_args()
     goal = a.goal or ("%d-second promo plus a short product walkthrough" % a.duration)
-    run(a.url, goal, a.run_id, a.mode, a.duration, a.pace, a.style, quality=a.quality)
+    run(a.url, goal, a.run_id, a.mode, a.duration, a.pace, a.style,
+        quality=a.quality, brain=a.brain, emphasis=a.emphasis)
 
 
 if __name__ == "__main__":

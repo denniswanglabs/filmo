@@ -105,3 +105,79 @@ export const appleMaskRise = (frame: number, at: number, dy = 48, dur = 26) => {
 // keeps a settled Apple composition alive. Starts at `settle`, deterministic.
 export const breathDrift = (frame: number, settle: number, amp = 2, period = 90) =>
   frame > settle ? Math.sin(((frame - settle) / period) * Math.PI * 2) * amp : 0;
+
+// ---------------------------------------------------------------------------
+// Staged line-by-line / word-by-word reveal helpers (D2 pacing — R4)
+// ---------------------------------------------------------------------------
+
+// Split a title string into display lines for staged reveals.
+// Respects explicit "\n" breaks first; otherwise splits on word boundaries
+// targeting ~maxCharsPerLine characters per line (max 3 lines).
+// Short titles (≤ maxCharsPerLine chars, ≤ 3 words) return as a single line.
+export const splitToLines = (text: string, maxCharsPerLine = 22): string[] => {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return [];
+  // Explicit newlines win.
+  if (trimmed.includes("\n")) return trimmed.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3);
+  const words = trimmed.split(/\s+/);
+  // Short text or few words → single line.
+  if (words.length <= 3 || trimmed.length <= maxCharsPerLine) return [trimmed];
+  // Split into 2 lines at the word closest to 50% of total chars.
+  const half = Math.ceil(trimmed.length / 2);
+  let acc = 0;
+  let splitAt = Math.floor(words.length / 2);
+  for (let i = 0; i < words.length - 1; i++) {
+    acc += words[i].length + 1;
+    if (acc >= half) { splitAt = i + 1; break; }
+  }
+  const lineA = words.slice(0, splitAt).join(" ");
+  const lineB = words.slice(splitAt).join(" ");
+  // If lineB is long, try to split it again (max 3 lines total).
+  if (lineB.length > maxCharsPerLine + 8) {
+    const sub = lineB.split(/\s+/);
+    const subSplit = Math.ceil(sub.length / 2);
+    return [lineA, sub.slice(0, subSplit).join(" "), sub.slice(subSplit).join(" ")];
+  }
+  return [lineA, lineB];
+};
+
+// Per-line staged reveal:
+//   - before its turn: pending (dim color, fully transparent → still present at 0.18 opacity)
+//   - arriving: fades + rises from dy px over dur frames
+//   - active: full opacity/color
+// Returns { opacity, transform, colorProgress } for the given line index.
+// colorProgress 0 = pending dim, 1 = active bright.
+//
+// stagger: frames between each line's start (default 16f = ~0.53s at 30fps)
+// startFrame: when line 0 begins to arrive
+export const stagedLine = (
+  frame: number,
+  lineIndex: number,
+  startFrame: number,
+  stagger = 16,
+  dy = 28,
+  dur = 18
+) => {
+  const lineStart = startFrame + lineIndex * stagger;
+  const opacity = ease(frame, lineStart, lineStart + dur, 0, 1);
+  const yOffset = ease(frame, lineStart, lineStart + dur, dy, 0);
+  // color: arrives → bright; pending (not yet arrived) → dim (0.28 opacity on the text color)
+  // We express this as a 0→1 progress the caller uses to lerp color.
+  const colorP = ease(frame, lineStart, lineStart + dur, 0, 1);
+  return { opacity, transform: `translateY(${yOffset}px)`, colorP };
+};
+
+// ---------------------------------------------------------------------------
+// Act badge helpers
+// ---------------------------------------------------------------------------
+
+// Format a 1-based act index as a zero-padded two-digit string: 1 -> "01", 12 -> "12".
+export const actNum = (index: number) => String(Math.max(1, index)).padStart(2, "0");
+
+// Derive a SHORT LABEL (≤2 words, all-caps) from a kicker string.
+// e.g. "PRODUCT WALKTHROUGH DEMO" -> "PRODUCT WALKTHROUGH"
+export const actLabel = (kicker?: string): string => {
+  const raw = (kicker ?? "").trim().toUpperCase();
+  if (!raw) return "";
+  return raw.split(/\s+/).slice(0, 2).join(" ");
+};

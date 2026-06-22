@@ -15,7 +15,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
-import { appleRise, breathDrift, EASE_OUT_QUART, alphaHex } from "../motion";
+import { appleRise, breathDrift, EASE_OUT_QUART, alphaHex, actNum, actLabel } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
@@ -31,7 +31,11 @@ export const AppleRegistry: React.FC<{
   cues: Cue[];
   theme: Theme;
   durationInFrames: number;
-}> = ({ data, cues, theme, durationInFrames }) => {
+  // 1-based act index among content-beat scenes (-1 = no badge)
+  actIndex?: number;
+  // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
+  sceneId?: string;
+}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId }) => {
   const frame = useCurrentFrame();
 
   const headingAt = cueAt(cues, "heading-in", 8);
@@ -69,6 +73,12 @@ export const AppleRegistry: React.FC<{
     easing: EASE_OUT_QUART,
   });
 
+  // Act badge label from data.kicker (≤2 words, all-caps); AppleRegistry often
+  // uses `data.heading` for the scene topic — fall back to heading if no kicker.
+  const badgeSource = (data.kicker ?? data.heading ?? "").trim();
+  const badgeLabel = actIndex > 0 ? actLabel(badgeSource) : "";
+  const badgeText = actIndex > 0 ? `${actNum(actIndex)}${badgeLabel ? ` — ${badgeLabel}` : ""}` : "";
+
   return (
     <AbsoluteFill
       style={{
@@ -90,6 +100,8 @@ export const AppleRegistry: React.FC<{
 
       {/* Heading */}
       <div
+        data-scene-id={sceneId}
+        data-field="heading"
         style={{
           position: "absolute",
           left: 0,
@@ -160,6 +172,8 @@ export const AppleRegistry: React.FC<{
 
       {/* Type-coded entity grid (3 x 2) */}
       <div
+        data-scene-id={sceneId}
+        data-field="entities"
         style={{
           position: "absolute",
           left: 120,
@@ -289,6 +303,27 @@ export const AppleRegistry: React.FC<{
           );
         })}
       </div>
+
+      {/* Numbered act badge — top-left eyebrow: "NN — LABEL".
+          Rendered LAST (highest z-order) so it paints over the mesh + grid. */}
+      {actIndex > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: 60,
+            top: 52,
+            opacity: head.opacity,
+            fontSize: 22,
+            fontWeight: 700,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: theme.accent,
+            fontFamily: theme.fontMono,
+          }}
+        >
+          {badgeText}
+        </div>
+      )}
     </AbsoluteFill>
   );
 };

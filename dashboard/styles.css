@@ -80,6 +80,37 @@
      (springy), supporting rows slide plainly. */
   --ease-rise:   cubic-bezier(.2,.7,.2,1);    /* plain rows / list items */
   --ease-spring: cubic-bezier(.34,1.4,.64,1); /* hero / money: small overshoot */
+
+  /* ---- SELECTION + FOCUS language (refinement pass) ----------------------
+     One restrained, designed vocabulary so a selected/focused control reads as
+     intentional, NOT like a browser-default focus ring. Two ideas only:
+       · --sel-fill / --sel-line  → the SELECTED state: a soft coral-tinted well
+         + one clean 1px coral border (no offset ring, no heavy inset glow).
+       · --focus-ring             → keyboard :focus-visible: a thin coral halo
+         hugging the control (box-shadow, NOT an offset outline). Subtle, on-brand,
+         still clearly visible for a11y. */
+  --sel-fill:  rgba(214,53,28,.06);          /* selected well — soft coral tint */
+  --sel-line:  rgba(214,53,28,.55);          /* selected border — clean 1px coral */
+  --focus-ring: 0 0 0 3px rgba(214,53,28,.22); /* keyboard focus halo (hugs edge) */
+
+  /* ---- NEUTRAL selection (Hera ration-coral pass) ------------------------
+     Hera keeps coral for exactly ONE primary action + a single live/active pop
+     per screen; the ACTIVE NAV / selected list rows are a calm NEUTRAL gray
+     well, not the accent. These tokens carry that neutral selected look so the
+     sidebar build rows, the Brain rows and the active model card read as
+     "selected" via a quiet recessed fill + a slightly firmer hairline — never a
+     coral tint. A thin coral left-edge indicator (drawn separately) is the only
+     accent the active row gets. */
+  --sel-fill-n: var(--bg-2);     /* selected NEUTRAL well — recessed gray, no tint */
+  --sel-fill-n2: var(--bg-3);    /* selected NEUTRAL well, hover (one step deeper) */
+  --sel-line-n: var(--line-2);   /* selected NEUTRAL border — firm hairline */
+
+  /* ---- ONE shared card elevation (Hera surface system) -------------------
+     Every floating card/panel rides the SAME soft ~5%-black shadow so the
+     surface system reads cohesive: hairline --line + radius --r-card + this.
+     A two-stop shadow (a tight contact shadow + a wide ambient one) gives the
+     gentle "floating on a calm canvas" lift without gloss. */
+  --card-shadow: 0 1px 2px rgba(20,23,28,.05), 0 8px 24px rgba(20,23,28,.05);
 }
 
 * { box-sizing: border-box; }
@@ -117,7 +148,7 @@ button { font-family: inherit; cursor: pointer; }
 /* inline horizontal Walk Studio mark (film-frame glyph + coral cursor + "Walk Studio"
    wordmark) — now lives at the top of the sidebar. Width-fit to the rail, height
    auto from the 432×120 (3.6:1) viewBox so the aspect ratio is preserved. */
-.bar-logo { height: 36px; width: auto; display: block; flex: 0 0 auto; }
+.bar-logo { height: 50px; width: auto; display: block; flex: 0 0 auto; }
 .rec { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; }
 .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-4); }
 .rec-dot.ok { background: var(--pos); box-shadow: 0 0 0 3px rgba(14,159,110,.16); animation: pulse 2.4s ease-in-out infinite; }
@@ -142,16 +173,26 @@ button { font-family: inherit; cursor: pointer; }
    ========================================================================== */
 .shell {
   position: relative; z-index: 2;
-  display: grid; grid-template-columns: 288px 1fr;
-  height: 100vh; transition: grid-template-columns .22s var(--ease-rise);
+  display: grid; grid-template-columns: 272px 1fr;
+  height: 100vh; gap: 14px; padding: 14px;
+  transition: grid-template-columns .22s var(--ease-rise), gap .22s var(--ease-rise), padding .22s var(--ease-rise);
 }
-/* collapsed: the sidebar slides out, the center takes the full width */
-.shell.rail-collapsed { grid-template-columns: 0 1fr; }
+/* collapsed: the floating sidebar slides out, the center takes the full width and
+   the left gutter collapses with it so the stage reclaims the space cleanly. */
+.shell.rail-collapsed { grid-template-columns: 0 1fr; gap: 0; padding-left: 0; }
 
-/* ---- left sidebar ---------------------------------------------------- */
-.rail { display: flex; flex-direction: column; border-right: 1px solid var(--line);
-  background: var(--bg-1); min-height: 0; overflow: hidden; }
-.shell.rail-collapsed .rail { border-right-color: transparent; }
+/* ---- left sidebar — a FLOATING panel (Claude-Code style) -------------------
+   Detached from the window edges: the .shell padding/gap give it air on every
+   side, and the rail itself is a rounded, hairline-bordered card with a soft
+   shadow so it sits ON the page background rather than flush to the edge. The
+   internal layout is unchanged; only the frame became a floating card. */
+.rail { display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  background: var(--bg-1);
+  border: 1px solid var(--line); border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(20,23,28,.04), 0 14px 34px rgba(20,23,28,.07); }
+/* collapsed: fold the floating card away (no stray border/shadow while the
+   column width animates to 0). The .shell padding/gap collapse alongside it. */
+.shell.rail-collapsed .rail { border-color: transparent; box-shadow: none; }
 
 /* brand row at the top of the sidebar */
 .rail-brand { display: flex; align-items: center; justify-content: space-between;
@@ -167,14 +208,20 @@ button { font-family: inherit; cursor: pointer; }
   font-family: var(--mono); font-size: 12.5px; letter-spacing: .3px; font-weight: 600;
   padding: 10px 12px; border-radius: var(--r-ctl);
   transition: border-color .12s, background .12s, color .12s; }
-.rail-new .ic { width: 15px; height: 15px; color: var(--amber); }
+.rail-new .ic { width: 15px; height: 15px; color: var(--ink-3); }
 .rail-new:hover { border-color: var(--amber); background: var(--bg-2); }
-.rail-new:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.rail-new:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
 
 .rail-list { flex: 1; overflow-y: auto; padding: 8px 8px 12px; }
-/* recency section labels — quiet small-caps mono, generous air above each group */
-.rail-group { font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px;
-  text-transform: uppercase; color: var(--ink-4); padding: 6px 10px 5px; margin-top: 10px; }
+/* recency section labels — quiet small-caps mono with a stronger recency RHYTHM:
+   a hairline rule fills the row to the right of each label so groups read as
+   distinct time bands (the Linear "section" cue), and the air above each band is
+   generous. The first band sits tight to the New-build button. */
+.rail-group { display: flex; align-items: center; gap: 9px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.6px; font-weight: 600;
+  text-transform: uppercase; color: var(--ink-4); padding: 6px 12px 6px; margin-top: 16px; }
+.rail-group::after { content: ""; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent); }
 .rail-group:first-child { margin-top: 2px; }
 /* minimal footer — just the connection dot + a quiet SYNC; no tech-stack line */
 .rail-foot { padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -190,11 +237,46 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ink-3); text-align: left; }
 .rail-analytics .ic { width: 15px; height: 15px; color: var(--ink-4); }
 .rail-analytics:hover { color: var(--ink); background: var(--bg-2); border-color: var(--line); }
-.rail-analytics:hover .ic { color: var(--amber); }
+.rail-analytics:hover .ic { color: var(--ink-2); }
 .rail-analytics.is-on { color: var(--ink); background: var(--bg-2); border-color: var(--line-2); }
-.rail-analytics.is-on .ic { color: var(--amber); }
-.rail-analytics:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.rail-analytics.is-on .ic { color: var(--ink-2); }
+.rail-analytics:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
 .rail-empty { color: var(--ink-3); padding: 20px 12px; font-size: 12px; line-height: 1.5; }
+
+/* ---- OPERATOR planner-BRAIN control (footer) --------------------------------
+   Picks WHICH LLM plans the storyboard — operator-only, NOT a customer pill, so it
+   lives in the sidebar footer next to Analytics, never in the clean Hiro composer.
+   Three stacked options (full human labels visible, paid/free tag on the right),
+   one selected at a time. Styled entirely with the restyle tokens: Hanken Grotesk
+   (--mono), --r-ctl rounding, coral (--amber) selection — matches .rail-analytics
+   and .q-opt so it reads as part of the same surface. */
+.rail-brain { margin-bottom: 10px; padding: 6px 2px 2px; }
+.rail-brain-lbl { display: flex; align-items: center; gap: 8px; padding: 2px 8px 8px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.6px; font-weight: 600; text-transform: uppercase;
+  color: var(--ink-4); }
+.rail-brain-lbl .ic { width: 13px; height: 13px; color: var(--ink-4); }
+/* a hairline fills the label row to the right — matches the .rail-group rhythm so
+   the operator Brain block reads as a titled section, not a loose cluster. */
+.rail-brain-lbl::after { content: ""; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent); }
+.rail-brain-opts { display: flex; flex-direction: column; gap: 4px; }
+.brain-opt { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; text-align: left; padding: 7px 10px; border-radius: var(--r-ctl);
+  background: transparent; border: 1px solid transparent;
+  font-family: var(--mono); font-size: 12px; letter-spacing: .2px; color: var(--ink-3);
+  transition: border-color .12s, background .12s, color .12s; }
+.brain-opt .bo-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brain-opt .bo-tag { flex: 0 0 auto; font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+  padding: 1px 5px; border-radius: var(--r-ctl); border: 1px solid var(--line-2); color: var(--ink-4); }
+.brain-opt .bo-tag.paid { color: var(--ink-3); border-color: var(--line-2); background: var(--bg-2); }
+.brain-opt .bo-tag.free { color: var(--pos); border-color: rgba(14,159,110,.4); background: rgba(14,159,110,.06); }
+.brain-opt:hover { color: var(--ink); background: var(--bg-2); border-color: var(--line); }
+/* selected: a calm NEUTRAL well + a firmer hairline (Hera ration-coral — the active
+   operator row is neutral gray, not the accent). The selected name goes ink + 600
+   weight to carry the "on" state without any coral tint. */
+.brain-opt.is-on { color: var(--ink); background: var(--sel-fill-n); border-color: var(--sel-line-n); }
+.brain-opt.is-on .bo-name { font-weight: 600; }
+.brain-opt:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
 
 /* floating reopen control, shown only when the sidebar is collapsed */
 .rail-reopen { position: absolute; z-index: 4; top: 14px; left: 14px;
@@ -210,10 +292,21 @@ button { font-family: inherit; cursor: pointer; }
    delete control. No cards, no borders — just a soft hover/active fill. */
 .run-wrap {
   position: relative; border-radius: var(--r-ctl);
-  margin: 1px 0; transition: background .12s;
+  margin: 1px 0; transition: background .14s var(--ease-rise);
 }
 .run-wrap:hover { background: var(--bg-2); }
-.run-wrap.active { background: var(--bg-2); }
+/* ACTIVE (open) row — Hera ration-coral: the row FILL is a calm NEUTRAL gray well
+   (one step recessed from the page), NOT a coral tint. The ONLY accent it earns is
+   a thin coral left-edge indicator that animates in — a single quiet pop that says
+   "this build is open". Reads intentional, never decorative-coral. */
+.run-wrap.active { background: var(--sel-fill-n); }
+.run-wrap.active::before {
+  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--amber);
+  animation: rail-active-in .22s var(--ease-spring) both;
+}
+@keyframes rail-active-in { from { height: 0; opacity: 0; } to { height: 18px; opacity: 1; } }
+.run-wrap.active:hover { background: var(--sel-fill-n2); }
 .run-card {
   position: relative; width: 100%; text-align: left;
   background: transparent; border: none; border-radius: var(--r-ctl);
@@ -231,6 +324,7 @@ button { font-family: inherit; cursor: pointer; }
 .rc-meta {
   min-width: 0; font-size: 10.5px; line-height: 1.3; color: var(--ink-4);
   letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 .run-wrap:hover .rc-title { color: var(--ink); }
 .run-wrap.active .rc-title { color: var(--ink); font-weight: 600; }
@@ -300,8 +394,10 @@ button { font-family: inherit; cursor: pointer; }
 @keyframes hero-glow-breathe { to { opacity: .82; transform: translateX(-50%) scale(1.04); } }
 
 /* the bold greeting — the single large focal object. Reuses .hero-title sizing but
-   a touch bolder/larger for the Hiro feel; the name lands last in coral (.hw-accent). */
-.hiro-greet { font-weight: 600; font-size: clamp(36px, 5vw, 50px); letter-spacing: -1px; }
+   a touch bolder/larger for the Hiro feel; the name lands last in coral (.hw-accent).
+   Explicit --serif here so the Claude-style Newsreader display face is guaranteed
+   regardless of cascade order with .hero-title. */
+.hiro-greet { font-family: var(--serif); font-weight: 600; font-size: clamp(36px, 5vw, 50px); letter-spacing: -1px; }
 /* at most ONE tiny muted line — no paragraph. */
 .hiro-sub { font-size: 12.5px; color: var(--ink-4); margin-top: 12px; letter-spacing: .3px; max-width: 460px; }
 
@@ -322,9 +418,39 @@ button { font-family: inherit; cursor: pointer; }
   font-family: var(--mono); font-size: 10px; letter-spacing: .8px; text-transform: uppercase;
   padding: 5px 9px; border-radius: var(--r-pill); transition: background .14s var(--ease-rise), color .14s; }
 .hpill-pace .pace-opt:hover { color: var(--ink-2); }
-.hpill-pace .pace-opt.is-on { background: var(--amber); color: var(--on-accent); font-weight: 700;
-  box-shadow: 0 1px 2px rgba(20,23,28,.16); }
-.hpill-pace .pace-opt:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+/* active pacing = a NEUTRAL ink pill (Hera ration-coral: pacing is a setting toggle,
+   not a primary action, so its "on" state is dark neutral, not the coral accent). */
+.hpill-pace .pace-opt.is-on { background: var(--ink); color: #fff; font-weight: 700;
+  box-shadow: 0 1px 2px rgba(20,23,28,.18); }
+.hpill-pace .pace-opt:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
+
+/* ---- SEGMENTED SETTING-CHIPS (Hera-style) -------------------------------------
+   A reusable segmented control that rides INSIDE a white .hpill chip: a small quiet
+   left label + 2-3 inline options, one lit at a time. Used by the Quality chip
+   (Standard | Premium, each with a "from $X" sub) and the Pacing chip in the
+   composer's setting-chip row. The "on" option is a NEUTRAL ink pill (ration-coral:
+   these are settings, not the primary action — coral stays on the PLAY button). */
+.hpill-seg { gap: 4px; padding: 4px 6px 4px 12px; }
+.hpill-seg-lbl { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--ink-4); margin-right: 3px; flex: none; }
+.hpill-seg .seg-opt { display: inline-flex; align-items: baseline; gap: 5px;
+  background: transparent; border: none; color: var(--ink-3);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .2px;
+  padding: 5px 10px; border-radius: var(--r-pill);
+  transition: background .14s var(--ease-rise), color .14s; }
+.hpill-seg .seg-opt .seg-name { font-weight: 600; }
+.hpill-seg .seg-opt .seg-sub { font-size: 9.5px; letter-spacing: .2px; color: var(--ink-4);
+  font-variant-numeric: tabular-nums; }
+.hpill-seg .seg-opt:hover { color: var(--ink-2); background: var(--bg-2); }
+.hpill-seg .seg-opt:hover .seg-sub { color: var(--ink-3); }
+/* active option = a calm NEUTRAL ink pill (no coral). The white name + dimmed sub
+   ride on the dark fill so the selection reads clearly without the accent. */
+.hpill-seg .seg-opt.is-on { background: var(--ink); color: #fff;
+  box-shadow: 0 1px 2px rgba(20,23,28,.18); }
+.hpill-seg .seg-opt.is-on .seg-sub { color: rgba(255,255,255,.7); }
+.hpill-seg .seg-opt:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
+/* the Pacing chip's options carry no sub, so tighten them to the same rhythm */
+.hpill-pace.hpill-seg .seg-opt { text-transform: uppercase; font-size: 10px; letter-spacing: .8px; padding: 5px 9px; }
 
 /* THE HIRO COMPOSER — a polished white rounded card with a soft shadow. The goal is
    the main prompt line; the URL is a small clean field below; the bottom row holds a
@@ -334,11 +460,10 @@ button { font-family: inherit; cursor: pointer; }
 .hiro-composer .cmp-fields { padding: 18px 18px 6px; }
 /* the goal — the main, larger prompt line */
 .cmp-goal { font-size: 15px; padding: 13px 14px; margin-bottom: 10px; }
-/* the URL — a small, clean field with a leading link glyph */
+/* the URL — a small, clean field (no leading icon). Padding matches the goal
+   input so text aligns naturally with the field's left edge. */
 .cmp-url-row { position: relative; margin-bottom: 4px; }
-.cmp-url-ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-  width: 14px; height: 14px; color: var(--ink-4); pointer-events: none; }
-.cmp-url { padding-left: 34px; font-size: 12.5px; margin-bottom: 0; }
+.cmp-url { font-size: 12.5px; margin-bottom: 0; }
 /* the bottom action row — subtle toggle left, coral circular send right */
 .hiro-composer .cmp-bar { padding: 10px 14px 12px; align-items: center; }
 .hiro-composer .cmp-opts { gap: 12px; }
@@ -350,12 +475,24 @@ button { font-family: inherit; cursor: pointer; }
    stays — keeps the circle clean without touching app.js's button wiring.
    Scoped under .hiro-composer so these win over the later .build-go base rules
    (which set border-radius:var(--r-ctl) and a translateX hover on .ic). */
-.hiro-composer .cmp-send { width: 38px; height: 38px; padding: 0; border-radius: 50%; font-size: 0;
-  justify-content: center; box-shadow: 0 1px 2px rgba(20,23,28,.16), 0 4px 12px rgba(214,53,28,.26); }
-.hiro-composer .cmp-send .ic { width: 17px; height: 17px; transform: rotate(-90deg); }
-.hiro-composer .cmp-send:hover { filter: brightness(1.08); }
-.hiro-composer .cmp-send:hover .ic { transform: rotate(-90deg) translateX(2px); }
-.hiro-composer .cmp-send:disabled .ic { display: inline-block; }
+.hiro-composer .cmp-send { width: 40px; height: 40px; padding: 0; border-radius: 50%; font-size: 0;
+  justify-content: center; background: linear-gradient(180deg, #E14730, var(--amber));
+  box-shadow: 0 1px 2px rgba(20,23,28,.18), 0 6px 16px rgba(214,53,28,.30), inset 0 1px 0 rgba(255,255,255,.22);
+  transition: filter .14s, box-shadow .18s var(--ease-rise), transform .18s var(--ease-rise); }
+/* PLAY semantics: the filled #i-play triangle, optically nudged right so it reads
+   centered inside the circle. The button carries a play icon AND a loader icon;
+   .is-loading (toggled by app.js during a build) swaps which one shows — the SVG
+   markup is never wiped, so the play icon always returns when the build ends. */
+.hiro-composer .cmp-send { flex: none; }
+.hiro-composer .cmp-send .ic { flex: none; width: 16px; height: 16px; transform: translateX(1px); }
+.hiro-composer .cmp-send .ic-load { display: none; }
+.hiro-composer .cmp-send.is-loading .ic-play { display: none; }
+.hiro-composer .cmp-send.is-loading .ic-load { display: inline-block; transform: translateX(0); animation: rot 0.8s linear infinite; }
+.hiro-composer .cmp-send:hover { filter: brightness(1.06); transform: translateY(-1px);
+  box-shadow: 0 1px 2px rgba(20,23,28,.18), 0 10px 22px rgba(214,53,28,.36), inset 0 1px 0 rgba(255,255,255,.22); }
+.hiro-composer .cmp-send:hover .ic-play { transform: translateX(2.5px) scale(1.04); }
+.hiro-composer .cmp-send:active { transform: translateY(0) scale(.96); }
+.hiro-composer .cmp-send:disabled { cursor: default; }
 
 /* QUALITY TOGGLE — the ONE upfront choice (Standard | Premium) that changes what
    the agent makes. Two side-by-side option cards inside the composer, each with a
@@ -363,18 +500,26 @@ button { font-family: inherit; cursor: pointer; }
    Matches the Hiro card look (hairlines, soft well, coral selection). */
 .cmp-quality { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
   padding: 0 14px 4px; }
+/* unselected = a quiet filled well (no border) — the --bg-2 fill against the white
+   card distinguishes it. The coral border is reserved for the SELECTED card only. */
 .q-opt { display: flex; flex-direction: column; gap: 5px; text-align: left; cursor: pointer;
-  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-card, 10px);
+  background: var(--bg-2); border: 1px solid transparent; border-radius: var(--r-card, 10px);
   padding: 11px 12px; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
-.q-opt:hover { border-color: var(--ink-4); background: var(--bg-1); }
-.q-opt:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
-.q-opt.is-on { border-color: rgba(214,53,28,.55); background: rgba(214,53,28,.05);
-  box-shadow: inset 0 0 0 1px rgba(214,53,28,.25); }
+.q-opt:hover { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line); }
+.q-opt:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
+/* selected: a calm NEUTRAL well (white on the card) + a firmer hairline + a soft
+   neutral lift (Hera ration-coral — the active model row is neutral gray, NOT the
+   accent). The "on" state is carried by the white-vs-grey fill, the firmer border
+   and ink-weighted label — no coral tint, no coral name/price. */
+.q-opt.is-on { border-color: var(--sel-line-n); background: var(--bg-1);
+  box-shadow: var(--card-shadow); }
+/* when a selected card also takes keyboard focus, swap the lift for the halo */
+.q-opt.is-on:focus-visible { box-shadow: var(--focus-ring); }
 .q-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .q-name { font-size: 13px; font-weight: 700; color: var(--ink); letter-spacing: .2px; }
-.q-opt.is-on .q-name { color: var(--amber); }
-.q-price { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.q-opt.is-on .q-price { color: var(--amber); }
+.q-opt.is-on .q-name { color: var(--ink); }
+.q-price { font-size: 12px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; letter-spacing: -.1px; }
+.q-opt.is-on .q-price { color: var(--ink-2); }
 .q-desc { font-size: 11px; line-height: 1.45; color: var(--ink-3); letter-spacing: .2px; }
 @media (max-width: 520px) { .cmp-quality { grid-template-columns: 1fr; } }
 
@@ -389,9 +534,10 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-pill);
   padding: 8px 14px; color: var(--ink-2); font-family: var(--mono); font-size: 11.5px; letter-spacing: .2px;
   transition: border-color .12s, color .12s, background .12s, transform .12s var(--ease-spring); }
-.ex-chip .ic { width: 13px; height: 13px; color: var(--amber); }
-.ex-chip:hover { border-color: var(--amber); color: var(--ink); background: var(--bg-2); transform: translateY(-1px); }
-.ex-chip:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.ex-chip .ic { width: 13px; height: 13px; color: var(--ink-3); }
+.ex-chip:hover { border-color: var(--line-2); color: var(--ink); background: var(--bg-2); transform: translateY(-1px); }
+.ex-chip:hover .ic { color: var(--ink-2); }
+.ex-chip:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
 
 /* the finished-example footnote sits quietly below the chips */
 .hiro-foot { margin-top: 26px; }
@@ -415,6 +561,10 @@ button { font-family: inherit; cursor: pointer; }
 .hero-title { font-family: var(--serif); font-size: clamp(34px, 4.6vw, 46px); line-height: 1.15; color: var(--ink); letter-spacing: -.8px; margin: 0; font-weight: 500; }
 .hero-sub { color: var(--ink-3); font-size: 14px; line-height: 1.62; margin: 18px auto 0; letter-spacing: .2px; max-width: 540px; }
 .hero-sub b { color: var(--ink); font-weight: 600; }
+/* Attention hint on the hero subline — only while a problem is unresolved (empty
+   URL / failed start). Coral is the one accent, used here with intent to draw the
+   eye to the fix, then cleared. No new color, no emoji. */
+.hero-sub.hint-attn { color: var(--amber); font-weight: 600; }
 
 /* ---- HOW IT WORKS — the agent's own pipeline, as a film-slate beat strip ----
    Four numbered beats (Plans · Prices · Produces · Ships) connected by ONE
@@ -458,9 +608,9 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ink); font-family: var(--mono); font-weight: 800; font-size: 16px;
   box-shadow: 0 1px 2px rgba(20,23,28,.06); margin-bottom: 14px;
 }
-.how-ico sub { font-size: 9px; font-weight: 700; color: var(--amber); vertical-align: sub; margin-left: 1px; }
+.how-ico sub { font-size: 9px; font-weight: 700; color: var(--ink-3); vertical-align: sub; margin-left: 1px; }
 .how-ico svg { position: absolute; right: -3px; bottom: -3px; width: 18px; height: 18px;
-  color: var(--amber); background: var(--bg-1); border-radius: 7px; padding: 1px;
+  color: var(--ink-3); background: var(--bg-1); border-radius: 7px; padding: 1px;
   border: 1px solid var(--line); }
 .how-k { font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink); font-weight: 600; }
 .how-d { font-size: 11.5px; line-height: 1.45; color: var(--ink-3); margin-top: 5px; max-width: 130px; }
@@ -478,15 +628,15 @@ button { font-family: inherit; cursor: pointer; }
 .hero-start:hover { filter: brightness(1.07); }
 .hero-start .ic { width: 15px; height: 15px; }
 .hero-sample { background: var(--bg-1); color: var(--ink-2); border: 1px solid var(--line-2); }
-.hero-sample:hover { color: var(--ink); border-color: var(--amber); }
-.hero-sample .ic { width: 13px; height: 13px; color: var(--amber); }
+.hero-sample:hover { color: var(--ink); border-color: var(--line-2); }
+.hero-sample .ic { width: 13px; height: 13px; color: var(--ink-3); }
 .hero-foot { color: var(--ink-4); font-size: 11.5px; line-height: 1.6; margin: 18px auto 0; letter-spacing: .3px; max-width: 500px; }
 /* "See a finished example" — an inline quiet link inside the footnote (no longer a
    standalone CTA button now the composer is the focus). */
 .hero-sample-link { background: none; border: none; padding: 0; font: inherit;
   color: var(--amber); letter-spacing: inherit; cursor: pointer; border-bottom: 1px solid transparent; }
 .hero-sample-link:hover { border-bottom-color: var(--amber); }
-.hero-sample-link:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 2px; }
+.hero-sample-link:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); border-radius: 3px; }
 .hero-start-hidden { display: none; }
 /* the CTA footnote arrives after the composer has settled. */
 .stage-empty.is-live .hero-cta { animation: rise .5s var(--ease-rise) 1.35s both; }
@@ -498,24 +648,39 @@ button { font-family: inherit; cursor: pointer; }
    goal), a compact options bar (pacing pill + mock toggle + Build), and a tucked-
    away collapsible Pricing disclosure that reveals the full premium menu.
    ========================================================================== */
+/* ONE frame device: a soft shadow (no competing border). A faint hairline keeps
+   the edge crisp on the page; the card reads as a single calm surface. */
 .composer {
   text-align: left; margin: 32px auto 0; max-width: 600px;
-  background: var(--bg-1); border: 1px solid var(--line-2); border-radius: 20px;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 20px;
   box-shadow: 0 1px 2px rgba(20,23,28,.05), 0 12px 32px rgba(20,23,28,.07);
-  overflow: hidden; transition: border-color .14s, box-shadow .14s;
+  overflow: hidden; transition: box-shadow .14s;
 }
-.composer:focus-within { border-color: var(--amber); box-shadow: 0 1px 2px rgba(20,23,28,.05), 0 12px 34px rgba(214,53,28,.14); }
+/* CALM on load: focus only deepens the shadow — no coral border, no alert look.
+   (The keyboard focus accent lives on the field's :focus-visible below.) */
+.composer:focus-within { box-shadow: 0 1px 3px rgba(20,23,28,.07), 0 16px 40px rgba(20,23,28,.10); }
 .cmp-fields { padding: 16px 18px 4px; }
 .cmp-lbl { display: block; font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
   color: var(--ink-3); margin: 0 0 6px 1px; }
 .cmp-lbl + .cmp-in { margin-bottom: 4px; }
-/* the prompt inputs — borderless wells inside the composer card (Claude-like flat
-   input), the card itself carries the frame + focus ring. */
-.cmp-in { width: 100%; background: var(--bg-2); border: 1px solid var(--line);
+/* the prompt inputs — BORDERLESS filled wells inside the composer card (Claude-like
+   flat input). The --bg-2 fill against the white card separates them; no border, so
+   no boxes-in-boxes. The card itself carries the only frame. */
+.cmp-in { width: 100%; background: var(--bg-2); border: 1px solid transparent;
   color: var(--ink); font-family: var(--mono); font-size: 13px; padding: 11px 12px;
-  border-radius: var(--r-ctl); margin-bottom: 14px; }
+  border-radius: var(--r-ctl); margin-bottom: 14px; transition: background .14s, box-shadow .14s; }
 .cmp-in::placeholder { color: var(--ink-4); }
-.cmp-in:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 3px rgba(214,53,28,.1); }
+/* mouse focus = quiet: the well brightens, no coral, no ring → page opens CALM. */
+.cmp-in:focus { outline: none; background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line); }
+/* keyboard focus = the only place coral appears: a faint, edge-hugging ring. */
+.cmp-in:focus-visible { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--sel-line), 0 0 0 2px rgba(214,53,28,.10); }
+/* PROGRAMMATIC focus (e.g. focusBuildUrl() after "New build") must stay CALM —
+   some browsers match :focus-visible on a scripted .focus(), which would paint
+   the coral ring on the URL field at rest. While .is-prog-focus is set (cleared
+   on the first real keyboard/pointer interaction) we fall back to the neutral
+   :focus look so the composer opens with ZERO coral-outlined inputs. Genuine
+   keyboard focus still earns its faint coral ring above. */
+.cmp-in.is-prog-focus:focus-visible { box-shadow: inset 0 0 0 1px var(--line); }
 .cmp-in.nudge { animation: in-nudge .9s var(--ease-rise) 1; }
 
 /* options bar — pacing + mock toggle on the left, Build on the right */
@@ -533,20 +698,25 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--ink-4); letter-spacing: .2px; }
 
 /* ---- DISCLOSURE: the one unified collapse device (native <details>) -------- */
-.dsc { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); margin-top: 14px; overflow: hidden; }
-.dsc[open] { background: var(--bg-1); }
+.dsc { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); margin-top: 14px; overflow: hidden;
+  box-shadow: 0 1px 2px rgba(20,23,28,.03); transition: border-color .16s, box-shadow .16s; }
+.dsc[open] { background: var(--bg-1); box-shadow: var(--card-shadow); }
+.dsc:hover { border-color: var(--line-2); }
 .dsc-sum {
-  display: flex; align-items: center; gap: 12px; padding: 14px 18px; cursor: pointer;
+  display: flex; align-items: center; gap: 12px; padding: 15px 18px; cursor: pointer;
   list-style: none; color: var(--ink-2); user-select: none;
 }
 .dsc-sum::-webkit-details-marker { display: none; }
 .dsc-sum:hover { background: var(--bg-2); }
-.dsc-sum:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
-.dsc-n { color: var(--amber); font-size: 11px; letter-spacing: 2px; flex: none; }
-.dsc-t { letter-spacing: 2px; font-size: 11px; text-transform: uppercase; color: var(--ink-2); }
+.dsc-sum:hover .dsc-chev { color: var(--ink-2); background: var(--bg-3); }
+.dsc-sum:focus-visible { outline: 1px solid transparent; box-shadow: inset var(--focus-ring); }
+.dsc-n { color: var(--amber); font-size: 11px; font-weight: 700; letter-spacing: 2px; flex: none; font-variant-numeric: tabular-nums; }
+.dsc-t { letter-spacing: 1.8px; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--ink-2); }
 .dsc-hint { margin-left: auto; color: var(--ink-4); font-size: 11px; letter-spacing: .4px; font-variant-numeric: tabular-nums; text-align: right; }
-.dsc-chev { width: 16px; height: 16px; flex: none; color: var(--ink-3); transition: transform .18s ease; }
-.dsc[open] > .dsc-sum .dsc-chev { transform: rotate(180deg); }
+/* chevron sits in a subtle round well so it reads as a real affordance */
+.dsc-chev { width: 26px; height: 26px; padding: 5px; flex: none; color: var(--ink-3); border-radius: var(--r-pill);
+  transition: transform .2s var(--ease-rise), color .16s, background .16s; }
+.dsc[open] > .dsc-sum .dsc-chev { transform: rotate(180deg); color: var(--amber); }
 .dsc-body { padding: 4px 18px 20px; border-top: 1px solid var(--line); }
 .dsc[open] > .dsc-body { animation: rise .35s cubic-bezier(.2,.7,.2,1) both; }
 /* let grids inside a disclosure breathe — they were designed full-width */
@@ -611,7 +781,7 @@ button { font-family: inherit; cursor: pointer; }
 .sec-label .n { color: var(--amber); }
 
 /* ---- slate (detail header) ------------------------------------------- */
-.slate { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--bg-1); }
+.slate { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--bg-1); box-shadow: var(--card-shadow); }
 .slate-strip { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--line);
   background: repeating-linear-gradient(135deg, var(--bg-2) 0 14px, var(--bg-1) 14px 28px); }
 .slate-cell { padding: 8px 16px; border-right: 1px solid var(--line); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
@@ -653,7 +823,7 @@ button { font-family: inherit; cursor: pointer; }
 .rcpt-row.sum .amt { color: var(--ink); font-weight: 700; }
 
 .pl-side { display: flex; flex-direction: column; gap: 14px; }
-.margin-card { border: 1px solid var(--line); border-radius: var(--r-card); padding: 20px 22px; background: linear-gradient(180deg, var(--bg-2), var(--bg-1)); }
+.margin-card { border: 1px solid var(--line); border-radius: var(--r-card); padding: 20px 22px; background: linear-gradient(180deg, var(--bg-2), var(--bg-1)); box-shadow: var(--card-shadow); }
 .margin-k { letter-spacing: 3px; font-size: 11px; color: var(--ink-3); }
 .margin-fig { font-size: 64px; font-weight: 700; letter-spacing: -3px; line-height: 1; margin: 6px 0 2px; font-variant-numeric: tabular-nums; color: var(--ink); }
 .margin-fig.win { color: var(--pos); }
@@ -672,7 +842,7 @@ button { font-family: inherit; cursor: pointer; }
 .saved .t { color: var(--ink-2); line-height: 1.5; font-size: 12px; }
 
 /* ---- gate timeline: filmstrip + list --------------------------------- */
-.strip { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); padding: 16px 16px 12px; }
+.strip { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); padding: 16px 16px 12px; box-shadow: var(--card-shadow); }
 .strip-ruler { display: flex; justify-content: space-between; color: var(--ink-4); font-size: 9px; letter-spacing: 1px; margin-bottom: 8px; padding: 0 2px; }
 .strip-track { display: flex; gap: 3px; height: 56px; }
 .clip { position: relative; border-radius: 4px; overflow: hidden; min-width: 26px; border: 1px solid var(--line-2);
@@ -690,7 +860,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .clip.decline .cut { color: var(--neg); width: 18px; height: 18px; }
 
-.gate { margin-top: 14px; display: flex; flex-direction: column; gap: 1px; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; }
+.gate { margin-top: 14px; display: flex; flex-direction: column; gap: 1px; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; box-shadow: var(--card-shadow); }
 .row { display: grid; grid-template-columns: 30px 1.4fr 92px 90px 96px; align-items: center; gap: 12px;
   padding: 13px 16px; background: var(--bg-1); }
 .row:hover { background: var(--bg-2); }
@@ -713,7 +883,7 @@ button { font-family: inherit; cursor: pointer; }
 .row-auth .obj { color: var(--ink-4); }
 
 /* ---- STUDIO: the agent writes Remotion ------------------------------- */
-.studio { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--bg-1); }
+.studio { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--bg-1); box-shadow: var(--card-shadow); }
 .studio-tabs { display: flex; gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
 .studio-tab { background: var(--bg-1); color: var(--ink-3); border: none; padding: 10px 16px; font-size: 11px; letter-spacing: .5px;
   display: flex; align-items: center; gap: 7px; border-top: 2px solid transparent; }
@@ -724,7 +894,7 @@ button { font-family: inherit; cursor: pointer; }
 .editor { background: var(--bg); border-right: 1px solid var(--line); position: relative; overflow: hidden; }
 .editor-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--ink-4); font-size: 10px; letter-spacing: 1px; }
 .editor-bar .fname { color: var(--ink-2); display: flex; align-items: center; gap: 7px; }
-.editor-bar .fname svg { width: 13px; height: 13px; color: var(--amber); }
+.editor-bar .fname svg { width: 13px; height: 13px; color: var(--ink-3); }
 .editor-bar .right { display: flex; gap: 10px; align-items: center; }
 .editor-scroll { overflow: auto; max-height: 420px; }
 .code { display: flex; font-size: 12px; line-height: 1.62; padding: 10px 0 16px; }
@@ -757,7 +927,7 @@ button { font-family: inherit; cursor: pointer; }
 .replay:hover { border-color: var(--amber); color: var(--ink); }
 
 /* ---- final cut viewer ------------------------------------------------ */
-.viewer { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--video-bg); }
+.viewer { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--video-bg); box-shadow: var(--card-shadow); }
 .viewer video { width: 100%; display: block; }
 .viewer-cap { background: var(--bg-1); padding: 11px 16px; display: flex; justify-content: space-between; color: var(--ink-3); font-size: 11px; letter-spacing: .5px; border-top: 1px solid var(--line); }
 .viewer-cap .cut { color: var(--neg); }
@@ -786,33 +956,126 @@ button { font-family: inherit; cursor: pointer; }
 .proof-fold .margin-fig { font-size: 46px; letter-spacing: -2px; }
 .dh-frame { background: var(--video-bg); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .dh-video { width: 100%; display: block; max-height: 64vh; background: var(--video-bg); }
+
+/* ---- custom delivered-hero player chrome ----------------------------------
+   A designed control layer over the bare looping <video> — replaces the generic
+   native scrubber so the player matches the premium frame. */
+.dh-player { position: relative; line-height: 0; }
+.dh-player .dh-video { cursor: pointer; }
+/* center play/pause glyph — a soft glass disc, shown only while PAUSED so a
+   stopped video reads as resumable, never as a frozen black frame. */
+.dh-pp {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(.94);
+  width: 66px; height: 66px; display: grid; place-items: center; border-radius: 50%;
+  background: rgba(12,14,18,.46); border: 1px solid rgba(255,255,255,.22);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: #fff;
+  cursor: pointer; opacity: 0; pointer-events: none;
+  box-shadow: 0 8px 26px rgba(0,0,0,.34);
+  transition: opacity .2s var(--ease-rise), transform .2s var(--ease-spring), background .15s;
+}
+.dh-pp svg { width: 26px; height: 26px; }
+.dh-pp:hover { background: rgba(12,14,18,.62); }
+/* paused → reveal the center play glyph (and show the play icon, hide pause). */
+.dh-player:not(.is-playing) .dh-pp { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.dh-ic-play { display: none; }
+.dh-ic-pause { display: inline-flex; }
+.dh-player:not(.is-playing) .dh-pp .dh-ic-play,
+.dh-player:not(.is-playing) .dh-c-pp .dh-ic-play { display: inline-flex; }
+.dh-player:not(.is-playing) .dh-pp .dh-ic-pause,
+.dh-player:not(.is-playing) .dh-c-pp .dh-ic-pause { display: none; }
+
+/* bottom control bar — a gradient scrim with the transport row. Auto-reveals on
+   hover/focus + while paused; fades during uninterrupted playback. */
+.dh-ctrls {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; line-height: 1;
+  display: flex; align-items: center; gap: 13px; padding: 26px 18px 14px;
+  background: linear-gradient(180deg, transparent, rgba(8,10,14,.74));
+  opacity: 0; transform: translateY(6px);
+  transition: opacity .22s var(--ease-rise), transform .22s var(--ease-rise);
+}
+.dh-player:hover .dh-ctrls, .dh-player:focus-within .dh-ctrls,
+.dh-player:not(.is-playing) .dh-ctrls { opacity: 1; transform: translateY(0); }
+/* inline play/pause in the bar */
+.dh-c-pp { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px;
+  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18); color: #fff; cursor: pointer;
+  transition: background .14s, border-color .14s; }
+.dh-c-pp:hover { background: rgba(255,255,255,.22); }
+.dh-c-pp svg { width: 16px; height: 16px; }
+/* scrub track — a thin rail that thickens on hover; coral fill + a head knob. */
+.dh-scrub { position: relative; flex: 1; height: 14px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+.dh-scrub::before { content: ""; position: absolute; left: 0; right: 0; height: 4px; border-radius: var(--r-pill);
+  background: rgba(255,255,255,.22); transition: height .12s; }
+.dh-scrub:hover::before, .dh-scrub:focus-visible::before { height: 6px; }
+.dh-scrub:focus-visible { outline: none; }
+.dh-scrub-fill { position: absolute; left: 0; height: 4px; border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--amber-2), var(--amber)); box-shadow: 0 0 8px rgba(214,53,28,.5);
+  transition: height .12s; }
+.dh-scrub:hover .dh-scrub-fill, .dh-scrub:focus-visible .dh-scrub-fill { height: 6px; }
+.dh-scrub-head { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4), 0 0 0 1px rgba(214,53,28,.5);
+  opacity: 0; transition: opacity .12s; }
+.dh-scrub:hover .dh-scrub-head, .dh-scrub:focus-visible .dh-scrub-head, .dh-player:not(.is-playing) .dh-scrub-head { opacity: 1; }
+/* time readout — tabular so digits don't jitter as the clock runs. */
+.dh-time { flex: none; display: flex; align-items: center; gap: 5px; color: rgba(255,255,255,.86);
+  font-size: 11px; letter-spacing: .3px; font-variant-numeric: tabular-nums; }
+.dh-time-sep { color: rgba(255,255,255,.4); }
+/* mute toggle — shows the sound icon when audible, the muted icon when silenced. */
+.dh-mute { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px;
+  background: transparent; border: 1px solid transparent; color: rgba(255,255,255,.86); cursor: pointer;
+  transition: background .14s, border-color .14s, color .14s; }
+.dh-mute:hover { background: rgba(255,255,255,.12); color: #fff; }
+.dh-mute svg { width: 18px; height: 18px; }
+.dh-ic-sound { display: inline-flex; }
+.dh-ic-muted { display: none; }
+.dh-player.is-muted .dh-mute .dh-ic-sound { display: none; }
+.dh-player.is-muted .dh-mute .dh-ic-muted { display: inline-flex; }
+@media (prefers-reduced-motion: reduce) {
+  .dh-ctrls, .dh-pp { transition: opacity .15s; }
+}
 .dh-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 14px 22px 18px; }
 .dh-meta { color: var(--ink-3); font-size: 11px; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
 .dh-actions { display: flex; align-items: center; gap: 10px; }
-.dh-dl, .dh-share {
+.dh-dl, .dh-share, .dh-edit {
   display: inline-flex; align-items: center; gap: 8px; font-size: 12px; letter-spacing: .6px;
   padding: 10px 16px; border-radius: var(--r-ctl); cursor: pointer; text-decoration: none;
 }
-.dh-dl { background: var(--amber); color: var(--on-accent); border: none; font-weight: 700; }
-.dh-dl:hover { filter: brightness(1.08); }
+.dh-dl { background: linear-gradient(180deg, #E14730, var(--amber)); color: var(--on-accent); border: none; font-weight: 700;
+  box-shadow: 0 1px 2px rgba(20,23,28,.16), 0 6px 16px rgba(214,53,28,.24), inset 0 1px 0 rgba(255,255,255,.2);
+  transition: filter .14s, box-shadow .18s var(--ease-rise), transform .14s var(--ease-rise); }
+.dh-dl:hover { filter: brightness(1.05); transform: translateY(-1px);
+  box-shadow: 0 1px 2px rgba(20,23,28,.16), 0 10px 24px rgba(214,53,28,.32), inset 0 1px 0 rgba(255,255,255,.2); }
+.dh-dl:active { transform: translateY(0); }
 .dh-dl svg { width: 16px; height: 16px; }
 .dh-share { background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line-2); }
 .dh-share:hover { color: var(--ink); border-color: var(--amber); }
 .dh-share svg { width: 15px; height: 15px; }
 .dh-share.copied { color: var(--pos); border-color: rgba(14,159,110,.5); background: rgba(14,159,110,.08); }
+/* Edit video — neutral secondary (same weight as Copy link; coral stays on Download). */
+.dh-edit { background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line-2); font-weight: 600; }
+.dh-edit:hover { color: var(--ink); border-color: var(--amber); }
+.dh-edit svg { width: 15px; height: 15px; }
+/* Edit unavailable — this delivered run has no editable project, so the editor can't
+   open it. Reads plainly as inert (muted, dashed border, not-allowed cursor, no accent
+   on hover) so it never looks like a live action that opens the wrong video. */
+.dh-edit-off { color: var(--ink-3, var(--ink-2)); border-style: dashed; opacity: .72; cursor: not-allowed; }
+.dh-edit-off:hover { color: var(--ink-3, var(--ink-2)); border-color: var(--line-2); }
 .dh-share.copied svg { color: var(--pos); }
 
 /* ---- PROOF FOLD: the receipt/gate/code drop below the video as evidence -- */
-.proof-fold { margin-top: 30px; padding-top: 28px; border-top: 1px solid var(--line); }
-.proof-lead { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
-.proof-lead .proof-k { color: var(--ink-2); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; }
-.proof-lead .proof-sub { color: var(--ink-4); font-size: 12px; letter-spacing: .3px; }
+.proof-fold { margin-top: 34px; padding-top: 30px; border-top: 1px solid var(--line); }
+.proof-lead { display: flex; flex-direction: column; gap: 5px; margin-bottom: 6px; }
+.proof-lead .proof-k { display: inline-flex; align-items: center; gap: 11px; color: var(--ink-2); font-size: 11px;
+  font-weight: 600; letter-spacing: 2.2px; text-transform: uppercase; }
+/* a short coral tick leads the eyebrow so it reads as a deliberate section label */
+.proof-lead .proof-k::before { content: ""; width: 18px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--amber), transparent); flex: none; }
+.proof-lead .proof-sub { color: var(--ink-4); font-size: 12px; line-height: 1.5; letter-spacing: .2px; padding-left: 29px; }
 
 /* ---- stripe + events -------------------------------------------------- */
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
-.panel { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); padding: 16px 18px; }
+.panel { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); padding: 16px 18px; box-shadow: var(--card-shadow); }
 .panel h4 { margin: 0 0 14px; font-size: 11px; letter-spacing: 3px; color: var(--ink-3); font-weight: 500; display: flex; align-items: center; gap: 8px; }
-.panel h4 svg { width: 14px; height: 14px; color: var(--amber); }
+.panel h4 svg { width: 14px; height: 14px; color: var(--ink-3); }
 .kv { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dotted var(--line); font-size: 12px; }
 .kv:last-child { border-bottom: none; }
 .kv .k { color: var(--ink-3); letter-spacing: .3px; }
@@ -826,7 +1089,7 @@ button { font-family: inherit; cursor: pointer; }
 .log { font-size: 11px; max-height: 300px; overflow-y: auto; }
 .log-row { display: flex; gap: 12px; padding: 5px 0; border-bottom: 1px dotted var(--line); }
 .log-row:last-child { border-bottom: none; }
-.log-seq { color: var(--ink-4); flex: none; width: 26px; text-align: right; }
+.log-seq { color: var(--ink-4); flex: none; width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
 .log-msg { color: var(--ink-2); line-height: 1.45; }
 .log-row.gate .log-msg { color: var(--ink); }
 .log-row.decline .log-msg, .log-row.money .log-msg { color: var(--neg-2); }
@@ -838,7 +1101,7 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---- source media (cinematic + walkthrough clips) -------------------- */
 .sm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.sm-card { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--bg-1); }
+.sm-card { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--bg-1); box-shadow: var(--card-shadow); }
 .sm-card video { width: 100%; display: block; aspect-ratio: 16/9; background: var(--video-bg); object-fit: cover; }
 .sm-card.is-cut { border-style: dashed; border-color: var(--neg); }
 .sm-cut { aspect-ratio: 16/9; display: grid; place-content: center; justify-items: center; gap: 8px;
@@ -861,29 +1124,41 @@ button { font-family: inherit; cursor: pointer; }
 .build-lbl { display: block; font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
   color: var(--ink-3); margin: 0 0 5px 1px; }
 .build-lbl + .build-in { margin-bottom: 3px; }
-.build-in { width: 100%; background: var(--bg); border: 1px solid var(--line-2); color: var(--ink);
-  font-family: var(--mono); font-size: 12px; padding: 8px 10px; border-radius: var(--r-ctl); margin-bottom: 10px; }
+/* BORDERLESS filled wells — the --bg-2 fill against the white composer card
+   separates them (no border = no boxes-in-boxes). The card carries the only frame. */
+.build-in { width: 100%; background: var(--bg-2); border: 1px solid transparent; color: var(--ink);
+  font-family: var(--mono); font-size: 12px; padding: 8px 10px; border-radius: var(--r-ctl); margin-bottom: 10px;
+  transition: background .14s, box-shadow .14s; }
 .build-in::placeholder { color: var(--ink-4); }
-.build-in:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 3px rgba(214,53,28,.12); }
+/* mouse focus = CALM: the well brightens, no coral, no alert ring → page opens calm. */
+.build-in:focus { outline: none; background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--line); }
+/* keyboard focus = the only place coral appears: a faint, edge-hugging ring. */
+.build-in:focus-visible { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--sel-line), 0 0 0 2px rgba(214,53,28,.10); }
 /* one-shot nudge when the landing's "Paste a URL to start" button focuses the
    field — a brief coral ring pulse so the eye lands on the right control. */
 .build-in.nudge { animation: in-nudge .9s var(--ease-rise) 1; }
+/* CALM attention pulse — a quiet neutral lift, NOT a coral alarm. The field
+   draws the eye by softly brightening + a faint neutral ring that fades; no
+   coral border-color (which read like a red-alert). Coral is reserved for the
+   play button + the selected quality card. Keyboard :focus-visible still earns
+   its own faint coral ring (see .cmp-in:focus-visible). */
 @keyframes in-nudge {
-  0%   { box-shadow: 0 0 0 0 rgba(214,53,28,.0);  border-color: var(--amber); }
-  30%  { box-shadow: 0 0 0 4px rgba(214,53,28,.22); border-color: var(--amber); }
-  100% { box-shadow: 0 0 0 0 rgba(214,53,28,.0);  border-color: var(--amber); }
+  0%   { box-shadow: 0 0 0 0 rgba(20,23,28,.0);  border-color: transparent; }
+  30%  { box-shadow: 0 0 0 3px rgba(20,23,28,.06); border-color: transparent; }
+  100% { box-shadow: 0 0 0 0 rgba(20,23,28,.0);  border-color: transparent; }
 }
 #build-pace-lbl { margin-top: 2px; }
 /* pacing/tier segmented pill (D6) — a named binary-ish lever in the build bar
-   instead of a hidden env var. One option lit amber at a time; pill radius (D7). */
+   instead of a hidden env var. One option lit NEUTRAL ink at a time (pacing is a
+   setting toggle, not a primary action — ration-coral keeps the accent off it). */
 .build-pace { display: flex; gap: 4px; padding: 3px; margin-bottom: 8px;
   background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r-pill); }
 .pace-opt { flex: 1; background: transparent; border: none; color: var(--ink-3);
   font-family: var(--mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
   padding: 6px 4px; border-radius: var(--r-pill); transition: background .14s var(--ease-rise), color .14s; }
 .pace-opt:hover { color: var(--ink-2); }
-.pace-opt.is-on { background: var(--amber); color: var(--on-accent); font-weight: 700; box-shadow: 0 1px 3px rgba(20,23,28,.16), 0 0 0 1px rgba(214,53,28,.5) inset; }
-.pace-opt:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.pace-opt.is-on { background: var(--ink); color: #fff; font-weight: 700; box-shadow: 0 1px 3px rgba(20,23,28,.18); }
+.pace-opt:focus-visible { outline: 1px solid transparent; box-shadow: var(--focus-ring); }
 
 .build-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .build-mode { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-3); cursor: pointer; }
@@ -897,20 +1172,51 @@ button { font-family: inherit; cursor: pointer; }
 .build-go:hover .ic { transform: translateX(2px); }
 .build-go:disabled { opacity: .5; cursor: default; }
 .build-go:disabled .ic { display: none; }
-.live-head { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); padding: 18px 20px; margin-bottom: 8px; }
+.live-head { border: 1px solid var(--line); border-radius: var(--r-card);
+  background: linear-gradient(180deg, var(--bg-1), var(--bg-2)); padding: 20px 22px; margin-bottom: 10px;
+  box-shadow: 0 1px 2px rgba(20,23,28,.04), 0 10px 30px rgba(20,23,28,.05); }
 .live-top { display: flex; align-items: center; gap: 14px; }
-.live-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 2px;
-  color: var(--amber); border: 1px solid rgba(214,53,28,.5); background: rgba(214,53,28,.1); padding: 4px 11px; border-radius: 7px; }
+.live-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 1.6px; text-transform: uppercase;
+  color: var(--amber); border: 1px solid rgba(214,53,28,.45); background: rgba(214,53,28,.09);
+  padding: 5px 12px; border-radius: var(--r-pill); }
 .live-pill.bad { color: #fff; background: var(--neg); border-color: var(--neg); }
-.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
-.live-goal { font-family: var(--serif); font-size: 18px; color: var(--ink); }
-.live-url { color: var(--ink-3); font-size: 12px; margin-top: 8px; letter-spacing: .4px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(214,53,28,.16); animation: pulse 1.2s ease-in-out infinite; }
+.live-goal { font-family: var(--serif); font-size: 19px; color: var(--ink); letter-spacing: -.2px; flex: 1 1 auto; min-width: 0; }
+.live-url { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-3); font-size: 12px; margin-top: 10px; letter-spacing: .3px; }
+/* "Stop build" — a NEUTRAL/destructive secondary in the live header (NOT the
+   rationed coral). Quiet recessed well by default; on hover/focus it picks up the
+   --neg crimson border + text so the destructive intent reads, while staying
+   secondary to the build's primary focus. Sits at the far right of .live-top. */
+.live-stop { flex: 0 0 auto; margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 500; letter-spacing: .2px; color: var(--ink-2);
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-ctl);
+  padding: 7px 12px; cursor: pointer; transition: color .14s, border-color .14s, background .14s; }
+.live-stop .live-stop-ic { width: 13px; height: 13px; color: var(--ink-3); transition: color .14s; }
+.live-stop:hover { color: var(--neg-2); border-color: var(--neg); background: var(--bg-1); }
+.live-stop:hover .live-stop-ic { color: var(--neg-2); }
+.live-stop:focus-visible { outline: none; border-color: var(--neg); box-shadow: 0 0 0 3px rgba(192,26,43,.16); }
+.live-stop:disabled, .live-stop.is-stopping { cursor: default; opacity: .6; color: var(--ink-3); border-color: var(--line-2); }
+.live-stop.is-stopping:hover { color: var(--ink-3); border-color: var(--line-2); background: var(--bg-2); }
+/* Stopped state pill + body (buildStopped()): a neutral crimson-tinted badge, a
+   plain explanation, and the single way forward (New build). No coral. */
+.live-pill.stopped { color: var(--neg-2); background: rgba(192,26,43,.08); border-color: rgba(192,26,43,.4); }
+.live-pill.stopped .ic { width: 12px; height: 12px; }
+.bs-body { margin-top: 16px; }
+.bs-msg { color: var(--ink-2); font-size: 14px; line-height: 1.5; max-width: 52ch; }
+.bs-actions { margin-top: 18px; }
+.bs-new { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500;
+  color: var(--ink); background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r-ctl);
+  padding: 9px 14px; cursor: pointer; transition: border-color .14s, background .14s; }
+.bs-new .ic { width: 15px; height: 15px; color: var(--ink-3); }
+.bs-new:hover { border-color: var(--amber); background: var(--bg-2); }
 /* phase track — chips ride above an amber fill that SWEEPS left-to-right as the
    build advances (D4). The fill width is set inline by liveHeader() per phase;
    the transition makes the advance glide rather than jump. A faint shimmer keeps
    the fill alive during the long planning/production phases. */
-.ph-track { position: relative; display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px;
-  padding-top: 10px; }
+.ph-track { position: relative; display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px;
+  padding-top: 12px; }
 .ph-fill {
   position: absolute; left: 0; top: 0; height: 3px; border-radius: var(--r-pill);
   background: linear-gradient(90deg, rgba(214,53,28,.4), var(--amber));
@@ -923,50 +1229,93 @@ button { font-family: inherit; cursor: pointer; }
   animation: ph-sweep 1.8s ease-in-out infinite;
 }
 @keyframes ph-sweep { 0% { transform: translateX(-100%); } 60%,100% { transform: translateX(100%); } }
-.ph-chip { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 10px; border-radius: var(--r-pill);
-  border: 1px solid var(--line-2); color: var(--ink-4); }
-.ph-chip.done { color: var(--pos); border-color: rgba(14,159,110,.4); }
+.ph-chip { font-size: 9.5px; font-weight: 600; letter-spacing: 1.3px; text-transform: uppercase; padding: 5px 11px; border-radius: var(--r-pill);
+  border: 1px solid var(--line-2); color: var(--ink-4); background: var(--bg-1); transition: color .2s, border-color .2s, background .2s; }
+.ph-chip.done { color: var(--pos); border-color: rgba(14,159,110,.4); background: rgba(14,159,110,.05); }
 .ph-chip.now { color: var(--on-accent); background: var(--amber); border-color: var(--amber);
   box-shadow: 0 1px 3px rgba(20,23,28,.14), 0 0 12px rgba(214,53,28,.4);
   animation: ph-now-pulse 1.6s ease-in-out infinite; }
 @keyframes ph-now-pulse { 50% { box-shadow: 0 1px 3px rgba(20,23,28,.14), 0 0 20px rgba(214,53,28,.55); } }
 
 .agent-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 14px; margin: 18px 0 4px; }
-.browser { border: 1px solid var(--line-2); border-radius: var(--r-card); overflow: hidden; background: var(--video-bg); }
-.browser-bar { display: flex; align-items: center; gap: 6px; padding: 8px 11px; background: var(--bg-2); border-bottom: 1px solid var(--line); }
+.browser { border: 1px solid var(--line-2); border-radius: var(--r-card); overflow: hidden; background: var(--video-bg);
+  box-shadow: 0 1px 2px rgba(20,23,28,.05), 0 14px 32px rgba(20,23,28,.10); }
+.browser-bar { display: flex; align-items: center; gap: 7px; padding: 9px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line); }
+/* traffic-light dots — softly tinted (mac-window cue) instead of flat grey, so the
+   browser chrome reads as a real window. */
 .bdot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
-.burl { font-size: 11px; color: var(--ink-3); margin-left: 6px; }
-.blive { margin-left: auto; font-size: 10px; letter-spacing: 1px; color: var(--neg); display: inline-flex; align-items: center; gap: 5px; }
-.blive-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neg); animation: pulse 1.2s ease-in-out infinite; }
+.bdot:nth-child(1) { background: #E8736A; }
+.bdot:nth-child(2) { background: #E8C15F; }
+.bdot:nth-child(3) { background: #6FC18C; }
+/* the URL pill — set in a recessed well so it reads as an address bar */
+.burl { font-size: 11px; color: var(--ink-3); margin-left: 8px; padding: 3px 10px; border-radius: var(--r-pill);
+  background: var(--bg-1); border: 1px solid var(--line); letter-spacing: .2px; max-width: 56%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blive { margin-left: auto; font-size: 9.5px; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--neg); display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: var(--r-pill); background: rgba(192,26,43,.08); border: 1px solid rgba(192,26,43,.22); }
+.blive-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--neg); box-shadow: 0 0 0 3px rgba(192,26,43,.16); animation: pulse 1.2s ease-in-out infinite; }
 .agent-think { aspect-ratio: 16/9; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 20px;
   color: var(--ink-3); text-align: center; font-size: 13px; background: var(--bg-1); }
-.agent-think svg { width: 30px; height: 30px; color: var(--amber); }
-.feed { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); padding: 12px 14px; }
-.feed-h { font-size: 10px; letter-spacing: 2px; color: var(--ink-4); margin-bottom: 8px; }
-.feed-row { font-size: 11px; line-height: 1.55; color: var(--ink-2); padding: 3px 0; border-bottom: 1px dotted var(--line); }
+.agent-think svg { width: 30px; height: 30px; color: var(--ink-3); }
+/* LIVE SCREENCAST — the walk-agent's rolling frame.jpg + step caption while it
+   navigates. Reuses the .browser chrome + .blive pill; no new visual language. The
+   frame <img> sits where the finished <video> would; the "warming up" placeholder
+   (an .agent-think) holds the 16/9 box until the first frame decodes. */
+.walkcast { display: block; }
+.walkcast-img { display: block; }
+.walkcast-warm { /* inherits .agent-think sizing/centering */ }
+.walkcast-cap { display: flex; align-items: center; gap: 10px; padding: 10px 13px;
+  background: var(--bg-2); border-top: 1px solid var(--line); }
+/* a small leading caret marks the agent's current step, like a console prompt */
+.walkcast-cap::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber); box-shadow: 0 0 0 3px rgba(214,53,28,.14); }
+.wc-step { font-size: 11.5px; color: var(--ink); line-height: 1.4; letter-spacing: .1px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.walkcast-cap .blive { margin-left: auto; }
+.wc-skip { font-size: 10px; letter-spacing: .5px; color: var(--neg-2); white-space: nowrap; }
+
+.feed { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-card);
+  background: var(--bg-1); padding: 12px 14px 13px; box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }
+.feed-h { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 600; letter-spacing: 1.6px;
+  text-transform: uppercase; color: var(--ink-3); padding-bottom: 9px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+/* a tiny live dot beside the feed header, matching the .blive language */
+.feed-h-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none;
+  box-shadow: 0 0 0 3px rgba(214,53,28,.12); animation: pulse 1.6s ease-in-out infinite; }
+.feed-row { font-size: 11.5px; line-height: 1.55; color: var(--ink-2); padding: 5px 0; border-bottom: 1px dotted var(--line); }
 .feed-row:last-child { border-bottom: none; }
+/* empty state — a calm "still watching" line, centered in the feed's body so the
+   panel never reads as a bare header floating over white. */
+.feed-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; min-height: 120px; text-align: center; padding: 14px 8px; }
+.feed-empty-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-4);
+  box-shadow: 0 0 0 4px rgba(152,161,176,.14); animation: pulse 1.8s ease-in-out infinite; }
+.feed-empty-t { font-size: 11.5px; line-height: 1.45; color: var(--ink-4); letter-spacing: .2px; max-width: 180px; }
 .feed-row.gate { color: var(--amber); }
 .feed-row.spend { color: var(--amber-2); }
 .feed-row.decline, .feed-row.money { color: var(--neg-2); }
 
 .sb-empty { color: var(--ink-3); font-size: 13px; padding: 16px 2px; display: flex; align-items: center; gap: 10px; }
-.sb-empty svg { width: 16px; height: 16px; color: var(--amber); }
+.sb-empty svg { width: 16px; height: 16px; color: var(--ink-4); }
 
 /* storyboard lead — bounded "N of M scenes" counter + thin amber progress bar
    (D4) so the production wait reads as measured forward motion, not a freeze. */
-.sb-lead { display: flex; align-items: center; gap: 16px; margin: 34px 0 14px; }
+.sb-lead { display: flex; align-items: center; gap: 18px; margin: 38px 0 16px; }
 .sb-lead-l { display: flex; align-items: baseline; gap: 12px; flex: none; }
-.sb-lead-k { letter-spacing: 3px; font-size: 11px; color: var(--ink-3); }
-.sb-lead-sub { font-size: 11px; color: var(--ink-4); letter-spacing: .5px; }
-.sb-count { font-size: 12px; color: var(--ink-3); letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+.sb-lead-k { letter-spacing: 2.5px; font-size: 11px; font-weight: 600; color: var(--ink-2); }
+.sb-lead-sub { font-size: 11px; color: var(--ink-4); letter-spacing: .4px; }
+.sb-count { font-size: 12px; color: var(--ink-3); letter-spacing: .4px; font-variant-numeric: tabular-nums; }
 .sb-count b { color: var(--amber); font-size: 14px; font-weight: 700; }
-.sb-prog { flex: 1; height: 3px; background: var(--bg-3); border-radius: var(--r-pill); overflow: hidden; }
+.sb-prog { flex: 1; height: 4px; background: var(--bg-3); border-radius: var(--r-pill); overflow: hidden;
+  box-shadow: inset 0 1px 1px rgba(20,23,28,.04); }
 .sb-prog-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, rgba(214,53,28,.5), var(--amber));
   box-shadow: 0 0 10px rgba(214,53,28,.4); transition: width .9s var(--ease-rise); }
 
-.sb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-.sb-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg-1); transition: border-color .3s; }
-.sb-card.s-working { border-color: var(--amber); box-shadow: 0 0 16px rgba(214,53,28,.18); }
+.sb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.sb-card { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; background: var(--bg-1);
+  box-shadow: var(--card-shadow); transition: border-color .3s, box-shadow .3s, transform .3s var(--ease-rise); }
+.sb-card.s-produced:hover { border-color: var(--line-2); box-shadow: 0 2px 4px rgba(20,23,28,.05), 0 12px 26px rgba(20,23,28,.08); transform: translateY(-2px); }
+.sb-card.s-working { border-color: var(--amber); box-shadow: 0 1px 2px rgba(214,53,28,.1), 0 0 0 1px rgba(214,53,28,.18), 0 10px 26px rgba(214,53,28,.14); }
 /* queued cards aren't just dimmed — a slow amber shimmer sweeps across them so
    the "about to fill" layout looks alive while it waits (D4). */
 .sb-card.s-queued { opacity: .62; position: relative; }
@@ -977,37 +1326,119 @@ button { font-family: inherit; cursor: pointer; }
   animation: sb-shimmer 2.4s ease-in-out infinite;
 }
 @keyframes sb-shimmer { 0% { background-position: 140% 0; } 100% { background-position: -140% 0; } }
-.sb-card video { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; background: var(--video-bg); }
-.sb-state { aspect-ratio: 16/9; display: grid; place-items: center; }
-.sb-state.queue { position: relative; overflow: hidden; background: repeating-linear-gradient(45deg, var(--bg-2) 0 8px, var(--bg-1) 8px 16px); }
-.sb-state.work svg { width: 22px; height: 22px; color: var(--amber); }
+.sb-card video { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; background: transparent; }
+/* produced-clip media wrapper — the <video> rides on top of a graceful slate
+   fallback. A soft dark gradient (not flat #0C0E12) backs the box so the moment
+   before a valid clip's first frame paints reads as an intentional cinema frame,
+   never a pure-black void. */
+.sb-media { position: relative; aspect-ratio: 16/9;
+  background: radial-gradient(120% 120% at 50% 18%, #1A2030 0%, var(--video-bg) 78%); }
+.sb-media .sb-clip { position: relative; z-index: 1; }
+/* the fallback slate sits BEHIND the clip (z-index 0); revealed only when the
+   clip 404s/stalls and .is-fallback hides the <video>. The two-class selector +
+   aspect-ratio reset beat the later .sb-state base rule so it overlays (inset:0)
+   instead of stacking below the in-flow <video>. */
+.sb-media .sb-media-fallback { position: absolute; inset: 0; z-index: 0; aspect-ratio: auto; }
+.sb-media.is-fallback .sb-clip { display: none; }
+/* "ready" slate — same warm-neutral language as queued/working placeholders */
+.sb-state.ready { background: linear-gradient(180deg, var(--bg-2), var(--bg-1)); }
+.sb-state.ready .sb-ghost { color: var(--ink-4); opacity: .16; }
+/* scene-state placeholders — each is a small "shot in waiting" composition: a
+   ghosted scene-type glyph, an optional spinner, and a tracked status word. They
+   read as deliberate slate frames rather than empty boxes. */
+.sb-state { aspect-ratio: 16/9; position: relative; display: grid; place-items: center; gap: 0;
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1)); }
+/* the ghosted type glyph fills the frame, very faint, anchored center */
+.sb-ghost { position: absolute; inset: 0; margin: auto; width: 34px; height: 34px;
+  color: var(--ink-4); opacity: .14; }
+/* the status word, tracked + tiny, pinned low so the glyph reads behind it */
+.sb-state-t { position: absolute; bottom: 9px; left: 0; right: 0; text-align: center;
+  font-size: 8.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--ink-4); }
+.sb-state.queue { overflow: hidden; }
+.sb-state.queue .sb-ghost { opacity: .12; }
+/* working — the spinner sits center, the type glyph ghosts behind it warmly */
+.sb-state.work { background: linear-gradient(180deg, rgba(214,53,28,.05), var(--bg-1)); }
+.sb-state.work .sb-ghost { color: var(--amber); opacity: .12; }
+.sb-spin { position: relative; z-index: 1; display: grid; place-items: center; margin-bottom: 10px; }
+.sb-state.work .sb-spin svg { width: 22px; height: 22px; color: var(--ink-3); }
+.sb-state.work .sb-state-t { color: var(--amber); }
 .sb-state.cut { background: repeating-linear-gradient(45deg, rgba(192,26,43,.14) 0 7px, rgba(192,26,43,.03) 7px 14px); }
-.sb-state.cut svg { width: 20px; height: 20px; color: var(--neg); }
-.sb-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 9px; border-top: 1px solid var(--line); }
-.sb-id { font-size: 10.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-badge { font-size: 9px; letter-spacing: .8px; text-transform: uppercase; padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
+.sb-state.cut svg { position: relative; z-index: 1; width: 20px; height: 20px; color: var(--neg); }
+.sb-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border-top: 1px solid var(--line); }
+.sb-id { font-size: 11px; color: var(--ink-2); letter-spacing: .1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 8.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+  padding: 3px 7px; border-radius: var(--r-pill); white-space: nowrap; }
+/* a small leading status dot inside each badge — drawn, gives the chip weight */
+.sb-badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
 .sb-badge.done { color: var(--pos); background: rgba(14,159,110,.1); }
 .sb-badge.work { color: var(--amber); background: rgba(214,53,28,.12); }
+.sb-badge.work::before { animation: pulse 1.2s ease-in-out infinite; }
 .sb-badge.queue { color: var(--ink-4); border: 1px solid var(--line-2); }
+.sb-badge.queue::before { background: var(--ink-4); }
 .sb-badge.cut { color: #fff; background: var(--neg); }
+.sb-badge.cut::before { background: #fff; }
 
 /* ---- live SCRIPT panel: the agent's storyboard before it shoots --------- */
 .script-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 14px; align-items: start; }
-.script-card { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); overflow: hidden; }
-.script-head { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); }
-.script-head .badge { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 7px;
-  background: var(--amber); color: var(--on-accent); font-weight: 800; font-size: 11px; letter-spacing: 0; }
-.script-head .badge.seq { background: var(--bg-3); color: var(--amber); border: 1px solid var(--line-2); font-weight: 700; }
-.script-head .h-title { letter-spacing: 2px; font-size: 11px; color: var(--ink-3); text-transform: uppercase; }
-.script-head .h-meta { margin-left: auto; font-size: 10px; letter-spacing: 1px; color: var(--ink-4); }
+.script-card { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); overflow: hidden;
+  box-shadow: var(--card-shadow); }
+.script-head { display: flex; align-items: center; gap: 11px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1)); }
+/* section badges (VO / N) are NEUTRAL ink chips — labels, not actions (ration-coral
+   keeps the accent off them; the live PRODUCING phase chip carries the screen's pop). */
+.script-head .badge { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 8px;
+  background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line-2);
+  font-weight: 800; font-size: 11px; letter-spacing: 0; box-shadow: none; }
+.script-head .badge.seq { background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line-2); font-weight: 700; box-shadow: none; }
+.script-head .h-title { letter-spacing: 1.8px; font-size: 11px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; }
+.script-head .h-meta { margin-left: auto; font-size: 10px; letter-spacing: 1px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
 /* the VO narration, set in serif as reading copy */
 .vo-body { padding: 16px 18px 18px; }
 .vo-script { font-family: var(--serif); font-size: 16px; line-height: 1.62; color: var(--ink); }
 .vo-script .cursor { vertical-align: baseline; height: .95em; }
 .vo-voice { margin-top: 14px; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink-4); display: flex; align-items: center; gap: 7px; }
 .vo-voice .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
-.vo-empty { font-family: var(--mono); color: var(--ink-3); font-size: 12px; display: flex; align-items: center; gap: 9px; }
-.vo-empty svg { width: 15px; height: 15px; color: var(--amber); }
+.vo-empty { font-family: var(--mono); color: var(--ink-3); font-size: 12px; letter-spacing: .2px;
+  display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.vo-empty svg { width: 15px; height: 15px; color: var(--ink-4); flex: none; }
+
+/* ---- SKELETON loaders (script VO + shot list) ------------------------------
+   Shimmering placeholder rows that mirror the resolved layout, so loading reads as
+   "content arriving" rather than a thin spinner in an empty card. The sheen is a
+   single moving gradient under a steady-tone base bar. */
+.sk-bar, .sk-chip, .sk-tag {
+  position: relative; overflow: hidden; border-radius: 6px;
+  background: var(--bg-3);
+}
+.sk-bar::after, .sk-chip::after, .sk-tag::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.7) 50%, transparent 100%);
+  background-size: 200% 100%; animation: sk-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes sk-shimmer { 0% { background-position: 140% 0; } 100% { background-position: -140% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sk-bar::after, .sk-chip::after, .sk-tag::after { animation: none; opacity: .5; }
+}
+/* VO narration skeleton — tapering text bars like wrapped prose. */
+.sk-lines { display: flex; flex-direction: column; gap: 10px; }
+.sk-lines .sk-bar { height: 11px; }
+/* shot-list skeleton — numbered chip + brief bar + tag pills, the .shot shape. */
+.sk-shots { display: flex; flex-direction: column; gap: 0; }
+.sk-shot { display: grid; grid-template-columns: 22px 1fr; gap: 11px; align-items: start;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.sk-shot:first-child { padding-top: 4px; }
+.sk-chip { width: 22px; height: 22px; border-radius: 7px; }
+.sk-shot-body { display: flex; flex-direction: column; gap: 9px; }
+.sk-bar.lg { height: 12px; }
+.sk-tags { display: flex; gap: 6px; }
+.sk-tag { width: 46px; height: 14px; border-radius: 6px; }
+.sk-tag.sm { width: 30px; }
+/* quiet caption naming what's loading — a soft pulsing coral dot leads it. */
+.sk-cap { display: flex; align-items: center; gap: 8px; margin-top: 14px;
+  font-size: 11px; letter-spacing: .3px; color: var(--ink-4); }
+.sk-cap-pad { padding: 14px 16px 4px; margin-top: 0; }
+.sk-cap-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(214,53,28,.14); animation: pulse 1.6s ease-in-out infinite; flex: none; }
 /* ordered scene breakdown */
 .shot-list { display: flex; flex-direction: column; }
 .shot { display: grid; grid-template-columns: 24px 1fr; gap: 11px; align-items: start; padding: 12px 16px; border-bottom: 1px solid var(--line); }
@@ -1019,7 +1450,9 @@ button { font-family: inherit; cursor: pointer; }
 .shot-tag { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; padding: 2px 7px; border-radius: 6px;
   border: 1px solid var(--line-2); color: var(--ink-4); white-space: nowrap; }
 .shot-tag.type { color: var(--ink-2); }
-.shot-tag.model { color: var(--amber); border-color: rgba(214,53,28,.4); }
+/* the model tag is repeating metadata — keep it NEUTRAL (ration-coral: not a per-row
+   coral pop). It reads as ink-weighted on a firm hairline, like the other tags. */
+.shot-tag.model { color: var(--ink-2); border-color: var(--line-2); }
 .shot-tag.dur { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
 /* ---- PAY GATE: pre-production Stripe TEST-mode Checkout ----------------- */
@@ -1049,11 +1482,15 @@ button { font-family: inherit; cursor: pointer; }
 .pg-for-v { font-family: var(--serif); font-size: 17px; color: var(--ink); margin-top: 4px; line-height: 1.25; }
 .pg-pay {
   display: inline-flex; align-items: center; gap: 9px; width: 100%; justify-content: center;
-  background: var(--amber); color: var(--on-accent); border: none; font-weight: 700; letter-spacing: .8px;
-  font-size: 14px; padding: 13px 18px; border-radius: 12px;
+  background: linear-gradient(180deg, #E14730, var(--amber)); color: var(--on-accent); border: none; font-weight: 700; letter-spacing: .8px;
+  font-size: 14px; padding: 14px 18px; border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(20,23,28,.16), 0 8px 20px rgba(214,53,28,.26), inset 0 1px 0 rgba(255,255,255,.2);
+  transition: filter .14s, box-shadow .18s var(--ease-rise), transform .14s var(--ease-rise);
 }
 .pg-pay svg { width: 17px; height: 17px; }
-.pg-pay:hover { filter: brightness(1.08); }
+.pg-pay:hover { filter: brightness(1.05); transform: translateY(-1px);
+  box-shadow: 0 1px 2px rgba(20,23,28,.16), 0 12px 28px rgba(214,53,28,.34), inset 0 1px 0 rgba(255,255,255,.2); }
+.pg-pay:active { transform: translateY(0); }
 .pg-pay.opened { filter: none; opacity: .82; }
 
 /* CHOSEN-QUALITY NOTE — confirms the upfront composer choice (Standard | Premium)
@@ -1067,7 +1504,8 @@ button { font-family: inherit; cursor: pointer; }
 .pg-quality.pg-q-premium { border-color: rgba(214,53,28,.4); background: rgba(214,53,28,.04); }
 .pg-quality.pg-q-premium .pg-quality-name { color: var(--amber); }
 
-/* ITEMIZED QUOTE — one Video production line = total */
+/* ITEMIZED QUOTE — fallback: one Video production line = total. Full (l.quote):
+   "Your instant quote" heading + summary + per-line-item rows + total + band cap. */
 .pg-quote { border: 1px solid var(--line); border-radius: var(--r-card, 10px);
   background: var(--bg-1); padding: 9px 13px; margin-bottom: 14px; }
 .pg-q-row { display: flex; align-items: baseline; justify-content: space-between;
@@ -1078,20 +1516,40 @@ button { font-family: inherit; cursor: pointer; }
 .pg-q-total .pg-q-lbl { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink-3); }
 .pg-q-total .pg-q-amt { font-size: 16px; font-weight: 800; color: var(--amber); letter-spacing: -.3px; }
 
+/* FULL "instant quote" card — a touch more breathing room than the one-row fallback. */
+.pg-quote-full { padding: 12px 14px 11px; }
+/* Heading — serif, matches the proposal/price voice. */
+.pg-q-head { font-family: var(--serif); font-size: 15px; color: var(--ink);
+  letter-spacing: .1px; line-height: 1.2; }
+/* Summary line — "{scenes} scenes · {duration_s}s · {Tier}", quiet mono caption. */
+.pg-q-summary { margin-top: 3px; font-size: 11px; letter-spacing: .3px; color: var(--ink-3); }
+/* Separate the heading block from the itemized rows with a hairline. */
+.pg-quote-full .pg-q-row:first-of-type { margin-top: 9px; padding-top: 9px;
+  border-top: 1px solid var(--line); }
+/* Band reassurance — quiet line with the coral check, sits under the total. */
+.pg-q-cap { display: flex; align-items: center; gap: 7px; margin-top: 9px;
+  font-size: 11px; letter-spacing: .2px; color: var(--ink-3); line-height: 1.35; }
+.pg-q-cap svg { width: 13px; height: 13px; color: var(--ink-3); flex: none; }
+
 .pg-nourl { display: flex; align-items: center; gap: 9px; color: var(--ink-3); font-size: 12px; padding: 12px 0; }
-.pg-nourl svg { width: 15px; height: 15px; color: var(--amber); }
+.pg-nourl svg { width: 15px; height: 15px; color: var(--ink-4); }
 .pg-status { display: flex; align-items: center; gap: 9px; margin-top: 14px; font-size: 12px; letter-spacing: .3px; }
 .pg-status.wait { color: var(--ink-2); }
 .pg-status.paid { color: var(--pos); }
 .pg-status.paid svg { width: 16px; height: 16px; color: var(--pos); }
 .pg-wait-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
 .pg-side { border: 1px solid var(--line); border-radius: 16px; background: var(--bg-1); padding: 16px 18px; display: flex; flex-direction: column; }
-.pg-line { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px dotted var(--line); font-size: 12px; }
+/* a tracked eyebrow titles the side panel so it reads as a deliberate "order
+   summary" card, not a loose stack of key/value rows. */
+.pg-side-h { font-size: 10px; font-weight: 600; letter-spacing: 1.8px; text-transform: uppercase;
+  color: var(--ink-4); padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.pg-line { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px dotted var(--line); font-size: 12px; }
 .pg-line .k { color: var(--ink-3); letter-spacing: .3px; flex: none; }
-.pg-line .v { color: var(--ink-2); text-align: right; }
+.pg-line .v { color: var(--ink-2); text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pg-line .v.mono { font-family: var(--code); font-size: 11px; color: var(--ink-3); }
 .pg-line .v.amber { color: var(--amber); }
-.pg-note { margin-top: auto; padding-top: 14px; font-size: 11px; line-height: 1.55; color: var(--ink-4); letter-spacing: .2px; }
+.pg-note { margin-top: auto; padding-top: 16px; font-size: 11px; line-height: 1.55; color: var(--ink-4); letter-spacing: .2px;
+  border-top: 1px solid var(--line); margin-top: auto; }
 .pg-note code { font-family: var(--code); color: var(--ink-3); background: var(--bg-2); padding: 0 4px; border-radius: 4px; }
 
 .live-pnl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }
@@ -1102,11 +1560,15 @@ button { font-family: inherit; cursor: pointer; }
 .pl-k { font-size: 11px; color: var(--ink-3); letter-spacing: .5px; }
 .pl-v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 3px; }
 
-/* keyboard focus rings in the amber accent (was browser-default only) */
+/* keyboard focus — a thin coral halo that HUGS the control (no offset ring).
+   Restrained + on-brand; still clearly visible for a11y. The outline stays as a
+   1px hairline (mostly transparent) purely so Windows high-contrast mode, which
+   ignores box-shadow, still gets a visible focus indicator. */
 .run-card:focus-visible, .rc-del:focus-visible, .build-go:focus-visible, .build-in:focus-visible,
 .pg-pay:focus-visible, .dh-dl:focus-visible, .dh-share:focus-visible, .studio-tab:focus-visible,
 .rcc-no:focus-visible, .rcc-yes:focus-visible, .btn:focus-visible, .replay:focus-visible {
-  outline: 2px solid var(--amber); outline-offset: 2px;
+  outline: 1px solid transparent; outline-offset: 0;
+  box-shadow: var(--focus-ring);
 }
 
 /* ============================================================================
@@ -1153,8 +1615,18 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--video-bg); border-bottom: 1px solid var(--line);
 }
 .sc-poster { width: 100%; height: 100%; object-fit: cover; display: block;
-  transition: transform .5s var(--ease-rise); }
+  transition: transform .5s var(--ease-rise), opacity .3s var(--ease-rise); }
 .style-card:hover .sc-poster { transform: scale(1.035); }
+
+/* hover-to-play video — sits over the poster, fades in on hover (mirrors
+   luceostudio.com's VideoCard.astro crossfade). preload="none" + lazy src means
+   it loads only on first hover, so the page stays light. The poster fades out
+   underneath as the video fades in, so there is no flash and no layout shift. */
+.sc-video { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: block; opacity: 0; pointer-events: none;
+  transition: opacity .3s var(--ease-rise); }
+.style-card:hover .sc-video { opacity: 1; }
+.style-card:hover .sc-poster { opacity: 0; }
 
 /* NOTE: the per-card style-family tag (.sc-fam / .fam-*) was intentionally
    removed — the shelf is a curated LOOKBOOK (the bar we hold every video to),
@@ -1172,7 +1644,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 .sc-play .ic { width: 15px; height: 15px; margin-left: 2px; }
 .style-card:hover .sc-play, .sc-frame:focus-visible .sc-play { opacity: 1; transform: scale(1); }
-.sc-frame:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+.sc-frame:focus-visible { outline: 1px solid transparent; box-shadow: inset var(--focus-ring); }
 
 .sc-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -1192,14 +1664,14 @@ button { font-family: inherit; cursor: pointer; }
 /* responsive: on narrow viewports the sidebar collapses (a floating reopen button
    stays), the center column goes full width, and two-up grids stack. */
 @media (max-width: 940px) {
-  .shell { grid-template-columns: 0 1fr; }
-  .rail { border-right-color: transparent; }
-  /* a narrow viewport behaves like the collapsed state by default; the JS toggle
-     can still slide the rail in (it sets an explicit width via .rail-open). */
-  .shell:not(.rail-open) .rail { pointer-events: none; }
+  /* narrow: the floating sidebar hides by default; the left gutter collapses with
+     it. The JS toggle slides the floating card back in via .rail-open. */
+  .shell { grid-template-columns: 0 1fr; gap: 0; padding-left: 0; }
+  .shell:not(.rail-open) .rail { pointer-events: none; border-color: transparent; box-shadow: none; }
   .shell:not(.rail-open) .rail-reopen { display: grid; }
-  .shell.rail-open { grid-template-columns: 268px 1fr; }
-  .shell.rail-open .rail { pointer-events: auto; border-right-color: var(--line); }
+  .shell.rail-open { grid-template-columns: 268px 1fr; gap: 14px; padding-left: 14px; }
+  .shell.rail-open .rail { pointer-events: auto; border-color: var(--line);
+    box-shadow: 0 1px 2px rgba(20,23,28,.04), 0 14px 34px rgba(20,23,28,.07); }
   .pl-wrap, .cols, .studio-grid, .sm-grid, .agent-grid, .paygate, .script-grid,
   .live-pnl, .live-pnl.gate { grid-template-columns: 1fr; }
   .styles-grid { grid-template-columns: 1fr 1fr; }
@@ -1229,7 +1701,7 @@ button { font-family: inherit; cursor: pointer; }
   text-align: center; padding: 56px 24px; color: var(--ink-3);
   border: 1px dashed var(--line-2); border-radius: var(--r-card); background: var(--bg-2); }
 .an-state .ic { width: 26px; height: 26px; color: var(--ink-4); }
-.an-state.empty .ic { color: var(--amber); opacity: .9; }
+.an-state.empty .ic { color: var(--ink-4); opacity: .9; }
 .an-state-t { font-size: 15px; color: var(--ink); font-weight: 600; }
 .an-state-d { font-size: 12.5px; color: var(--ink-3); max-width: 48ch; line-height: 1.55; }
 .an-state code { font-family: var(--code); font-size: 11.5px; color: var(--ink-2);
@@ -1244,7 +1716,7 @@ button { font-family: inherit; cursor: pointer; }
 /* TOTALS metric cards */
 .an-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 26px; }
 .an-card { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-card);
-  padding: 16px 16px 14px; box-shadow: 0 1px 3px rgba(20,23,28,.05); }
+  padding: 16px 16px 14px; box-shadow: var(--card-shadow); }
 .an-card-k { font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px;
   text-transform: uppercase; color: var(--ink-4); margin-bottom: 8px; }
 .an-card-v { font-size: 26px; font-weight: 700; color: var(--ink); letter-spacing: -.5px; line-height: 1; }
@@ -1345,9 +1817,11 @@ button { font-family: inherit; cursor: pointer; }
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .ab-step { display: grid; grid-template-columns: auto auto 1fr; align-items: start; gap: 12px;
   background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-card);
-  padding: 14px 16px; box-shadow: 0 1px 2px rgba(20,23,28,.05); }
+  padding: 14px 16px; box-shadow: var(--card-shadow); }
+/* the step number is a NEUTRAL ink chip (ration-coral: these repeat down the list,
+   so they stay grayscale rather than a row of coral dots). */
 .ab-step-n { width: 22px; height: 22px; flex: none; display: grid; place-items: center;
-  border-radius: 50%; background: var(--amber); color: var(--on-accent);
+  border-radius: 50%; background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line-2);
   font-family: var(--mono); font-size: 11px; font-weight: 700; margin-top: 1px; }
 .ab-step-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center;
   border-radius: var(--r-ctl); background: var(--bg-2); border: 1px solid var(--line); }
@@ -1356,13 +1830,33 @@ button { font-family: inherit; cursor: pointer; }
 .ab-step-t { font-family: var(--serif); font-size: 15px; font-weight: 600; color: var(--ink); letter-spacing: -.2px; }
 .ab-step-d { font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
 
+/* --- the "Built on" stack credit (a slim, intentional powered-by strip) ---
+   Three pillars, each a clean TEXT wordmark over one concise line — shares the
+   about card language (--bg-1 surface, --line border, --r-card rounding) so it
+   reads as a deliberate credit, never a logo dump. */
+.about-built { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line); }
+.about-built-k { display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 1.8px; text-transform: uppercase;
+  color: var(--ink-3); }
+.about-built-k .ic { width: 13px; height: 13px; color: var(--ink-3); }
+.about-built-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+.bo-card { display: flex; flex-direction: column; gap: 7px;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-card);
+  padding: 16px 18px; box-shadow: var(--card-shadow); }
+.bo-mark { font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink);
+  letter-spacing: -.3px; display: flex; align-items: baseline; gap: 7px; }
+.bo-sub { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .3px;
+  text-transform: uppercase; color: var(--ink-3); }
+.bo-line { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+
 /* --- the curation thesis cards (lettered badges, no emoji) --- */
 .about-thesis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 26px 0 8px; }
 .about-thesis-card { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
   background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-card);
-  padding: 16px; box-shadow: 0 1px 2px rgba(20,23,28,.05); }
+  padding: 16px; box-shadow: var(--card-shadow); }
+/* lettered badge — a NEUTRAL ink chip (these repeat across the three thesis cards). */
 .att-n { width: 26px; height: 26px; flex: none; display: grid; place-items: center;
-  border-radius: var(--r-ctl); background: #FFF1EE; border: 1px solid #F0BFB3; color: var(--amber);
+  border-radius: var(--r-ctl); background: var(--bg-3); border: 1px solid var(--line-2); color: var(--ink-2);
   font-family: var(--serif); font-size: 14px; font-weight: 700; }
 .att-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .att-t { font-family: var(--serif); font-size: 15px; font-weight: 600; color: var(--ink); letter-spacing: -.2px; }
@@ -1380,4 +1874,5 @@ button { font-family: inherit; cursor: pointer; }
 @media (max-width: 880px) {
   .ab-steps { grid-template-columns: 1fr; }
   .about-thesis { grid-template-columns: 1fr; }
+  .about-built-grid { grid-template-columns: 1fr; }
 }

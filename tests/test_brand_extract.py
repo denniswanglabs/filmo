@@ -55,8 +55,29 @@ class UnknownBrandHonesty(unittest.TestCase):
         self.assertEqual(t["tagline"], "")
         self.assertEqual(t["copy"]["hook"], "")
         self.assertEqual(t["features"], [])
-        # generic _default palette, not a leaked known-brand palette.
-        self.assertEqual(t["palette"]["accent"], "#7CFFB2")
+        # clean LIGHT default bg (NOT the old dark #0A0D0C+mint that rendered
+        # blank cards), and not a leaked known-brand palette.
+        self.assertEqual(t["palette"]["bg"], "#FFFFFF")
+        # R7 GENERALITY: an unknown brand with no learnable accent gets a
+        # DETERMINISTIC, brand-specific, perceptible accent — NOT the old shared
+        # generic blue (#2563EB-for-all) and NEVER an invisible white.
+        acc = t["palette"]["accent"].upper()
+        self.assertNotEqual(acc, "#2563EB", "must not collapse to the shared default blue")
+        self.assertNotEqual(acc, "#FFFFFF", "accent must never be invisible white")
+        self.assertTrue(
+            be._is_perceptible_accent(acc, t["palette"]["bg"], t["palette"]["ink"]),
+            "deterministic accent must be perceptible vs both bg and ink")
+
+    def test_distinct_unknown_brands_get_distinct_accents(self):
+        # R7 GENERALITY: two different unknown brands must NOT resolve to the same
+        # accent (the 12-brand failure: allbirds/airbnb/theverge/huckberry all blue).
+        a = be.extract_brand("https://alpha-co.example", fetcher=_no_fetch)
+        b = be.extract_brand("https://beta-co.example", fetcher=_no_fetch)
+        self.assertNotEqual(a["palette"]["accent"].upper(),
+                            b["palette"]["accent"].upper())
+        # ...and deterministic: the same brand always gets the same accent.
+        a2 = be.extract_brand("https://alpha-co.example", fetcher=_no_fetch)
+        self.assertEqual(a["palette"]["accent"], a2["palette"]["accent"])
 
     def test_no_leaked_brand_strings_anywhere(self):
         # The old _copy_from_brief leaked "Stripe" into every non-Stripe build.
@@ -77,11 +98,198 @@ class UnknownBrandHonesty(unittest.TestCase):
         self.assertIn("palette", t)
 
 
+class PerceptibilityGuard(unittest.TestCase):
+    """R4-B: accent must be visually distinct from BOTH bg AND ink."""
+
+    def test_plaid_resolves_to_perceptible_blue_not_near_black_navy(self):
+        # Plaid's old well-known accent #0C2340 (lum=31) is nearly identical to
+        # ink #0F2338 (lum=31) on the white light theme → gap=0, imperceptible.
+        # The guard must promote #1D64DC (lum=92, gap_vs_ink=61, gap_vs_bg=163).
+        t = be.extract_brand("https://plaid.com", fetcher=_no_fetch)
+        acc = t["palette"]["accent"].upper()
+        self.assertEqual(acc, "#1D64DC",
+                         "Plaid accent should be the perceptible blue, not near-black")
+        # Verify the promoted accent actually passes the perceptibility check.
+        self.assertTrue(
+            be._is_perceptible_accent(acc, t["palette"]["bg"], t["palette"]["ink"]),
+            "Plaid accent must be perceptible vs both bg and ink")
+
+    def test_near_ink_accent_is_replaced_even_when_structurally_valid(self):
+        # #0C2340 passes _is_valid_accent (lum=31 in [15,240]) but is imperceptible
+        # on a light theme (too close to ink). Simulate via a fictional brand whose
+        # fetch returns the near-ink hex.
+        def fetch(url, prompt):
+            return json.dumps({"accent": "#0C2340", "tagline": "", "features": []})
+        t = be.extract_brand("https://darkcorp.test", fetcher=fetch)
+        acc = t["palette"]["accent"]
+        bg = t["palette"]["bg"]
+        ink = t["palette"]["ink"]
+        self.assertTrue(
+            be._is_perceptible_accent(acc, bg, ink),
+            "Near-ink accent #0C2340 must be rejected and replaced with a perceptible one")
+        self.assertNotEqual(acc.upper(), "#0C2340")
+
+    def test_near_bg_accent_is_replaced(self):
+        # Near-white accent on a white bg is invisible.
+        def fetch(url, prompt):
+            return json.dumps({"accent": "#F0F0F5", "tagline": "", "features": []})
+        t = be.extract_brand("https://whiteco.test", fetcher=fetch)
+        acc = t["palette"]["accent"]
+        bg = t["palette"]["bg"]
+        ink = t["palette"]["ink"]
+        self.assertTrue(
+            be._is_perceptible_accent(acc, bg, ink),
+            "Near-bg accent #F0F0F5 must be rejected and replaced with a perceptible one")
+
+
+class UiLabelFilter(unittest.TestCase):
+    """R7: UI/nav chrome must never become the tagline / a feature."""
+
+    def test_ui_label_predicate(self):
+        for chrome in ("Added to Cart", "New Arrivals", "Become a host",
+                       "Homes on Airbnb · Become a host", "What's happening",
+                       "Sign in", "Log in", "Best Sellers",
+                       "Added to Cart · New Arrivals"):
+            self.assertTrue(be._is_ui_label(chrome), "%r should be a UI label" % chrome)
+        for real in ("Build internet businesses", "One workspace. Every team.",
+                     "Develop. Preview. Ship.", "Search 8 million hotels"):
+            self.assertFalse(be._is_ui_label(real), "%r is real copy" % real)
+
+    def test_r8_nav_section_labels_are_ui_labels(self):
+        # R8: the nav-section labels that slipped past G2 in the R7 12-brand run —
+        # both the single segments and the separator-joined pairs (·/•/|).
+        for chrome in ("Men's Shoes", "Customer Favorites", "Help Center",
+                       "Find a co-host", "Women's Shoes",
+                       "Men's Shoes · Customer Favorites",
+                       "Help Center · Find a co-host",
+                       "Help Center • Find a co-host",
+                       "Help Center | Find a co-host"):
+            self.assertTrue(be._is_ui_label(chrome),
+                            "%r should be a nav/UI label" % chrome)
+
+    def test_r8_nav_section_features_dropped_real_kept(self):
+        def fetch(url, prompt):
+            return json.dumps({"tagline": "", "accent": "", "features": [
+                {"title": "Men's Shoes", "sub": ""},
+                {"title": "Sustainable wool insoles", "sub": ""},
+                {"title": "Customer Favorites", "sub": ""},
+                {"title": "Find a co-host", "sub": ""},
+            ]})
+        t = be.extract_brand("https://shopco.test", fetcher=fetch)
+        titles = [f["title"] for f in t["features"]]
+        self.assertIn("Sustainable wool insoles", titles)
+        for nav in ("Men's Shoes", "Customer Favorites", "Find a co-host"):
+            self.assertNotIn(nav, titles)
+
+
+class CollapsedNameRepair(unittest.TestCase):
+    """R8: a collapsed multi-word brand name (host label "Theverge") must be
+    restored to its real spacing ("The Verge"); single-word brands stay intact."""
+
+    def test_theverge_name_restored_via_curated_map(self):
+        t = be.extract_brand("https://www.theverge.com", fetcher=_no_fetch)
+        self.assertEqual(t["name"], "The Verge")
+
+    def test_collapsed_name_restored_from_fetched_site_name(self):
+        # An og:site_name whose despaced form equals the label earns the spacing.
+        def fetch(url, prompt):
+            return json.dumps({"name": "The Verge", "tagline": "",
+                               "accent": "", "features": []})
+        t = be.extract_brand("https://www.theverge.com", fetcher=fetch)
+        self.assertEqual(t["name"], "The Verge")
+
+    def test_single_word_brands_stay_intact(self):
+        cases = {
+            "https://stripe.com": "Stripe",
+            "https://linear.app": "Linear",
+            "https://www.notion.so": "Notion",
+            "https://www.plaid.com": "Plaid",
+            "https://vercel.com": "Vercel",
+            "https://www.shopify.com": "Shopify",
+            "https://www.webflow.com": "Webflow",
+            "https://www.allbirds.com": "Allbirds",
+            "https://www.huckberry.com": "Huckberry",
+            "https://www.airbnb.com": "Airbnb",
+        }
+        for url, want in cases.items():
+            t = be.extract_brand(url, fetcher=_no_fetch)
+            self.assertEqual(t["name"], want,
+                             "%s name must stay %r, got %r" % (url, want, t["name"]))
+
+    def test_unrelated_fetched_name_does_not_hijack(self):
+        # A fetched name that does NOT despace to the label must be ignored.
+        def fetch(url, prompt):
+            return json.dumps({"name": "Best Travel Deals 2026", "tagline": "",
+                               "accent": "", "features": []})
+        t = be.extract_brand("https://www.theverge.com", fetcher=fetch)
+        # Curated map still wins (safe), never the junk page title.
+        self.assertEqual(t["name"], "The Verge")
+
+    def test_ui_label_tagline_is_dropped_from_fetch(self):
+        def fetch(url, prompt):
+            return json.dumps({"tagline": "Added to Cart · New Arrivals",
+                               "accent": "", "features": []})
+        t = be.extract_brand("https://shopco.test", fetcher=fetch)
+        self.assertEqual(t["tagline"], "")
+        self.assertEqual(t["copy"]["hook"], "")
+
+    def test_ui_label_features_are_dropped_from_fetch(self):
+        def fetch(url, prompt):
+            return json.dumps({"tagline": "", "accent": "", "features": [
+                {"title": "Added to Cart", "sub": ""},
+                {"title": "Real-time inventory", "sub": ""},
+                {"title": "Become a host", "sub": ""},
+            ]})
+        t = be.extract_brand("https://shopco.test", fetcher=fetch)
+        titles = [f["title"] for f in t["features"]]
+        self.assertIn("Real-time inventory", titles)
+        self.assertNotIn("Added to Cart", titles)
+        self.assertNotIn("Become a host", titles)
+
+
+class KnownBrandAccentPerceptibility(unittest.TestCase):
+    """R7: a known brand whose curated accent is imperceptible (Vercel #FFFFFF on
+    #000000 with #FFFFFF ink) must be repaired, never rendered invisible."""
+
+    def test_vercel_white_accent_is_repaired(self):
+        t = be.extract_brand("https://vercel.com", fetcher=_no_fetch)
+        acc = t["palette"]["accent"].upper()
+        self.assertNotEqual(acc, "#FFFFFF", "white accent on black bg is invisible")
+        self.assertTrue(
+            be._is_perceptible_accent(acc, t["palette"]["bg"], t["palette"]["ink"]),
+            "repaired Vercel accent must be perceptible vs its own bg and ink")
+
+
+class DominantPageAccent(unittest.TestCase):
+    """R7: derive the brand accent from the page's CSS when theme-color misses."""
+
+    def test_most_saturated_prominent_color_wins(self):
+        # A page soup of near-grey structure + one vivid brand colour.
+        html = ("<style>body{background:#E0E2DC;color:#242729}"
+                ".btn{background:#9B433F}.btn2{background:#9B433F}</style>"
+                "<a style='color:#888888'>x</a>")
+        acc = be._dominant_page_accent(html)
+        self.assertEqual(acc, "#9B433F")  # the saturated brick red, not the greys
+
+    def test_no_usable_color_returns_empty(self):
+        # Only near-neutral structure colours -> nothing usable.
+        html = "<style>body{background:#FAFAFA;color:#111111;border:#888}</style>"
+        self.assertEqual(be._dominant_page_accent(html), "")
+
+    def test_rgb_literals_are_harvested(self):
+        html = "<div style='background:rgb(29,100,220)'>x</div>" * 3
+        acc = be._dominant_page_accent(html)
+        self.assertEqual(acc, "#1D64DC")
+
+
 class FetchEnrichment(unittest.TestCase):
     def test_fetch_supplies_real_tagline_and_features_for_unknown_brand(self):
         def fetch(url, prompt):
             return json.dumps({
                 "tagline": "Ship faster",
+                # #123456 (lum=45) is too close to ink #0F2338 (lum=31, gap=14) on
+                # a light theme — the perceptibility guard rejects it and falls back
+                # to the LIGHT_DEFAULT blue. Tagline and features still flow through.
                 "accent": "#123456",
                 "features": [
                     {"title": "Fast builds", "sub": "Sub-second"},
@@ -91,7 +299,15 @@ class FetchEnrichment(unittest.TestCase):
         t = be.extract_brand("https://newco.test", fetcher=fetch)
         self.assertEqual(t["tagline"], "Ship faster")
         self.assertEqual(t["copy"]["hook"], "Ship faster")
-        self.assertEqual(t["palette"]["accent"], "#123456")
+        # #123456 is imperceptible on the light theme (too close to ink) → the
+        # accent guard rejects it. With no world-knowledge / page colour to fall
+        # back on, a deterministic brand-specific perceptible accent is derived
+        # (R7: never the shared blue, never invisible). Tagline/features still flow.
+        acc = t["palette"]["accent"].upper()
+        self.assertNotEqual(acc, "#123456", "near-ink fetched accent must be rejected")
+        self.assertNotEqual(acc, "#FFFFFF")
+        self.assertTrue(
+            be._is_perceptible_accent(acc, t["palette"]["bg"], t["palette"]["ink"]))
         self.assertEqual(len(t["features"]), 2)
         self.assertEqual(t["features"][0]["title"], "Fast builds")
 
@@ -112,8 +328,22 @@ class FetchEnrichment(unittest.TestCase):
         def fetch(url, prompt):
             return json.dumps({"accent": "blue", "tagline": "", "features": []})
         t = be.extract_brand("https://newco.test", fetcher=fetch)
-        # invalid hex dropped -> generic _default accent retained.
-        self.assertEqual(t["palette"]["accent"], "#7CFFB2")
+        # invalid hex dropped -> a deterministic, perceptible brand accent is
+        # derived (R7: not the shared default blue, never invisible white).
+        acc = t["palette"]["accent"].upper()
+        self.assertNotEqual(acc, "#FFFFFF")
+        self.assertTrue(
+            be._is_perceptible_accent(acc, t["palette"]["bg"], t["palette"]["ink"]))
+
+    def test_perceptible_fetched_accent_is_accepted(self):
+        # A genuinely perceptible fetched accent (good contrast vs both bg and ink)
+        # MUST be kept, not replaced. #4B7BF5 (lum≈115) on white (lum=255, gap=140)
+        # and vs ink #0F2338 (lum=31, gap=84) → both > 40 → PASS.
+        def fetch(url, prompt):
+            return json.dumps({"accent": "#4B7BF5", "tagline": "Build fast", "features": []})
+        t = be.extract_brand("https://newco.test", fetcher=fetch)
+        self.assertEqual(t["palette"]["accent"], "#4B7BF5")
+        self.assertEqual(t["tagline"], "Build fast")
 
     def test_feature_without_title_is_dropped(self):
         payload = be._parse_fetch_payload(json.dumps({

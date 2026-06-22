@@ -4,6 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Walk Studio — Producer Console</title>
+<!-- Type system (Claude-like). Claude's real faces — Styrene A/B (UI) and
+     Tiempos/Copernicus (display) — are PROPRIETARY and cannot be embedded, so
+     the dashboard uses the closest FREE Google Fonts substitutes:
+       · "Hanken Grotesk" — warm humanist grotesque for ALL UI/body (≈ Styrene)
+       · "Newsreader"     — display serif for large headings (≈ Tiempos)
+     Wired through the --mono / --serif tokens in styles.css. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,400..800;1,400..600&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..500&display=swap" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2084%2084'%3E%3Crect%20width='84'%20height='84'%20rx='22'%20fill='%23FFF1EE'/%3E%3Crect%20x='1'%20y='1'%20width='82'%20height='82'%20rx='21'%20fill='none'%20stroke='%23F0BFB3'%20stroke-width='1.5'/%3E%3Cg%20fill='%23EAB6A9'%3E%3Crect%20x='10'%20y='17'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='10'%20y='38'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='10'%20y='59'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='68.5'%20y='17'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='68.5'%20y='38'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3Crect%20x='68.5'%20y='59'%20width='5.5'%20height='8'%20rx='2.75'/%3E%3C/g%3E%3Cpath%20d='M32%2020%20L32%2064%20L42.8%2053.4%20L50.4%2068.2%20L57.6%2064.6%20L50%2049.8%20L62.8%2049.8%20Z'%20fill='%23D6351C'%20stroke='%23D6351C'%20stroke-width='1.4'%20stroke-linejoin='round'/%3E%3C/svg%3E" type="image/svg+xml" />
 <link rel="stylesheet" href="/dashboard/styles.css" />
 </head>
@@ -67,8 +76,8 @@
           </g>
           <path d="M32 20 L32 64 L42.8 53.4 L50.4 68.2 L57.6 64.6 L50 49.8 L62.8 49.8 Z" fill="#D6351C" stroke="#D6351C" stroke-width="1.4" stroke-linejoin="round"/>
         </g>
-        <text x="120" y="78" font-family="Söhne, Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#16181D">Walk</text>
-        <text x="248" y="78" font-family="Söhne, Inter, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#D6351C">Studio</text>
+        <text x="120" y="78" font-family="'Hanken Grotesk', -apple-system, system-ui, 'Segoe UI', Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#16181D">Walk</text>
+        <text x="248" y="78" font-family="'Hanken Grotesk', -apple-system, system-ui, 'Segoe UI', Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#D6351C">Studio</text>
       </svg>
       <button class="rail-collapse" id="rail-collapse" title="Hide sidebar" aria-label="Hide sidebar"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
     </div>
@@ -82,6 +91,20 @@
     <div id="rail-list" class="rail-list"></div>
 
     <div class="rail-foot">
+      <!-- OPERATOR planner-BRAIN control (NOT customer-facing): picks WHICH LLM
+           plans the storyboard. EXACTLY three options, all via OpenRouter. Default
+           super-free ($0) so nothing bills by accident; the two paid options are
+           marked with a "$" tag. Lives in the operator footer next to Analytics —
+           the clean Hiro composer is never touched. Wired in app.js (state.brain ->
+           /api/build payload). -->
+      <div class="rail-brain" id="rail-brain" role="group" aria-label="Planner brain (operator)">
+        <div class="rail-brain-lbl"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Brain</span></div>
+        <div class="rail-brain-opts">
+          <button type="button" class="brain-opt" data-brain="ultra-paid" title="Nemotron 3 Ultra via OpenRouter — paid"><span class="bo-name">Nemotron 3 Ultra</span><span class="bo-tag paid">paid</span></button>
+          <button type="button" class="brain-opt is-on" data-brain="super-free" title="Nemotron 3 Super (free variant) via OpenRouter — $0"><span class="bo-name">Nemotron 3 Super</span><span class="bo-tag free">free</span></button>
+          <button type="button" class="brain-opt" data-brain="super-paid" title="Nemotron 3 Super via OpenRouter — paid"><span class="bo-name">Nemotron 3 Super</span><span class="bo-tag paid">paid</span></button>
+        </div>
+      </div>
       <!-- ABOUT (customer-facing): how the agent works end-to-end + the curation
            thesis (why our videos are better) where the curated lookbook now lives.
            Mirrors the Analytics entry's mechanism. Also openable via ?view=about. -->
@@ -123,19 +146,34 @@
         <h1 class="hero-title hiro-greet" id="hero-title" data-setup="Got a video idea," data-accent="Dennis?">Got a video idea, Dennis?</h1>
         <p class="hero-sub hiro-sub" id="stage-empty-msg">The agent does the rest.</p>
 
-        <!-- PILLS ABOVE THE COMPOSER — clean outlined chips (Hiro-style). An aspect
-             pill (default Widescreen 16:9) + the pacing pill. The pacing pill keeps
-             the #build-pace id/.pace-opt buttons app.js wires (state.pace). -->
-        <div class="hiro-pills">
+        <!-- SETTING-CHIPS ABOVE THE COMPOSER (Hera-style) — a single scannable row of
+             clean white pill-chips that surfaces the build options before the input:
+             Quality (Standard | Premium), Aspect (16:9), Pacing. Each is a self-
+             contained chip; the QUALITY chip keeps #cmp-quality / .q-opt / data-quality
+             so app.js's wiring (state.selection.quality) is untouched, and Pacing keeps
+             #build-pace / .pace-opt (state.pace). Operator-only Brain stays in the
+             sidebar. The coral PLAY button remains the one hero action below. -->
+        <div class="hiro-pills" id="composer-chips">
+          <!-- QUALITY — the one upfront choice that changes WHAT the agent makes,
+               now a compact segmented chip instead of two nested description cards.
+               Standard = designed motion graphics + synthetic voice (free, fast).
+               Premium = cinematic AI footage + a natural studio voice (richer).
+               The "from $X" price rides inside each option; the longer explanation
+               moved to the chip's title tooltip so the row stays scannable. -->
+          <div class="hpill hpill-seg" id="cmp-quality" role="group" aria-label="Video quality">
+            <span class="hpill-seg-lbl">Quality</span>
+            <button type="button" class="seg-opt q-opt is-on" data-quality="standard" title="Designed motion graphics + a clean synthetic voice. Fast and free to make."><span class="seg-name">Standard</span><span class="seg-sub">from $5</span></button>
+            <button type="button" class="seg-opt q-opt" data-quality="premium" title="Cinematic AI footage (Higgsfield) + a natural studio voice (ElevenLabs). Richer and more lifelike."><span class="seg-name">Premium</span><span class="seg-sub">from $15</span></button>
+          </div>
           <div class="hpill" id="aspect-pill" role="group" aria-label="Aspect ratio">
             <svg class="ic" aria-hidden="true"><use href="#i-film"/></svg>
             <span class="hpill-lbl">Widescreen 16:9</span>
           </div>
-          <div class="hpill hpill-pace" id="build-pace" role="group" aria-labelledby="build-pace-lbl">
-            <span class="cmp-pace-lbl" id="build-pace-lbl">Pacing</span>
-            <button type="button" class="pace-opt" data-pace="snappy" title="Quick cuts — punchy, social-ready">Snappy</button>
-            <button type="button" class="pace-opt is-on" data-pace="standard" title="Balanced pacing — the default">Standard</button>
-            <button type="button" class="pace-opt" data-pace="cinematic" title="Slower, held shots — premium feel">Cinematic</button>
+          <div class="hpill hpill-pace hpill-seg" id="build-pace" role="group" aria-labelledby="build-pace-lbl">
+            <span class="hpill-seg-lbl" id="build-pace-lbl">Pacing</span>
+            <button type="button" class="seg-opt pace-opt" data-pace="snappy" title="Quick cuts — punchy, social-ready">Snappy</button>
+            <button type="button" class="seg-opt pace-opt is-on" data-pace="standard" title="Balanced pacing — the default">Standard</button>
+            <button type="button" class="seg-opt pace-opt" data-pace="cinematic" title="Slower, held shots — premium feel">Cinematic</button>
           </div>
         </div>
 
@@ -147,33 +185,28 @@
           <div class="cmp-fields">
             <input id="build-goal" class="build-in cmp-in cmp-goal" placeholder="What should the video show? e.g. how to find your API keys" autocomplete="off" spellcheck="false" />
             <div class="cmp-url-row">
-              <svg class="ic cmp-url-ic" aria-hidden="true"><use href="#i-link"/></svg>
               <input id="build-url" class="build-in cmp-in cmp-url" placeholder="Company URL — e.g. stripe.com" autocomplete="off" spellcheck="false" inputmode="url" />
+            </div>
+            <!-- EMPHASIS — the walkthrough target. The agent steers the guided
+                 Walk Agent capture toward THIS feature/area (becomes the
+                 walkthrough's specific multi-step goal, avoiding the one-nav-link
+                 loop). Threaded into the /api/build payload as { emphasis } and on
+                 to build_runner.py as --emphasis. Empty is fine — the backend
+                 defaults emphasis="". -->
+            <div class="cmp-url-row cmp-emph-row">
+              <input id="build-emphasis" class="build-in cmp-in cmp-url cmp-emph" placeholder="What should the walkthrough show off? e.g. the pricing page" autocomplete="off" spellcheck="false" />
             </div>
           </div>
 
-          <!-- QUALITY — the one upfront choice that changes WHAT the agent makes.
-               Standard = Remotion designed motion-graphics + a clean synthetic
-               voice (free, fast). Premium = cinematic AI footage (Higgsfield) + a
-               natural studio voice (ElevenLabs) (richer, costs more). Wired in
-               app.js (#cmp-quality .q-opt -> state.selection.quality). Each option
-               carries a small explanation. -->
-          <div class="cmp-quality" id="cmp-quality" role="group" aria-label="Video quality">
-            <button type="button" class="q-opt is-on" data-quality="standard">
-              <span class="q-head"><span class="q-name">Standard</span><span class="q-price">from $5</span></span>
-              <span class="q-desc">Designed motion graphics + a clean synthetic voice. Fast and free to make.</span>
-            </button>
-            <button type="button" class="q-opt" data-quality="premium">
-              <span class="q-head"><span class="q-name">Premium</span><span class="q-price">from $6</span></span>
-              <span class="q-desc">Cinematic AI footage (Higgsfield) + a natural studio voice (ElevenLabs). Richer and more lifelike.</span>
-            </button>
-          </div>
+          <!-- QUALITY moved UP into the setting-chips row above the input (Hera-style
+               scannable chips); see #cmp-quality in .hiro-pills. The composer body is
+               now just the prompt fields + the action bar, so the input is the focus. -->
 
           <div class="cmp-bar">
             <div class="cmp-opts">
               <label class="build-mode" title="Real production runs Higgsfield + walk-agent ($). Tick for a $0 dev/mock run."><input type="checkbox" id="build-mock" /> <span>mock · $0</span></label>
             </div>
-            <button id="build-go" class="build-go cmp-send" title="Build this video" aria-label="Build this video"><svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+            <button id="build-go" class="build-go cmp-send" title="Start build" aria-label="Start build"><svg class="ic ic-play" aria-hidden="true"><use href="#i-play"/></svg><svg class="ic ic-load" aria-hidden="true"><use href="#i-loader"/></svg></button>
           </div>
         </div>
 
@@ -186,7 +219,7 @@
           <button type="button" class="ex-chip" data-fill="A cinematic launch film that builds to the new release"><svg class="ic" aria-hidden="true"><use href="#i-ship"/></svg><span>Launch film</span></button>
         </div>
 
-        <p class="hero-foot hiro-foot" id="stage-empty-foot"><button class="hero-sample-link" id="hero-sample" type="button" data-run="demo-1-approve">See a finished example</button> &mdash; or open any build in the sidebar.</p>
+        <p class="hero-foot hiro-foot" id="stage-empty-foot"><button class="hero-sample-link" id="hero-sample" type="button" data-run="fin-stripe">See a finished example</button> &mdash; or open any build in the sidebar.</p>
         <!-- hidden hook kept for app.js init() (focuses the URL field); no longer a
              visible CTA button now the composer is the focus. -->
         <button class="hero-start-hidden" id="hero-start" type="button" hidden aria-hidden="true"></button>

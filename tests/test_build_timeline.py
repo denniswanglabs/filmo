@@ -64,10 +64,11 @@ def _byid(tl):
 
 class TestVoicedSpan(unittest.TestCase):
     def test_voiced_scene_length_from_word_span_not_duration_s(self):
-        # s1 has NO duration_s; if it were used the scene would be wrong. Its span
-        # is 1.5s -> 45 frames. A bogus duration_s must be ignored for voiced scenes.
+        # Duration contract: scene length = max(plan duration_s, VO word span). s1's
+        # word span is 1.5s -> 45 frames. A plan duration_s SMALLER than the span must
+        # never cut the voice short: the VO span wins.
         scenes = base_scenes()
-        scenes[1]["duration_s"] = 99  # advisory poison; must NOT be used
+        scenes[1]["duration_s"] = 1.0  # 30f, below the 45f span -> span wins
         tl = bt.build_timeline(scenes, alignment(), fps=FPS)
         s1 = _byid(tl)["s1"]
         self.assertEqual(s1["out_frame"] - s1["in_frame"], 45)
@@ -77,6 +78,24 @@ class TestVoicedSpan(unittest.TestCase):
         self.assertEqual(tl["fps"], FPS)
         self.assertEqual(tl["audio_path"], "voiceover.mp3")
         self.assertEqual(tl["lang"], "en")
+
+    def test_media_duration_floors_scene_length(self):
+        # P2 walkthrough floor: a scene carrying a produced clip must HOLD at least
+        # the clip's length so OffthreadVideo never truncates. s2's VO span is 1.5s
+        # (45f); a 4.0s clip (120f) must win even though the voice + plan are shorter.
+        scenes = base_scenes()
+        scenes[2]["media_duration_s"] = 4.0  # 120f, above the 45f span
+        tl = bt.build_timeline(scenes, alignment(), fps=FPS)
+        s2 = _byid(tl)["s2"]
+        self.assertEqual(s2["out_frame"] - s2["in_frame"], 120)
+
+    def test_media_duration_does_not_shrink_longer_voice(self):
+        # A clip SHORTER than the voice never cuts the VO: the larger floor wins.
+        scenes = base_scenes()
+        scenes[2]["media_duration_s"] = 0.5  # 15f, below the 45f span -> span wins
+        tl = bt.build_timeline(scenes, alignment(), fps=FPS)
+        s2 = _byid(tl)["s2"]
+        self.assertEqual(s2["out_frame"] - s2["in_frame"], 45)
 
 
 class TestUnvoicedHold(unittest.TestCase):
@@ -149,7 +168,10 @@ class TestContiguity(unittest.TestCase):
 
     def test_contiguity_and_last_frame_clamp(self):
         tl = bt.build_timeline(base_scenes(), alignment(), fps=FPS)
-        self.assertEqual(tl["total_frames"], round(6.0 * FPS))
+        # Duration contract: total = sum of per-scene lengths (each = max(plan
+        # duration_s, VO span)); with no target_duration_s there is no pad to the VO
+        # total. logo hold 1.0s=30f + s1 span 1.5s=45f + s2 span 1.5s=45f = 120f.
+        self.assertEqual(tl["total_frames"], 120)
         self._assert_contiguous(tl)
 
     def test_contiguity_holds_with_a_cut(self):

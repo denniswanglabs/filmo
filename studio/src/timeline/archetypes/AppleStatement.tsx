@@ -24,8 +24,16 @@ export const AppleStatement: React.FC<{
   cues: Cue[];
   theme: Theme;
   durationInFrames: number;
-}> = ({ data, cues, theme, durationInFrames }) => {
+  // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
+  sceneId?: string;
+}> = ({ data, cues, theme, durationInFrames, sceneId }) => {
   const frame = useCurrentFrame();
+
+  // OPTIONAL geometry overrides (data.geo). `data.geo?.KEY ?? LITERAL` so when geo
+  // is absent (every production run) the original literal is used and output is
+  // byte-identical. The visual editor writes these keys.
+  const geo = data.geo;
+  const statementFontSize = geo?.statementFontSize ?? 116;
 
   // accept either `lines` (multi-line) or a single `statement`.
   const lines = data.lines ?? (data.statement ? [data.statement] : []);
@@ -85,32 +93,42 @@ export const AppleStatement: React.FC<{
           transform: `translateY(${breath}px)`,
         }}
       >
-        {lines.map((line, i) => {
-          const m = appleMaskRise(frame, lineAt(i), 56, 28);
-          const isAccent = i === accentLine;
-          return (
-            <div
-              key={i}
-              style={{
-                opacity: m.opacity,
-                clipPath: m.clipPath,
-                transform: m.transform,
-                fontSize: 116,
-                fontWeight: 700,
-                letterSpacing: "-0.03em",
-                lineHeight: 1.04,
-                textAlign: "center",
-                maxWidth: 1600,
-                color: isAccent ? theme.accent : theme.text,
-              }}
-            >
-              {line}
-            </div>
-          );
-        })}
+        {/* Statement plate — the multi-line editorial wordmark. Wrapped in a
+            selectable container so a click on any line selects the statement text. */}
+        <div
+          data-scene-id={sceneId}
+          data-field="statement"
+          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}
+        >
+          {lines.map((line, i) => {
+            const m = appleMaskRise(frame, lineAt(i), 56, 28);
+            const isAccent = i === accentLine;
+            return (
+              <div
+                key={i}
+                style={{
+                  opacity: m.opacity,
+                  clipPath: m.clipPath,
+                  transform: m.transform,
+                  fontSize: statementFontSize,
+                  fontWeight: 700,
+                  letterSpacing: "-0.03em",
+                  lineHeight: 1.04,
+                  textAlign: "center",
+                  maxWidth: 1600,
+                  color: isAccent ? theme.accent : theme.text,
+                }}
+              >
+                {line}
+              </div>
+            );
+          })}
+        </div>
 
         {data.footnote && (
           <div
+            data-scene-id={sceneId}
+            data-field="footnote"
             style={{
               opacity: foot.opacity,
               transform: foot.transform,

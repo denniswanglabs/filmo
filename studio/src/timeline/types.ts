@@ -20,7 +20,16 @@ export type Archetype =
   // Apple-style archetypes (cubic-ease iOS motion, per-brand palette)
   | "apple-hero" // product-as-hero, slide-up title, edge-light sweep
   | "apple-registry" // segmented control + type-coded entity grid
-  | "apple-statement"; // big editorial wordmark with subtle breath drift
+  | "apple-statement" // big editorial wordmark with subtle breath drift
+  // A REAL website screenshot (headless-browser capture) shown inside a
+  // brand-tinted browser card with the Apple shrink/zoom arrival. Mode-
+  // INDEPENDENT: rendered in both mock + real builds (screenshots are $0).
+  | "apple-screenshot"
+  // A produced walkthrough MP4 (Walk Agent capture) played INSIDE the branded
+  // studio composition, so the clip inherits Walk Studio overlays + per-scene VO
+  // placement. The clip fills a brand-tinted frame with a kinetic wordmark/title
+  // bar; its own audio is muted by default (the scene VO owns the audio).
+  | "walkthrough-player";
 
 export interface Cue {
   // A named reveal point. `word` is the spoken word it is anchored to (for
@@ -73,6 +82,58 @@ export interface SceneData {
   lines?: string[]; // multi-line editorial statement
   accentLine?: number; // index of the line drawn in the brand accent color
   footnote?: string; // small muted footnote / attribution under the statement
+
+  // apple-screenshot fields. A REAL captured website screenshot shown inside a
+  // brand-tinted browser card with the Apple shrink/zoom arrival.
+  //   imageSrc: public-relative (staticFile-resolved) or absolute/remote path to
+  //             the captured PNG (style_fill stages it into studio/public/).
+  //   frame:    "browser" (mac browser chrome + address bar) or "none" (bare card).
+  //   caption:  optional URL shown in the browser address bar (e.g. the captured URL).
+  //   headline: optional grounded value-prop line (a short headline about WHAT the
+  //             screenshot shows) rendered as prominent on-screen text above the card,
+  //             so the proof beat communicates rather than being a bare image. Filled
+  //             by style_fill from the scene's narrated VO beat (NEVER the URL).
+  imageSrc?: string;
+  frame?: "browser" | "none";
+  caption?: string;
+  headline?: string;
+
+  // walkthrough-player fields. A produced walkthrough MP4 played inside a
+  // brand-tinted frame with a kinetic overlay title bar.
+  //   videoSrc:     public-relative (staticFile-resolved) or absolute/remote path
+  //                 to the produced clip (style_fill stages it into studio/public/).
+  //   videoFit:     "contain" (letterbox, never crop — default for UI walkthroughs)
+  //                 or "cover" (fill the frame, may crop edges).
+  //   overlayTitle: the brand wordmark / emphasis shown in the kinetic title bar
+  //                 over the clip (accent underline reveals on the scene's cues).
+  //   muteClip:     mute the clip's own audio (default true — the scene VO owns it).
+  videoSrc?: string;
+  videoFit?: "contain" | "cover";
+  overlayTitle?: string;
+  muteClip?: boolean;
+
+  // OPTIONAL geometry overrides written by the visual editor. Each key maps to a
+  // single hardcoded geometry literal inside an archetype (font size, box width,
+  // border radius, etc.). When `geo` is ABSENT (every production run today),
+  // archetypes fall back to their original literal so output is byte-identical.
+  // Keys are archetype-scoped (see each archetype for the exact key set):
+  //   hero-title:       titleFontSize, subtitleFontSize, kickerFontSize, plateW,
+  //                     plateH, plateOffsetX, plateOffsetY
+  //   apple-hero:       titleFontSize, subtitleFontSize
+  //   apple-screenshot: cardW, cardRadius, shotH, cardOffsetX, cardOffsetY
+  //   apple-statement:  statementFontSize
+  // Offsets default to 0 and font/size keys default to the archetype literal, so
+  // an absent `geo` (every production run today) renders byte-identical.
+  geo?: Record<string, number>;
+}
+
+// Per-scene VO audio. The picture is stretched so each scene HOLDS for its
+// planned duration (>= its voice), so a single continuous track from frame 0 would
+// no longer land each beat on its scene. Instead each voiced scene carries its own
+// per-beat file, rendered at the scene's in_frame. `src` is a public-relative path
+// (staticFile-resolved) or an absolute/remote path.
+export interface SceneAudio {
+  src: string;
 }
 
 export interface Scene {
@@ -82,6 +143,9 @@ export interface Scene {
   out_frame: number;
   cues: Cue[];
   data: SceneData;
+  // Optional per-scene VO (per-beat file). When present on ANY scene the Timeline
+  // places these per-scene instead of the single continuous top-level audio_path.
+  audio?: SceneAudio;
 }
 
 export interface Theme {
