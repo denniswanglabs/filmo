@@ -1715,7 +1715,7 @@ def generate_overlay(scene, out_path, mode, company_url=None):
     env = dict(os.environ, PATH=os.path.join(kit, "node_modules/.bin") + ":" + os.environ.get("PATH", ""))
     proc = subprocess.run(
         ["remotion", "render", "src/index.ts", "Overlay", out_path, "--codec=h264",
-         "--frames=0-%d" % last, "--props=%s" % props, "--concurrency=8"],
+         "--frames=0-%d" % last, "--props=%s" % props, "--concurrency=50%"],
         cwd=kit, env=env, capture_output=True, text=True, timeout=300, check=False)
     if proc.returncode != 0 or not os.path.exists(out_path):
         synth_clip(out_path, TYPE_COLOR.get(stype, "0A0D0C"), scene.get("duration_s", 3))
@@ -1857,11 +1857,22 @@ def synthesize_voiceover_aligned(beats, voice, out_path, provider, total_s=None)
 
 def _vo_edge(script, voice, out_path):
     edge_voice = EDGE_VOICE_MAP.get((voice or "").strip().lower(), EDGE_VOICE_DEFAULT)
-    _run(["edge-tts", "--voice", edge_voice, "--text", script, "--write-media", out_path],
-         timeout=180)
-    if not os.path.exists(out_path) or os.path.getsize(out_path) < 500:
-        raise AdapterError("edge-tts produced no audio")
-    return {"output_path": out_path, "provider": "edge-tts", "voice": edge_voice, "real": False}
+    # edge-tts (free MS service) intermittently returns NoAudioReceived for a beat;
+    # it's transient, so retry a few times with a short backoff before giving up.
+    import time as _t
+    last_err = None
+    for attempt in range(4):
+        try:
+            _run(["edge-tts", "--voice", edge_voice, "--text", script, "--write-media", out_path],
+                 timeout=180)
+            if os.path.exists(out_path) and os.path.getsize(out_path) >= 500:
+                return {"output_path": out_path, "provider": "edge-tts", "voice": edge_voice, "real": False}
+            last_err = AdapterError("edge-tts produced no audio")
+        except AdapterError as e:
+            last_err = e
+        if attempt < 3:
+            _t.sleep(1.5 * (attempt + 1))
+    raise last_err or AdapterError("edge-tts produced no audio after retries")
 
 
 # ElevenLabs STOCK voice ids (premium_vo add-on). These are pre-made library

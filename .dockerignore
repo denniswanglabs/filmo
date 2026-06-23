@@ -1,0 +1,15 @@
+.git
+**/node_modules
+runs
+evidence
+_full-renders
+*.mp4
+*.mov
+*.bak
+**/.venv-capture
+**/__pycache__
+*.pyc
+.env
+*.env
+.insforge
+worker/worker.log

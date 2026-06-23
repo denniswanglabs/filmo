@@ -3838,7 +3838,7 @@ def render_and_montage(props_path: str, out_dir: str) -> Optional[str]:
     env = dict(os.environ, PATH=os.path.join(studio, "node_modules", ".bin")
                + os.pathsep + os.environ.get("PATH", ""))
     render_cmd = ["remotion", "render", "src/index.ts", "Timeline", mp4,
-                  "--codec=h264", "--concurrency=8", f"--props={abs_props}"]
+                  "--codec=h264", "--concurrency=50%", f"--props={abs_props}"]
     print("style_fill: rendering ->", mp4)
     r = subprocess.run(render_cmd, cwd=studio, env=env)
     if r.returncode != 0 or not os.path.exists(mp4):

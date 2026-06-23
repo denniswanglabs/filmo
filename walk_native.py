@@ -1006,12 +1006,18 @@ def _stitch(frames_dir: str, out_path: str, duration: float) -> bool:
     # framerate so total length = len(pics)/fps ≈ duration, kept watchable.
     dur = max(2.0, float(duration))
     fps = max(8.0, min(18.0, len(pics) / dur))
+    # NOTE: mux a SILENT audio track (anullsrc) rather than -an. Remotion's render
+    # probes every asset's audio (ffprobe -select_streams a:0); on linux-x64 that
+    # errors on an audio-less mp4 (it tolerates it on arm64), failing the cloud render.
+    # A silent stereo track makes a:0 exist everywhere.
     cmd = [
         "ffmpeg", "-y", "-nostdin", "-loglevel", "error",
         "-framerate", "%.4f" % fps,
         "-pattern_type", "glob", "-i", os.path.join(frames_dir, "f*.jpg"),
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,setsar=1",
-        "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-an",
+        "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+        "-c:a", "aac", "-shortest",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path,
     ]
     try:

@@ -291,7 +291,7 @@ def _run_vo_engine(plan, run_id, url, run_dir):
                + os.pathsep + os.environ.get("PATH", ""))
     import subprocess
     cmd = ["remotion", "render", "src/index.ts", "Timeline", os.path.abspath(final),
-           "--codec=h264", "--concurrency=8", "--props=%s" % abs_props]
+           "--codec=h264", "--concurrency=50%", "--props=%s" % abs_props]
     r = subprocess.run(cmd, cwd=studio, env=env)
     if r.returncode != 0 or not os.path.exists(final):
         return None

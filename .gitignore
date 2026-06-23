@@ -88,3 +88,13 @@ studio/public/brand-logo-*.svg
 
 # generated run artifacts (dashboard reads from disk; not versioned)
 runs/
+
+# cloud build (added on hosted-saas)
+web/node_modules/
+web/.next/
+web/.env*
+web/.vercel/
+**/.insforge/
+*.railwayignore
+docker-build.log
+worker/*.log
