@@ -1,0 +1,455 @@
+{
+  "audio_path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-allbirds-g1/voiceover.mp3",
+  "lang": "en",
+  "voice": "en-US-AndrewNeural",
+  "tier": "free",
+  "total_duration_s": 28.56,
+  "words": [
+    {
+      "word": "Allbirds",
+      "start_s": 0.14,
+      "end_s": 0.54,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "offers",
+      "start_s": 0.54,
+      "end_s": 1.01,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "the",
+      "start_s": 1.01,
+      "end_s": 1.18,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "world's",
+      "start_s": 1.18,
+      "end_s": 1.65,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "most",
+      "start_s": 1.65,
+      "end_s": 2.0,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "comfortable",
+      "start_s": 2.0,
+      "end_s": 2.68,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "shoes",
+      "start_s": 2.68,
+      "end_s": 3.08,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "made",
+      "start_s": 3.08,
+      "end_s": 3.28,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "from",
+      "start_s": 3.28,
+      "end_s": 3.64,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "wool",
+      "start_s": 3.64,
+      "end_s": 4.11,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "and",
+      "start_s": 4.11,
+      "end_s": 4.2,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "tree.",
+      "start_s": 4.2,
+      "end_s": 4.88,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "Explore",
+      "start_s": 4.88,
+      "end_s": 5.42,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "popular",
+      "start_s": 5.42,
+      "end_s": 5.96,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "picks",
+      "start_s": 5.96,
+      "end_s": 6.34,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "on",
+      "start_s": 6.34,
+      "end_s": 6.53,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "Allbirds",
+      "start_s": 6.53,
+      "end_s": 7.11,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "homepage,",
+      "start_s": 7.11,
+      "end_s": 7.96,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "showcasing",
+      "start_s": 7.96,
+      "end_s": 8.48,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "wool",
+      "start_s": 8.48,
+      "end_s": 8.72,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "runners,",
+      "start_s": 8.72,
+      "end_s": 9.28,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "tree",
+      "start_s": 9.28,
+      "end_s": 9.87,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "sneakers,",
+      "start_s": 9.87,
+      "end_s": 10.32,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "and",
+      "start_s": 10.32,
+      "end_s": 10.53,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "eco-friendly",
+      "start_s": 10.53,
+      "end_s": 11.37,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "apparel.",
+      "start_s": 11.37,
+      "end_s": 12.08,
+      "beat_scene_id": "screenshot-homepage"
+    },
+    {
+      "word": "Shop",
+      "start_s": 12.08,
+      "end_s": 12.31,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "the",
+      "start_s": 12.31,
+      "end_s": 12.48,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "men's",
+      "start_s": 12.48,
+      "end_s": 12.76,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "collection",
+      "start_s": 12.76,
+      "end_s": 13.4,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "for",
+      "start_s": 13.4,
+      "end_s": 13.52,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "comfortable",
+      "start_s": 13.52,
+      "end_s": 14.08,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "wool",
+      "start_s": 14.08,
+      "end_s": 14.43,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "shoes",
+      "start_s": 14.43,
+      "end_s": 14.86,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "and",
+      "start_s": 14.86,
+      "end_s": 15.23,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "tree-based",
+      "start_s": 15.23,
+      "end_s": 15.57,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "sneakers,",
+      "start_s": 15.57,
+      "end_s": 16.32,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "plus",
+      "start_s": 16.32,
+      "end_s": 16.58,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "everyday",
+      "start_s": 16.58,
+      "end_s": 17.11,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "sustainable",
+      "start_s": 17.11,
+      "end_s": 17.84,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "clothing.",
+      "start_s": 17.84,
+      "end_s": 18.56,
+      "beat_scene_id": "screenshot-mens"
+    },
+    {
+      "word": "Walk",
+      "start_s": 18.56,
+      "end_s": 18.82,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "through",
+      "start_s": 18.82,
+      "end_s": 19.4,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "popular",
+      "start_s": 19.4,
+      "end_s": 19.74,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "picks.",
+      "start_s": 19.74,
+      "end_s": 20.43,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "Choose",
+      "start_s": 20.43,
+      "end_s": 20.66,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "a",
+      "start_s": 20.66,
+      "end_s": 20.72,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "wool",
+      "start_s": 20.72,
+      "end_s": 21.3,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "runner",
+      "start_s": 21.3,
+      "end_s": 21.57,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "and",
+      "start_s": 21.57,
+      "end_s": 21.68,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "view",
+      "start_s": 21.68,
+      "end_s": 21.92,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "its",
+      "start_s": 21.92,
+      "end_s": 22.14,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "details",
+      "start_s": 22.14,
+      "end_s": 22.71,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "before",
+      "start_s": 22.71,
+      "end_s": 23.1,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "adding",
+      "start_s": 23.1,
+      "end_s": 23.58,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "it",
+      "start_s": 23.58,
+      "end_s": 23.68,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "to",
+      "start_s": 23.68,
+      "end_s": 23.91,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "your",
+      "start_s": 23.91,
+      "end_s": 24.15,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "cart.",
+      "start_s": 24.15,
+      "end_s": 24.62,
+      "beat_scene_id": "walkthrough-popular-picks"
+    },
+    {
+      "word": "Visit",
+      "start_s": 24.62,
+      "end_s": 25.0,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "Allbirds.com",
+      "start_s": 25.0,
+      "end_s": 26.03,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "to",
+      "start_s": 26.03,
+      "end_s": 26.16,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "shop",
+      "start_s": 26.16,
+      "end_s": 26.42,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "wool",
+      "start_s": 26.42,
+      "end_s": 26.91,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "runners",
+      "start_s": 26.91,
+      "end_s": 27.43,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "and",
+      "start_s": 27.43,
+      "end_s": 27.52,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "tree",
+      "start_s": 27.52,
+      "end_s": 27.76,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "sneakers",
+      "start_s": 27.76,
+      "end_s": 28.24,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "today.",
+      "start_s": 28.24,
+      "end_s": 28.56,
+      "beat_scene_id": "closing-cta"
+    }
+  ],
+  "beats": [
+    {
+      "scene_id": "opening-title",
+      "start_s": 0.14,
+      "end_s": 4.88,
+      "text": "Allbirds offers the world\u2019s most comfortable shoes made from wool and tree."
+    },
+    {
+      "scene_id": "screenshot-homepage",
+      "start_s": 4.88,
+      "end_s": 12.08,
+      "text": "Explore Popular Picks on Allbirds\u2019 homepage, showcasing wool runners, tree sneakers, and eco\u2011friendly apparel."
+    },
+    {
+      "scene_id": "screenshot-mens",
+      "start_s": 12.08,
+      "end_s": 18.56,
+      "text": "Shop the Men\u2019s collection for comfortable wool shoes and tree\u2011based sneakers, plus everyday sustainable clothing."
+    },
+    {
+      "scene_id": "walkthrough-popular-picks",
+      "start_s": 18.56,
+      "end_s": 24.62,
+      "text": "Walk through Popular Picks, choose a wool runner and view its details before adding it to your cart."
+    },
+    {
+      "scene_id": "closing-cta",
+      "start_s": 24.62,
+      "end_s": 28.56,
+      "text": "Visit allbirds.com to shop wool runners and tree sneakers today."
+    }
+  ]
+}

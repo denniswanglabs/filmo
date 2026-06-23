@@ -1,0 +1,122 @@
+{
+  "fps": 30,
+  "total_frames": 970,
+  "audio_path": "vo-overhaul-stripe-langkeep.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#0A2540",
+    "bgCard": "#0A2540",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#80E9FF",
+    "navyBright": "#80E9FF",
+    "accent": "#635BFF",
+    "ok": "#80E9FF",
+    "text": "#FFFFFF",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "\"Sohne\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontMono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+    "fontDisplay": "\"Sohne\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "wordmark": "Stripe",
+    "logoSrc": "brand-logo-overhaul-stripe-langkeep.svg",
+    "music": "music-overhaul-stripe-langkeep.mp3"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 120,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Stripe is the backbone of global commerce",
+        "subtitle": "Build internet businesses"
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-langkeep-opening-title.mp3"
+      }
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": "apple-screenshot",
+      "in_frame": 120,
+      "out_frame": 302,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-stripe-langkeep-screenshot-home.png",
+        "frame": "browser",
+        "caption": "https://stripe.com",
+        "headline": "Financial Infrastructure",
+        "layout": "split",
+        "kicker": "Financial Infrastructure",
+        "eyebrow": "Financial Infrastructure",
+        "supporting": "The backbone of global commerce",
+        "punchWord": "Infrastructure"
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-langkeep-screenshot-home.mp3"
+      }
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": "apple-screenshot",
+      "in_frame": 302,
+      "out_frame": 484,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-stripe-langkeep-screenshot-inner.png",
+        "frame": "browser",
+        "caption": "https://stripe.com/pricing",
+        "headline": "Pricing & Fees",
+        "layout": "split",
+        "kicker": "& Fees",
+        "eyebrow": "& Fees",
+        "supporting": "Powering businesses of all sizes",
+        "punchWord": "Fees",
+        "focus": {
+          "x": 0.6787,
+          "y": 0.0768,
+          "w": 0.1388,
+          "h": 0.048,
+          "label": "Payments optimizations to boost revenue"
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-langkeep-screenshot-inner.mp3"
+      }
+    },
+    {
+      "id": "walkthrough-demo",
+      "archetype": "walkthrough-player",
+      "in_frame": 484,
+      "out_frame": 754,
+      "cues": [],
+      "data": {
+        "videoSrc": "walk-overhaul-stripe-langkeep-walkthrough-demo.mp4",
+        "overlayTitle": "Stripe \u2014 Accept payments in one integration",
+        "muteClip": true,
+        "videoFit": "contain"
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-langkeep-walkthrough-demo.mp3"
+      }
+    },
+    {
+      "id": "closing-cta",
+      "archetype": "hero-title",
+      "in_frame": 754,
+      "out_frame": 970,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Start building your internet business",
+        "subtitle": "Start now \u2192 stripe.com"
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-langkeep-closing-cta.mp3"
+      }
+    }
+  ]
+}

@@ -150,6 +150,85 @@ def _wordmark_svg(name, accent, ink):
     ) % (w, w, safe, accent, font, ink, safe)
 
 
+# --- Captured-logo consumption (Task F) ----------------------------------------
+# capture_screenshots.py records the brand's REAL logo (inline header <svg> ->
+# apple-touch-icon/icon -> og:image) in the screenshot manifest under "logo":
+#   {"file": "logo.svg", "path": "<abs>", "source": "inline-svg"}.
+# We prefer that real asset over the NAME-DERIVED wordmark_svg. Honest fallback:
+# when no captured logo exists, the theme keeps its derived wordmark unchanged.
+# This adds two theme fields (both OPTIONAL, absent when no logo was captured):
+#   "logo_src":    str   # filesystem path to the captured logo asset
+#   "logo_source": str   # provenance ("inline-svg" / "link-or-og:<url>")
+
+def _find_capture_manifest(loc):
+    """Resolve `loc` (a manifest.json path, a run dir, or a screenshots dir) to a
+    manifest.json path that exists, or None. Tolerant of the common layouts the
+    pipeline produces: runs/<id>/screenshots/manifest.json."""
+    if not loc:
+        return None
+    loc = str(loc)
+    if os.path.isfile(loc):
+        return loc
+    cands = (
+        os.path.join(loc, "manifest.json"),
+        os.path.join(loc, "screenshots", "manifest.json"),
+    )
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _captured_logo_from_manifest(manifest_path):
+    """Return {"path","source"} for a captured logo asset that EXISTS, else None.
+
+    Reads the screenshot manifest's "logo" record. The recorded path is preferred;
+    if it is missing (e.g. the run dir moved) we resolve the recorded basename next
+    to the manifest under brand/. Never raises — any failure => None (fall back to
+    the derived wordmark)."""
+    if not manifest_path or not os.path.isfile(manifest_path):
+        return None
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return None
+    logo = (data or {}).get("logo")
+    if not isinstance(logo, dict):
+        return None
+    base_dir = os.path.dirname(os.path.abspath(manifest_path))
+    file_name = logo.get("file") or (
+        os.path.basename(logo["path"]) if logo.get("path") else None)
+    cands = []
+    if logo.get("path"):
+        cands.append(logo["path"])
+    if file_name:
+        cands.append(os.path.join(base_dir, "brand", file_name))
+        cands.append(os.path.join(base_dir, file_name))
+    for c in cands:
+        if c and os.path.isfile(c):
+            return {"path": os.path.abspath(c),
+                    "source": logo.get("source") or "captured"}
+    return None
+
+
+def apply_captured_logo(theme, loc):
+    """Prefer the brand's REAL captured logo over the derived wordmark, IN PLACE.
+
+    `loc` may be a manifest.json path, a run dir, or a screenshots dir. When a real
+    captured logo asset exists, set theme["logo_src"]/["logo_source"]; the derived
+    wordmark_svg stays as the honest fallback. No-op (theme unchanged) when no logo
+    was captured. Returns the (possibly-mutated) theme."""
+    if not isinstance(theme, dict):
+        return theme
+    manifest = _find_capture_manifest(loc)
+    found = _captured_logo_from_manifest(manifest)
+    if found:
+        theme["logo_src"] = found["path"]
+        theme["logo_source"] = found["source"]
+    return theme
+
+
 # The fetch prompt — asks the fetcher to return STRICT JSON and to leave a field
 # EMPTY rather than guess. This instruction is the first honesty guard; the parser
 # below is the second (it drops anything that smells invented).
@@ -425,10 +504,15 @@ def _parse_fetch_payload(text):
     return out
 
 
-def extract_brand(url, name_override=None, fetcher=None):
+def extract_brand(url, name_override=None, fetcher=None, logo_from=None):
     """URL -> brand_theme dict. `fetcher(url, prompt) -> str` is injectable; the
     default is network-free. Known brands resolve from BRAND_PALETTES; unknown
-    brands get real name + generic palette + HONEST empty copy."""
+    brands get real name + generic palette + HONEST empty copy.
+
+    `logo_from` (optional): a screenshot manifest path / run dir / screenshots dir.
+    When it carries a captured real logo, theme["logo_src"]/["logo_source"] are set
+    so style_fill prefers the real asset over the derived wordmark (Task F). Absent
+    or no-logo => the derived wordmark stays as the honest fallback."""
     palette = rc.palette_for(url)
     label = (palette.get("_name") or "").strip()      # part-A registrable label
     name = (name_override or label or "").strip() or "The product"
@@ -555,6 +639,11 @@ def extract_brand(url, name_override=None, fetcher=None):
     # HONESTY: hook mirrors the real tagline ONLY (never synthesized brand copy);
     # the CTA is domain-agnostic ("Get started"), never a leaked-brand imperative.
     theme["copy"]["hook"] = theme["tagline"]
+
+    # Task F: prefer the brand's REAL captured logo over the derived wordmark when a
+    # capture manifest is supplied and carries one. No-op otherwise (honest fallback).
+    if logo_from:
+        apply_captured_logo(theme, logo_from)
     return theme
 
 
@@ -889,9 +978,23 @@ def main(argv=None):
     ap.add_argument("--url", required=True, help="company URL, e.g. https://stripe.com")
     ap.add_argument("--name", default=None, help="override the display brand name")
     ap.add_argument("--out", required=True, help="output path for brand_theme.json")
+    ap.add_argument("--logo-from", default=None,
+                    help="screenshot manifest.json / run dir / screenshots dir to "
+                         "read a captured real logo from (Task F). Defaults to the "
+                         "run dir inferred from --out.")
     args = ap.parse_args(argv)
 
-    theme = extract_brand(args.url, name_override=args.name, fetcher=_live_webfetch)
+    # Auto-discover the capture manifest from the run dir the brand_theme.json lives
+    # in (runs/<id>/brand_theme.json -> runs/<id>/screenshots/manifest.json) unless
+    # the caller pinned --logo-from explicitly.
+    logo_from = args.logo_from
+    if not logo_from:
+        run_dir = os.path.dirname(os.path.abspath(args.out))
+        if _find_capture_manifest(run_dir):
+            logo_from = run_dir
+
+    theme = extract_brand(args.url, name_override=args.name,
+                          fetcher=_live_webfetch, logo_from=logo_from)
 
     out_dir = os.path.dirname(os.path.abspath(args.out))
     if out_dir:

@@ -1,0 +1,401 @@
+{
+  "audio_path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-stripe-langkeep/voiceover.mp3",
+  "lang": "en",
+  "voice": "en-US-AndrewNeural",
+  "tier": "free",
+  "total_duration_s": 29.84,
+  "words": [
+    {
+      "word": "Stripe",
+      "start_s": 0.17,
+      "end_s": 0.42,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "is",
+      "start_s": 0.42,
+      "end_s": 0.59,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "the",
+      "start_s": 0.59,
+      "end_s": 0.77,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "backbone",
+      "start_s": 0.77,
+      "end_s": 1.33,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "of",
+      "start_s": 1.33,
+      "end_s": 1.47,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "global",
+      "start_s": 1.47,
+      "end_s": 1.89,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "commerce",
+      "start_s": 1.89,
+      "end_s": 2.45,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "today.",
+      "start_s": 2.45,
+      "end_s": 3.21,
+      "beat_scene_id": "opening-title"
+    },
+    {
+      "word": "Stripe",
+      "start_s": 3.21,
+      "end_s": 3.66,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "powers",
+      "start_s": 3.66,
+      "end_s": 4.19,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "businesses",
+      "start_s": 4.19,
+      "end_s": 4.64,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "of",
+      "start_s": 4.64,
+      "end_s": 4.98,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "all",
+      "start_s": 4.98,
+      "end_s": 5.2,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "sizes,",
+      "start_s": 5.2,
+      "end_s": 5.92,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "from",
+      "start_s": 5.92,
+      "end_s": 6.24,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "startups",
+      "start_s": 6.24,
+      "end_s": 6.89,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "to",
+      "start_s": 6.89,
+      "end_s": 7.09,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "Fortune",
+      "start_s": 7.09,
+      "end_s": 7.62,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "500",
+      "start_s": 7.62,
+      "end_s": 8.37,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "globally.",
+      "start_s": 8.37,
+      "end_s": 9.25,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "Stripe",
+      "start_s": 9.25,
+      "end_s": 9.72,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "enables",
+      "start_s": 9.72,
+      "end_s": 10.32,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "any",
+      "start_s": 10.32,
+      "end_s": 10.59,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "billing",
+      "start_s": 10.59,
+      "end_s": 11.21,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "model,",
+      "start_s": 11.21,
+      "end_s": 11.68,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "from",
+      "start_s": 11.68,
+      "end_s": 11.95,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "subscriptions",
+      "start_s": 11.95,
+      "end_s": 12.85,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "to",
+      "start_s": 12.85,
+      "end_s": 12.96,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "one-click",
+      "start_s": 12.96,
+      "end_s": 13.55,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "payments",
+      "start_s": 13.55,
+      "end_s": 14.13,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "worldwide",
+      "start_s": 14.13,
+      "end_s": 14.89,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "today.",
+      "start_s": 14.89,
+      "end_s": 15.34,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "Stripe's",
+      "start_s": 15.34,
+      "end_s": 15.87,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "dashboard",
+      "start_s": 15.87,
+      "end_s": 16.4,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "lets",
+      "start_s": 16.4,
+      "end_s": 16.66,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "you",
+      "start_s": 16.66,
+      "end_s": 16.8,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "see",
+      "start_s": 16.8,
+      "end_s": 16.95,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "what's",
+      "start_s": 16.95,
+      "end_s": 17.28,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "happening",
+      "start_s": 17.28,
+      "end_s": 17.9,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "with",
+      "start_s": 17.9,
+      "end_s": 18.17,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "live",
+      "start_s": 18.17,
+      "end_s": 18.44,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "payment",
+      "start_s": 18.44,
+      "end_s": 18.92,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "flows,",
+      "start_s": 18.92,
+      "end_s": 19.39,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "so",
+      "start_s": 19.39,
+      "end_s": 19.52,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "you",
+      "start_s": 19.52,
+      "end_s": 19.75,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "can",
+      "start_s": 19.75,
+      "end_s": 19.92,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "act",
+      "start_s": 19.92,
+      "end_s": 20.49,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "instantly",
+      "start_s": 20.49,
+      "end_s": 20.74,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "on",
+      "start_s": 20.74,
+      "end_s": 20.94,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "every",
+      "start_s": 20.94,
+      "end_s": 21.21,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "transaction",
+      "start_s": 21.21,
+      "end_s": 21.97,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "today.",
+      "start_s": 21.97,
+      "end_s": 22.64,
+      "beat_scene_id": "walkthrough-demo"
+    },
+    {
+      "word": "Start",
+      "start_s": 22.64,
+      "end_s": 22.94,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "building",
+      "start_s": 22.94,
+      "end_s": 23.43,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "your",
+      "start_s": 23.43,
+      "end_s": 23.67,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "internet",
+      "start_s": 23.67,
+      "end_s": 24.25,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "business",
+      "start_s": 24.25,
+      "end_s": 24.65,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "at",
+      "start_s": 24.65,
+      "end_s": 24.77,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "Stripe.com",
+      "start_s": 24.77,
+      "end_s": 25.82,
+      "beat_scene_id": "closing-cta"
+    },
+    {
+      "word": "today.",
+      "start_s": 25.82,
+      "end_s": 29.84,
+      "beat_scene_id": "closing-cta"
+    }
+  ],
+  "beats": [
+    {
+      "scene_id": "opening-title",
+      "start_s": 0.17,
+      "end_s": 3.21,
+      "text": "Stripe is the backbone of global commerce today."
+    },
+    {
+      "scene_id": "screenshot-home",
+      "start_s": 3.21,
+      "end_s": 9.25,
+      "text": "Stripe powers businesses of all sizes, from startups to Fortune 500 globally."
+    },
+    {
+      "scene_id": "screenshot-inner",
+      "start_s": 9.25,
+      "end_s": 15.34,
+      "text": "Stripe enables any billing model, from subscriptions to one\u2011click payments worldwide today."
+    },
+    {
+      "scene_id": "walkthrough-demo",
+      "start_s": 15.34,
+      "end_s": 22.64,
+      "text": "Stripe\u2019s dashboard lets you see what\u2019s happening with live payment flows, so you can act instantly on every transaction today."
+    },
+    {
+      "scene_id": "closing-cta",
+      "start_s": 22.64,
+      "end_s": 29.84,
+      "text": "Start building your internet business at stripe.com today."
+    }
+  ]
+}

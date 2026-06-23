@@ -78,3 +78,10 @@ tmp/
 # Keep small lookbook style thumbnails (dashboard/assets/styles/*.jpg)
 # and branding/*.svg — they are intentionally NOT ignored above.
 !dashboard/assets/styles/*.jpg
+
+# transient orchestration handoff notes (not product code)
+.handoff-*.md
+
+# per-run capture fixtures (regenerated each build; not source)
+studio/public/shot-*.png
+studio/public/brand-logo-*.svg

@@ -1,0 +1,129 @@
+{
+  "fps": 30,
+  "total_frames": 900,
+  "audio_path": "vo-overhaul-notion-g3.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#191919",
+    "bgCard": "#191919",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#5BA3F0",
+    "navyBright": "#5BA3F0",
+    "accent": "#2383E2",
+    "ok": "#5BA3F0",
+    "text": "#FFFFFF",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "\"Lyon Display\", ui-serif, Georgia, \"Times New Roman\", serif",
+    "fontMono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+    "fontDisplay": "\"Lyon Display\", ui-serif, Georgia, \"Times New Roman\", serif",
+    "wordmark": "Notion",
+    "logoSrc": "brand-logo-overhaul-notion-g3.svg",
+    "music": "music-overhaul-notion-g3.mp3"
+  },
+  "scenes": [
+    {
+      "id": "title-open",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 138,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Notion is the connected workspace",
+        "subtitle": "One workspace"
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g3-title-open.mp3"
+      }
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": "apple-screenshot",
+      "in_frame": 138,
+      "out_frame": 288,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-notion-g3-screenshot-home.png",
+        "frame": "browser",
+        "caption": "https://www.notion.com",
+        "headline": "The AI workspace that works for you",
+        "layout": "split",
+        "kicker": "Ai Workspace",
+        "eyebrow": "Ai Workspace",
+        "supporting": "Keep work moving 24/7",
+        "punchWord": "workspace",
+        "focus": {
+          "x": 0.1087,
+          "y": 0.248,
+          "w": 0.7825,
+          "h": 0.2101,
+          "label": "Where teams and agents \nBuild\n together."
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g3-screenshot-home.mp3"
+      }
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": "apple-screenshot",
+      "in_frame": 288,
+      "out_frame": 468,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-notion-g3-screenshot-inner.png",
+        "frame": "browser",
+        "caption": "https://www.notion.com/product/calendar",
+        "headline": "Calendar",
+        "layout": "split",
+        "kicker": "Calendar",
+        "eyebrow": "Calendar",
+        "supporting": "Automate repetitive work for your team",
+        "punchWord": "Calendar",
+        "focus": {
+          "x": 0.3538,
+          "y": 0.284,
+          "w": 0.2925,
+          "h": 0.064,
+          "label": "It\u2019s time."
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g3-screenshot-inner.mp3"
+      }
+    },
+    {
+      "id": "walkthrough",
+      "archetype": "walkthrough-player",
+      "in_frame": 468,
+      "out_frame": 738,
+      "cues": [],
+      "data": {
+        "videoSrc": "walk-overhaul-notion-g3-walkthrough.mp4",
+        "overlayTitle": "Notion \u2014 One connected workspace",
+        "muteClip": true,
+        "videoFit": "contain"
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g3-walkthrough.mp3"
+      }
+    },
+    {
+      "id": "title-close",
+      "archetype": "hero-title",
+      "in_frame": 738,
+      "out_frame": 900,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Build your workspace on Notion",
+        "subtitle": "Start now \u2192 notion.com"
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g3-title-close.mp3"
+      }
+    }
+  ]
+}

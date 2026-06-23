@@ -48,6 +48,14 @@ DEFAULT_FPS = 30
 # Advisory hold for an unvoiced scene when its duration_s is absent/non-positive.
 DEFAULT_HOLD_S = 1.5
 
+# R5 (L9 confirmed on Stripe/Notion/Shopify) — the walkthrough scene must not exceed
+# the 9s/270f pacing budget. The captured walk clip's own length (media_frames floor)
+# pushed the scene window to 10-11s on all three brands, dragging pacing below 4.
+# Cap the walkthrough SCENE WINDOW (not the clip): the device-hero player just shows
+# the first WALKTHROUGH_MAX_FRAMES of the clip. Roles that get the clamp.
+WALKTHROUGH_MAX_FRAMES = 270  # 9.0s @ 30fps
+_WALKTHROUGH_ROLES = ("walkthrough", "demo")
+
 # Map a plan scene `type` (or id keyword) -> a semantic ROLE that style_fill's
 # registry can route to an archetype. The plan describes scenes by `type`
 # ("title" | "motion_graphic" | "cinematic" | "walkthrough" | "demo" | ...) but
@@ -354,6 +362,17 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
             hold_s = plan_hold_s if plan_hold_s > 0 else DEFAULT_HOLD_S
             out_frame = in_frame + max(1, round(hold_s * fps), media_frames)
 
+        # R5 — CLAMP the walkthrough scene window to the 9s/270f pacing budget. The
+        # media_frames floor above lets a 10-11s captured clip blow the budget (L9,
+        # confirmed on 3 brands). Cap the SCENE WINDOW so the device-hero player shows
+        # only the first 9s of the clip. Only clamp DOWN (never extend a short scene),
+        # and respect a longer VO span so narration is never cut — keep max(span, cap).
+        if _derive_role(scene) in _WALKTHROUGH_ROLES:
+            scene_len = out_frame - in_frame
+            cap_len = max(WALKTHROUGH_MAX_FRAMES, span_frames)
+            if scene_len > cap_len:
+                out_frame = in_frame + cap_len
+
         out_scenes.append({
             "id": sid,
             "archetype": scene.get("archetype"),
@@ -387,13 +406,29 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
     # the plan asked for a longer film than the scenes summed to (the scene HOLDS on
     # its finished card during the pad — correct, not blank). Never shrink below the
     # laid-out length (so a VO that overran its slot is never cut).
+    #
+    # R6 — CAP the close-hero pad to the per-scene 9s budget. The unbounded pad bumped
+    # Notion's CLOSE scene to 11.3s (a 37.2s target on scenes that summed shorter), a
+    # dead hold that dragged pacing. Cap the LAST scene's total length at
+    # max(270f, its own content floor) so the close holds at most ~9s on its finished
+    # card; the leftover target time is just dropped (a slightly shorter film beats an
+    # 11s static close). A close whose VO/clip already runs longer keeps its floor
+    # (never cut). Drop the cap only for a 1-scene film (the whole video is that scene).
     if out_scenes:
         total_frames = out_scenes[-1]["out_frame"]
         if honor_plan_durations and target_duration_s and target_duration_s > 0:
             target_frames = round(float(target_duration_s) * fps)
             if target_frames > total_frames:
-                out_scenes[-1]["out_frame"] = target_frames
-                total_frames = target_frames
+                last = out_scenes[-1]
+                last_floor = last["out_frame"] - last["in_frame"]  # content-driven length
+                if len(out_scenes) > 1:
+                    pad_cap = last["in_frame"] + max(WALKTHROUGH_MAX_FRAMES, last_floor)
+                    padded = min(target_frames, pad_cap)
+                else:
+                    padded = target_frames  # single-scene film: honor the full target
+                if padded > last["out_frame"]:
+                    last["out_frame"] = padded
+                total_frames = last["out_frame"]
     else:
         total_frames = max(audio_frames, 0)
 

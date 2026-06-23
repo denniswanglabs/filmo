@@ -1,0 +1,125 @@
+{
+  "fps": 30,
+  "total_frames": 900,
+  "audio_path": "vo-overhaul-allbirds-g2.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#FFFFFF",
+    "bgCard": "#FFFFFF",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#1A3A5C",
+    "navyBright": "#1A3A5C",
+    "accent": "#F0C511",
+    "ok": "#10B981",
+    "text": "#0F2338",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontMono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+    "fontDisplay": "\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "wordmark": "Allbirds",
+    "logoSrc": "brand-logo-overhaul-allbirds-g2.svg",
+    "music": "music-overhaul-allbirds-g2.mp3"
+  },
+  "scenes": [
+    {
+      "id": "title-open",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 126,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Allbirds makes comfortable shoes",
+        "subtitle": ""
+      },
+      "audio": {
+        "src": "vo-overhaul-allbirds-g2-title-open.mp3"
+      }
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": "apple-screenshot",
+      "in_frame": 126,
+      "out_frame": 276,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-allbirds-g2-screenshot-home.png",
+        "frame": "browser",
+        "caption": "https://www.allbirds.com",
+        "headline": "Comfortable, Sustainable Shoes",
+        "layout": "split",
+        "kicker": "Comfortable Sustainable",
+        "eyebrow": "Comfortable Sustainable",
+        "punchWord": "Shoes",
+        "focus": {
+          "x": 0.025,
+          "y": 0.064,
+          "w": 0.0462,
+          "h": 0.024
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-allbirds-g2-screenshot-home.mp3"
+      }
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": "apple-screenshot",
+      "in_frame": 276,
+      "out_frame": 456,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-allbirds-g2-screenshot-inner.png",
+        "frame": "browser",
+        "caption": "https://www.allbirds.com/products/mens-runner-nz-slip-on-mushroom",
+        "headline": "On Sneakers",
+        "layout": "split",
+        "kicker": "Sneakers",
+        "eyebrow": "Sneakers",
+        "punchWord": "Sneakers",
+        "focus": {
+          "x": 0.0125,
+          "y": 0.138,
+          "w": 0.6325,
+          "h": 0.5783
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-allbirds-g2-screenshot-inner.mp3"
+      }
+    },
+    {
+      "id": "walkthrough",
+      "archetype": "walkthrough-player",
+      "in_frame": 456,
+      "out_frame": 726,
+      "cues": [],
+      "data": {
+        "videoSrc": "walk-overhaul-allbirds-g2-walkthrough.mp4",
+        "overlayTitle": "Allbirds \u2014 Comfortable everyday shoes",
+        "muteClip": true,
+        "videoFit": "contain"
+      },
+      "audio": {
+        "src": "vo-overhaul-allbirds-g2-walkthrough.mp3"
+      }
+    },
+    {
+      "id": "title-close",
+      "archetype": "hero-title",
+      "in_frame": 726,
+      "out_frame": 900,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Shop the collection",
+        "subtitle": "Start now \u2192 allbirds.com"
+      },
+      "audio": {
+        "src": "vo-overhaul-allbirds-g2-title-close.mp3"
+      }
+    }
+  ]
+}

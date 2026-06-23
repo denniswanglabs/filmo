@@ -1,0 +1,714 @@
+{
+	"systeminfo": "WHISPER : COREML = 0 | OPENVINO = 0 | MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | SME = 1 | ACCELERATE = 1 | OPENMP = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "base",
+		"multilingual": false,
+		"vocab": 51864,
+		"audio": {
+			"ctx": 1500,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"text": {
+			"ctx": 448,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"mels": 80,
+		"ftype": 1
+	},
+	"params": {
+		"model": "/Users/dennis/.cache/whisper/ggml-base.en.bin",
+		"language": "en",
+		"translate": false
+	},
+	"result": {
+		"language": "en"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:00,000",
+				"to": "00:00:00,170"
+			},
+			"offsets": {
+				"from": 0,
+				"to": 170
+			},
+			"text": ""
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,170",
+				"to": "00:00:00,450"
+			},
+			"offsets": {
+				"from": 170,
+				"to": 450
+			},
+			"text": " Stripe"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,450",
+				"to": "00:00:00,590"
+			},
+			"offsets": {
+				"from": 450,
+				"to": 590
+			},
+			"text": " is"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,590",
+				"to": "00:00:00,830"
+			},
+			"offsets": {
+				"from": 590,
+				"to": 830
+			},
+			"text": " the"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,830",
+				"to": "00:00:01,410"
+			},
+			"offsets": {
+				"from": 830,
+				"to": 1410
+			},
+			"text": " backbone"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,410",
+				"to": "00:00:01,570"
+			},
+			"offsets": {
+				"from": 1410,
+				"to": 1570
+			},
+			"text": " of"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,570",
+				"to": "00:00:02,020"
+			},
+			"offsets": {
+				"from": 1570,
+				"to": 2020
+			},
+			"text": " global"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,020",
+				"to": "00:00:02,820"
+			},
+			"offsets": {
+				"from": 2020,
+				"to": 2820
+			},
+			"text": " commerce,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,820",
+				"to": "00:00:03,430"
+			},
+			"offsets": {
+				"from": 2820,
+				"to": 3430
+			},
+			"text": " powering"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,430",
+				"to": "00:00:04,230"
+			},
+			"offsets": {
+				"from": 3430,
+				"to": 4230
+			},
+			"text": " businesses"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,230",
+				"to": "00:00:04,380"
+			},
+			"offsets": {
+				"from": 4230,
+				"to": 4380
+			},
+			"text": " of"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,380",
+				"to": "00:00:04,610"
+			},
+			"offsets": {
+				"from": 4380,
+				"to": 4610
+			},
+			"text": " all"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,610",
+				"to": "00:00:05,280"
+			},
+			"offsets": {
+				"from": 4610,
+				"to": 5280
+			},
+			"text": " sizes."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,280",
+				"to": "00:00:05,810"
+			},
+			"offsets": {
+				"from": 5280,
+				"to": 5810
+			},
+			"text": " Stripe"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,810",
+				"to": "00:00:06,410"
+			},
+			"offsets": {
+				"from": 5810,
+				"to": 6410
+			},
+			"text": " enables"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,410",
+				"to": "00:00:06,580"
+			},
+			"offsets": {
+				"from": 6410,
+				"to": 6580
+			},
+			"text": " any"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,580",
+				"to": "00:00:07,150"
+			},
+			"offsets": {
+				"from": 6580,
+				"to": 7150
+			},
+			"text": " billing"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,150",
+				"to": "00:00:07,760"
+			},
+			"offsets": {
+				"from": 7150,
+				"to": 7760
+			},
+			"text": " model,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,760",
+				"to": "00:00:08,120"
+			},
+			"offsets": {
+				"from": 7760,
+				"to": 8120
+			},
+			"text": " letting"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,120",
+				"to": "00:00:08,640"
+			},
+			"offsets": {
+				"from": 8120,
+				"to": 8640
+			},
+			"text": " businesses"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,640",
+				"to": "00:00:08,840"
+			},
+			"offsets": {
+				"from": 8640,
+				"to": 8840
+			},
+			"text": " set"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,840",
+				"to": "00:00:08,970"
+			},
+			"offsets": {
+				"from": 8840,
+				"to": 8970
+			},
+			"text": " up"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,970",
+				"to": "00:00:10,000"
+			},
+			"offsets": {
+				"from": 8970,
+				"to": 10000
+			},
+			"text": " subscriptions,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:10,000",
+				"to": "00:00:10,960"
+			},
+			"offsets": {
+				"from": 10000,
+				"to": 10960
+			},
+			"text": " invoices,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:10,960",
+				"to": "00:00:11,170"
+			},
+			"offsets": {
+				"from": 10960,
+				"to": 11170
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,170",
+				"to": "00:00:11,800"
+			},
+			"offsets": {
+				"from": 11170,
+				"to": 11800
+			},
+			"text": " one-click"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,800",
+				"to": "00:00:12,370"
+			},
+			"offsets": {
+				"from": 11800,
+				"to": 12370
+			},
+			"text": " payments"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,370",
+				"to": "00:00:12,510"
+			},
+			"offsets": {
+				"from": 12370,
+				"to": 12510
+			},
+			"text": " in"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,510",
+				"to": "00:00:13,000"
+			},
+			"offsets": {
+				"from": 12510,
+				"to": 13000
+			},
+			"text": " minutes"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,000",
+				"to": "00:00:13,780"
+			},
+			"offsets": {
+				"from": 13000,
+				"to": 13780
+			},
+			"text": " worldwide"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,780",
+				"to": "00:00:14,260"
+			},
+			"offsets": {
+				"from": 13780,
+				"to": 14260
+			},
+			"text": " today."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:14,260",
+				"to": "00:00:14,670"
+			},
+			"offsets": {
+				"from": 14260,
+				"to": 14670
+			},
+			"text": " Stripe"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:14,670",
+				"to": "00:00:15,100"
+			},
+			"offsets": {
+				"from": 14670,
+				"to": 15100
+			},
+			"text": " powers"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,100",
+				"to": "00:00:15,840"
+			},
+			"offsets": {
+				"from": 15100,
+				"to": 15840
+			},
+			"text": " businesses"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,840",
+				"to": "00:00:16,380"
+			},
+			"offsets": {
+				"from": 15840,
+				"to": 16380
+			},
+			"text": " of"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:16,380",
+				"to": "00:00:16,500"
+			},
+			"offsets": {
+				"from": 16380,
+				"to": 16500
+			},
+			"text": " all"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:16,500",
+				"to": "00:00:17,120"
+			},
+			"offsets": {
+				"from": 16500,
+				"to": 17120
+			},
+			"text": " sizes,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:17,120",
+				"to": "00:00:17,820"
+			},
+			"offsets": {
+				"from": 17120,
+				"to": 17820
+			},
+			"text": " processing"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:17,820",
+				"to": "00:00:18,380"
+			},
+			"offsets": {
+				"from": 17820,
+				"to": 18380
+			},
+			"text": " billions"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:18,380",
+				"to": "00:00:18,520"
+			},
+			"offsets": {
+				"from": 18380,
+				"to": 18520
+			},
+			"text": " of"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:18,520",
+				"to": "00:00:19,050"
+			},
+			"offsets": {
+				"from": 18520,
+				"to": 19050
+			},
+			"text": " dollars"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,050",
+				"to": "00:00:19,150"
+			},
+			"offsets": {
+				"from": 19050,
+				"to": 19150
+			},
+			"text": " in"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,150",
+				"to": "00:00:19,990"
+			},
+			"offsets": {
+				"from": 19150,
+				"to": 19990
+			},
+			"text": " transactions"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,990",
+				"to": "00:00:20,270"
+			},
+			"offsets": {
+				"from": 19990,
+				"to": 20270
+			},
+			"text": " each"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:20,270",
+				"to": "00:00:20,720"
+			},
+			"offsets": {
+				"from": 20270,
+				"to": 20720
+			},
+			"text": " year,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:20,720",
+				"to": "00:00:21,470"
+			},
+			"offsets": {
+				"from": 20720,
+				"to": 21470
+			},
+			"text": " supporting"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:21,470",
+				"to": "00:00:21,850"
+			},
+			"offsets": {
+				"from": 21470,
+				"to": 21850
+			},
+			"text": " over"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:21,850",
+				"to": "00:00:22,440"
+			},
+			"offsets": {
+				"from": 21850,
+				"to": 22440
+			},
+			"text": " 135"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:22,440",
+				"to": "00:00:23,170"
+			},
+			"offsets": {
+				"from": 22440,
+				"to": 23170
+			},
+			"text": " currencies"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:23,170",
+				"to": "00:00:23,540"
+			},
+			"offsets": {
+				"from": 23170,
+				"to": 23540
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:23,540",
+				"to": "00:00:24,020"
+			},
+			"offsets": {
+				"from": 23540,
+				"to": 24020
+			},
+			"text": " offering"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:24,020",
+				"to": "00:00:24,610"
+			},
+			"offsets": {
+				"from": 24020,
+				"to": 24610
+			},
+			"text": " seamless"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:24,610",
+				"to": "00:00:24,980"
+			},
+			"offsets": {
+				"from": 24610,
+				"to": 24980
+			},
+			"text": " fraud"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:24,980",
+				"to": "00:00:26,000"
+			},
+			"offsets": {
+				"from": 24980,
+				"to": 26000
+			},
+			"text": " protection."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:26,000",
+				"to": "00:00:26,300"
+			},
+			"offsets": {
+				"from": 26000,
+				"to": 26300
+			},
+			"text": " Start"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:26,300",
+				"to": "00:00:26,770"
+			},
+			"offsets": {
+				"from": 26300,
+				"to": 26770
+			},
+			"text": " building"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:26,770",
+				"to": "00:00:27,130"
+			},
+			"offsets": {
+				"from": 26770,
+				"to": 27130
+			},
+			"text": " your"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:27,130",
+				"to": "00:00:27,530"
+			},
+			"offsets": {
+				"from": 27130,
+				"to": 27530
+			},
+			"text": " internet"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:27,530",
+				"to": "00:00:27,950"
+			},
+			"offsets": {
+				"from": 27530,
+				"to": 27950
+			},
+			"text": " business"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:27,950",
+				"to": "00:00:28,070"
+			},
+			"offsets": {
+				"from": 27950,
+				"to": 28070
+			},
+			"text": " at"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:28,070",
+				"to": "00:00:28,820"
+			},
+			"offsets": {
+				"from": 28070,
+				"to": 28820
+			},
+			"text": " Stripe.com"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:28,820",
+				"to": "00:00:29,840"
+			},
+			"offsets": {
+				"from": 28820,
+				"to": 29840
+			},
+			"text": " today."
+		}
+	]
+}

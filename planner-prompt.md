@@ -195,6 +195,20 @@ VOICEOVER RULES:
 - The CLOSING title's beat is the call to action and SHOULD name the real next step (e.g.
   "Start accepting payments at stripe.com.", "Find your next trip on Tripadvisor."), not a
   generic "get started", so the CTA lands ON the closing card.
+- SCREENSHOT SCENES — ONE FEATURE EACH, COHERENT WITH THE SHOT (the text-left / screenshot-
+  right layout shows the scene's headline NEXT TO the captured page, and a highlight box marks
+  the named element, so the words and the picture MUST be about the same thing):
+    * Each "screenshot" scene's "brief" names ONE concrete, on-page product capability the
+      captured view will show (e.g. for stripe.com: "Accepting card and wallet payments through
+      one integration"; "The dashboard's real-time revenue and payouts view"; "Going live with a
+      few lines of code"). The brief is the SUBJECT the headline + highlight both point at.
+    * That scene's VO "beat" describes THAT SAME feature — its first sentence is the value-prop
+      the headline is built from; lead with the feature noun ("Accept payments…", "Every
+      transaction…", "Go live…"). Do NOT narrate the page, the screenshot, or the brand tagline.
+    * When there are TWO screenshot scenes, they MUST cover DIFFERENT features (e.g. payments
+      then dashboard) — never repeat the same value-prop or the tagline across both. Distinct
+      subjects per scene is required (the R1 failure: "Build internet businesses" repeated on
+      every scene).
 - Do NOT emit a single combined "script" — use the per-scene "beats" array only.
 
 VALIDITY:

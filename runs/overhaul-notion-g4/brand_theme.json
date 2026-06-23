@@ -1,0 +1,39 @@
+{
+  "name": "Notion",
+  "host": "notion.com",
+  "tagline": "One workspace. Every team.",
+  "palette": {
+    "bg": "#191919",
+    "ink": "#FFFFFF",
+    "accent": "#2383E2",
+    "accent2": "#5BA3F0",
+    "success": "#5BA3F0"
+  },
+  "fonts": {
+    "display": "\"Lyon Display\", ui-serif, Georgia, \"Times New Roman\", serif",
+    "mono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace"
+  },
+  "wordmark_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 276 96\" width=\"276\" height=\"96\" role=\"img\" aria-label=\"Notion\"><rect x=\"16\" y=\"30\" width=\"14\" height=\"36\" rx=\"4\" fill=\"#2383E2\"/><text x=\"46\" y=\"62\" font-size=\"44\" font-weight=\"800\" letter-spacing=\"-0.02em\" font-family='\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, sans-serif' fill=\"#FFFFFF\">Notion</text></svg>",
+  "features": [
+    {
+      "title": "Keep work moving 24/7.",
+      "sub": ""
+    },
+    {
+      "title": "Automate repetitive work for your team.",
+      "sub": ""
+    },
+    {
+      "title": "Ask your on-demand assistants.",
+      "sub": ""
+    },
+    {
+      "title": "One search for everything.",
+      "sub": ""
+    }
+  ],
+  "copy": {
+    "hook": "One workspace. Every team.",
+    "cta": "Get started"
+  }
+}

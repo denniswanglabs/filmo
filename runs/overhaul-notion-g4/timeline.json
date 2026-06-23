@@ -1,0 +1,68 @@
+{
+  "fps": 30,
+  "total_frames": 979,
+  "audio_path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g4/voiceover.mp3",
+  "lang": "en",
+  "scenes": [
+    {
+      "id": "opening-title",
+      "archetype": null,
+      "role": "title",
+      "text": "Notion keeps your work moving 24/7, so nothing ever stalls.",
+      "in_frame": 0,
+      "out_frame": 130,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g4/voiceover.beat00.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": null,
+      "role": "screenshot",
+      "text": "Automate repetitive work for your team using customizable templates that save hours each week.",
+      "in_frame": 130,
+      "out_frame": 315,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g4/voiceover.beat01.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": null,
+      "role": "screenshot",
+      "text": "Ask your on-demand assistants for instant answers inside any page, so you stay in flow.",
+      "in_frame": 315,
+      "out_frame": 495,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g4/voiceover.beat02.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "walkthrough-demo",
+      "archetype": null,
+      "role": "walkthrough",
+      "text": "Search across all your notes and tasks and wikis and databases to instantly locate any piece of information you need.",
+      "in_frame": 495,
+      "out_frame": 765,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g4/voiceover.beat03.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "closing-cta",
+      "archetype": null,
+      "role": "close",
+      "text": "Start using Notion today at notion.com to organize everything in one place.",
+      "in_frame": 765,
+      "out_frame": 979,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g4/voiceover.beat04.mp3"
+      },
+      "cues": []
+    }
+  ]
+}

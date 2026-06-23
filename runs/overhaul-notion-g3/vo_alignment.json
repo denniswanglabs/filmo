@@ -1,0 +1,311 @@
+{
+  "audio_path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g3/voiceover.mp3",
+  "lang": "en",
+  "voice": "en-US-AndrewNeural",
+  "tier": "free",
+  "total_duration_s": 19.84,
+  "words": [
+    {
+      "word": "Notion",
+      "start_s": 0.15,
+      "end_s": 0.36,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "is",
+      "start_s": 0.36,
+      "end_s": 0.48,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "the",
+      "start_s": 0.48,
+      "end_s": 0.68,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "connected",
+      "start_s": 0.68,
+      "end_s": 1.21,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "workspace",
+      "start_s": 1.21,
+      "end_s": 1.8,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "for",
+      "start_s": 1.8,
+      "end_s": 2.08,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "docs,",
+      "start_s": 2.08,
+      "end_s": 2.8,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "wikis,",
+      "start_s": 2.8,
+      "end_s": 3.56,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "and",
+      "start_s": 3.56,
+      "end_s": 3.76,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "projects.",
+      "start_s": 3.76,
+      "end_s": 4.72,
+      "beat_scene_id": "title-open"
+    },
+    {
+      "word": "Write",
+      "start_s": 4.72,
+      "end_s": 5.12,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "docs,",
+      "start_s": 5.12,
+      "end_s": 5.6,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "build",
+      "start_s": 5.6,
+      "end_s": 6.01,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "wikis,",
+      "start_s": 6.01,
+      "end_s": 6.64,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "and",
+      "start_s": 6.64,
+      "end_s": 6.81,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "track",
+      "start_s": 6.81,
+      "end_s": 7.52,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "projects",
+      "start_s": 7.52,
+      "end_s": 7.87,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "in",
+      "start_s": 7.87,
+      "end_s": 8.02,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "one",
+      "start_s": 8.02,
+      "end_s": 8.29,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "place.",
+      "start_s": 8.29,
+      "end_s": 8.76,
+      "beat_scene_id": "screenshot-home"
+    },
+    {
+      "word": "Databases,",
+      "start_s": 8.76,
+      "end_s": 9.87,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "templates,",
+      "start_s": 9.87,
+      "end_s": 10.88,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "and",
+      "start_s": 10.88,
+      "end_s": 11.17,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "AI",
+      "start_s": 11.17,
+      "end_s": 11.56,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "built",
+      "start_s": 11.56,
+      "end_s": 11.84,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "into",
+      "start_s": 11.84,
+      "end_s": 12.32,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "every",
+      "start_s": 12.32,
+      "end_s": 12.7,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "page.",
+      "start_s": 12.7,
+      "end_s": 13.14,
+      "beat_scene_id": "screenshot-inner"
+    },
+    {
+      "word": "Watch",
+      "start_s": 13.14,
+      "end_s": 13.47,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "one",
+      "start_s": 13.47,
+      "end_s": 13.66,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "connected",
+      "start_s": 13.66,
+      "end_s": 14.25,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "workspace",
+      "start_s": 14.25,
+      "end_s": 14.83,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "for",
+      "start_s": 14.83,
+      "end_s": 15.06,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "notes,",
+      "start_s": 15.06,
+      "end_s": 15.51,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "docs,",
+      "start_s": 15.51,
+      "end_s": 16.2,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "and",
+      "start_s": 16.2,
+      "end_s": 16.7,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "projects,",
+      "start_s": 16.7,
+      "end_s": 17.35,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "step",
+      "start_s": 17.35,
+      "end_s": 17.8,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "by",
+      "start_s": 17.8,
+      "end_s": 17.91,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "step.",
+      "start_s": 17.91,
+      "end_s": 18.36,
+      "beat_scene_id": "walkthrough"
+    },
+    {
+      "word": "Build",
+      "start_s": 18.36,
+      "end_s": 18.61,
+      "beat_scene_id": "title-close"
+    },
+    {
+      "word": "your",
+      "start_s": 18.61,
+      "end_s": 18.81,
+      "beat_scene_id": "title-close"
+    },
+    {
+      "word": "workspace",
+      "start_s": 18.81,
+      "end_s": 19.26,
+      "beat_scene_id": "title-close"
+    },
+    {
+      "word": "on",
+      "start_s": 19.26,
+      "end_s": 19.36,
+      "beat_scene_id": "title-close"
+    },
+    {
+      "word": "Notion.",
+      "start_s": 19.36,
+      "end_s": 19.84,
+      "beat_scene_id": "title-close"
+    }
+  ],
+  "beats": [
+    {
+      "scene_id": "title-open",
+      "start_s": 0.15,
+      "end_s": 4.72,
+      "text": "Notion is the connected workspace for docs, wikis, and projects."
+    },
+    {
+      "scene_id": "screenshot-home",
+      "start_s": 4.72,
+      "end_s": 8.76,
+      "text": "Write docs, build wikis, and track projects in one place."
+    },
+    {
+      "scene_id": "screenshot-inner",
+      "start_s": 8.76,
+      "end_s": 13.14,
+      "text": "Databases, templates, and AI built into every page."
+    },
+    {
+      "scene_id": "walkthrough",
+      "start_s": 13.14,
+      "end_s": 18.36,
+      "text": "Watch one connected workspace for notes, docs, and projects, step by step."
+    },
+    {
+      "scene_id": "title-close",
+      "start_s": 18.36,
+      "end_s": 19.84,
+      "text": "Build your workspace on Notion."
+    }
+  ]
+}

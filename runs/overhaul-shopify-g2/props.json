@@ -1,0 +1,114 @@
+{
+  "fps": 30,
+  "total_frames": 900,
+  "audio_path": "vo-overhaul-shopify-g2.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#FFFFFF",
+    "bgCard": "#FFFFFF",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#1A3A5C",
+    "navyBright": "#1A3A5C",
+    "accent": "#96BF48",
+    "ok": "#10B981",
+    "text": "#0F2338",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontMono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+    "fontDisplay": "\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "wordmark": "Shopify",
+    "music": "music-overhaul-shopify-g2.mp3"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 120,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Shopify lets you launch a store that customers line up",
+        "subtitle": "Try Shopify free."
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g2-opening-title.mp3"
+      }
+    },
+    {
+      "id": "homepage-screenshot",
+      "archetype": "apple-screenshot",
+      "in_frame": 120,
+      "out_frame": 300,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-shopify-g2-homepage-screenshot.png",
+        "frame": "browser",
+        "caption": "https://www.shopify.com",
+        "headline": "Build your brand fast",
+        "layout": "split",
+        "kicker": "Brand Fast",
+        "eyebrow": "Brand Fast",
+        "supporting": "Your brand has entered the chat",
+        "punchWord": "fast"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g2-homepage-screenshot.mp3"
+      }
+    },
+    {
+      "id": "sidekick-screenshot",
+      "archetype": "apple-screenshot",
+      "in_frame": 300,
+      "out_frame": 480,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-shopify-g2-sidekick-screenshot.png",
+        "frame": "browser",
+        "caption": "https://www.shopify.com",
+        "headline": "Meet Sidekick, your AI assistant",
+        "layout": "split",
+        "kicker": "Meet Sidekick",
+        "eyebrow": "Meet Sidekick",
+        "supporting": "Meet your secret weapon, Sidekick",
+        "punchWord": "assistant"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g2-sidekick-screenshot.mp3"
+      }
+    },
+    {
+      "id": "store-walkthrough",
+      "archetype": "walkthrough-player",
+      "in_frame": 480,
+      "out_frame": 750,
+      "cues": [],
+      "data": {
+        "videoSrc": "walk-overhaul-shopify-g2-store-walkthrough.mp4",
+        "overlayTitle": "Shopify \u2014 Start and grow your online store",
+        "muteClip": true,
+        "videoFit": "contain"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g2-store-walkthrough.mp3"
+      }
+    },
+    {
+      "id": "closing-title",
+      "archetype": "hero-title",
+      "in_frame": 750,
+      "out_frame": 900,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Start your free trial",
+        "subtitle": "Start now \u2192 shopify.com"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g2-closing-title.mp3"
+      }
+    }
+  ]
+}

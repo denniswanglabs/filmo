@@ -1,0 +1,114 @@
+{
+  "fps": 30,
+  "total_frames": 949,
+  "audio_path": "vo-overhaul-shopify-g1.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#FFFFFF",
+    "bgCard": "#FFFFFF",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#1A3A5C",
+    "navyBright": "#1A3A5C",
+    "accent": "#96BF48",
+    "ok": "#10B981",
+    "text": "#0F2338",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontMono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+    "fontDisplay": "\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "wordmark": "Shopify",
+    "music": "music-overhaul-shopify-g1.mp3"
+  },
+  "scenes": [
+    {
+      "id": "title-open",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 139,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Shopify powers millions of online stores selling",
+        "subtitle": "Try Shopify free."
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g1-title-open.mp3"
+      }
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": "apple-screenshot",
+      "in_frame": 139,
+      "out_frame": 289,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-shopify-g1-screenshot-home.png",
+        "frame": "browser",
+        "caption": "https://www.shopify.com",
+        "headline": "Launch an online store and start",
+        "layout": "split",
+        "kicker": "Launch Online",
+        "eyebrow": "Launch Online",
+        "supporting": "Your brand has entered the chat",
+        "punchWord": "start"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g1-screenshot-home.mp3"
+      }
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": "apple-screenshot",
+      "in_frame": 289,
+      "out_frame": 469,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-shopify-g1-screenshot-inner.png",
+        "frame": "browser",
+        "caption": "https://www.shopify.com",
+        "headline": "Run payments, shipping",
+        "layout": "split",
+        "kicker": "Run Payments",
+        "eyebrow": "Run Payments",
+        "supporting": "Meet your secret weapon, Sidekick",
+        "punchWord": "shipping"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g1-screenshot-inner.mp3"
+      }
+    },
+    {
+      "id": "walkthrough",
+      "archetype": "walkthrough-player",
+      "in_frame": 469,
+      "out_frame": 799,
+      "cues": [],
+      "data": {
+        "videoSrc": "walk-overhaul-shopify-g1-walkthrough.mp4",
+        "overlayTitle": "Shopify \u2014 Start and grow your online store",
+        "muteClip": true,
+        "videoFit": "contain"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g1-walkthrough.mp3"
+      }
+    },
+    {
+      "id": "title-close",
+      "archetype": "hero-title",
+      "in_frame": 799,
+      "out_frame": 949,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Start your store",
+        "subtitle": "Start now \u2192 shopify.com"
+      },
+      "audio": {
+        "src": "vo-overhaul-shopify-g1-title-close.mp3"
+      }
+    }
+  ]
+}

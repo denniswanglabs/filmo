@@ -1,0 +1,93 @@
+{
+  "url": "https://www.allbirds.com",
+  "count": 2,
+  "shots": [
+    {
+      "index": 1,
+      "file": "shot-01.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-allbirds-g1/screenshots/shot-01.png",
+      "url": "https://www.allbirds.com",
+      "label": "home",
+      "title": "Allbirds: Comfortable, Sustainable Shoes & Apparel",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 4311335,
+      "focus": {
+        "x": 0.355,
+        "y": 0.574,
+        "w": 0.29,
+        "h": 0.048,
+        "label": "CONFIRM",
+        "_candidates": [
+          {
+            "x": 0.4056,
+            "y": 0.39,
+            "w": 0.1888,
+            "h": 0.024,
+            "label": "Where are we shipping to?"
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "file": "shot-02.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-allbirds-g1/screenshots/shot-02.png",
+      "url": "https://www.allbirds.com/products/mens-runner-nz-slip-on-mushroom",
+      "label": "route",
+      "title": "Men\u2019s Runner NZ Slip-On Sneakers | Lightweight Everyday Comfort | Allbirds",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 1339304,
+      "focus": {
+        "x": 0.0125,
+        "y": 0.138,
+        "w": 0.6325,
+        "h": 0.5783,
+        "_candidates": [
+          {
+            "x": 0.355,
+            "y": 0.574,
+            "w": 0.29,
+            "h": 0.048,
+            "label": "CONFIRM"
+          },
+          {
+            "x": 0.6775,
+            "y": 0.605,
+            "w": 0.29,
+            "h": 0.049,
+            "label": "SELECT A SIZE"
+          },
+          {
+            "x": 0.6775,
+            "y": 0.166,
+            "w": 0.29,
+            "h": 0.036,
+            "label": "Men's Runner NZ Slip On"
+          },
+          {
+            "x": 0.4056,
+            "y": 0.39,
+            "w": 0.1888,
+            "h": 0.024,
+            "label": "Where are we shipping to?"
+          },
+          {
+            "x": 0.752,
+            "y": 0.4,
+            "w": 0.0762,
+            "h": 0.021,
+            "label": "WOMEN'S SIZES"
+          }
+        ]
+      }
+    }
+  ],
+  "ok": true,
+  "logo": {
+    "file": "logo.svg",
+    "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-allbirds-g1/screenshots/brand/logo.svg",
+    "source": "inline-svg"
+  }
+}

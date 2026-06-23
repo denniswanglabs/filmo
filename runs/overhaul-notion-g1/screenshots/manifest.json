@@ -1,0 +1,150 @@
+{
+  "url": "https://www.notion.com",
+  "count": 2,
+  "shots": [
+    {
+      "index": 1,
+      "file": "shot-01.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g1/screenshots/shot-01.png",
+      "url": "https://www.notion.com",
+      "label": "home",
+      "title": "The AI workspace that works for you. | Notion",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 2677292,
+      "focus": {
+        "x": 0.3162,
+        "y": 0.136,
+        "w": 0.3675,
+        "h": 0.0465,
+        "label": "Meet the night shift.",
+        "_candidates": [
+          {
+            "x": 0.4223,
+            "y": 0.108,
+            "w": 0.1554,
+            "h": 0.026,
+            "label": "Startups"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.204,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "Knowledge BaseCentralize your knowledge"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.248,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "DocsSimple and powerful"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.292,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "ProjectsManage any project"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.108,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "Notion AIAI tools for work"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.152,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "AgentsAutomate busywork"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.196,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "AI Meeting NotesPerfectly written by AI"
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "file": "shot-02.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g1/screenshots/shot-02.png",
+      "url": "https://www.notion.com/product",
+      "label": "route",
+      "title": "The AI workspace that works for you. | Notion",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 560976,
+      "focus": {
+        "x": 0.1087,
+        "y": 0.248,
+        "w": 0.7825,
+        "h": 0.2101,
+        "label": "Where teams and agents \nShip\n together.",
+        "_candidates": [
+          {
+            "x": 0.4223,
+            "y": 0.108,
+            "w": 0.1554,
+            "h": 0.026,
+            "label": "Startups"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.204,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "Knowledge BaseCentralize your knowledge"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.248,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "DocsSimple and powerful"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.292,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "ProjectsManage any project"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.108,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "Notion AIAI tools for work"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.152,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "AgentsAutomate busywork"
+          },
+          {
+            "x": 0.4223,
+            "y": 0.196,
+            "w": 0.1554,
+            "h": 0.044,
+            "label": "AI Meeting NotesPerfectly written by AI"
+          }
+        ]
+      }
+    }
+  ],
+  "ok": true,
+  "logo": {
+    "file": "logo.svg",
+    "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g1/screenshots/brand/logo.svg",
+    "source": "inline-svg"
+  }
+}

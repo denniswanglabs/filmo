@@ -1,0 +1,129 @@
+{
+  "fps": 30,
+  "total_frames": 1117,
+  "audio_path": "vo-overhaul-notion-g2.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#191919",
+    "bgCard": "#191919",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#5BA3F0",
+    "navyBright": "#5BA3F0",
+    "accent": "#2383E2",
+    "ok": "#5BA3F0",
+    "text": "#FFFFFF",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "\"Lyon Display\", ui-serif, Georgia, \"Times New Roman\", serif",
+    "fontMono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+    "fontDisplay": "\"Lyon Display\", ui-serif, Georgia, \"Times New Roman\", serif",
+    "wordmark": "Notion",
+    "logoSrc": "brand-logo-overhaul-notion-g2.svg",
+    "music": "music-overhaul-notion-g2.mp3"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 133,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Notion keeps work moving 24/7 in one unified workspace",
+        "subtitle": "One workspace"
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g2-opening-title.mp3"
+      }
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": "apple-screenshot",
+      "in_frame": 133,
+      "out_frame": 313,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-notion-g2-screenshot-home.png",
+        "frame": "browser",
+        "caption": "https://www.notion.com",
+        "headline": "The AI workspace that works for you",
+        "layout": "split",
+        "kicker": "Ai Workspace",
+        "eyebrow": "Ai Workspace",
+        "supporting": "Keep work moving 24/7",
+        "punchWord": "workspace",
+        "focus": {
+          "x": 0.3162,
+          "y": 0.136,
+          "w": 0.3675,
+          "h": 0.0465,
+          "label": "Meet the night shift."
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g2-screenshot-home.mp3"
+      }
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": "apple-screenshot",
+      "in_frame": 313,
+      "out_frame": 493,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-notion-g2-screenshot-inner.png",
+        "frame": "browser",
+        "caption": "https://www.notion.com/product",
+        "headline": "The AI workspace that works for you",
+        "layout": "split",
+        "kicker": "Ai Workspace",
+        "eyebrow": "Ai Workspace",
+        "supporting": "Automate repetitive work for your team",
+        "punchWord": "workspace",
+        "focus": {
+          "x": 0.1087,
+          "y": 0.248,
+          "w": 0.7825,
+          "h": 0.2101,
+          "label": "Where teams and agents \nShip\n together."
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g2-screenshot-inner.mp3"
+      }
+    },
+    {
+      "id": "walkthrough-demo",
+      "archetype": "walkthrough-player",
+      "in_frame": 493,
+      "out_frame": 778,
+      "cues": [],
+      "data": {
+        "videoSrc": "walk-overhaul-notion-g2-walkthrough-demo.mp4",
+        "overlayTitle": "Notion \u2014 One connected workspace",
+        "muteClip": true,
+        "videoFit": "contain"
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g2-walkthrough-demo.mp3"
+      }
+    },
+    {
+      "id": "closing-cta",
+      "archetype": "hero-title",
+      "in_frame": 778,
+      "out_frame": 1117,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Start using Notion today at notion.com",
+        "subtitle": "Start now \u2192 notion.com"
+      },
+      "audio": {
+        "src": "vo-overhaul-notion-g2-closing-cta.mp3"
+      }
+    }
+  ]
+}

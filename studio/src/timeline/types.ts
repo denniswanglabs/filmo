@@ -94,9 +94,31 @@ export interface SceneData {
   //             so the proof beat communicates rather than being a bare image. Filled
   //             by style_fill from the scene's narrated VO beat (NEVER the URL).
   imageSrc?: string;
-  frame?: "browser" | "none";
+  // "browser" = mac browser chrome + address bar (web product; the Stripe default),
+  // "phone"   = portrait PhoneFrame device chrome (mobile/app product; reuses the
+  //             SAME archetype with a portrait capture), "none" = bare card.
+  frame?: "browser" | "phone" | "none";
   caption?: string;
   headline?: string;
+
+  // --- apple-screenshot v2 "split" layout (spec §2). ALL optional; absent =
+  //     byte-identical to the pre-overhaul centered behavior. ---
+  // Layout axis: "split" = text-left / screenshot-right (the new default the
+  // archetype opts into); "centered" = the original centered-text-above-card path.
+  // When ABSENT the archetype keeps its current default (no schema migration).
+  layout?: "split" | "centered";
+  // The muted supporting sentence under the headline in the left column.
+  supporting?: string;
+  // The headline↔UI tie target: a rect in card-LOCAL normalized coords (0..1).
+  // The archetype draws a highlight-box over it (and optionally a cursor + zoom)
+  // timed to the headline punch word. ABSENT = no box/cursor/zoom (plain shot).
+  focus?: { x: number; y: number; w: number; h: number; label?: string };
+  // Optional cursor path in card-LOCAL normalized coords (0..1); `click` emits a
+  // ripple at that keyframe. ABSENT = no cursor.
+  cursorPath?: Array<{ at: number; x: number; y: number; click?: boolean }>;
+  // Optional zoom-punch target (card-local normalized 0..1) + push scale. ABSENT
+  // = no zoom.
+  zoomTo?: { x: number; y: number; scale: number };
 
   // walkthrough-player fields. A produced walkthrough MP4 played inside a
   // brand-tinted frame with a kinetic overlay title bar.
@@ -111,6 +133,12 @@ export interface SceneData {
   videoFit?: "contain" | "cover";
   overlayTitle?: string;
   muteClip?: boolean;
+  // OPTIONAL proof KPI for the walkthrough device-hero (R4). A short stat string
+  // like "$1T+ processed" / "99.999% uptime" / "millions of businesses". The
+  // archetype parses a number out of it, rolls it up, and floats a glass chip
+  // over the held clip (the TapPay approve-chip analog). ABSENT or number-less
+  // => no chip (never invents a stat). Falls back to a number in overlayTitle.
+  kpi?: string;
 
   // OPTIONAL geometry overrides written by the visual editor. Each key maps to a
   // single hardcoded geometry literal inside an archetype (font size, box width,
@@ -166,6 +194,18 @@ export interface Theme {
   fontDisplay: string;
   // brand wordmark shown in the hero lockup.
   wordmark: string;
+  // OPTIONAL real brand logo asset (spec §4). A public-relative path
+  // (staticFile-resolved) or absolute/remote URL staged by style_fill into
+  // studio/public/brand/. Bookend archetypes render this as an <Img> when
+  // present, else fall back to wordmark_svg/text. NEVER invented — ABSENT here
+  // means "no captured logo", and bookends degrade to the wordmark.
+  logoSrc?: string;
+  // OPTIONAL background-music track (spec §4). A public-relative path
+  // (staticFile-resolved) or absolute/remote URL staged into studio/public/.
+  // When present, Timeline adds ONE looped, ducked <Audio> under the VO; ABSENT
+  // = no music track (current behavior). May also be supplied at the top level
+  // as `music_path` (theme.music wins if both are set).
+  music?: string;
 }
 
 // Index signature so TimelineData satisfies Remotion's `Record<string, unknown>`
@@ -174,6 +214,11 @@ export interface TimelineData {
   fps: number;
   total_frames: number;
   audio_path: string;
+  // OPTIONAL background-music track (spec §4), a top-level alternative to
+  // theme.music. A public-relative (staticFile-resolved) or absolute/remote
+  // path staged into studio/public/. ABSENT = no music (current behavior).
+  // If both are set, theme.music wins.
+  music_path?: string;
   lang: string;
   theme: Theme;
   scenes: Scene[];

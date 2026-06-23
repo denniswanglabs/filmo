@@ -2,7 +2,7 @@
 // kinetic-light scenes (IntroScene / HookScene / ReviewApproveScene). Every
 // value is frame-derived and deterministic — NO Math.random / Date — so renders
 // are reproducible.
-import { Easing, interpolate } from "remotion";
+import { Easing, interpolate, spring } from "remotion";
 
 // Clamped linear ease between two frames (the kinetic-light default).
 export const ease = (frame: number, a: number, b: number, from: number, to: number) =>
@@ -180,4 +180,180 @@ export const actLabel = (kicker?: string): string => {
   const raw = (kicker ?? "").trim().toUpperCase();
   if (!raw) return "";
   return raw.split(/\s+/).slice(0, 2).join(" ");
+};
+
+// ===========================================================================
+// Overhaul motion vocabulary (spec §1). Ported, frame-derived, deterministic.
+// REUSES ease / interpClamp / easeOutCubic / EASE_OUT_QUART / EASE_IN_OUT_CUBIC
+// / breathDrift above — these add ONLY the named primitives the spec lists as
+// gaps. Every helper is a pure function of `frame` (springs are seeded from
+// frame + fps), so renders stay reproducible.
+// ===========================================================================
+
+// frame-rise (NEW) — the web analog of TapPay's phone-rise, retargeted for a
+// browser/UI card. The card springs up from `+dy`px, scales `scaleFrom→1`, and
+// settles a small `rotateX` tilt back to flat. Ported spring config from
+// IPhoneTapScene.phoneSpring ({damping:16, stiffness:110}); opacity fades over
+// `fadeDur` like the reference's [at, at+22] window. Defaults match the spec
+// (scale 0.92→1, dy 48, rotateX 6°→0, ~28f settle).
+//   frame, at: scene-local cue frame + start; fps: spring seed (from useVideoConfig).
+export const frameRise = (
+  frame: number,
+  at: number,
+  fps: number,
+  opts: { dy?: number; scaleFrom?: number; tilt?: number; fadeDur?: number } = {}
+) => {
+  const { dy = 48, scaleFrom = 0.92, tilt = 6, fadeDur = 22 } = opts;
+  const s = spring({ frame: frame - at, fps, config: { damping: 16, stiffness: 110 } });
+  const opacity = ease(frame, at, at + fadeDur, 0, 1);
+  const ty = interpolate(s, [0, 1], [dy, 0]);
+  const scale = interpolate(s, [0, 1], [scaleFrom, 1]);
+  const rx = interpolate(s, [0, 1], [tilt, 0]);
+  return {
+    opacity,
+    s,
+    transform: `perspective(1600px) translateY(${ty}px) rotateX(${rx}deg) scale(${scale})`,
+  };
+};
+
+// cursor-move (NEW) — port of Orinovate Cursor.tsx. Springs an arrow cursor
+// through `keyframes` (card-LOCAL coords; the archetype decides px vs %), and
+// emits click ripples (r 6→60, opacity 0.65→0 over 18f) for any keyframe with
+// `click` within the last 18 frames. Spring config + ripple curve lifted exactly
+// ({damping:14, stiffness:110, mass:0.6}). Returns position + active ripples so
+// the caller renders the cursor glyph + ripple <circle>s however it likes.
+export type CursorKeyframe = { at: number; x: number; y: number; click?: boolean };
+export const cursorAt = (
+  frame: number,
+  keyframes: CursorKeyframe[],
+  fps: number
+): { x: number; y: number; ripples: Array<{ at: number; x: number; y: number; r: number; opacity: number }> } => {
+  if (!keyframes || keyframes.length === 0) return { x: 0, y: 0, ripples: [] };
+  const first = keyframes[0];
+  const last = keyframes[keyframes.length - 1];
+  let prev = first;
+  let next = last;
+  for (let i = 0; i < keyframes.length - 1; i++) {
+    if (frame >= keyframes[i].at && frame <= keyframes[i + 1].at) {
+      prev = keyframes[i];
+      next = keyframes[i + 1];
+      break;
+    }
+  }
+  if (frame <= first.at) {
+    prev = first;
+    next = first;
+  } else if (frame >= last.at) {
+    prev = last;
+    next = last;
+  }
+  const span = Math.max(1, next.at - prev.at);
+  const t = (frame - prev.at) / span;
+  const eased = spring({ frame: t * fps * 0.6, fps, config: { damping: 14, stiffness: 110, mass: 0.6 } });
+  const x = interpolate(eased, [0, 1], [prev.x, next.x]);
+  const y = interpolate(eased, [0, 1], [prev.y, next.y]);
+  const ripples = keyframes
+    .filter((k) => k.click && frame >= k.at && frame < k.at + 18)
+    .map((k) => {
+      const p = (frame - k.at) / 18;
+      return {
+        at: k.at,
+        x: k.x,
+        y: k.y,
+        r: interpolate(p, [0, 1], [6, 60]),
+        opacity: interpolate(p, [0, 1], [0.65, 0]),
+      };
+    });
+  return { x, y, ripples };
+};
+
+// highlight-box (NEW) — a rounded accent ring + tint draws ON over a named UI
+// rect: opacity 0→1 over `dur` (EASE_OUT_QUART), HOLDS until `holdEnd`, then
+// fades out over `dur`. Pairs with the headline punch noun. Returns the box
+// opacity (the archetype owns the rect geometry + stroke/tint styling).
+export const highlightBox = (frame: number, at: number, holdEnd: number, dur = 14) => {
+  const inP = interpolate(frame, [at, at + dur], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_OUT_QUART,
+  });
+  const outP = interpolate(frame, [holdEnd, holdEnd + dur], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_OUT_QUART,
+  });
+  return { opacity: Math.min(inP, outP) };
+};
+
+// zoom-punch (NEW) — Ken-Burns / CameraRig-style push toward a focus point
+// inside a box. `focus` is in NORMALIZED card coords (0..1); the push scales the
+// content `1→scale` and translates so the focus point stays toward center, then
+// (optionally) eases back after `holdEnd`. Eases with EASE_IN_OUT_CUBIC (24f in
+// per spec). Returns a CSS transform string applied to the card content layer
+// (transformOrigin should be "0 0" / top-left so the % math is exact).
+export const zoomPunch = (
+  frame: number,
+  at: number,
+  focus: { x: number; y: number },
+  scale = 1.18,
+  opts: { dur?: number; holdEnd?: number; boxW?: number; boxH?: number } = {}
+) => {
+  const { dur = 24, holdEnd, boxW = 1, boxH = 1 } = opts;
+  const inP = interpolate(frame, [at, at + dur], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_IN_OUT_CUBIC,
+  });
+  const outP =
+    holdEnd != null
+      ? interpolate(frame, [holdEnd, holdEnd + dur], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+          easing: EASE_IN_OUT_CUBIC,
+        })
+      : 1;
+  const p = Math.min(inP, outP);
+  const s = 1 + (scale - 1) * p;
+  // Keep the focus point fixed under the scale (transformOrigin top-left):
+  // translate so focus*box stays put as everything scales up around it.
+  const tx = (1 - s) * focus.x * boxW;
+  const ty = (1 - s) * focus.y * boxH;
+  return { transform: `translate(${tx}px, ${ty}px) scale(${s})`, scale: s, p };
+};
+
+// counter-roll — a number counts up from `0` (or `from`) to `to` over `dur`,
+// EASE_OUT_QUART. Returns the raw number; the caller formats ($, commas, +).
+export const rollNumber = (frame: number, at: number, to: number, dur = 26, from = 0): number => {
+  const p = interpolate(frame, [at, at + dur], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_OUT_QUART,
+  });
+  return from + (to - from) * p;
+};
+
+// nfc-ripple (device only) — concentric accent rings scale 0→2.0 & fade,
+// staggered 6f per ring index `i`. Curves lifted from IPhoneTapScene
+// waveScale/waveOp. Returns { scale, opacity } for ring `i`.
+export const nfcRipple = (frame: number, at: number, i: number) => {
+  const base = at + i * 6;
+  const scale = interpolate(frame, [base, base + 24, base + 54], [0, 1.4, 2.0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const opacity = interpolate(frame, [base, base + 14, base + 44], [0, 0.9, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return { scale, opacity };
+};
+
+// approve-chip — a success chip springs in scale 0.6→1 ({damping:11,
+// stiffness:200}) with a fade. Ported from IPhoneTapScene approveSpring.
+export const approveChip = (frame: number, at: number, fps: number) => {
+  const s = spring({ frame: frame - at, fps, config: { damping: 11, stiffness: 200 } });
+  return {
+    opacity: ease(frame, at, at + 25, 0, 1),
+    transform: `scale(${interpolate(s, [0, 1], [0.6, 1])})`,
+  };
 };

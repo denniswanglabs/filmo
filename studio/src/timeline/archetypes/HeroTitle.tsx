@@ -8,12 +8,33 @@
 //   kicker-in -> kicker, title-in -> title, punch -> accent glow on punchWord,
 //   subtitle-in -> subtitle.
 import React from "react";
-import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Img, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
-import { ease, alphaHex, interpClamp, splitToLines, stagedLine } from "../motion";
+import { ease, alphaHex, interpClamp, splitToLines, stagedLine, breathDrift } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
+
+// Resolve a public-relative path under public/ via staticFile; pass absolute /
+// remote (http or leading-slash) paths through untouched. Mirrors Timeline's
+// resolveAsset so the captured brand logo (theme.logoSrc, staged into
+// studio/public/brand/ by style_fill) renders as an <Img>. ABSENT logoSrc =>
+// the bookend degrades to the wordmark text (never invents a logo).
+const resolveLogo = (path: string): string =>
+  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
+
+// Heuristic: is this hero acting as the CLOSING / CTA bookend? The CTA beat is
+// where the brand promise + call-to-action land (feedback_slogan_lands_on_cta).
+// Detected WITHOUT a schema change: a kicker that reads as a close/CTA, or a
+// subtitle that carries a CTA signal (an arrow, a URL, or "start"/"get"). When
+// false the hero is the OPENING bookend and the subtitle stays a plain tagline.
+const isCtaBeat = (data: SceneData): boolean => {
+  const k = (data.kicker ?? "").toLowerCase();
+  const s = (data.subtitle ?? "").toLowerCase();
+  if (/(get started|start now|sign ?up|close|cta|try|join)/.test(k)) return true;
+  if (/→|->|https?:\/\/|www\.|\.com|\.io|\.ai|start now|get started/.test(s)) return true;
+  return false;
+};
 
 // Split a title around its punch word so the punch word can be accent-colored.
 const splitPunch = (title: string, punch?: string) => {
@@ -105,6 +126,34 @@ export const HeroTitle: React.FC<{
   const subOpacity = ease(frame, subAt, subAt + 16, 0, 1);
   const subY = ease(frame, subAt, subAt + 16, 14, 0);
 
+  // --- Logo (spec §4) -------------------------------------------------------
+  // The hero is a BOOKEND, so it shows the real captured logo prominently when
+  // present, else the wordmark text. The logo lockup rises with the kicker.
+  const logoSrc = (theme.logoSrc ?? "").trim();
+  const hasLogo = logoSrc.length > 0;
+  // Persistent corner mark: a small brand mark anchored bottom-right on every
+  // scene per the spec. Graceful when there is no logo AND no wordmark.
+  const cornerMark = hasLogo ? logoSrc : "";
+  const cornerWordmark = (theme.wordmark ?? "").trim();
+  const cornerOpacity = ease(frame, kickerAt + 6, kickerAt + 22, 0, 0.7);
+  const cornerDrift = breathDrift(frame, kickerAt + 30, 1.5, 130);
+
+  // --- CTA bookend (spec §3 scene 7, feedback_slogan_lands_on_cta) ----------
+  // On the closing/CTA hero, render the subtitle as an accent CTA pill that
+  // pops in (the slogan/brand-promise lands HERE, not on the opening hero).
+  const cta = isCtaBeat(data);
+  const ctaSpring = spring({
+    frame: frame - subAt,
+    fps,
+    config: { damping: 14, stiffness: 170, mass: 0.7 },
+  });
+  const ctaScale = interpolate(ctaSpring, [0, 0.7, 1], [0.7, 1.04, 1]);
+  const ctaGlow = interpClamp(
+    frame,
+    [subAt, subAt + 16, subAt + 44, durationInFrames - 14, durationInFrames],
+    [0, 1, 0.6, 0.85, 0.55]
+  );
+
   return (
     <AbsoluteFill
       style={{
@@ -140,10 +189,32 @@ export const HeroTitle: React.FC<{
           transform: `scale(${breathe})`,
         }}
       >
-        {/* Wordmark — hidden when the title already IS the wordmark (the
-            never-empty fallback case) so it isn't shown twice. */}
-        {theme.wordmark && theme.wordmark.trim() !== titleText.trim() ? (
+        {/* Brand lockup — the real captured logo (theme.logoSrc) when present,
+            else the wordmark text. Rises with the kicker. Hidden when the title
+            already IS the wordmark and there is no real logo, so it isn't shown
+            twice (the never-empty fallback case). */}
+        {hasLogo ? (
           <div
+            data-scene-id={sceneId}
+            data-field="logo"
+            style={{
+              opacity: kickerOpacity,
+              transform: `translateY(${kickerY}px)`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: 72,
+            }}
+          >
+            <Img
+              src={resolveLogo(logoSrc)}
+              style={{ height: "100%", width: "auto", objectFit: "contain", display: "block" }}
+            />
+          </div>
+        ) : theme.wordmark && theme.wordmark.trim() !== titleText.trim() ? (
+          <div
+            data-scene-id={sceneId}
+            data-field="logo"
             style={{
               opacity: kickerOpacity,
               fontSize: 46,
@@ -241,23 +312,91 @@ export const HeroTitle: React.FC<{
           }}
         />
 
-        {/* Subtitle */}
+        {/* Subtitle — on the CLOSING/CTA hero it lands as an accent CTA pill
+            (the brand promise / call-to-action; feedback_slogan_lands_on_cta),
+            with a spring pop + held accent glow. On the opening hero it stays a
+            plain muted tagline. */}
+        {data.subtitle ? (
+          cta ? (
+            <div
+              data-scene-id={sceneId}
+              data-field="subtitle"
+              style={{
+                opacity: subOpacity,
+                transform: `scale(${ctaScale})`,
+                marginTop: 8,
+                padding: "18px 40px",
+                borderRadius: 999,
+                backgroundColor: theme.accent,
+                color: "#ffffff",
+                fontSize: Math.round(subtitleFontSize * 0.92),
+                fontWeight: 700,
+                letterSpacing: "-0.01em",
+                textAlign: "center",
+                boxShadow: `0 10px 36px ${theme.accent}${alphaHex(0.45 * ctaGlow)}, inset 0 1px 0 rgba(255,255,255,0.35)`,
+              }}
+            >
+              {data.subtitle}
+            </div>
+          ) : (
+            <div
+              data-scene-id={sceneId}
+              data-field="subtitle"
+              style={{
+                opacity: subOpacity,
+                transform: `translateY(${subY}px)`,
+                fontSize: subtitleFontSize,
+                fontWeight: 400,
+                color: theme.textMuted,
+                maxWidth: 1100,
+                textAlign: "center",
+              }}
+            >
+              {data.subtitle}
+            </div>
+          )
+        ) : null}
+      </div>
+
+      {/* Persistent corner brand mark (spec §4) — bottom-right, small + low-key,
+          on every scene. Real logo <Img> when present, else the wordmark text;
+          renders nothing when neither exists (graceful). */}
+      {(cornerMark || cornerWordmark) && (
         <div
           data-scene-id={sceneId}
-          data-field="subtitle"
+          data-field="cornerMark"
           style={{
-            opacity: subOpacity,
-            transform: `translateY(${subY}px)`,
-            fontSize: subtitleFontSize,
-            fontWeight: 400,
-            color: theme.textMuted,
-            maxWidth: 1100,
-            textAlign: "center",
+            position: "absolute",
+            right: 56,
+            bottom: 44,
+            opacity: cornerOpacity,
+            transform: `translateY(${cornerDrift}px)`,
+            display: "flex",
+            alignItems: "center",
+            height: 34,
+            pointerEvents: "none",
           }}
         >
-          {data.subtitle}
+          {cornerMark ? (
+            <Img
+              src={resolveLogo(cornerMark)}
+              style={{ height: "100%", width: "auto", objectFit: "contain", display: "block", opacity: 0.9 }}
+            />
+          ) : (
+            <span
+              style={{
+                fontSize: 22,
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+                color: theme.textDim,
+                fontFamily: theme.fontDisplay,
+              }}
+            >
+              {cornerWordmark}
+            </span>
+          )}
         </div>
-      </div>
+      )}
     </AbsoluteFill>
   );
 };

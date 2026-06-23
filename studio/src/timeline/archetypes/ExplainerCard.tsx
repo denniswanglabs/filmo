@@ -11,12 +11,64 @@
 //   title-in -> title, subtitle-in -> subtitle, point-1..point-N -> each bullet.
 // Sensible fallback cue frames keep it animating even when a scene has no cues.
 import React from "react";
-import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Img, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
 import { ease, reveal, interpClamp, alphaHex, actNum, actLabel, splitToLines, stagedLine } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
+
+// Resolve a public-relative logo path via staticFile; http/leading-slash pass
+// through. ABSENT theme.logoSrc => corner mark degrades to the wordmark.
+const resolveLogo = (path: string): string =>
+  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
+
+// Persistent corner brand mark (spec §4) — bottom-right, low-key. Real logo
+// <Img> when present, else wordmark text; nothing when neither exists.
+const CornerMark: React.FC<{ theme: Theme; opacity: number; sceneId?: string }> = ({
+  theme,
+  opacity,
+  sceneId,
+}) => {
+  const logoSrc = (theme.logoSrc ?? "").trim();
+  const wordmark = (theme.wordmark ?? "").trim();
+  if (!logoSrc && !wordmark) return null;
+  return (
+    <div
+      data-scene-id={sceneId}
+      data-field="cornerMark"
+      style={{
+        position: "absolute",
+        right: 56,
+        bottom: 40,
+        opacity,
+        display: "flex",
+        alignItems: "center",
+        height: 30,
+        pointerEvents: "none",
+      }}
+    >
+      {logoSrc ? (
+        <Img
+          src={resolveLogo(logoSrc)}
+          style={{ height: "100%", width: "auto", objectFit: "contain", display: "block", opacity: 0.9 }}
+        />
+      ) : (
+        <span
+          style={{
+            fontSize: 20,
+            fontWeight: 600,
+            letterSpacing: "0.02em",
+            color: theme.textDim,
+            fontFamily: theme.fontDisplay,
+          }}
+        >
+          {wordmark}
+        </span>
+      )}
+    </div>
+  );
+};
 
 export const ExplainerCard: React.FC<{
   data: SceneData;
@@ -300,6 +352,8 @@ export const ExplainerCard: React.FC<{
           </div>
         ) : null}
       </div>
+
+      <CornerMark theme={theme} opacity={ease(frame, kickerAt + 6, kickerAt + 22, 0, 0.65)} sceneId={sceneId} />
     </AbsoluteFill>
   );
 };

@@ -1,0 +1,129 @@
+{
+  "url": "https://stripe.com",
+  "count": 2,
+  "shots": [
+    {
+      "index": 1,
+      "file": "shot-01.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-stripe-r7/screenshots/shot-01.png",
+      "url": "https://stripe.com",
+      "label": "home",
+      "title": "Stripe | Financial Infrastructure to Grow Your Revenue",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 1111946,
+      "focus": {
+        "x": 0.112,
+        "y": 0.1576,
+        "w": 0.516,
+        "h": 0.684,
+        "label": "Pay Roastery\nCartsy bezahlen\nShowflix \u306b\u652f\u6255\u3046\nPay Roastery\n$5.4",
+        "_candidates": [
+          {
+            "x": 0.115,
+            "y": 0.1616,
+            "w": 0.51,
+            "h": 0.676,
+            "label": "Accept and optimize payments globally\u2014online and in person\nP"
+          },
+          {
+            "x": 0.13,
+            "y": 0.1856,
+            "w": 0.3796,
+            "h": 0.0582,
+            "label": "Accept and optimize payments globally\u2014online and in person"
+          },
+          {
+            "x": 0.6328,
+            "y": 0.1556,
+            "w": 0.2544,
+            "h": 0.688,
+            "label": "Pro Plan\nBilled monthly\nTokens\n$0.01 per 1,000 units\nUsage m"
+          },
+          {
+            "x": 0.635,
+            "y": 0.1616,
+            "w": 0.25,
+            "h": 0.676,
+            "label": "Enable any billing model\nPro Plan\nBilled monthly\nTokens\n$0.0"
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "file": "shot-02.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-stripe-r7/screenshots/shot-02.png",
+      "url": "https://stripe.com/pricing",
+      "label": "route",
+      "title": "Pricing & Fees",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 289725,
+      "focus": {
+        "x": 0.51,
+        "y": 0.0768,
+        "w": 0.1388,
+        "h": 0.048,
+        "label": "Tools to optimize your checkout",
+        "_candidates": [
+          {
+            "x": 0.51,
+            "y": 0.3368,
+            "w": 0.1388,
+            "h": 0.048,
+            "label": "Phone, chat, and email support"
+          },
+          {
+            "x": 0.3412,
+            "y": 0.0768,
+            "w": 0.1388,
+            "h": 0.024,
+            "label": "Built-in fraud prevention"
+          },
+          {
+            "x": 0.3412,
+            "y": 0.3368,
+            "w": 0.1388,
+            "h": 0.048,
+            "label": "Fast, predictable payouts to your bank accounts"
+          },
+          {
+            "x": 0.6787,
+            "y": 0.0768,
+            "w": 0.1388,
+            "h": 0.048,
+            "label": "Payments optimizations to boost revenue"
+          },
+          {
+            "x": 0.6787,
+            "y": 0.3368,
+            "w": 0.1388,
+            "h": 0.048,
+            "label": "Security, reliability and compliance"
+          },
+          {
+            "x": 0.1725,
+            "y": 0.0768,
+            "w": 0.1388,
+            "h": 0.024,
+            "label": "Global access"
+          },
+          {
+            "x": 0.1725,
+            "y": 0.3368,
+            "w": 0.1388,
+            "h": 0.048,
+            "label": "Embedded payments for platforms & marketplaces"
+          }
+        ]
+      }
+    }
+  ],
+  "ok": true,
+  "logo": {
+    "file": "logo.svg",
+    "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-stripe-r7/screenshots/brand/logo.svg",
+    "source": "inline-svg"
+  }
+}

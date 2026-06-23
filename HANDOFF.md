@@ -1,4 +1,6 @@
 # HANDOFF — Walk Studio (Hermes hackathon video-production agent)
+
+> **ACTIVE (2026-06-23): a video-quality OVERHAUL LOOP is running.** Before anything else, READ **`OVERHAUL-LOOP-STATE.md`** (repo root) — it is the resume doc + self-improving LESSONS ledger for the Stripe-first generate(Nemotron Super)/judge(Claude) loop, plus the build spec pointer `VIDEO-OVERHAUL-SPEC.md`. The dashboard is clean (prior runs archived to `~/walk-studio-runs-archive-20260623-011654`).
 _Rewritten 2026-06-22 evening (session 4). **SUPERSEDES the 2026-06-21 handoff** (little of it is still current — see "What changed"). Self-contained so a fresh chat can carry on. Per-change detail lives in the many `.handoff-*.md` files at the project root, `LEARNINGS.md`, `UI-POLISH-SPEC.md`, and vault `Daily/2026-06-22.md`._
 
 ## TL;DR

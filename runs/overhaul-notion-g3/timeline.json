@@ -1,0 +1,68 @@
+{
+  "fps": 30,
+  "total_frames": 900,
+  "audio_path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g3/voiceover.mp3",
+  "lang": "en",
+  "scenes": [
+    {
+      "id": "title-open",
+      "archetype": null,
+      "role": "title",
+      "text": "Notion is the connected workspace for docs, wikis, and projects.",
+      "in_frame": 0,
+      "out_frame": 138,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g3/voiceover.beat00.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": null,
+      "role": "screenshot",
+      "text": "Write docs, build wikis, and track projects in one place.",
+      "in_frame": 138,
+      "out_frame": 288,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g3/voiceover.beat01.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": null,
+      "role": "screenshot",
+      "text": "Databases, templates, and AI built into every page.",
+      "in_frame": 288,
+      "out_frame": 468,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g3/voiceover.beat02.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "walkthrough",
+      "archetype": null,
+      "role": "walkthrough",
+      "text": "Watch one connected workspace for notes, docs, and projects, step by step.",
+      "in_frame": 468,
+      "out_frame": 738,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g3/voiceover.beat03.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "title-close",
+      "archetype": null,
+      "role": "close",
+      "text": "Build your workspace on Notion.",
+      "in_frame": 738,
+      "out_frame": 900,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-notion-g3/voiceover.beat04.mp3"
+      },
+      "cues": []
+    }
+  ]
+}

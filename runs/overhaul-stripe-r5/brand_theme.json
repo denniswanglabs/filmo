@@ -1,0 +1,39 @@
+{
+  "name": "Stripe",
+  "host": "stripe.com",
+  "tagline": "Build internet businesses",
+  "palette": {
+    "bg": "#0A2540",
+    "ink": "#FFFFFF",
+    "accent": "#635BFF",
+    "accent2": "#80E9FF",
+    "success": "#80E9FF"
+  },
+  "fonts": {
+    "display": "\"Sohne\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "mono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace"
+  },
+  "wordmark_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 276 96\" width=\"276\" height=\"96\" role=\"img\" aria-label=\"Stripe\"><rect x=\"16\" y=\"30\" width=\"14\" height=\"36\" rx=\"4\" fill=\"#635BFF\"/><text x=\"46\" y=\"62\" font-size=\"44\" font-weight=\"800\" letter-spacing=\"-0.02em\" font-family='\"SF Pro Display\", \"Helvetica Neue\", \"Avenir Next\", -apple-system, sans-serif' fill=\"#FFFFFF\">Stripe</text></svg>",
+  "features": [
+    {
+      "title": "The backbone of global commerce",
+      "sub": ""
+    },
+    {
+      "title": "Powering businesses of all sizes.",
+      "sub": ""
+    },
+    {
+      "title": "What\u2019s happening",
+      "sub": ""
+    },
+    {
+      "title": "Enable any billing model",
+      "sub": ""
+    }
+  ],
+  "copy": {
+    "hook": "Build internet businesses",
+    "cta": "Get started"
+  }
+}

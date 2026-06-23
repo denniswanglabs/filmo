@@ -1,0 +1,82 @@
+{
+  "job": {
+    "company_url": "https://stripe.com",
+    "goal": "A 30-second brand explainer",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd",
+    "emphasis": "accept payments in one integration"
+  },
+  "scenes": [
+    {
+      "id": "opening-title",
+      "type": "title",
+      "brief": "Opening brand title card with Stripe wordmark and tagline.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    },
+    {
+      "id": "screenshot-homepage",
+      "type": "screenshot",
+      "brief": "Real captured view of Stripe homepage showing the product interface.",
+      "model": null,
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "screenshot-billing",
+      "type": "screenshot",
+      "brief": "Real captured view of Stripe billing dashboard illustrating subscription setup.",
+      "model": null,
+      "duration_s": 6,
+      "input_image": null
+    },
+    {
+      "id": "walkthrough-demo",
+      "type": "walkthrough",
+      "brief": "From the homepage, navigate to and demonstrate accept payments in one integration, showing 2-3 distinct steps.",
+      "model": null,
+      "duration_s": 12,
+      "input_image": null
+    },
+    {
+      "id": "closing-cta",
+      "type": "title",
+      "brief": "Closing title card with call\u2011to\u2011action to integrate Stripe.",
+      "model": null,
+      "duration_s": 3,
+      "input_image": null
+    }
+  ],
+  "voiceover": {
+    "voice": "Adam",
+    "beats": [
+      {
+        "scene_id": "opening-title",
+        "text": "Stripe powers global commerce for businesses of all sizes."
+      },
+      {
+        "scene_id": "screenshot-homepage",
+        "text": "Stripe is the backbone of global commerce, handling billions in transactions each year."
+      },
+      {
+        "scene_id": "screenshot-billing",
+        "text": "Enable any billing model with Stripe\u2019s flexible subscriptions invoicing and usage based pricing."
+      },
+      {
+        "scene_id": "walkthrough-demo",
+        "text": "Watch a business set up recurring billing and add payment methods then customize invoices and launch in minutes with Stripe to start earning revenue."
+      },
+      {
+        "scene_id": "closing-cta",
+        "text": "Start accepting payments by integrating Stripe today."
+      }
+    ],
+    "script": "Stripe powers global commerce for businesses of all sizes. Stripe is the backbone of global commerce, handling billions in transactions each year. Enable any billing model with Stripe\u2019s flexible subscriptions invoicing and usage based pricing. Watch a business set up recurring billing and add payment methods then customize invoices and launch in minutes with Stripe to start earning revenue. Start accepting payments by integrating Stripe today."
+  },
+  "selection": {
+    "quality": "standard",
+    "brain": "super-free"
+  }
+}

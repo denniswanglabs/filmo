@@ -14,7 +14,7 @@
 //   kicker-in -> kicker, title-in -> title slide-up, punch -> accent word,
 //   product-in -> glass product plate + edge sweep, subtitle-in -> subtitle.
 import React from "react";
-import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
+import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
 import {
   appleMaskRise,
@@ -30,6 +30,11 @@ import {
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
+
+// Resolve a public-relative logo path via staticFile; http/leading-slash pass
+// through. ABSENT theme.logoSrc => the lockup/corner mark degrades to wordmark.
+const resolveLogo = (path: string): string =>
+  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
 
 // Split a title around its punch word so the punch word can be accent-colored.
 const splitPunch = (title: string, punch?: string) => {
@@ -132,18 +137,40 @@ export const AppleHero: React.FC<{
           transform: `translateY(${breath}px)`,
         }}
       >
-        {/* Wordmark */}
-        <div
-          style={{
-            opacity: kicker.opacity,
-            fontSize: 40,
-            fontWeight: 600,
-            letterSpacing: "-0.02em",
-            color: theme.navy,
-          }}
-        >
-          {theme.wordmark}
-        </div>
+        {/* Brand lockup — real captured logo (theme.logoSrc) when present, else
+            the wordmark text. Rises with the kicker. */}
+        {(theme.logoSrc ?? "").trim() ? (
+          <div
+            data-scene-id={sceneId}
+            data-field="logo"
+            style={{
+              opacity: kicker.opacity,
+              transform: kicker.transform,
+              height: 60,
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <Img
+              src={resolveLogo((theme.logoSrc ?? "").trim())}
+              style={{ height: "100%", width: "auto", objectFit: "contain", display: "block" }}
+            />
+          </div>
+        ) : (
+          <div
+            data-scene-id={sceneId}
+            data-field="logo"
+            style={{
+              opacity: kicker.opacity,
+              fontSize: 40,
+              fontWeight: 600,
+              letterSpacing: "-0.02em",
+              color: theme.navy,
+            }}
+          >
+            {theme.wordmark}
+          </div>
+        )}
 
         {/* Kicker eyebrow */}
         <div

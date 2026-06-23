@@ -12,12 +12,17 @@
 // Reveals fire on the scene's CUE frames (relative to scene in_frame):
 //   line-1..line-N -> each statement line slides up, footnote-in -> footnote.
 import React from "react";
-import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
+import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
 import { appleMaskRise, appleRise, breathDrift, EASE_OUT_QUART } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
+
+// Resolve a public-relative logo path via staticFile; pass http/leading-slash
+// through. ABSENT theme.logoSrc => corner mark degrades to the wordmark.
+const resolveLogo = (path: string): string =>
+  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
 
 export const AppleStatement: React.FC<{
   data: SceneData;
@@ -58,6 +63,16 @@ export const AppleStatement: React.FC<{
   );
 
   const exitFade = interpolate(frame, [durationInFrames - 14, durationInFrames], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_OUT_QUART,
+  });
+
+  // Persistent corner brand mark (spec §4): real logo when present, else
+  // wordmark; nothing when neither exists. Anchored bottom-right, low-key.
+  const logoSrc = (theme.logoSrc ?? "").trim();
+  const cornerWordmark = (theme.wordmark ?? "").trim();
+  const cornerOpacity = interpolate(frame, [lineAt(0), lineAt(0) + 18], [0, 0.7], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: EASE_OUT_QUART,
@@ -144,6 +159,43 @@ export const AppleStatement: React.FC<{
           </div>
         )}
       </AbsoluteFill>
+
+      {/* Persistent corner brand mark (spec §4) — bottom-right, low-key. */}
+      {(logoSrc || cornerWordmark) && (
+        <div
+          data-scene-id={sceneId}
+          data-field="cornerMark"
+          style={{
+            position: "absolute",
+            right: 56,
+            bottom: 44,
+            opacity: cornerOpacity,
+            display: "flex",
+            alignItems: "center",
+            height: 34,
+            pointerEvents: "none",
+          }}
+        >
+          {logoSrc ? (
+            <Img
+              src={resolveLogo(logoSrc)}
+              style={{ height: "100%", width: "auto", objectFit: "contain", display: "block", opacity: 0.9 }}
+            />
+          ) : (
+            <span
+              style={{
+                fontSize: 22,
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+                color: theme.textDim,
+                fontFamily: theme.fontDisplay,
+              }}
+            >
+              {cornerWordmark}
+            </span>
+          )}
+        </div>
+      )}
     </AbsoluteFill>
   );
 };

@@ -70,6 +70,10 @@ _DESKTOP_UA = (
 # Upgrade-Insecure-Requests so the browser context looks like a real Chrome 124.
 # Defined here as a plain dict; _re is imported further below.
 _EXTRA_HEADERS = {
+    # Pin a US English preference. The server may still IP-geo-redirect (see the
+    # SHOPIFY-HARDENING section in OVERHAUL-LOOP-STATE.md: a non-US egress is a
+    # money-gated proxy fix, not a header fix), but for sites that honor the header
+    # this keeps the capture English.
     "Accept-Language": "en-US,en;q=0.9",
     "Accept": (
         "text/html,application/xhtml+xml,application/xml;"
@@ -86,6 +90,101 @@ _EXTRA_HEADERS = {
     "sec-fetch-user": "?1",
     "Upgrade-Insecure-Requests": "1",
 }
+
+# ---------------------------------------------------------------------------
+# Stealth + hardened launch (R8 SHOPIFY-HARDENING) — make the headless capture
+# look like a real desktop Chrome so bot-detection (UA sniff / navigator.webdriver
+# / missing chrome.runtime / WebGL vendor) does not serve a degraded page or a
+# challenge. NOTE: this defeats BOT-DETECTION only. A server-side geo-IP redirect
+# (shopify.com -> /tw from a Taiwan egress) is keyed on the request IP and CANNOT
+# be beaten by any in-browser/header trick — that needs a US-egress proxy (set
+# WALK_PROXY; see the SHOPIFY-HARDENING note in OVERHAUL-LOOP-STATE.md).
+# ---------------------------------------------------------------------------
+
+# Applied via add_init_script BEFORE any navigation so the page never observes the
+# headless tells. playwright-stealth-style, dependency-free (no new packages).
+_STEALTH_INIT_JS = r"""
+(() => {
+  try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
+  try { Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']}); } catch (e) {}
+  try {
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5].map(i => ({name: 'Plugin ' + i, filename: 'p' + i})),
+    });
+    Object.defineProperty(navigator, 'mimeTypes', {get: () => [1, 2].map(i => ({type: 'application/x-' + i}))});
+  } catch (e) {}
+  try { window.chrome = window.chrome || {runtime: {}, app: {isInstalled: false}}; } catch (e) {}
+  try {
+    const _q = window.navigator.permissions && window.navigator.permissions.query;
+    if (_q) {
+      window.navigator.permissions.query = (p) => (
+        p && p.name === 'notifications'
+          ? Promise.resolve({state: Notification.permission})
+          : _q(p)
+      );
+    }
+  } catch (e) {}
+  // WebGL vendor/renderer spoof — headless reports "Google SwiftShader" which is a
+  // strong bot-tell; report a plausible desktop GPU instead.
+  try {
+    const _gp = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function (p) {
+      if (p === 37445) return 'Intel Inc.';            // UNMASKED_VENDOR_WEBGL
+      if (p === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+      return _gp.call(this, p);
+    };
+  } catch (e) {}
+})();
+"""
+
+
+def _proxy_settings() -> Optional[Dict[str, str]]:
+    """Optional Playwright proxy from the WALK_PROXY env var (OFF by default).
+
+    The ONLY way to beat a server-side geo-IP redirect (e.g. shopify.com forcing
+    /tw from a Taiwan egress) is to egress from a US IP. Set
+    WALK_PROXY=http://user:pass@host:port (or socks5://...) to route the capture
+    through a US proxy. Unset => no proxy => normal (free) behavior. Documented but
+    NOT required: every existing brand captures fine without it."""
+    raw = (os.environ.get("WALK_PROXY") or "").strip()
+    if not raw:
+        return None
+    return {"server": raw}
+
+
+def _launch_browser(p):
+    """Launch a hardened Chromium that looks like a real desktop Chrome.
+
+    Preference order (most-realistic first), each falling back to the next:
+      1. channel='chrome' + --headless=new  (the user's installed Google Chrome —
+         the least bot-detectable; uses real Chrome's TLS/JA3 + feature set)
+      2. bundled Chromium + --headless=new   (new headless mode, far less
+         detectable than the legacy --headless=old)
+      3. bundled Chromium, default headless  (last-resort, original behavior)
+    Returns the launched browser. The proxy (if WALK_PROXY is set) is applied at
+    launch so it covers the whole context."""
+    base_args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+    proxy = _proxy_settings()
+    common: Dict[str, Any] = {}
+    if proxy:
+        common["proxy"] = proxy
+        sys.stderr.write("[capture] using WALK_PROXY egress\n")
+    # 1) real installed Chrome channel + new headless.
+    try:
+        return p.chromium.launch(channel="chrome",
+                                 args=base_args + ["--headless=new"], **common)
+    except Exception as e:
+        sys.stderr.write("[capture] chrome channel unavailable (%s); "
+                         "using bundled chromium\n" % e)
+    # 2) bundled chromium + new headless.
+    try:
+        return p.chromium.launch(args=base_args + ["--headless=new"], **common)
+    except Exception as e:
+        sys.stderr.write("[capture] --headless=new failed (%s); "
+                         "using default headless\n" % e)
+    # 3) original behavior.
+    return p.chromium.launch(args=base_args, **common)
+
 
 # Route path segments that strongly signal a rich content-y inner page.
 # Ranked: first match wins when we sort candidates.
@@ -122,6 +221,81 @@ _GEO_LOCALE_RE = _re.compile(
     r")(?:/|$)",
     _re.IGNORECASE,
 )
+
+
+def _page_looks_english(page) -> bool:
+    """True when the CURRENT page renders in English (not a geo locale).
+
+    A clean URL is NOT enough — Shopify re-redirects www.shopify.com?locale=en back
+    to /tw AND ignores the param, so the URL momentarily looks English while the
+    BODY stays zh-TW. We confirm with two cheap signals: the document language is
+    English-ish, and the visible body is not dominated by CJK characters. Never
+    raises; an unreadable page is treated as not-English (conservative)."""
+    try:
+        lang = (page.evaluate("() => document.documentElement.lang") or "").lower()
+    except Exception:
+        lang = ""
+    if lang and not (lang.startswith("en") or lang in ("", "x-default")):
+        return False
+    try:
+        body = (page.inner_text("body") or "")[:4000]
+    except Exception:
+        body = ""
+    if not body:
+        return True  # nothing to judge; don't penalize on an empty read
+    cjk = sum(1 for ch in body if "一" <= ch <= "鿿")
+    # >5% CJK in the first 4000 visible chars => a CJK locale page, not English.
+    return cjk <= max(20, len(body) * 0.05)
+
+
+def _try_force_english(page, original_url: str) -> bool:
+    """Brand-AGNOSTIC attempt to recover an English page after a geo-redirect.
+
+    A site that geo-redirected (final URL carries a non-en locale segment) MIGHT
+    still expose an English path. We try, in order, the cheapest corrections that
+    work WITHOUT a US IP:
+      1. strip the locale segment  (site.com/tw/ -> site.com/)
+      2. append ?locale=en          (some CMSs honor a locale query param)
+    A correction is kept ONLY when the resulting page both (a) lands on a non-geo
+    URL AND (b) actually RENDERS in English (`_page_looks_english`) — a clean URL
+    that still serves the geo locale (Shopify ignores ?locale=en and re-redirects
+    to /tw) is rejected. Returns True only on a genuinely English page.
+
+    LIMITATION: a server that 302s to /tw purely on egress IP (Shopify) re-redirects
+    every English path back to /tw and exposes NO /en or /us path — no in-browser
+    correction can beat it (confirmed; see OVERHAUL-LOOP-STATE.md SHOPIFY-HARDENING).
+    This helper recovers the sites where the redirect is path-based, not IP-locked."""
+    try:
+        landed = page.url or original_url
+    except Exception:
+        landed = original_url
+    if not _GEO_LOCALE_RE.search(landed) and _page_looks_english(page):
+        return True  # already English, nothing to do
+    candidates = []
+    stripped = _GEO_LOCALE_RE.sub("/", landed, count=1)
+    if stripped != landed:
+        candidates.append(stripped)
+    sep = "&" if "?" in original_url else "?"
+    candidates.append(original_url.rstrip("/") + sep + "locale=en")
+    for cand in candidates:
+        try:
+            page.goto(cand, wait_until="domcontentloaded", timeout=20000)
+            _wait_for_spa_hydration(page, settle_ms=1000)
+        except Exception:
+            continue
+        try:
+            now = page.url or cand
+        except Exception:
+            now = cand
+        # BOTH: a non-geo URL AND a body that actually renders English.
+        if not _GEO_LOCALE_RE.search(now) and _page_looks_english(page):
+            sys.stderr.write(
+                "[capture] recovered English via %s (was %s)\n" % (cand, landed))
+            return True
+    sys.stderr.write(
+        "[capture] could not recover English from geo-redirect (%s); "
+        "server is IP-geo-locked (needs WALK_PROXY)\n" % landed)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +386,66 @@ def _wait_for_spa_hydration(page, settle_ms: int = 1500) -> None:
         pass
 
 
+# Selectors for the close/confirm/accept affordance on a geo-shipping / region /
+# cookie / newsletter interstitial. Brand-agnostic: e-commerce sites (Allbirds,
+# many Shopify storefronts) pop a "Where are we shipping to?" / "Confirm your
+# region" / cookie-consent modal that OCCLUDES the product screenshot. We try a
+# few common, non-destructive dismiss/close affordances (close icon, confirm,
+# accept, stay/continue) then fall back to ESC. ORDER matters: an explicit close
+# beats a "Confirm" (which might submit a form), so close/dismiss icons come
+# first. Each is best-effort and time-boxed; nothing here ever raises out.
+_INTERSTITIAL_DISMISS_SELECTORS = (
+    "[aria-label*='close' i]",
+    "[aria-label*='dismiss' i]",
+    "button[class*='close' i]",
+    "button[class*='dismiss' i]",
+    "[data-testid*='close' i]",
+    "button:has-text('No thanks')",
+    "button:has-text('Continue')",
+    "button:has-text('Confirm')",
+    "button:has-text('Accept all')",
+    "button:has-text('Accept')",
+    "button:has-text('Got it')",
+    "button:has-text('Stay')",
+    "button:has-text('I agree')",
+)
+
+
+def _dismiss_interstitial(page) -> bool:
+    """Best-effort dismiss of a geo/shipping/region/cookie interstitial that would
+    otherwise occlude the screenshot. Brand-agnostic and non-destructive: it only
+    clicks an obvious close/confirm/accept affordance that is actually VISIBLE,
+    then presses ESC as a last resort. Returns True if it clicked something.
+
+    Allbirds (and many storefronts) open a "Where are we shipping to?" modal over
+    the product; this dismisses it before the shot. Never raises — a missing modal
+    or a failed click is silently a no-op, so a clean page is unaffected (only the
+    first visible affordance is clicked, and only when present)."""
+    clicked = False
+    for sel in _INTERSTITIAL_DISMISS_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible(timeout=400):
+                loc.click(timeout=800, no_wait_after=True)
+                clicked = True
+                try:
+                    page.wait_for_timeout(350)
+                except Exception:
+                    pass
+                break  # one dismiss is enough; avoid clicking unrelated buttons
+        except Exception:
+            continue
+    # ESC last-resort: closes many dialog/overlay implementations even when no
+    # button matched. Harmless on a page with no open dialog.
+    if not clicked:
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(250)
+        except Exception:
+            pass
+    return clicked
+
+
 def _is_near_empty_png(path: str) -> bool:
     """Return True if the captured PNG is near-black or near-empty.
 
@@ -246,6 +480,102 @@ def _is_near_empty_png(path: str) -> bool:
     except Exception:
         pass
     return False
+
+
+# Mean-luma difference (0-255) below which two downscaled grayscale frames are
+# considered the SAME page. Empirically: distinct pages score ~30+; identical
+# frames score 0; minor cookie-banner / animation jitter on the same page stays
+# under ~2. We use 3.0 as a conservative "these are the same page" ceiling.
+_SAME_PAGE_DIFF_CEIL = 3.0
+
+# R5 (diagnosis FIX-2) — a captured surface whose mean luma is below this reads as a
+# DARK marketing hero. Inside the near-white browser card on a near-white page these
+# read "muddy" and fight the left headline (Notion's "Meet the night shift" hero was
+# the actual 10-pt coherence gap vs Stripe's light captures). When the above-the-fold
+# homepage hero is this dark, we prefer a scrolled-down/cleaner content surface.
+_DARK_HERO_YAVG_CEIL = 80.0
+
+
+def _frame_yavg(path: str) -> Optional[float]:
+    """Mean luminance (0-255) of a PNG via ffprobe signalstats, or None on failure.
+    Reuses the same probe as _is_near_empty_png; None => unknown (never penalize)."""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "frame_tags=lavfi.signalstats.YAVG",
+                "-f", "lavfi",
+                "-i", "movie=%s,signalstats" % path.replace("\\", "/"),
+                "-of", "default=noprint_wrappers=1:nokey=1",
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        raw = (result.stdout or "").strip().splitlines()
+        if raw:
+            return float(raw[0])
+    except Exception:
+        pass
+    return None
+
+
+def _image_diff_yavg(path_a: str, path_b: str) -> Optional[float]:
+    """Mean luminance (0-255) of the per-pixel difference between two PNGs, after
+    downscaling both to a small grayscale frame. Returns None when the comparison
+    cannot run (ffmpeg/ffprobe missing, a file absent, or any failure) so the caller
+    treats an unknowable comparison as "assume distinct" and never discards a real
+    shot on a probe error. A return near 0 means visually identical pages."""
+    if not (path_a and path_b and os.path.exists(path_a) and os.path.exists(path_b)):
+        return None
+    diff_png = path_b + ".diff.png"
+    try:
+        rc = subprocess.run(
+            [
+                "ffmpeg", "-y", "-v", "error", "-i", path_a, "-i", path_b,
+                "-filter_complex",
+                "[0:v]scale=96:60,format=gray[a];"
+                "[1:v]scale=96:60,format=gray[b];"
+                "[a][b]blend=all_mode=difference",
+                "-frames:v", "1", diff_png,
+            ],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if rc.returncode != 0 or not os.path.exists(diff_png):
+            return None
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-f", "lavfi",
+                "-i", "movie=%s,signalstats" % diff_png.replace("\\", "/"),
+                "-show_entries", "frame_tags=lavfi.signalstats.YAVG",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        raw = (probe.stdout or "").strip().splitlines()
+        if raw:
+            return float(raw[0])
+    except Exception:
+        return None
+    finally:
+        try:
+            if os.path.exists(diff_png):
+                os.remove(diff_png)
+        except Exception:
+            pass
+    return None
+
+
+def _images_are_distinct(path_a: str, path_b: str) -> bool:
+    """True when two captured PNGs show DIFFERENT pages. Conservative: a comparison
+    that cannot run (probe failure) returns True (assume distinct) so we never drop a
+    genuinely useful shot. Only an explicit near-zero luma difference (<= the
+    same-page ceiling) is treated as a duplicate."""
+    diff = _image_diff_yavg(path_a, path_b)
+    if diff is None:
+        return True  # unknowable -> assume distinct, never discard on probe error
+    return diff > _SAME_PAGE_DIFF_CEIL
 
 
 def _norm_url(url: str) -> str:
@@ -351,6 +681,336 @@ def _discover_routes(page, base_url: str, max_routes: int) -> List[str]:
     return combined[:max_routes]
 
 
+# ---------------------------------------------------------------------------
+# Logo capture (Task F) — pull the brand's REAL logo during the same Playwright
+# pass. Priority: inline header <svg> -> apple-touch-icon/icon/mask-icon ->
+# og:image. Saved to <out_dir>/brand/logo.<ext>; the source is recorded in the
+# manifest so brand_extract can prefer it over the derived wordmark. NEVER
+# fabricates — any failure leaves no logo file and the caller degrades to the
+# derived wordmark.
+# ---------------------------------------------------------------------------
+
+# Selectors for an inline site-logo <svg>, most-specific first. A header/nav
+# brand link is the highest-confidence "this is the logo" signal.
+_LOGO_SVG_SELECTORS = (
+    "header a[href='/'] svg",
+    "header a[href='./'] svg",
+    "a[href='/'][aria-label*='ome' i] svg",   # "Home" / "homepage"
+    "[class*='ogo' i] a svg",                  # *Logo* container
+    "a[class*='ogo' i] svg",
+    "header [class*='ogo' i] svg",
+    "nav a[href='/'] svg",
+    "header svg",
+)
+
+
+def _logo_svg_outer_html(page) -> Optional[str]:
+    """Return the outerHTML of the first plausible inline site-logo <svg>, or None.
+
+    Filters out tiny icon glyphs (search/menu/chevron) by requiring a bounding box
+    at least 40px wide — a real wordmark/lockup logo is wide, a hamburger icon is
+    square and small. Pure DOM read; never raises."""
+    js = """
+    (selectors) => {
+      for (const sel of selectors) {
+        let els;
+        try { els = Array.from(document.querySelectorAll(sel)); }
+        catch (e) { continue; }
+        for (const el of els) {
+          const r = el.getBoundingClientRect();
+          // a real logo svg is reasonably wide and visible
+          if (r && r.width >= 40 && r.height >= 8 && r.width <= 600) {
+            const html = el.outerHTML || '';
+            if (html && html.toLowerCase().startsWith('<svg')) return html;
+          }
+        }
+      }
+      return null;
+    }
+    """
+    try:
+        html = page.evaluate(js, list(_LOGO_SVG_SELECTORS))
+    except Exception:
+        return None
+    if not html or not isinstance(html, str):
+        return None
+    html = html.strip()
+    # Ensure the SVG declares a namespace so it renders standalone in an <Img>.
+    if "xmlns" not in html[:200]:
+        html = html.replace(
+            "<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+    return html
+
+
+def _logo_link_href(page) -> Optional[str]:
+    """Return an absolute URL for the best icon/og:image asset, or None.
+
+    Priority: apple-touch-icon (biggest, square brand mark) -> mask-icon ->
+    rel=icon -> og:image. Returns the absolute href; the caller downloads it."""
+    js = """
+    () => {
+      const pick = (sel, attr) => {
+        const el = document.querySelector(sel);
+        return el ? (el.getAttribute(attr) || '') : '';
+      };
+      return {
+        appleTouch: pick("link[rel='apple-touch-icon']", 'href')
+                 || pick("link[rel='apple-touch-icon-precomposed']", 'href'),
+        maskIcon:   pick("link[rel='mask-icon']", 'href'),
+        icon:       pick("link[rel='icon']", 'href')
+                 || pick("link[rel='shortcut icon']", 'href'),
+        ogImage:    pick("meta[property='og:image']", 'content')
+                 || pick("meta[name='og:image']", 'content'),
+      };
+    }
+    """
+    try:
+        info = page.evaluate(js) or {}
+    except Exception:
+        info = {}
+    for key in ("appleTouch", "maskIcon", "icon", "ogImage"):
+        href = (info.get(key) or "").strip()
+        if href:
+            try:
+                base = page.url or ""
+            except Exception:
+                base = ""
+            full = urljoin(base, href) if base else href
+            if urlparse(full).scheme in ("http", "https"):
+                return full
+    return None
+
+
+def _download_asset(ctx, asset_url: str, dest_no_ext: str) -> Optional[str]:
+    """Download an icon/image asset via the Playwright request context. Returns the
+    saved path (with an extension inferred from URL/content-type), or None. Never
+    raises — a failed download just means no captured logo."""
+    try:
+        resp = ctx.request.get(asset_url, timeout=15000)
+        if not resp.ok:
+            return None
+        body = resp.body()
+        if not body or len(body) < 64:
+            return None
+        ctype = (resp.headers.get("content-type") or "").lower()
+    except Exception:
+        return None
+    # Infer extension: URL suffix first, then content-type.
+    path = urlparse(asset_url).path.lower()
+    ext = ""
+    for cand in (".svg", ".png", ".ico", ".jpg", ".jpeg", ".webp", ".gif"):
+        if path.endswith(cand):
+            ext = cand
+            break
+    if not ext:
+        if "svg" in ctype:
+            ext = ".svg"
+        elif "png" in ctype:
+            ext = ".png"
+        elif "icon" in ctype or "ico" in ctype:
+            ext = ".ico"
+        elif "jpeg" in ctype or "jpg" in ctype:
+            ext = ".jpg"
+        elif "webp" in ctype:
+            ext = ".webp"
+        else:
+            ext = ".png"
+    dest = dest_no_ext + ext
+    try:
+        with open(dest, "wb") as fh:
+            fh.write(body)
+    except Exception:
+        return None
+    return dest
+
+
+def _capture_logo(page, ctx, out_dir: str) -> Optional[Dict[str, str]]:
+    """Capture the brand's real logo into <out_dir>/brand/. Returns
+    {"file","path","source"} relative-friendly record, or None when no logo found.
+
+    Order: inline header <svg> (serialized) -> apple-touch-icon/icon/mask-icon ->
+    og:image -> the well-known /favicon.ico (R5 last-resort: every site serves one
+    even when it declares NO <link rel=icon>, which is why shopify.com fell back to
+    the derived wordmark SILENTLY). Honest fallback (None) leaves the derived wordmark
+    in place. EVERY fallback step logs to stderr so a silent degrade is impossible."""
+    brand_dir = os.path.join(out_dir, "brand")
+    try:
+        os.makedirs(brand_dir, exist_ok=True)
+    except Exception:
+        return None
+
+    # 1) Inline header <svg> — the highest-confidence real wordmark/lockup.
+    svg = _logo_svg_outer_html(page)
+    if svg:
+        dest = os.path.join(brand_dir, "logo.svg")
+        try:
+            with open(dest, "w", encoding="utf-8") as fh:
+                fh.write(svg)
+            return {"file": "logo.svg", "path": dest, "source": "inline-svg"}
+        except Exception:
+            pass
+    sys.stderr.write("[capture] logo: no inline header <svg>; trying icon/og:image\n")
+
+    # 2) Link icons -> og:image (downloaded).
+    asset_url = _logo_link_href(page)
+    if asset_url:
+        saved = _download_asset(ctx, asset_url, os.path.join(brand_dir, "logo"))
+        if saved:
+            return {
+                "file": os.path.basename(saved),
+                "path": saved,
+                "source": "link-or-og:%s" % asset_url,
+            }
+        sys.stderr.write(
+            "[capture] logo: icon/og asset download failed (%s); trying /favicon.ico\n"
+            % asset_url)
+    else:
+        sys.stderr.write(
+            "[capture] logo: no declared icon/og:image link; trying /favicon.ico\n")
+
+    # 3) LAST RESORT — the well-known /favicon.ico at the site root. A site that
+    #    declares no <link rel=icon> (Shopify) still serves a favicon here. Better
+    #    than a derived wordmark even if it's a square mark, and it is the REAL brand
+    #    asset. Resolve against the current origin.
+    try:
+        base = page.url or ""
+    except Exception:
+        base = ""
+    if base:
+        favicon_url = urljoin(base, "/favicon.ico")
+        if urlparse(favicon_url).scheme in ("http", "https"):
+            saved = _download_asset(ctx, favicon_url, os.path.join(brand_dir, "logo"))
+            if saved:
+                sys.stderr.write("[capture] logo: using /favicon.ico fallback\n")
+                return {
+                    "file": os.path.basename(saved),
+                    "path": saved,
+                    "source": "favicon:%s" % favicon_url,
+                }
+    sys.stderr.write(
+        "[capture] logo: ALL sources failed (svg/icon/og/favicon); "
+        "falling back to derived wordmark\n")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Focus rect (Task F) — compute a card-local % rectangle marking a prominent UI
+# element the headline can name (so the archetype's highlight-box / zoom can
+# target it). Card-local fractions (0..1) relative to the captured VIEWPORT box,
+# matching the spec's `data.focus = {x,y,w,h,label}` contract (§2). Best-effort;
+# absent => archetype shows a plain shot with no highlight.
+# ---------------------------------------------------------------------------
+def _normalize_focus_rect(rect: Any) -> Optional[Dict[str, Any]]:
+    """Coerce one raw {x,y,w,h,label,score?} (0..1 fractions) -> a clamped focus
+    rect, or None when degenerate. Shared by the single + multi-candidate paths."""
+    if not isinstance(rect, dict):
+        return None
+    try:
+        x = float(rect.get("x"))
+        y = float(rect.get("y"))
+        w = float(rect.get("w"))
+        h = float(rect.get("h"))
+    except (TypeError, ValueError):
+        return None
+    x = max(0.0, min(1.0, x))
+    y = max(0.0, min(1.0, y))
+    w = max(0.0, min(1.0 - x, w))
+    h = max(0.0, min(1.0 - y, h))
+    if w < 0.02 or h < 0.01:
+        return None
+    out: Dict[str, Any] = {"x": round(x, 4), "y": round(y, 4),
+                           "w": round(w, 4), "h": round(h, 4)}
+    label = (rect.get("label") or "").strip()
+    if label:
+        out["label"] = label
+    return out
+
+
+def _compute_focus(page) -> Optional[Dict[str, Any]]:
+    """Pick a prominent above-the-fold element and return its card-local % rect.
+
+    Heuristic, deterministic (no LLM): prefer a primary CTA button / nav item /
+    hero card that sits within the captured viewport and is comfortably sized.
+    Returns {"x","y","w","h","label"} in 0..1 fractions of the VIEWPORT box, or
+    None. Never raises.
+
+    Also returns up to a handful of OTHER labelled candidate rects (sorted by score)
+    so the downstream copy step can pick the rect whose LABEL best matches the
+    scene's headline subject — making the highlight point at what the headline NAMES
+    rather than at the single most-prominent CTA (R2 coherence gap). The extra
+    candidates ride along under the "_candidates" key (a list of focus rects); the
+    primary rect's own fields stay at the top level so existing callers are
+    byte-compatible."""
+    vw = VIEWPORT["width"]
+    vh = VIEWPORT["height"]
+    js = """
+    (vp) => {
+      const W = vp.w, H = vp.h;
+      const cands = [];
+      const sels = [
+        "a[class*='button' i]", "button", "[role='button']",
+        "a[href*='pricing' i]", "a[href*='start' i]", "a[href*='signup' i]",
+        "[class*='card' i]", "[class*='hero' i] a", "main a[href]",
+        "h1", "h2", "h3", "nav a", "[class*='feature' i]",
+      ];
+      const seen = new Set();
+      for (const sel of sels) {
+        let els;
+        try { els = document.querySelectorAll(sel); } catch (e) { continue; }
+        for (const el of els) {
+          if (seen.has(el)) continue;
+          seen.add(el);
+          const r = el.getBoundingClientRect();
+          // must be fully-ish inside the captured viewport box and a real size
+          if (r.width < 60 || r.height < 18) continue;
+          if (r.width > W * 0.95 || r.height > H * 0.7) continue;
+          if (r.left < 0 || r.top < 0) continue;
+          if (r.left + r.width > W || r.top + r.height > H) continue;
+          // prefer elements in the upper 75% (visible in an above-the-fold shot)
+          if (r.top > H * 0.75) continue;
+          const txt = (el.innerText || el.textContent || '').trim().slice(0, 60);
+          // score: favor mid-page, reasonably wide, with a text label
+          const centerBias = 1 - Math.abs((r.left + r.width / 2) / W - 0.5);
+          const score = r.width * 0.6 + (txt ? 120 : 0) + centerBias * 80;
+          cands.push({ x: r.left / W, y: r.top / H, w: r.width / W,
+                       h: r.height / H, label: txt, score: score });
+        }
+      }
+      if (!cands.length) return null;
+      cands.sort((a, b) => b.score - a.score);
+      // Keep a small, labelled set: the top primary + the best labelled others,
+      // de-duplicated by label, capped at 8 so the manifest stays small.
+      const out = [];
+      const labels = new Set();
+      for (const c of cands) {
+        const key = (c.label || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+        if (out.length && key && labels.has(key)) continue;
+        if (key) labels.add(key);
+        out.push(c);
+        if (out.length >= 8) break;
+      }
+      return out;
+    }
+    """
+    try:
+        raw = page.evaluate(js, {"w": vw, "h": vh})
+    except Exception:
+        return None
+    # Back-compat: the JS now returns a list; tolerate an old single-dict too.
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list) or not raw:
+        return None
+    rects = [r for r in (_normalize_focus_rect(c) for c in raw) if r]
+    if not rects:
+        return None
+    primary = dict(rects[0])
+    extras = [r for r in rects[1:] if r.get("label")]
+    if extras:
+        primary["_candidates"] = extras
+    return primary
+
+
 def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
     """Real capture in THIS interpreter (requires Playwright). Returns manifest."""
     from playwright.sync_api import sync_playwright
@@ -360,14 +1020,24 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
     shots: List[Dict[str, Any]] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--no-sandbox"])
+        # R8 SHOPIFY-HARDENING: hardened launch (real Chrome channel + new headless
+        # + optional WALK_PROXY) so bot-detection serves the real page, not a
+        # degraded shell / challenge.
+        browser = _launch_browser(p)
         ctx = browser.new_context(
             viewport=VIEWPORT,
             device_scale_factor=DEVICE_SCALE,
             locale="en-US",
+            # US timezone + geolocation so JS-side geo checks agree with the en-US
+            # locale (a Taipei timezone against an en-US locale is itself a tell).
+            timezone_id="America/New_York",
+            geolocation={"latitude": 40.7128, "longitude": -74.0060},
+            permissions=["geolocation"],
             user_agent=_DESKTOP_UA,
             extra_http_headers=_EXTRA_HEADERS,
         )
+        # Stealth init runs BEFORE every navigation in this context.
+        ctx.add_init_script(_STEALTH_INIT_JS)
         page = ctx.new_page()
 
         def _nav_page(pg, tgt: str) -> bool:
@@ -400,13 +1070,20 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
                 title = pg.title() or ""
             except Exception:
                 pass
-            return {
+            rec = {
                 "index": idx, "file": shot_name, "path": shot_path,
                 "url": target_url, "label": label, "title": title,
                 "width": VIEWPORT["width"] * DEVICE_SCALE,
                 "height": VIEWPORT["height"] * DEVICE_SCALE,
                 "bytes": size,
             }
+            # Focus rect (Task F): mark a prominent UI element so the archetype's
+            # highlight-box / zoom can target it (the headline<->UI tie). Best-
+            # effort; a None just degrades to a plain shot with no highlight.
+            focus = _compute_focus(pg)
+            if focus:
+                rec["focus"] = focus
+            return rec
 
         def grab(target_url: str, idx: int, label: str,
                  allow_scroll: bool = False) -> Optional[Dict[str, Any]]:
@@ -443,17 +1120,36 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
             # present in the DOM, then networkidle, then a short settle.
             _wait_for_spa_hydration(page, settle_ms=1500)
 
+            # R7 gap 4 — dismiss a geo/shipping/region/cookie interstitial that
+            # would occlude the shot (Allbirds' "Where are we shipping to?" modal).
+            _dismiss_interstitial(page)
+
             # Geo-redirect detection: if the final URL contains a non-English
-            # locale path segment (/tw/, /zh-tw/, /fr/, …) skip this route.
+            # locale path segment (/tw/, /zh-tw/, /fr/, …) first PREFER English via a
+            # brand-agnostic recovery (strip locale / ?locale=en). When English is
+            # genuinely unreachable (server IP-geo-locks every English path back to
+            # the locale, e.g. Shopify from a Taiwan egress), KEEP and capture the
+            # foreign-language page — a valid foreign page is a SUCCESS, not a
+            # failure. Dennis okayed bilingual output (English planner copy over a
+            # foreign screenshot); the goal is a COMPLETE video, not English purity.
+            # We degrade to empty ONLY on a GENUINE capture failure (bot-wall,
+            # blank/error page, nav failure) — handled by the _is_blocked /
+            # near-empty checks below — never merely because the page is non-English.
             try:
                 final_url = page.url or ""
             except Exception:
                 final_url = ""
             if _GEO_LOCALE_RE.search(final_url):
-                sys.stderr.write(
-                    f"[capture] geo-redirected to non-en locale, skipping: "
-                    f"{target_url} -> {final_url}\n")
-                return None
+                if not _try_force_english(page, target_url):
+                    sys.stderr.write(
+                        f"[capture] geo-redirected to non-en locale and English is "
+                        f"unreachable (server IP-geo-locked; set WALK_PROXY for an "
+                        f"English shot). KEEPING the foreign-language capture — "
+                        f"bilingual output is acceptable: {target_url} -> {final_url}\n")
+                # Whether we recovered English or kept the foreign page, re-hydrate
+                # + re-dismiss any interstitial before shooting the live page.
+                _wait_for_spa_hydration(page, settle_ms=1200)
+                _dismiss_interstitial(page)
 
             # Bot-block detection: retry with two strategies in order:
             #   1. Apex .com URL (e.g. tripadvisor.com.tw -> tripadvisor.com) — often
@@ -473,6 +1169,7 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
                         try:
                             if _nav_page(fresh_apex, apex):
                                 _wait_for_spa_hydration(fresh_apex, settle_ms=2000)
+                                _dismiss_interstitial(fresh_apex)
                                 if not _is_blocked(fresh_apex):
                                     rec = _screenshot_pg(fresh_apex, idx, apex, label, out_dir)
                                     if rec:
@@ -497,6 +1194,7 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
                         if not _nav_page(fresh, target_url):
                             return None
                         _wait_for_spa_hydration(fresh, settle_ms=2000)
+                        _dismiss_interstitial(fresh)
                         if _is_blocked(fresh):
                             sys.stderr.write(
                                 f"[capture] bot-block confirmed after retry, skipping: "
@@ -560,22 +1258,117 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
                     return retry_rec
             return rec
 
+        logo_rec: Optional[Dict[str, str]] = None
         first = grab(url, 1, "home")
         if first:
+            # R5 (diagnosis FIX-2) — PREFER A CLEANER SURFACE over a dark, text-heavy
+            # marketing hero. The above-the-fold homepage hero on a dark-brand site
+            # (Notion's "Meet the night shift", Shopify's dark splash) reads muddy
+            # inside the near-white browser card and fights the left headline — the
+            # actual 10-pt coherence gap vs Stripe's light captures. When the hero is
+            # DARK and the body is content-rich (so a cleaner section exists below the
+            # fold), scroll past the hero and reshoot; keep the scrolled view only when
+            # it is genuinely LIGHTER (a real cleaner surface), else keep the hero.
+            try:
+                hero_yavg = _frame_yavg(first.get("path", ""))
+            except Exception:
+                hero_yavg = None
+            if hero_yavg is not None and hero_yavg < _DARK_HERO_YAVG_CEIL:
+                try:
+                    body_len = len((page.inner_text("body") or "").strip())
+                except Exception:
+                    body_len = 0
+                if body_len > 500 and first.get("path") and os.path.exists(first["path"]):
+                    sys.stderr.write(
+                        "[capture] dark homepage hero (YAVG=%.1f); scrolling past it "
+                        "for a cleaner surface\n" % hero_yavg)
+                    # Back up the dark hero (grab(idx=1) overwrites shot-01.png IN
+                    # PLACE), reshoot the scrolled view, compare luma. Keep the
+                    # scrolled view only when it is meaningfully LIGHTER; else restore
+                    # the dark hero from the backup so we never lose the original.
+                    hero_path = first["path"]
+                    backup = hero_path + ".darkhero.bak"
+                    try:
+                        import shutil
+                        shutil.copy2(hero_path, backup)
+                    except Exception:
+                        backup = ""
+                    cleaner = grab(url, 1, "home", allow_scroll=True)  # overwrites shot-01.png
+                    cleaner_yavg = _frame_yavg(cleaner.get("path", "")) if cleaner else None
+                    if (cleaner and cleaner_yavg is not None
+                            and cleaner_yavg > hero_yavg + 15.0):
+                        sys.stderr.write(
+                            "[capture] using cleaner scrolled surface "
+                            "(YAVG %.1f -> %.1f)\n" % (hero_yavg, cleaner_yavg))
+                        first = cleaner  # cleaner["path"] == shot-01.png (overwritten)
+                    else:
+                        # Scrolled view not meaningfully cleaner — restore the hero.
+                        sys.stderr.write(
+                            "[capture] scrolled surface not cleaner; keeping hero\n")
+                        if backup and os.path.exists(backup):
+                            try:
+                                import shutil
+                                shutil.move(backup, hero_path)
+                            except Exception:
+                                pass
+                    # Clean up any leftover backup.
+                    try:
+                        if backup and os.path.exists(backup):
+                            os.remove(backup)
+                    except Exception:
+                        pass
             shots.append(first)
+            # Logo capture (Task F): the homepage is loaded on `page` now, so pull
+            # the brand's REAL logo (inline header <svg> -> icon/og:image) during
+            # the same pass. Honest fallback (None) leaves the derived wordmark.
+            try:
+                logo_rec = _capture_logo(page, ctx, out_dir)
+                if logo_rec:
+                    sys.stderr.write(
+                        "[capture] logo captured (%s): %s\n"
+                        % (logo_rec.get("source", "?"), logo_rec.get("path", "")))
+                else:
+                    sys.stderr.write(
+                        "[capture] no logo found; will fall back to wordmark\n")
+            except Exception as e:
+                sys.stderr.write("[capture] logo capture errored: %s\n" % e)
+                logo_rec = None
             if max_shots > 1:
                 # discover key routes ONLY after we have a valid homepage (we're on it).
-                extra_routes = _discover_routes(page, url, max_routes=max_shots - 1)
+                # Over-fetch candidate routes so a route that renders IDENTICALLY to the
+                # homepage (redirect / shell / soft-404) can be skipped for the next one
+                # — the two screenshot scenes MUST show different pages.
+                extra_routes = _discover_routes(
+                    page, url, max_routes=max(max_shots - 1, 0) + 4)
+                first_norm = _norm_url(first.get("url") or url).rstrip("/")
                 placed = False
-                for i, route in enumerate(extra_routes, start=2):
-                    rec = grab(route, i, "route")
-                    if rec:
-                        shots.append(rec)
-                        placed = True
-                        if len(shots) >= max_shots:
-                            break
+                next_idx = len(shots) + 1  # the slot the next distinct shot fills
+                for route in extra_routes:
+                    rec = grab(route, next_idx, "route")
+                    if not rec:
+                        continue
+                    # DISTINCT-PAGE GUARD: a route that landed on the same final URL
+                    # as the homepage (redirect) OR renders a visually identical frame
+                    # is a duplicate — discard its shot file and try the next route so
+                    # the two screenshot scenes never show the same page.
+                    rec_norm = _norm_url(rec.get("url") or route).rstrip("/")
+                    if rec_norm == first_norm or not _images_are_distinct(
+                            first.get("path", ""), rec.get("path", "")):
+                        sys.stderr.write(
+                            f"[capture] route duplicates homepage, skipping: {route}\n")
+                        try:
+                            if rec.get("path") and os.path.exists(rec["path"]):
+                                os.remove(rec["path"])
+                        except Exception:
+                            pass
+                        continue
+                    shots.append(rec)
+                    placed = True
+                    next_idx = len(shots) + 1
+                    if len(shots) >= max_shots:
+                        break
                 if not placed:
-                    # No usable inner route found — capture a scrolled-down view of
+                    # No DISTINCT inner route found — capture a scrolled-down view of
                     # the homepage as a visually distinct 2nd shot instead of
                     # re-shooting the identical above-the-fold frame.
                     sys.stderr.write(
@@ -587,13 +1380,32 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
                         page.wait_for_timeout(800)
                     except Exception:
                         pass
-                    rec = grab(url, 2, "home-scroll", allow_scroll=True)
+                    rec = grab(url, next_idx, "home-scroll", allow_scroll=True)
+                    # Even the scrolled fallback must differ from the above-the-fold
+                    # homepage; if the page was too short to scroll (identical frame),
+                    # keep it only when it is genuinely distinct. A short homepage that
+                    # cannot produce a 2nd distinct view degrades gracefully to a single
+                    # shot (the 2nd screenshot scene then shows its never-blank floor).
                     if rec:
-                        shots.append(rec)
+                        if _images_are_distinct(first.get("path", ""), rec.get("path", "")):
+                            shots.append(rec)
+                        else:
+                            sys.stderr.write(
+                                "[capture] scrolled homepage not distinct from hero; "
+                                "keeping a single shot (graceful degrade)\n")
+                            try:
+                                if rec.get("path") and os.path.exists(rec["path"]):
+                                    os.remove(rec["path"])
+                            except Exception:
+                                pass
 
         browser.close()
 
     manifest = {"url": url, "count": len(shots), "shots": shots, "ok": bool(shots)}
+    # Logo (Task F): record the captured logo asset so brand_extract can prefer it
+    # over the derived wordmark. Absent key => no logo captured (honest fallback).
+    if logo_rec:
+        manifest["logo"] = logo_rec
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
     return manifest

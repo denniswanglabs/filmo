@@ -1,0 +1,108 @@
+{
+  "url": "https://www.shopify.com",
+  "count": 2,
+  "shots": [
+    {
+      "index": 1,
+      "file": "shot-01.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/screenshots/shot-01.png",
+      "url": "https://www.shopify.com",
+      "label": "home",
+      "title": "Shopify \u53f0\u7063",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 114209,
+      "focus": {
+        "x": 0.055,
+        "y": 0.238,
+        "w": 0.94,
+        "h": 0.231,
+        "label": "\u6df1\u7372\u5404\u5927\u4f01\u696d\u7d1a\u54c1\u724c\u4fe1\u4efb\n\n\u652f\u63f4\u5404\u7a2e\u898f\u6a21\u3001\u8907\u96dc\u6027\u6216\u62b1\u8ca0\u3002",
+        "_candidates": [
+          {
+            "x": 0.055,
+            "y": 0.656,
+            "w": 0.94,
+            "h": 0.269,
+            "label": "\u5168\u7403\u6700\u4f73\u7d50\u5e33\u9ad4\u9a57\n\n\u7d93\u5be6\u8b49\u8f49\u63db\u6210\u6548\u66f4\u4f73\u3002"
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "file": "shot-02.png",
+      "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/screenshots/shot-02.png",
+      "url": "https://www.shopify.com/tw/enterprise",
+      "label": "route",
+      "title": "\u4f01\u696d\u9069\u7528\u7684 Shopify \u65b9\u6848 - Shopify \u53f0\u7063",
+      "width": 3200,
+      "height": 2000,
+      "bytes": 329235,
+      "focus": {
+        "x": 0.055,
+        "y": 0.032,
+        "w": 0.94,
+        "h": 0.044,
+        "label": "Plus\n\u70ba\u65b0\u8208\u6578\u4f4d\u54c1\u724c\u63d0\u4f9b\u7684\u5546\u52d9\u89e3\u6c7a\u65b9\u6848",
+        "_candidates": [
+          {
+            "x": 0.055,
+            "y": 0.076,
+            "w": 0.94,
+            "h": 0.044,
+            "label": "Enterprise\n\u5c08\u70ba\u5168\u7403\u77e5\u540d\u54c1\u724c\u8a2d\u8a08\u7684\u89e3\u6c7a\u65b9\u6848"
+          },
+          {
+            "x": 0.055,
+            "y": 0.167,
+            "w": 0.94,
+            "h": 0.022,
+            "label": "\u7372\u8a55\u70ba\u300c2024 \u5e74 Forrester Wave\u2122 \uff1aB2B \u5546\u52d9\u89e3\u6c7a\u65b9\u6848\u300d\u7684\u9818\u5c0e\u8005"
+          },
+          {
+            "x": 0.055,
+            "y": 0.189,
+            "w": 0.94,
+            "h": 0.022,
+            "label": "\u7372\u8a55\u70ba\u300c2024 IDC B2C Commerce MarketScape \u5ee0\u5546\u8a55\u4f30\u300d\u7684\u9818\u5c0e\u8005"
+          },
+          {
+            "x": 0.055,
+            "y": 0.211,
+            "w": 0.94,
+            "h": 0.022,
+            "label": "\u7372\u8a55\u70ba 2025 \u5e74 Gartner\u00ae Magic Quadrant\u2122 \u6578\u4f4d\u5546\u52d9\u9818\u5c0e\u8005"
+          },
+          {
+            "x": 0.055,
+            "y": 0.255,
+            "w": 0.94,
+            "h": 0.022,
+            "label": "Shop Component \u6307\u5357"
+          },
+          {
+            "x": 0.055,
+            "y": 0.299,
+            "w": 0.94,
+            "h": 0.022,
+            "label": "\u512a\u8cea\u652f\u63f4"
+          },
+          {
+            "x": 0.055,
+            "y": 0.321,
+            "w": 0.94,
+            "h": 0.022,
+            "label": "\u8aaa\u660e\u6587\u4ef6"
+          }
+        ]
+      }
+    }
+  ],
+  "ok": true,
+  "logo": {
+    "file": "logo.svg",
+    "path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/screenshots/brand/logo.svg",
+    "source": "inline-svg"
+  }
+}

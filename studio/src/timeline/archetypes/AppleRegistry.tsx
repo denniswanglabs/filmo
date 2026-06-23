@@ -13,12 +13,65 @@
 //   heading-in -> heading + segmented control, pill -> pill slides to segment,
 //   card-1..card-6 -> each entity card deals in.
 import React from "react";
-import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
+import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
 import { appleRise, breathDrift, EASE_OUT_QUART, alphaHex, actNum, actLabel } from "../motion";
 
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
+
+// Resolve a public-relative logo path via staticFile; http/leading-slash pass
+// through. ABSENT theme.logoSrc => corner mark degrades to the wordmark.
+const resolveLogo = (path: string): string =>
+  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
+
+// Persistent corner brand mark (spec §4) — bottom-right, low-key, on content
+// scenes. Real logo <Img> when present, else wordmark text; nothing when
+// neither exists (graceful). Shared shape across the content archetypes.
+const CornerMark: React.FC<{ theme: Theme; opacity: number; sceneId?: string }> = ({
+  theme,
+  opacity,
+  sceneId,
+}) => {
+  const logoSrc = (theme.logoSrc ?? "").trim();
+  const wordmark = (theme.wordmark ?? "").trim();
+  if (!logoSrc && !wordmark) return null;
+  return (
+    <div
+      data-scene-id={sceneId}
+      data-field="cornerMark"
+      style={{
+        position: "absolute",
+        right: 56,
+        bottom: 44,
+        opacity,
+        display: "flex",
+        alignItems: "center",
+        height: 32,
+        pointerEvents: "none",
+      }}
+    >
+      {logoSrc ? (
+        <Img
+          src={resolveLogo(logoSrc)}
+          style={{ height: "100%", width: "auto", objectFit: "contain", display: "block", opacity: 0.9 }}
+        />
+      ) : (
+        <span
+          style={{
+            fontSize: 22,
+            fontWeight: 600,
+            letterSpacing: "0.02em",
+            color: theme.textDim,
+            fontFamily: theme.fontDisplay,
+          }}
+        >
+          {wordmark}
+        </span>
+      )}
+    </div>
+  );
+};
 
 const typeColor = (
   theme: Theme,
@@ -324,6 +377,8 @@ export const AppleRegistry: React.FC<{
           {badgeText}
         </div>
       )}
+
+      <CornerMark theme={theme} opacity={head.opacity * 0.7} sceneId={sceneId} />
     </AbsoluteFill>
   );
 };

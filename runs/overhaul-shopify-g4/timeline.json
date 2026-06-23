@@ -1,0 +1,68 @@
+{
+  "fps": 30,
+  "total_frames": 900,
+  "audio_path": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/voiceover.mp3",
+  "lang": "en",
+  "scenes": [
+    {
+      "id": "opening-title",
+      "archetype": null,
+      "role": "title",
+      "text": "Shopify lets you launch a store fast with AI-powered Sidekick.",
+      "in_frame": 0,
+      "out_frame": 120,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/voiceover.beat00.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": null,
+      "role": "screenshot",
+      "text": "With Shopify, you build a fully functional online store in minutes.",
+      "in_frame": 120,
+      "out_frame": 300,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/voiceover.beat01.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "screenshot-dashboard",
+      "archetype": null,
+      "role": "screenshot",
+      "text": "Sidekick gives you AI-driven suggestions to improve product descriptions and ads.",
+      "in_frame": 300,
+      "out_frame": 480,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/voiceover.beat02.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "walkthrough-demo",
+      "archetype": null,
+      "role": "walkthrough",
+      "text": "Add a product and customize your theme. Then publish your store with just a few clicks.",
+      "in_frame": 480,
+      "out_frame": 750,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/voiceover.beat03.mp3"
+      },
+      "cues": []
+    },
+    {
+      "id": "closing-cta",
+      "archetype": null,
+      "role": "close",
+      "text": "Start your free trial at shopify.com and begin selling now.",
+      "in_frame": 750,
+      "out_frame": 900,
+      "audio": {
+        "src": "/Users/dennis/Desktop/Projects/Hackathons/hermes-video-agent/runs/overhaul-shopify-g4/voiceover.beat04.mp3"
+      },
+      "cues": []
+    }
+  ]
+}

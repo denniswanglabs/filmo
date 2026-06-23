@@ -1,0 +1,538 @@
+{
+	"systeminfo": "WHISPER : COREML = 0 | OPENVINO = 0 | MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | SME = 1 | ACCELERATE = 1 | OPENMP = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "base",
+		"multilingual": false,
+		"vocab": 51864,
+		"audio": {
+			"ctx": 1500,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"text": {
+			"ctx": 448,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"mels": 80,
+		"ftype": 1
+	},
+	"params": {
+		"model": "/Users/dennis/.cache/whisper/ggml-base.en.bin",
+		"language": "en",
+		"translate": false
+	},
+	"result": {
+		"language": "en"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:00,000",
+				"to": "00:00:00,150"
+			},
+			"offsets": {
+				"from": 0,
+				"to": 150
+			},
+			"text": ""
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,150",
+				"to": "00:00:00,360"
+			},
+			"offsets": {
+				"from": 150,
+				"to": 360
+			},
+			"text": " Notion"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,360",
+				"to": "00:00:00,480"
+			},
+			"offsets": {
+				"from": 360,
+				"to": 480
+			},
+			"text": " is"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,480",
+				"to": "00:00:00,680"
+			},
+			"offsets": {
+				"from": 480,
+				"to": 680
+			},
+			"text": " the"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,680",
+				"to": "00:00:01,210"
+			},
+			"offsets": {
+				"from": 680,
+				"to": 1210
+			},
+			"text": " connected"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,210",
+				"to": "00:00:01,800"
+			},
+			"offsets": {
+				"from": 1210,
+				"to": 1800
+			},
+			"text": " workspace"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,800",
+				"to": "00:00:02,080"
+			},
+			"offsets": {
+				"from": 1800,
+				"to": 2080
+			},
+			"text": " for"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,080",
+				"to": "00:00:02,800"
+			},
+			"offsets": {
+				"from": 2080,
+				"to": 2800
+			},
+			"text": " docs,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,800",
+				"to": "00:00:03,560"
+			},
+			"offsets": {
+				"from": 2800,
+				"to": 3560
+			},
+			"text": " wikis,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,560",
+				"to": "00:00:03,760"
+			},
+			"offsets": {
+				"from": 3560,
+				"to": 3760
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,760",
+				"to": "00:00:04,720"
+			},
+			"offsets": {
+				"from": 3760,
+				"to": 4720
+			},
+			"text": " projects."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,720",
+				"to": "00:00:05,120"
+			},
+			"offsets": {
+				"from": 4720,
+				"to": 5120
+			},
+			"text": " Write"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,120",
+				"to": "00:00:05,600"
+			},
+			"offsets": {
+				"from": 5120,
+				"to": 5600
+			},
+			"text": " docs,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,600",
+				"to": "00:00:06,010"
+			},
+			"offsets": {
+				"from": 5600,
+				"to": 6010
+			},
+			"text": " build"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,010",
+				"to": "00:00:06,640"
+			},
+			"offsets": {
+				"from": 6010,
+				"to": 6640
+			},
+			"text": " wikis,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,640",
+				"to": "00:00:06,810"
+			},
+			"offsets": {
+				"from": 6640,
+				"to": 6810
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,810",
+				"to": "00:00:07,520"
+			},
+			"offsets": {
+				"from": 6810,
+				"to": 7520
+			},
+			"text": " track"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,520",
+				"to": "00:00:07,870"
+			},
+			"offsets": {
+				"from": 7520,
+				"to": 7870
+			},
+			"text": " projects"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:07,870",
+				"to": "00:00:08,020"
+			},
+			"offsets": {
+				"from": 7870,
+				"to": 8020
+			},
+			"text": " in"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,020",
+				"to": "00:00:08,290"
+			},
+			"offsets": {
+				"from": 8020,
+				"to": 8290
+			},
+			"text": " one"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,290",
+				"to": "00:00:08,760"
+			},
+			"offsets": {
+				"from": 8290,
+				"to": 8760
+			},
+			"text": " place."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:08,760",
+				"to": "00:00:09,870"
+			},
+			"offsets": {
+				"from": 8760,
+				"to": 9870
+			},
+			"text": " Databases,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:09,870",
+				"to": "00:00:10,880"
+			},
+			"offsets": {
+				"from": 9870,
+				"to": 10880
+			},
+			"text": " templates,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:10,880",
+				"to": "00:00:11,170"
+			},
+			"offsets": {
+				"from": 10880,
+				"to": 11170
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,170",
+				"to": "00:00:11,560"
+			},
+			"offsets": {
+				"from": 11170,
+				"to": 11560
+			},
+			"text": " AI"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,560",
+				"to": "00:00:11,840"
+			},
+			"offsets": {
+				"from": 11560,
+				"to": 11840
+			},
+			"text": " built"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:11,840",
+				"to": "00:00:12,320"
+			},
+			"offsets": {
+				"from": 11840,
+				"to": 12320
+			},
+			"text": " into"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,320",
+				"to": "00:00:12,700"
+			},
+			"offsets": {
+				"from": 12320,
+				"to": 12700
+			},
+			"text": " every"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:12,700",
+				"to": "00:00:13,140"
+			},
+			"offsets": {
+				"from": 12700,
+				"to": 13140
+			},
+			"text": " page."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,140",
+				"to": "00:00:13,470"
+			},
+			"offsets": {
+				"from": 13140,
+				"to": 13470
+			},
+			"text": " Watch"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,470",
+				"to": "00:00:13,660"
+			},
+			"offsets": {
+				"from": 13470,
+				"to": 13660
+			},
+			"text": " one"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:13,660",
+				"to": "00:00:14,250"
+			},
+			"offsets": {
+				"from": 13660,
+				"to": 14250
+			},
+			"text": " connected"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:14,250",
+				"to": "00:00:14,830"
+			},
+			"offsets": {
+				"from": 14250,
+				"to": 14830
+			},
+			"text": " workspace"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:14,830",
+				"to": "00:00:15,060"
+			},
+			"offsets": {
+				"from": 14830,
+				"to": 15060
+			},
+			"text": " for"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,060",
+				"to": "00:00:15,510"
+			},
+			"offsets": {
+				"from": 15060,
+				"to": 15510
+			},
+			"text": " notes,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:15,510",
+				"to": "00:00:16,200"
+			},
+			"offsets": {
+				"from": 15510,
+				"to": 16200
+			},
+			"text": " docs,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:16,200",
+				"to": "00:00:16,700"
+			},
+			"offsets": {
+				"from": 16200,
+				"to": 16700
+			},
+			"text": " and"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:16,700",
+				"to": "00:00:17,350"
+			},
+			"offsets": {
+				"from": 16700,
+				"to": 17350
+			},
+			"text": " projects,"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:17,350",
+				"to": "00:00:17,800"
+			},
+			"offsets": {
+				"from": 17350,
+				"to": 17800
+			},
+			"text": " step"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:17,800",
+				"to": "00:00:17,910"
+			},
+			"offsets": {
+				"from": 17800,
+				"to": 17910
+			},
+			"text": " by"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:17,910",
+				"to": "00:00:18,360"
+			},
+			"offsets": {
+				"from": 17910,
+				"to": 18360
+			},
+			"text": " step."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:18,360",
+				"to": "00:00:18,610"
+			},
+			"offsets": {
+				"from": 18360,
+				"to": 18610
+			},
+			"text": " Build"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:18,610",
+				"to": "00:00:18,810"
+			},
+			"offsets": {
+				"from": 18610,
+				"to": 18810
+			},
+			"text": " your"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:18,810",
+				"to": "00:00:19,260"
+			},
+			"offsets": {
+				"from": 18810,
+				"to": 19260
+			},
+			"text": " workspace"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,260",
+				"to": "00:00:19,360"
+			},
+			"offsets": {
+				"from": 19260,
+				"to": 19360
+			},
+			"text": " on"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:19,360",
+				"to": "00:00:19,840"
+			},
+			"offsets": {
+				"from": 19360,
+				"to": 19840
+			},
+			"text": " Notion."
+		}
+	]
+}

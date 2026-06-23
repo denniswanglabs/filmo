@@ -769,6 +769,52 @@ def _norm_hex(color, fallback):
     return fallback
 
 
+def _salvage_walk_frames(run_dir, out_path, duration):
+    """Parent-side recovery (R2 gap-3): stitch the screencast frames walk_native
+    already captured into <run_dir>/walk/frames/f*.jpg into a real clip at out_path.
+
+    walk_native streams a live CDP screencast frame-by-frame, but the FINAL stitch
+    runs only after the smart-nav loop finishes. When the subprocess hits the parent
+    timeout (or the child's SIGALRM fires inside a Playwright/ffmpeg call and the
+    `finally`-stitch never completes before the parent SIGKILLs it), the mp4 is never
+    written — yet dozens of genuine frames of the brand's real UI are sitting on disk
+    (R1: 140 real Stripe frames abandoned). This salvages them into a REAL walkthrough
+    instead of dropping the scene to a flat placeholder.
+
+    Returns True on a valid mp4 written to out_path, else False (caller then falls
+    back to the synth placeholder / scene-drop). Never raises."""
+    if not run_dir:
+        return False
+    import glob
+    frames_dir = os.path.join(run_dir, "walk", "frames")
+    if not os.path.isdir(frames_dir):
+        return False
+    pics = sorted(glob.glob(os.path.join(frames_dir, "f*.jpg")))
+    # Need enough frames to read as motion, not a 1-frame freeze. 8 ~= <1s of footage.
+    if len(pics) < 8:
+        return False
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        dur = max(2.0, float(duration or 12))
+        # framerate so the clip length ~= duration, kept watchable (matches
+        # walk_native._stitch's 8-18fps clamp).
+        fps = max(8.0, min(18.0, len(pics) / dur))
+        cmd = [
+            "ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+            "-framerate", "%.4f" % fps,
+            "-pattern_type", "glob", "-i", os.path.join(frames_dir, "f*.jpg"),
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,setsar=1",
+            "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-an",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=120, check=False)
+    except Exception:
+        return False
+    return (proc.returncode == 0 and os.path.exists(out_path)
+            and os.path.getsize(out_path) > 1000)
+
+
 def generate_walkthrough(scene, out_path, mode, job_url=None, run_dir=None,
                          accent_hex=None):
     # CACHE OVERRIDE (mode-independent, $0/no-NIM): if WS_WALKTHROUGH_CACHE points at
@@ -838,6 +884,13 @@ def generate_walkthrough(scene, out_path, mode, job_url=None, run_dir=None,
     # crashes. Either way the orchestrator's placeholder/None gate drops the scene + its
     # VO beat, so mock and real degrade identically (no brand VO over generic footage).
     def _walkthrough_fallback():
+        # R2 gap-3: BEFORE degrading to a placeholder/skip, try to SALVAGE the real
+        # screencast frames walk_native already captured (a timeout/kill loses only
+        # the final stitch, not the frames on disk). A successful salvage is a GENUINE
+        # per-brand capture (real:True), so the orchestrator keeps the scene + its VO.
+        if _salvage_walk_frames(rd, out_path, scene.get("duration_s", 12)):
+            return {"output_path": out_path, "real": True, "native": True,
+                    "placeholder": False, "salvaged": True}
         # In MOCK, never crash on a failed native capture — emit the brand-tinted
         # synthetic card as a last resort (placeholder:True -> orchestrator drops it,
         # same as a real-mode skip). In REAL, the contract is graceful-skip (None).
@@ -863,16 +916,21 @@ def generate_walkthrough(scene, out_path, mode, job_url=None, run_dir=None,
         # No Playwright venv / script → last-resort fallback (skip in real).
         return _walkthrough_fallback()
     try:
+        # Parent timeout 230s > the child's own 190s SIGALRM wall-clock guard, so the
+        # child's `finally`-stitch has ~40s of headroom to write the mp4 before the
+        # parent kills it (the old 200s left only 10s and routinely lost the frames —
+        # R1). If the child STILL fails to stitch in time, _walkthrough_fallback
+        # salvages the on-disk frames parent-side.
         proc = subprocess.run(
             [capture_py, script, url, goal, emphasis, out_path, rd, duration],
-            capture_output=True, text=True, timeout=200, check=False)
+            capture_output=True, text=True, timeout=230, check=False)
     except subprocess.TimeoutExpired as e:
         # TimeoutExpired has stdout/stderr (maybe bytes) but no .returncode, so
         # wrap it in a tiny shim _write_walkagent_log can consume uniformly.
         shim = types.SimpleNamespace(
             returncode="timeout",
             stdout=_as_text(getattr(e, "stdout", None)),
-            stderr=_as_text(getattr(e, "stderr", None)) or "walk_native timed out (>200s)")
+            stderr=_as_text(getattr(e, "stderr", None)) or "walk_native timed out (>230s)")
         _write_walkagent_log(out_path, scene, shim, url, goal)
         return _walkthrough_fallback()  # never raise — fall back / drop the scene
     # Success requires a real mp4; otherwise last-resort fallback (skip in real).

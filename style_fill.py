@@ -667,7 +667,7 @@ def _brand_name(brand: Dict[str, Any]) -> str:
 def _brand_domain(brand: Dict[str, Any]) -> str:
     """A clean visit-able domain from the brand's cta_url/url, WITHOUT scheme/path,
     KEEPING the TLD ('.com') intact (R10 keep-the-.com). '' if none usable."""
-    raw = (str(brand.get("cta_url") or brand.get("url") or "")).strip()
+    raw = (str(brand.get("cta_url") or brand.get("url") or brand.get("host") or "")).strip()
     if not raw:
         return ""
     # Strip scheme and any path/query so only the host remains: "https://theverge.com/x"
@@ -863,6 +863,23 @@ def _shape_hero(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
         if not title or _is_cta_stage_direction(title) or _is_prompt_artifact(title):
             title = (_derive_cta(brand, d.get("_text") or scene.get("brief") or "")
                      or wordmark)
+        # R5 — CLAMP the close-hero headline to ~2 lines (L2-style). Notion's close
+        # headline ran "Start using Notion today at notion.com to organize all your
+        # work" → a 4-line wall on the centered close card. The CTA headline is a
+        # PUNCHY 2-line phrase, not a sentence; clause-clip to <=48 chars (the centered
+        # close column is wider than the split column's 38, but a sentence still wraps
+        # to 4 lines). _clip_to_clause only trims real text — never a mid-word cut, and
+        # the brand-anchored "Get started with <Brand>" derived CTAs already fit. Skip
+        # when the title is already short (no needless re-trim of "Visit stripe.com").
+        CLOSE_HEADLINE_LIMIT = 48
+        if title and len(title) > CLOSE_HEADLINE_LIMIT:
+            clamped = _clip_to_clause(title, CLOSE_HEADLINE_LIMIT)
+            # Only accept a clamp that keeps a usable multi-word imperative; otherwise
+            # derive a clean brand-anchored CTA rather than ship a 1-word stub.
+            if clamped and len(clamped.split()) >= 2:
+                title = clamped
+            else:
+                title = _derive_cta(brand, d.get("_text") or scene.get("brief") or "") or title
         subtitle = d.get("subtitle")
         if subtitle is None:
             subtitle = (brand.get("cta_url")
@@ -879,6 +896,22 @@ def _shape_hero(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
         # threaded as the subtitle). Fall back to the brand URL, else drop.
         if subtitle and (_is_cta_stage_direction(subtitle) or _is_prompt_artifact(subtitle)):
             subtitle = brand.get("cta_url") or ""
+        # R3 — SLOGAN-LANDS-ON-CTA (feedback_slogan_lands_on_cta, spec §3 scene 7):
+        # the closing hero must read as a CALL TO ACTION, not a second opening title.
+        # HeroTitle.isCtaBeat only renders the accent CTA *pill* when the subtitle
+        # carries a CTA signal (an arrow, a URL/domain, or "start"/"get started").
+        # A plain tagline ("Build internet businesses") rendered as a muted line made
+        # the CTA scene indistinguishable from the open (R2 miss). When the resolved
+        # subtitle has NO CTA signal, upgrade it to a real brand-anchored action
+        # lockup "Start now → <domain>" (domain from cta_url/url/host) so the pill
+        # fires. Honest: only the real brand domain, never fabricated copy. When no
+        # domain is known, keep the existing tagline/url subtitle unchanged.
+        _CTA_SIGNAL_RE = re.compile(r"→|->|https?://|www\.|\.com|\.io|\.ai|start\b|get started",
+                                    re.IGNORECASE)
+        if not (subtitle and _CTA_SIGNAL_RE.search(subtitle)):
+            _cta_domain = _brand_domain(brand)
+            if _cta_domain:
+                subtitle = "Start now → %s" % _cta_domain
         out = {
             # No kicker on the close: the wordmark already renders as the sub-line,
             # so a "ORINOVATE" eyebrow would show the wordmark twice.
@@ -933,6 +966,32 @@ def _shape_hero(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
             title = _grounded_headline(raw_threaded, brand, avoid=wordmark, limit=56) \
                 or wordmark or ""
 
+        # R6 — CLAMP an OVER-LONG OPENING-hero headline to a complete shorter clause.
+        # The R5 clamp only touched the CLOSE branch; Notion still OPENED on a multi-line
+        # serif wall when an EXPLICIT plan title (which bypasses _grounded_headline's
+        # 56-char clause distiller) ran long. We do NOT touch headlines at/under the
+        # grounded-headline limit (56) — those are already 2-line display phrases the
+        # system intentionally allows complete (e.g. "Allbirds makes comfortable shoes
+        # from natural wool", a complete numeric claim like "...800 million trusted
+        # reviews"). Only a title LONGER than that grounding ceiling is the 4-line wall;
+        # for it, prefer a COMPLETE shorter clause (comma/clause boundary) and accept the
+        # clamp ONLY when it ends at a real clause boundary (not a hard mid-clause chop
+        # that would drop a compelling tail). Otherwise keep the long headline unchanged
+        # (a complete long clause beats a meaning-losing chop). Never clamp the wordmark.
+        OPEN_WALL_LIMIT = 56  # == _grounded_headline's opening ceiling; only longer titles wall
+        if (title and len(title) > OPEN_WALL_LIMIT
+                and title.strip().lower() != wordmark.lower()):
+            clamped = _clip_to_clause(title, OPEN_WALL_LIMIT)
+            # Accept only a clause-boundary clamp: the clamp must be a PREFIX of the
+            # original that ends where a comma/clause-opener split occurred (so we kept a
+            # complete sub-clause, not a hard chop mid-thought). A hard word-boundary chop
+            # (the Tripadvisor "...access" case) is rejected — keep the full headline.
+            if (clamped and len(clamped.split()) >= 3
+                    and title.lower().startswith(clamped.lower())
+                    and len(title) > len(clamped)
+                    and title[len(clamped):len(clamped) + 1] in (",", ";", ":")):
+                title = clamped
+
         subtitle = d.get("subtitle")
         if subtitle is None:
             # Subtitle must be distinct from both title AND wordmark.
@@ -966,8 +1025,19 @@ def _shape_hero(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
         if subtitle and (_is_ui_nav_label(subtitle) or _is_prompt_artifact(subtitle)
                          or _is_section_label_subtitle(subtitle)):
             subtitle = ""
+        # Opening eyebrow. An explicit plan kicker wins. Otherwise default to the
+        # wordmark uppercased — BUT NOT when the wordmark already renders as the logo
+        # lockup right above it (a real captured logo, or the wordmark text the
+        # archetype draws when wordmark != title): echoing "STRIPE" under the Stripe
+        # logo is redundant chrome (R2 polish miss). In that case drop the eyebrow so
+        # the lockup is logo → headline, clean. When there is NO logo AND the title IS
+        # the wordmark, keep the wordmark eyebrow (it's the only brand mark).
+        has_logo = bool(str(brand.get("logo_src") or brand.get("logoSrc") or "").strip())
+        wordmark_shows_above = has_logo or (wordmark and wordmark.lower() != title.strip().lower())
+        explicit_kicker = str(d.get("kicker") or "").strip()
+        open_kicker = explicit_kicker or ("" if wordmark_shows_above else wordmark.upper())
         out = {
-            "kicker": _decode(d.get("kicker") or wordmark.upper()),
+            "kicker": _decode(open_kicker),
             "title": _decode(title),
             "subtitle": _decode(subtitle or ""),
         }
@@ -1045,6 +1115,27 @@ _DANGLING_PARTICIPLES = frozenset((
     "starting", "ensuring", "guiding", "leading",
 ))
 
+# Trailing PAST-participle "bridge" words. A headline that ends on one of these is
+# almost always a clipped reduced-relative clause whose object lived past the cut
+# ("...comfortable shoes made" cut from "...made from natural materials";
+# "...software built" from "...built for teams"; "...products designed" from
+# "...designed to last"). A headline must NOT end on a bare past participle.
+# Because _strip_dangling_tail only ever inspects the LAST token, adding these
+# strips them ONLY when they are literally the final word — exactly the dangle
+# case. A COMPLETE phrase keeps its object ("shoes made from wool" ends on "wool",
+# a content word) and is untouched. R7 gap 3.
+_DANGLING_PAST_PARTICIPLES = frozenset((
+    "made", "built", "designed", "crafted", "engineered", "powered", "backed",
+    "trusted", "based", "founded", "created", "driven", "loved",
+))
+
+# Trailing CONNECTOR SYMBOLS. A headline clipped from a page <title> can end on a
+# bare ampersand / plus / separator ("Comfortable, Sustainable Shoes &" cut from
+# "...Shoes & Apparel"; "...Tools |" / "...Home ·"). These are not words so they
+# never appear in _DANGLING_WORDS; strip them as a trailing dangling tail too.
+# R7 gap 2.
+_DANGLING_SYMBOLS = frozenset(("&", "+", "·", "•", "|", "/", "-", "—", "–", ":", ";"))
+
 
 # A sentence-terminating "." (or ! or ?) is followed by whitespace or end-of-string.
 # A "." glued to a following alnum token is part of a domain/decimal ("theverge.com",
@@ -1069,19 +1160,34 @@ def _strip_dangling_tail(text: str) -> str:
     thought, never on a dangling token. Idempotent; strips repeatedly so a
     "..., letting" tail collapses past both the participle AND the trailing comma.
     """
-    head = (text or "").strip().rstrip(",").strip()
+    # Strip a trailing comma AND any trailing connector symbol ("&"/"|"/"·"/"+"/…)
+    # before splitting, so a bare-symbol tail collapses whether it is glued
+    # ("Apparel&") or space-separated ("Apparel &"). R7 gap 2.
+    head = (text or "").strip()
+    while head and head[-1] in _DANGLING_SYMBOLS:
+        head = head[:-1].strip()
+    head = head.rstrip(",").strip()
     words = head.split()
     while words:
         last = words[-1].lower().rstrip(",.")
-        if last in _DANGLING_WORDS or last in _DANGLING_PARTICIPLES:
+        # A bare symbol token left as its own word ("Shoes &" -> token "&").
+        if words[-1].strip() in _DANGLING_SYMBOLS:
+            words.pop()
+            continue
+        if (last in _DANGLING_WORDS or last in _DANGLING_PARTICIPLES
+                or last in _DANGLING_PAST_PARTICIPLES):
             words.pop()
             continue
         # A trailing comma glued to a content word ("wikis,") means the clause was cut
         # mid-list — drop the comma (the word stays; "...docs, wikis" reads complete).
         if words[-1].endswith(","):
             words[-1] = words[-1].rstrip(",")
+        # A trailing connector symbol glued to a content word ("Apparel|") — drop the
+        # symbol, keep the word.
+        elif words[-1] and words[-1][-1] in _DANGLING_SYMBOLS:
+            words[-1] = words[-1][:-1].rstrip(",")
         break
-    return " ".join(words)
+    return " ".join(w for w in words if w)
 
 
 # Clause-boundary punctuation/words at which a long sentence can be cut to a COMPLETE
@@ -1095,6 +1201,62 @@ _CLAUSE_OPENERS = frozenset((
 ))
 
 
+# Connectors (prepositions + clause-bridge participle-helpers + the infinitive "to")
+# that introduce an object/clause. When a distilled phrase ends on one of these
+# WITH only a short orphaned object after it (the rest of the object got cut at a
+# comma/limit), the phrase reads as a mid-clause chop ("...using clear" cut from
+# "...using clear, comprehensive documentation"; "...go to Migrate to" cut from
+# "...Migrate to Stripe"). _ends_on_orphan_connector detects that shape so the
+# clause-clipper can back up past the whole connector phrase to a COMPLETE shorter
+# line instead.
+_ORPHAN_CONNECTORS = frozenset((
+    # prepositions
+    "from", "to", "with", "at", "of", "for", "in", "on", "by", "as", "into",
+    "onto", "via", "through", "across", "over", "about", "after", "before",
+    # clause-bridge participle helpers (a connector that opens a clipped clause)
+    "using", "letting", "keeping", "making", "helping", "giving", "bringing",
+    "allowing", "enabling", "powering", "creating", "building", "delivering",
+    "providing", "offering", "connecting",
+))
+
+
+def _ends_on_orphan_connector(text: str, was_cut: bool, orphan_max: int = 2) -> bool:
+    """True when `text` ends on a connector whose object was SEVERED by a cut.
+
+    The orphan shape is: a connector (preposition / participle-helper / "to") near
+    the end with only `orphan_max` or fewer words after it, AND we KNOW content was
+    removed right after this fragment (`was_cut=True`). That combination means the
+    connector's full object lived past the cut ("...using clear" cut at the comma
+    before "comprehensive documentation"; "...go to Migrate to" -> trailing "to").
+
+    `was_cut` is REQUIRED and load-bearing: a naturally-complete line that merely
+    FITS the limit ("Accept payments online with Stripe", "...for millions of
+    internet businesses", "...integrate Payments in minutes") has a complete
+    connector phrase and must NOT be back-trimmed. So when `was_cut=False` this
+    only flags a connector that is literally the LAST word (a pure dangling tail,
+    which _strip_dangling_tail already removes) — i.e. it returns False for any
+    fragment with trailing content. The orphan back-up is reserved for true cuts.
+    """
+    words = [w for w in (text or "").strip().split() if w]
+    if len(words) < 2:
+        return False
+    low = [w.lower().rstrip(",.;:!?") for w in words]
+    if not was_cut:
+        # No cut happened: the text is the full source. A trailing connector with
+        # an object after it is a COMPLETE phrase — never an orphan. (A connector as
+        # the final word is handled by _strip_dangling_tail, not here.)
+        return False
+    # A cut happened right after this fragment. Scan the tail window for a connector
+    # whose trailing object is short enough to be a severed-object artifact.
+    for off in range(1, orphan_max + 1):
+        idx = len(low) - 1 - off
+        if idx < 1:  # keep at least one content word before the connector
+            break
+        if low[idx] in _ORPHAN_CONNECTORS:
+            return True
+    return False
+
+
 def _first_complete_clause(text: str, limit: int) -> str:
     """Prefer the FIRST COMPLETE CLAUSE that fits within `limit` over a hard word-count
     chop, so a long VO beat distills to a clean complete phrase instead of a dangling
@@ -1102,6 +1264,13 @@ def _first_complete_clause(text: str, limit: int) -> str:
     -> "Allbirds makes comfortable wool runners" (cut before the relative-clause opener)
     rather than "...that keep your". Returns "" when no in-limit clause boundary exists
     (the caller then falls back to the hard-chop-then-strip path).
+
+    ORPHAN-CONNECTOR GUARD: a clause candidate that ends on a connector with a
+    severed object ("...in minutes using clear" cut at the comma before
+    "comprehensive documentation") is REJECTED in favour of a COMPLETE shorter
+    candidate (back up past the connector phrase: "...Payments in minutes"). This
+    prevents a comma-cut from preserving the start of an object whose head noun
+    lived on the other side of the comma.
     """
     t = (text or "").strip()
     if not t:
@@ -1122,9 +1291,96 @@ def _first_complete_clause(text: str, limit: int) -> str:
     best = ""
     for c in sorted(set(cuts)):
         cand = _strip_dangling_tail(t[:c])
+        if not (cand and len(cand) <= limit and len(cand.split()) >= 2):
+            continue
+        # ORPHAN-CONNECTOR GUARD: every candidate here is a PREFIX cut at a clause
+        # boundary, so content followed (was_cut=True). If the candidate ends on a
+        # connector whose object was severed by that cut ("...using clear" before the
+        # comma), back up past the whole connector phrase to the last complete
+        # sub-clause. Keep the backed-up form only if a real phrase remains.
+        if _ends_on_orphan_connector(cand, was_cut=True):
+            cand = _drop_orphan_connector_phrase(cand)
         if cand and len(cand) <= limit and len(cand.split()) >= 2:
             best = cand  # longest fitting complete clause wins
     return best
+
+
+def _drop_orphan_connector_phrase(text: str, orphan_max: int = 2) -> str:
+    """Back up past a trailing orphaned-connector phrase to a COMPLETE shorter line.
+
+    Given "...Payments in minutes using clear" (connector "using" + the severed
+    object "clear"), drop the connector AND its short orphaned object so the result
+    ends on the last COMPLETE clause ("...Payments in minutes"). We back up to the
+    LAST (right-most) orphaning connector only, then a single _strip_dangling_tail
+    cleans any newly-exposed dangling word. We deliberately do NOT re-flag a
+    now-complete prepositional tail that the back-up exposed ("in minutes" is a
+    complete phrase, not a second orphan) — backing up over a single severed object
+    is enough; a pure dangling connector left behind is removed by the strip, never
+    by re-running the orphan back-up. Returns the shortened phrase, or the cleaned
+    original when nothing can be safely removed.
+    """
+    words = [w for w in (text or "").strip().split() if w]
+    if len(words) < 2:
+        return (text or "").strip()
+    low = [w.lower().rstrip(",.;:!?") for w in words]
+    # Find the RIGHT-MOST orphaning connector in the tail window (closest to the end)
+    # so we drop only the final severed-object phrase, not a complete earlier clause.
+    cut_at = None
+    for off in range(1, orphan_max + 1):
+        idx = len(low) - 1 - off
+        if idx < 1:
+            break
+        if low[idx] in _ORPHAN_CONNECTORS:
+            cut_at = idx  # keep words[:idx]
+            break  # right-most connector wins — single back-up
+    if cut_at is None:
+        return _strip_dangling_tail((text or "").strip())
+    out = _strip_dangling_tail(" ".join(words[:cut_at]))
+    # Never reduce to a single word — if back-up over-trimmed, return the cleaned
+    # original instead so the caller can fall back to a different candidate.
+    if len(out.split()) >= 2:
+        return out
+    return _strip_dangling_tail((text or "").strip())
+
+
+def _clip_to_clause(text: str, max_len: int) -> str:
+    """Boundary-safe clip of `text` to <= max_len characters.
+
+    The single entry point for trimming a spoken line / emphasis phrase down to a
+    headline-length string that is ALWAYS a COMPLETE phrase:
+      1. Take the first sentence (domain-safe) and the part before an em-dash.
+      2. If it already fits AND does not end on a dangling word or orphaned
+         connector phrase, return it verbatim.
+      3. Otherwise prefer the FIRST COMPLETE CLAUSE that fits (comma / clause-opener
+         boundary), backing up past any orphaned-connector phrase.
+      4. Fall back to a hard word-boundary chop, then drop a trailing dangling
+         connector AND any orphaned-connector phrase, NEVER ending mid-word or on a
+         dangling a/an/the/and/or/to/of/in/using/with/for/your/its...
+    Prefers a COMPLETE shorter line over a mid-phrase cut. NEVER fabricates — it
+    only trims real text. Returns "" only for empty input.
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    head = _split_first_sentence(t)
+    head = re.split(r"\s+[—–-]\s+", head, maxsplit=1)[0].strip()
+    if not head:
+        return ""
+    # Already complete and in-limit: keep as-is (was_cut=False — nothing removed, so
+    # a trailing connector phrase here is a complete phrase, not an orphan).
+    if (len(head) <= max_len
+            and _strip_dangling_tail(head) == head):
+        return head
+    # Prefer a complete clause that fits.
+    clause = _first_complete_clause(head, max_len)
+    if clause:
+        return clause
+    # Hard word-boundary chop (content was removed -> was_cut=True), then cleanup.
+    cut = head[:max_len].rsplit(" ", 1)[0].rstrip(",").strip() or head[:max_len]
+    cut = _strip_dangling_tail(cut)
+    if _ends_on_orphan_connector(cut, was_cut=True):
+        cut = _drop_orphan_connector_phrase(cut)
+    return _strip_dangling_tail(cut)
 
 
 def _title_from_text(text: str, limit: int = 72) -> str:
@@ -1149,23 +1405,34 @@ def _title_from_text(text: str, limit: int = 72) -> str:
     # a following TLD-like token.
     head = _split_first_sentence(str(text).strip())
     head = re.split(r"\s+[—–-]\s+", head, maxsplit=1)[0].strip()
-    if len(head) > limit:
+    _was_truncated = len(head) > limit
+    _took_hard_chop = False
+    if _was_truncated:
         # COMPLETE-CLAUSE-FIRST: prefer the first complete clause that fits (cut at a
         # comma/semicolon/colon or before a relative-clause opener) over a hard
         # mid-clause word chop, so "...runners that keep your feet warm" distills to
         # "...runners", never "...that keep your".
         clause = _first_complete_clause(head, limit)
         if clause:
-            head = clause
+            head = clause  # already orphan-guarded inside _first_complete_clause
         else:
             cut = head[:limit].rsplit(" ", 1)[0]
             head = cut or head[:limit]
+            _took_hard_chop = True
     # Strip a trailing comma + any dangling tail (function word, possessive, or a
     # clause-bridge participle-helper) — applies BOTH when the string was truncated AND
     # when it naturally ends on a dangling token ("brands for men who" -> "brands for
     # men"; "...docs, wikis," -> "...docs, wikis"; "...self-driving, letting" ->
     # "...self-driving").
     out = _strip_dangling_tail(head)
+    # ORPHAN-CONNECTOR GUARD for the HARD-CHOP path ONLY. The clause path above is
+    # already orphan-guarded inside _first_complete_clause, so re-applying here would
+    # double-trim a clean clause ("...Payments in minutes" -> "...Payments"). Only the
+    # raw mid-word/limit chop can leave a fresh severed-object connector tail.
+    if out and _took_hard_chop and _ends_on_orphan_connector(out, was_cut=True):
+        backed = _drop_orphan_connector_phrase(out)
+        if len(backed.split()) >= 2:
+            out = backed
     return out if out else head
 
 
@@ -1500,6 +1767,19 @@ def _punchy_headline(text: str, limit: int = 48) -> str:
             w2.pop()
         head = " ".join(w2)
 
+    # FINAL ORPHAN-CONNECTOR GUARD: catch a connector whose object was severed
+    # ("...in minutes using clear" cut at the comma before "comprehensive
+    # documentation"). _first_complete_clause already backs these up when it fires;
+    # this re-check covers any path that produced an orphan shape. `was_cut` is true
+    # when the distilled head is shorter than the complete clause captured before the
+    # soft-limit truncation (i.e. content was removed) — so a naturally-complete tail
+    # ("built for builders", "for businesses") that was never cut is preserved.
+    _head_was_cut = (head != full_clause) or _was_truncated
+    if head and _ends_on_orphan_connector(head, was_cut=_head_was_cut):
+        backed = _drop_orphan_connector_phrase(head)
+        if len(backed.split()) >= 2:
+            head = backed
+
     return head if len(head.split()) >= 2 else ""
 
 
@@ -1677,8 +1957,12 @@ def _emphasis_phrase(emphasis: str, limit: int = 48) -> str:
     e = re.sub(r"^(the|a|an)\s+", "", e, flags=re.IGNORECASE).strip()
     if not e:
         return ""
-    if len(e) > limit:
-        e = e[:limit].rsplit(" ", 1)[0].rstrip(",").strip() or e[:limit]
+    # Boundary-safe clip: NEVER end on a dangling connector / mid-word. A plain
+    # rsplit chop produced the "Stripe — ... Migrate to" bug (trailing "to"); route
+    # through _clip_to_clause so the overlay title is always a COMPLETE phrase.
+    e = _clip_to_clause(e, limit) or e
+    if not e:
+        return ""
     return e[0].upper() + e[1:]
 
 
@@ -1728,6 +2012,367 @@ def _shape_walkthrough(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str
     if d.get("caption"):
         out["caption"] = _decode(str(d["caption"]).strip())
     return out
+
+
+# Generic "filler" words that should NEVER be the accent-popped punch noun (they read
+# as glue, not the salient concept the headline is about). Lowercased comparison.
+_PUNCH_STOPWORDS = frozenset((
+    "the", "a", "an", "and", "or", "but", "for", "to", "of", "in", "on", "at",
+    "by", "with", "from", "into", "onto", "your", "our", "their", "its", "his",
+    "her", "this", "that", "these", "those", "is", "are", "be", "been", "was",
+    "were", "you", "we", "they", "it", "all", "any", "every", "more", "most",
+    "one", "single", "just", "only", "very", "so", "as", "up", "out", "over",
+    "makes", "make", "build", "built", "get", "gets", "use", "uses",
+))
+
+
+def _short_eyebrow(label: str, max_words: int = 2) -> str:
+    """Trim a phrase to a SHORT, CLEAN tracked-uppercase eyebrow label (default <= 2
+    words) that names the FEATURE, not the action ("Accept payments in one integration"
+    -> "Payments"; "The dashboard's real-time revenue and payouts view" -> "Dashboard
+    Revenue"). Keeps it honest — only trims/normalizes the real label. "" for empty.
+
+    Cleanup: drop a leading article ("the"/"a"/"an"), a leading imperative verb or
+    gerund ("Accept"/"Accepting" -> the following noun), strip possessive "'s",
+    drop bare connectors, and Title-Case so it reads as a label."""
+    t = (label or "").strip()
+    if not t:
+        return ""
+    words = [w.strip(" .,!?;:—–-") for w in t.split() if w.strip(" .,!?;:—–-")]
+    if not words:
+        return ""
+    # Drop a leading article.
+    if len(words) > 1 and words[0].lower() in ("the", "a", "an"):
+        words = words[1:]
+    # Drop a leading imperative verb / gerund so we lead with the noun
+    # ("Accept payments" / "Accepting card ..." -> "payments" / "card ...").
+    if len(words) > 1 and (words[0].lower() in _PUNCH_STOPWORDS
+                           or (len(words[0]) >= 5 and words[0].lower().endswith("ing"))):
+        words = words[1:]
+    # Strip a possessive on the (new) leading word ("dashboard's" -> "dashboard").
+    words = [re.sub(r"['’]s$", "", w) for w in words]
+    # Drop connector/stopword tokens so we keep content nouns only.
+    content = [w for w in words if w.lower() not in _PUNCH_STOPWORDS]
+    words = (content or words)[:max_words]
+    out = " ".join(words).strip(" .,!?;:—–-")
+    # Title-case for the tracked-uppercase eyebrow (the archetype upcases, but a clean
+    # cased form keeps acronyms/casing sane if it doesn't).
+    return out.title() if out else ""
+
+
+def _pick_punch_word(headline: str, brand: Dict[str, Any], emphasis: str = "") -> str:
+    """Pick ONE salient noun from `headline` to accent-pop, or "".
+
+    Hard contract (AppleScreenshot.splitPunch): the returned word must be a
+    contiguous SUBSTRING of `headline` exactly as it appears (case included), so the
+    accent split fires on the rendered line. We therefore choose from the headline's
+    OWN tokens — never fabricate a word.
+
+    Priority among headline tokens (first match wins):
+      1. A token that matches a word in the run's emphasis (the feature the video is
+         about, e.g. emphasis "accept payments" -> punch "payments"). This is what ties
+         the accent to the on-screen highlight.
+      2. The brand wordmark if it appears in the headline (rare for a screenshot line).
+      3. The LAST content word >= 4 chars that is not a stopword (the noun a value-prop
+         line usually ends on, e.g. "...in a single integration" -> "integration").
+    Returns the original-cased token (trailing punctuation stripped) so it is a clean
+    substring of the headline. "" when nothing suitable (the archetype then renders the
+    headline with no accent split — graceful)."""
+    h = (headline or "").strip()
+    if not h:
+        return ""
+    # Tokenize preserving order + original case; strip surrounding punctuation for
+    # the comparison but KEEP a cleaned form that is still a substring of the headline.
+    raw_tokens = h.split()
+    cleaned: List[tuple] = []  # (original_substr, lower_alnum)
+    for tok in raw_tokens:
+        core = tok.strip(".,!?;:\"'’“”()[]—–-")
+        if not core:
+            continue
+        # `core` is a substring of `tok`; `tok` is a substring of the headline (split on
+        # whitespace), so `core` is a substring of the headline. Safe for splitPunch.
+        cleaned.append((core, core.lower()))
+    if not cleaned:
+        return ""
+
+    emph_words = {w.strip(".,!?;:").lower()
+                  for w in re.findall(r"[A-Za-z][A-Za-z0-9'’-]+", emphasis or "")
+                  if len(w) >= 3 and w.lower() not in _PUNCH_STOPWORDS}
+    wordmark = (brand.get("wordmark") or brand.get("brand") or brand.get("name") or "").strip().lower()
+
+    # 1. Emphasis match (the feature the highlight points at). Prefer the LAST such
+    #    token in the headline — the emphasis noun ("payments", "integration") usually
+    #    follows the leading imperative verb ("Accept"), and the noun reads as the
+    #    stronger accent than the verb. Scan right-to-left so the noun wins over the verb.
+    for core, low in reversed(cleaned):
+        if low in emph_words and low not in _PUNCH_STOPWORDS and len(core) >= 3:
+            return core
+    # 2. Brand wordmark appearing in the headline.
+    if wordmark:
+        for core, low in cleaned:
+            if low == wordmark and len(core) >= 3:
+                return core
+    # 3. Last content noun-ish token >= 4 chars, not a stopword.
+    for core, low in reversed(cleaned):
+        if len(core) >= 4 and low not in _PUNCH_STOPWORDS:
+            return core
+    return ""
+
+
+def _supporting_line(headline: str, raw_threaded: str, brief_seed: str,
+                     brand: Dict[str, Any], limit: int = 90,
+                     used: Optional[List[str]] = None) -> str:
+    """A short muted SECONDARY sentence for the split layout's left column, DISTINCT
+    from the headline. Never fabricated — trims real narrated/brief/brand text.
+
+    Source priority:
+      1. The SECOND sentence of the threaded VO beat (the headline already used the
+         first), distilled to a clean clause.
+      2. A distinct BRAND FEATURE value-prop (rotated by `used` so each screenshot
+         scene gets a DIFFERENT feature — not the same tagline repeated).
+      3. The brand's clean tagline (when it differs from the headline + is unused).
+      4. A non-stage-direction brief clause distinct from the headline.
+      5. "" — the archetype renders no supporting line (graceful).
+    Always clause-clipped (never a mid-word/dangling cut), never an echo of the
+    headline/URL, and — when `used` is provided — never a REPEAT of a supporting line
+    already shown on an earlier scene (the R1 "Build internet businesses" x3 bug)."""
+    hl = (headline or "").strip().lower()
+    used_lower = {u.strip().lower() for u in (used or [])}
+
+    def _distinct(cand: str) -> str:
+        c = (cand or "").strip()
+        if not c:
+            return ""
+        c = _clip_to_clause(c, limit)
+        if not c:
+            return ""
+        cl = c.strip().lower()
+        if cl == hl or cl in used_lower:
+            return ""
+        # reject scrape/stage/nav junk so the secondary line stays clean.
+        if (_is_fragment_subtitle(c) or _is_ui_nav_label(c)
+                or _is_prompt_artifact(c) or _is_capture_stage_direction(c)):
+            return ""
+        # R7 gap 1 — drop a bare SECTION/nav label ("Popular Picks", "All Sale",
+        # "Shop All"): a short Title-Case noun phrase with no verb reads as store
+        # chrome, not a value-prop. This is the SAME positive-headline gate
+        # _shape_hero applies to the opening subtitle. An empty supporting line is
+        # cleaner than a section label, so when the candidate is one we drop it
+        # (the caller falls to the next feature / tagline / brief, else "").
+        if _is_section_label_subtitle(c):
+            return ""
+        return c
+
+    def _commit(c: str) -> str:
+        if c and used is not None:
+            used.append(c)
+        return c
+
+    # 1. Second sentence of the narrated beat (headline took the first).
+    beat = (raw_threaded or "").strip()
+    if beat:
+        parts = re.split(r"(?<=[.!?])\s+", beat)
+        if len(parts) >= 2:
+            second = _distinct(" ".join(parts[1:]).strip())
+            if second:
+                return _commit(second)
+    # 2. A distinct brand FEATURE, GROUNDED to the headline's subject (R5 fix).
+    #    The R1/Shopify-g1 bug: this loop pulled the FIRST usable feature[] blindly, so
+    #    the supporting line was an unrelated scraped marketing fragment ("Meet your
+    #    secret weapon, Sidekick", "Your brand has entered the chat") with no relation
+    #    to the eyebrow/headline — the single biggest coherence drag. Fix: build the
+    #    headline's content-word set and RANK each candidate feature by keyword overlap
+    #    (mirroring _focus_for_headline's ring re-targeting). Prefer the feature whose
+    #    text best matches what the headline NAMES; only when NOTHING overlaps do we
+    #    fall through to the first distinct feature (degrades to the old behavior, never
+    #    worse). Each feature is still a real scraped/known capability — naming one keeps
+    #    the line grounded; ranking keeps it RELEVANT.
+    def _content_words(text: str) -> set:
+        return {w for w in re.findall(r"[A-Za-z][A-Za-z0-9'-]+", (text or "").lower())
+                if len(w) >= 4 and w not in _PUNCH_STOPWORDS}
+
+    def _stem(w: str) -> str:
+        # Crude stem so "payments"/"payment", "shipping"/"ship" overlap. Strip a few
+        # common suffixes; floor at 3 chars so we don't over-merge short words.
+        for suf in ("ing", "ments", "ment", "ions", "ion", "ers", "er", "ies",
+                    "es", "ed", "s"):
+            if len(w) - len(suf) >= 3 and w.endswith(suf):
+                stem = w[: -len(suf)]
+                # Undo a doubled final consonant from "-ing"/"-ed" ("shipp" -> "ship",
+                # "runn" -> "run") so the stem matches the base form.
+                if (suf in ("ing", "ed") and len(stem) >= 4
+                        and stem[-1] == stem[-2] and stem[-1] not in "aeiou"):
+                    stem = stem[:-1]
+                return stem
+        return w
+
+    def _overlap(a_words: set, b_words: set) -> int:
+        # Count matches by stem so near-forms ("payments" vs "payment processing",
+        # "shipping" vs "ship orders") still score as RELATED.
+        a_stems = {_stem(w) for w in a_words}
+        b_stems = {_stem(w) for w in b_words}
+        return len(a_stems & b_stems)
+
+    hl_words = _content_words(headline)
+    feat_cands: List[tuple] = []  # (score, ordinal, cand_text)
+    for ordinal, f in enumerate(brand.get("features") or []):
+        if isinstance(f, dict):
+            label = (f.get("label") or f.get("title") or "").strip()
+            sub = (f.get("sub") or "").strip()
+            cand = ("%s — %s" % (label, sub)) if (label and sub) else (label or sub)
+        else:
+            cand = str(f or "").strip()
+        if not cand or _is_nav_label_segment(cand) or _is_weak_headline(cand):
+            continue
+        score = _overlap(_content_words(cand), hl_words) if hl_words else 0
+        feat_cands.append((score, ordinal, cand))
+    # Highest overlap first; ties keep the original (planner) order so distinct scenes
+    # still rotate through different features rather than all converging on one.
+    for _score, _ord, cand in sorted(feat_cands, key=lambda t: (-t[0], t[1])):
+        feat = _distinct(cand)
+        if feat:
+            return _commit(feat)
+    # 3. Brand tagline / distinct value-prop (when not echoing the headline + unused).
+    tag = _distinct(_distinct_tagline(brand, avoid=headline))
+    if tag:
+        return _commit(tag)
+    # 4. A distinct clause from the (non-stage-direction) brief.
+    bs = _distinct(brief_seed)
+    if bs:
+        return _commit(bs)
+    return ""
+
+
+def _focus_for_headline(default_focus: Any, candidates: Any, headline: str,
+                        punch: str, emphasis: str) -> Optional[Dict[str, Any]]:
+    """Pick the focus rect whose LABEL best matches what the headline NAMES.
+
+    The R1 bug: the captured `focus` was the single most-prominent CTA ("Sign up
+    with Google") with no relation to the headline ("...billing model") — so the
+    highlight pointed at the wrong element. Here we re-rank the captured candidate
+    rects by keyword overlap with the headline's content words (weighted toward the
+    accent `punch` word and the run `emphasis`, which ARE the headline's subject) and
+    return the best match. Falls back to `default_focus` when nothing scores — so a
+    miss is never WORSE than the old behavior, just degrades to the prominent CTA.
+
+    All rects are card-local % dicts {x,y,w,h,label?}. Returns one such dict (with the
+    internal _candidates key stripped) or None."""
+    def _clean(rect):
+        if not isinstance(rect, dict):
+            return None
+        out = {k: rect[k] for k in ("x", "y", "w", "h") if k in rect}
+        if len(out) != 4:
+            return None
+        if rect.get("label"):
+            out["label"] = rect["label"]
+        return out
+
+    cands: List[Dict[str, Any]] = []
+    if isinstance(candidates, list):
+        cands = [c for c in (_clean(c) for c in candidates) if c]
+    # The captured primary is itself a candidate to match against.
+    primary = _clean(default_focus)
+    if primary and primary not in cands:
+        cands = [primary] + cands
+    if not cands:
+        return primary  # nothing to choose from
+
+    # Build the headline keyword set (content words >= 4 chars, minus stopwords),
+    # with the punch word + emphasis nouns weighted higher (they ARE the subject).
+    def _words(text):
+        return {w for w in re.findall(r"[A-Za-z][A-Za-z0-9'-]+", (text or "").lower())
+                if len(w) >= 4 and w not in _PUNCH_STOPWORDS}
+
+    hl_words = _words(headline)
+    strong = _words(punch) | _words(emphasis)
+    if not hl_words and not strong:
+        return primary
+
+    best, best_score = None, 0.0
+    for c in cands:
+        lbl_words = _words(c.get("label", ""))
+        if not lbl_words:
+            continue
+        score = len(lbl_words & hl_words) + 2.0 * len(lbl_words & strong)
+        if score > best_score:
+            best, best_score = c, score
+    # Require a real match (a single shared content word, or any strong/emphasis hit).
+    if best is not None and best_score >= 1.0:
+        return best
+    return primary
+
+
+# Capture-target labels (capture_screenshots target names) → a clean noun phrase that
+# names the SURFACE. Maps the internal target id to display words so the headline can
+# say what the shot shows. Anything not mapped falls back to the page <title>.
+_SURFACE_LABEL_WORDS = {
+    "home": "", "mock-home": "", "homepage": "",  # the home page is the brand itself; no surface noun
+    "pricing": "pricing", "mock-pricing": "pricing", "price": "pricing",
+    "dashboard": "the dashboard", "app": "the app", "product": "the product",
+    "payments": "payments", "checkout": "checkout", "billing": "billing",
+    "list": "", "mock-list": "", "inner": "", "feature": "",  # generic inner page: no specific noun
+    "docs": "the docs", "developers": "developers", "api": "the API",
+    "integrations": "integrations", "analytics": "analytics",
+}
+
+
+def _surface_aligned_headline(shot_title: str, shot_label: str, brand: Dict[str, Any],
+                              avoid: str = "", limit: int = 38) -> str:
+    """Best-effort headline that NAMES the captured surface (R5 — Shopify bug #2:
+    "Run payments, shipping" rendered over a product-collection list, because the
+    headline came from the planner emphasis, NOT the page shown). When the captured
+    shot carries a meaningful page <title> or a specific capture-target label, distill
+    a short grounded phrase from it so the headline matches the surface on screen.
+
+    Honest: only uses the REAL captured page <title> / target label — never invents.
+    Returns "" when the title/label is empty, generic (home/inner page), or yields a
+    weak/nav-label phrase (the caller then keeps its VO/brand-derived headline)."""
+    wordmark = (brand.get("wordmark") or brand.get("brand") or brand.get("name") or "").strip()
+    avoid_l = (avoid or "").strip().lower()
+
+    # 1. A specific capture-target label (pricing/dashboard/payments/…) → its noun.
+    lbl = (shot_label or "").strip().lower()
+    surface_noun = _SURFACE_LABEL_WORDS.get(lbl, None)
+    # Unmapped label that is itself a short content word → use it as the surface noun.
+    if surface_noun is None and lbl and lbl not in ("home", "list", "inner"):
+        clean = re.sub(r"^mock-", "", lbl).replace("-", " ").strip()
+        if clean and clean not in _PUNCH_STOPWORDS and not _is_weak_headline(clean):
+            surface_noun = clean
+
+    # 2. The captured page <title> — strip the brand/site suffix ("Pricing | Stripe"
+    #    → "Pricing"; "Stripe Dashboard" → "Dashboard"), then distill.
+    title_phrase = ""
+    t = (shot_title or "").strip()
+    if t:
+        # Split on common title separators and drop a segment that is just the brand.
+        segs = [s.strip() for s in re.split(r"\s*[|–—\-:·•]\s*", t) if s.strip()]
+        segs = [s for s in segs if s.lower() != wordmark.lower()] or segs
+        # Prefer the most specific (shortest non-brand) segment as the surface name.
+        title_phrase = min(segs, key=len) if segs else ""
+        # Remove a leading/trailing brand token ("Stripe Dashboard" → "Dashboard").
+        if wordmark and title_phrase.lower().startswith(wordmark.lower() + " "):
+            title_phrase = title_phrase[len(wordmark):].strip()
+        if wordmark and title_phrase.lower().endswith(" " + wordmark.lower()):
+            title_phrase = title_phrase[:-len(wordmark)].strip()
+
+    # Compose: prefer the explicit target noun; else the page-title phrase.
+    cand = surface_noun or title_phrase
+    cand = (cand or "").strip()
+    if not cand:
+        return ""
+    cand = _clip_to_clause(cand, limit)
+    # NOTE: do NOT apply _is_weak_headline / _is_section_label_subtitle here — those
+    # reject a bare noun like "Pricing"/"Dashboard", which is EXACTLY the surface name
+    # we want as a screenshot headline (rendered WITH an eyebrow + accent + supporting
+    # line, not alone — a bare surface noun is on-point, not chrome, for a shot that
+    # literally shows that page). We only reject empty / wordmark-echo / UI-nav-label /
+    # prompt-artifact strings.
+    if (not cand or cand.lower() == avoid_l or cand.lower() == wordmark.lower()
+            or _is_ui_nav_label(cand) or _is_prompt_artifact(cand)):
+        return ""
+    # Title-case a bare surface noun so it reads as a display headline ("pricing" →
+    # "Pricing"); leave multi-word title-phrases as captured.
+    return cand if " " in cand else cand[:1].upper() + cand[1:]
 
 
 def _shape_screenshot(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
@@ -1784,11 +2429,69 @@ def _shape_screenshot(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str,
                                     or _is_cta_stage_direction(brief)
                                     or _is_prompt_artifact(brief))) else brief
     wordmark = (brand.get("wordmark") or brand.get("brand") or brand.get("name") or "").strip()
-    headline = (_grounded_headline(raw_threaded, brand, avoid=wordmark, limit=64)
-                or _grounded_headline(brief_seed, brand, avoid=wordmark, limit=64))
+    # Split-layout headlines live in a ~660px left column at 76px — a kinetic 2-line
+    # display headline, NOT a full sentence. A 64-char limit produced 4-line walls
+    # ("Enable any billing model with Stripe's flexible subscriptions"). Distill to a
+    # PUNCHY <=38-char clause so it lands in 2 lines and reads like Orinovate/TapPay.
+    # _grounded_headline already clause-trims (no mid-word cut); the tighter limit just
+    # makes the kept clause shorter. Falls back through the same source priority.
+    SCREENSHOT_HEADLINE_LIMIT = 38
+    headline = (_grounded_headline(raw_threaded, brand, avoid=wordmark, limit=SCREENSHOT_HEADLINE_LIMIT)
+                or _grounded_headline(brief_seed, brand, avoid=wordmark, limit=SCREENSHOT_HEADLINE_LIMIT))
+    # R5 — ALIGN the headline to the CAPTURED SURFACE (Shopify bug #2). The VO-derived
+    # headline comes from the planner emphasis and can NAME a feature the captured page
+    # does NOT show ("Run payments, shipping" over a product-collection list). When the
+    # shot carries a SPECIFIC page <title> / capture-target label (pricing, dashboard,
+    # payments, …), prefer a short headline that names THAT surface so the headline and
+    # the on-screen UI agree. Only overrides when the surface noun is meaningful AND the
+    # current headline doesn't already reference it; a generic home/inner page yields ""
+    # so the VO/brand headline is kept (no regression on real product captures whose VO
+    # already matches the surface).
+    shot_title = str(d.get("_shot_title") or "").strip()
+    shot_label = str(d.get("_shot_label") or "").strip()
+    surface_hl = _surface_aligned_headline(shot_title, shot_label, brand,
+                                           avoid=wordmark, limit=SCREENSHOT_HEADLINE_LIMIT)
+    if surface_hl:
+        hl_words = {w for w in re.findall(r"[A-Za-z]+", (headline or "").lower())}
+        sf_words = {w for w in re.findall(r"[A-Za-z]+", surface_hl.lower())
+                    if w not in _PUNCH_STOPWORDS}
+        # If the current headline already names the surface (word overlap), keep it.
+        # Otherwise the headline is talking about something the shot doesn't show →
+        # use the surface-aligned headline so headline↔UI cohere.
+        if not headline or not (hl_words & sf_words):
+            headline = surface_hl
     # Last guard: the headline must never echo the address-bar caption / URL.
     if headline and caption and headline.strip().lower() == _decode(caption).strip().lower():
         headline = ""
+
+    # R6 — CROSS-SCENE HEADLINE DEDUP (the Notion miss). When a brand's <title> is
+    # identical across pages (Notion home + /product both "The AI workspace that works
+    # for you. | Notion") AND the VO distills to the same line, two screenshot scenes
+    # derive an IDENTICAL headline (+ identical eyebrow). `_used_headlines` is one shared
+    # list threaded by build_props to every screenshot scene (mirrors `_used_supporting`).
+    # On a collision, derive a DISTINCT headline from THIS scene's OWN surface
+    # (surface-aligned name), else a distinct grounded clause from the brand value-props,
+    # else drop the headline so the shot still renders cleanly (never a duplicate).
+    used_headlines = d.get("_used_headlines")
+    used_headlines = used_headlines if isinstance(used_headlines, list) else None
+    if headline and used_headlines is not None:
+        used_lower = {h.strip().lower() for h in used_headlines}
+        if headline.strip().lower() in used_lower:
+            alt = ""
+            # 1. The scene's OWN captured surface name (home → "", pricing → "Pricing",
+            #    /product → "Product"); distinct from earlier headlines + the wordmark.
+            if surface_hl and surface_hl.strip().lower() not in used_lower:
+                alt = surface_hl
+            # 2. A distinct grounded brand value-prop clause not yet used as a headline.
+            if not alt:
+                cand = _distinct_tagline(brand, avoid=wordmark)
+                if cand and cand.strip().lower() not in used_lower:
+                    alt = _clip_to_clause(cand, SCREENSHOT_HEADLINE_LIMIT)
+                    if alt and alt.strip().lower() in used_lower:
+                        alt = ""
+            headline = alt  # "" => the shot renders with no headline (no duplicate)
+        if headline:
+            used_headlines.append(headline)
 
     out: Dict[str, Any] = {
         "imageSrc": img,
@@ -1798,6 +2501,80 @@ def _shape_screenshot(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str,
         out["caption"] = _decode(caption)
     if headline:
         out["headline"] = _decode(headline)
+
+    # --- Split-layout (apple-screenshot v2) fields (spec §2 / .handoff-screenshot-v2) -
+    # Newly-built screenshot scenes render the text-LEFT / shot-RIGHT split. This is the
+    # GAP closer (Task G): nothing set layout before, so the keystone defaulted to the
+    # old centered look. An explicit plan-authored data.layout still wins.
+    out["layout"] = d.get("layout") or "split"
+
+    # Eyebrow label — the archetype reads data.kicker via actLabel() and folds the act
+    # index into "NN · LABEL". A tracked uppercase eyebrow wants a SHORT label (2-3
+    # words), not a full sentence. Source: explicit plan kicker, else a short phrase
+    # from the run emphasis (the feature the highlight points at), else the wordmark.
+    run_emphasis = str(d.get("_emphasis") or "").strip()
+    # R2 coherence: derive the eyebrow from THIS scene's own headline subject first
+    # (so two screenshot scenes get DISTINCT eyebrows — "Payments" vs "Dashboard" —
+    # each matching its own headline), then the run emphasis, then the wordmark. An
+    # explicit plan kicker still wins.
+    scene_eyebrow = _short_eyebrow(headline) if headline else ""
+    kicker = (str(d.get("kicker") or "").strip()
+              or scene_eyebrow
+              or _short_eyebrow(_emphasis_phrase(run_emphasis))
+              or wordmark)
+    if kicker:
+        kicker = _decode(kicker)
+        out["kicker"] = kicker
+        # Also expose the named `eyebrow` field (spec §2). The archetype consumes
+        # `kicker`; `eyebrow` mirrors it so either field name resolves the label.
+        out["eyebrow"] = kicker
+
+    # Supporting muted secondary line, DISTINCT from the headline AND distinct across
+    # scenes (the R1 "Build internet businesses" x3 bug). `_used_supporting` is one
+    # shared list threaded by build_props to every screenshot scene.
+    used_supporting = d.get("_used_supporting")
+    used_supporting = used_supporting if isinstance(used_supporting, list) else None
+    supporting = str(d.get("supporting") or "").strip()
+    if supporting:
+        # Register an explicit plan-authored line so later scenes don't repeat it.
+        if used_supporting is not None and supporting not in used_supporting:
+            used_supporting.append(supporting)
+    elif headline:
+        supporting = _supporting_line(headline, raw_threaded, brief_seed, brand,
+                                      used=used_supporting)
+    if supporting:
+        out["supporting"] = _decode(supporting)
+
+    # punchWord — a salient noun INSIDE the headline (substring contract for the accent
+    # split). Honor an explicit plan punchWord only when it is a substring of headline.
+    if headline:
+        explicit_punch = str(d.get("punchWord") or "").strip()
+        decoded_headline = out["headline"]
+        if explicit_punch and _decode(explicit_punch) in decoded_headline:
+            out["punchWord"] = _decode(explicit_punch)
+        else:
+            punch = _pick_punch_word(decoded_headline, brand, run_emphasis)
+            if punch and punch in decoded_headline:
+                out["punchWord"] = punch
+
+    # focus — the card-local NORMALIZED rect from the screenshot manifest (wired onto
+    # scene.data.focus by wire_captured_assets). R2 coherence: re-target the rect to the
+    # one the HEADLINE names (over the most-prominent CTA), using the labelled candidate
+    # rects (_focus_candidates) + the punch word + emphasis. Absent candidates => the
+    # captured primary; absent focus => no highlight (plain shot).
+    focus = d.get("focus")
+    if isinstance(focus, dict):
+        chosen = _focus_for_headline(
+            focus, d.get("_focus_candidates"),
+            out.get("headline", ""), out.get("punchWord", ""), run_emphasis)
+        if isinstance(chosen, dict):
+            out["focus"] = chosen
+    # Optional explicit cursor path / zoom target (plan-authored) pass through too.
+    if isinstance(d.get("cursorPath"), list):
+        out["cursorPath"] = d.get("cursorPath")
+    if isinstance(d.get("zoomTo"), dict):
+        out["zoomTo"] = d.get("zoomTo")
+
     return out
 
 
@@ -1850,6 +2627,59 @@ _KINETIC_LIGHT_DEFAULTS = {
 }
 
 
+# --- Music selection (Task E/F: the music-selection point) ---------------------
+# We choose a BGM track by COMPANY STYLE and write the chosen SOURCE path into the
+# theme under the key `theme.music`. _stage_audio later copies that file into
+# studio/public/ and rewrites the value to a public-relative name so Remotion's
+# staticFile() resolves it; Timeline.tsx (Foundation/Task-E agent) reads
+# props.theme.music and mounts ONE looped, VO-ducked <Audio>.
+#
+# The picks come from Dennis's owned, attribution-free Pixabay set. Per
+# VIDEO-OVERHAUL-SPEC §4 the Stripe/fintech default is the TapPay promo track
+# (51.5s, confident-modern-clean, no loop seam over the ~32-40s arc).
+_MUSIC_TRACKS = {
+    # confident, modern, clean — fintech / payments / SaaS (the spec default)
+    "fintech": "/Users/dennis/Desktop/Projects/Demos/tappay-promo/public/music.mp3",
+    # calm / modern, longer bed — generic fallback for non-fintech brands
+    "calm":    "/Users/dennis/Desktop/Projects/Demos/kuli-promo/public/music.mp3",
+}
+# The default track when nothing brand-specific is known. The spec recommends the
+# TapPay/fintech cut for Stripe and as a safe modern-clean default for all brands.
+_MUSIC_DEFAULT = _MUSIC_TRACKS["fintech"]
+
+# Brand/industry keywords -> a music style bucket. Matched (case-insensitive)
+# against the brand name + tagline + host so a payments/fintech brand picks the
+# confident fintech bed and other brands still get a calm modern default.
+_FINTECH_HINTS = (
+    "payment", "payments", "fintech", "finance", "financial", "bank", "banking",
+    "invoice", "billing", "checkout", "transaction", "money", "wallet", "card",
+    "stripe", "plaid", "tappay", "ledger", "treasury", "payout", "merchant",
+)
+
+
+def _select_music(brand: Dict[str, Any]) -> str:
+    """Return the SOURCE filesystem path of the BGM track for this brand's style.
+
+    Fintech/payments brands get the confident TapPay bed; everything else gets a
+    calm modern default. The TapPay/fintech cut is also the spec's safe default for
+    Stripe specifically. Returns a path string; _stage_audio stages it into
+    studio/public/. The brand may pin `brand.music` to override the auto-pick."""
+    # Explicit per-brand override wins (a future data-driven path).
+    override = (brand.get("music") or "").strip() if isinstance(brand, dict) else ""
+    if override:
+        return override
+    haystack = " ".join(str(brand.get(k) or "") for k in (
+        "name", "brand", "wordmark", "tagline", "host")).lower()
+    copy = brand.get("copy") or {}
+    if isinstance(copy, dict):
+        haystack += " " + " ".join(str(copy.get(k) or "") for k in ("hook", "cta")).lower()
+    if any(h in haystack for h in _FINTECH_HINTS):
+        return _MUSIC_TRACKS["fintech"]
+    # Default: the spec-recommended modern-clean fintech bed reads well for the
+    # kinetic-light SaaS genre across brands. (Calm is available for future tuning.)
+    return _MUSIC_DEFAULT
+
+
 def _theme_kinetic_light(brand: Dict[str, Any]) -> Dict[str, Any]:
     """Map a brand_theme.json (palette/fonts/wordmark) -> the Timeline theme block.
 
@@ -1885,6 +2715,22 @@ def _theme_kinetic_light(brand: Dict[str, Any]) -> Dict[str, Any]:
     theme["fontMono"] = fonts.get("fontMono") or fonts.get("mono") or _KINETIC_LIGHT_DEFAULTS["fontMono"]
     theme["fontDisplay"] = fonts.get("fontDisplay") or fonts.get("display") or _KINETIC_LIGHT_DEFAULTS["fontDisplay"]
     theme["wordmark"] = brand.get("wordmark") or brand.get("brand") or brand.get("name") or ""
+
+    # Task F: real captured logo (set by brand_extract.apply_captured_logo). When
+    # present, bookend archetypes render theme.logoSrc as an <Img>; absent => they
+    # fall back to wordmark_svg/wordmark text (honest fallback). _stage_audio copies
+    # the source file into studio/public/ and rewrites this to a public-relative name.
+    logo_src = brand.get("logo_src") or brand.get("logoSrc")
+    if logo_src:
+        theme["logoSrc"] = logo_src
+
+    # Task E/F: BGM track chosen by company style. _stage_audio stages this source
+    # into studio/public/ and rewrites it to a public-relative name; Timeline.tsx
+    # reads props.theme.music for ONE looped, VO-ducked <Audio>. Backward-compatible:
+    # a build that drops the source (missing file) keeps no music and still renders.
+    music_src = _select_music(brand)
+    if music_src:
+        theme["music"] = music_src
     return theme
 
 
@@ -1944,9 +2790,28 @@ def _load_screenshot_manifest(out_dir: str) -> List[Dict[str, Any]]:
             for s in (data.get("shots") or []):
                 f = s.get("file") or (os.path.basename(s.get("path")) if s.get("path") else None)
                 if f:
-                    shots.append({"file": f,
-                                  "path": s.get("path") or os.path.join(shots_dir, f),
-                                  "url": s.get("url") or ""})
+                    rec = {"file": f,
+                           "path": s.get("path") or os.path.join(shots_dir, f),
+                           "url": s.get("url") or "",
+                           # R5: carry the captured page <title> + the capture target
+                           # label so the headline can NAME the on-screen surface
+                           # (Shopify bug #2: "Run payments, shipping" over a product
+                           # list). Absent/empty => the headline stays VO/brand-derived.
+                           "title": (s.get("title") or "").strip(),
+                           "label": (s.get("label") or "").strip()}
+                    # Task F: pass through the card-local focus rect so the
+                    # apple-screenshot archetype can highlight/zoom the named UI
+                    # element. Absent => no highlight (plain shot).
+                    focus = s.get("focus")
+                    if isinstance(focus, dict):
+                        rec["focus"] = focus
+                        # R2 coherence: the focus rect carries extra labelled
+                        # candidate rects (_candidates) so _shape_screenshot can pick
+                        # the rect whose LABEL best matches the scene's headline.
+                        cands = focus.get("_candidates")
+                        if isinstance(cands, list) and cands:
+                            rec["focus_candidates"] = cands
+                    shots.append(rec)
         except (OSError, ValueError):
             shots = []
     if not shots and os.path.isdir(shots_dir):
@@ -2002,6 +2867,24 @@ def wire_captured_assets(plan: Dict[str, Any], out_dir: str) -> Dict[str, Any]:
                 d["imageSrc"] = shot["path"]
                 if not d.get("caption") and shot.get("url"):
                     d["caption"] = shot["url"]
+                # R5: thread the captured page <title> + capture-target label so the
+                # screenshot headline can NAME the surface actually shown (instead of
+                # a planner-emphasis phrase unrelated to the captured page). Never
+                # overwrite explicit plan-authored hints.
+                if not d.get("_shot_title") and shot.get("title"):
+                    d["_shot_title"] = shot["title"]
+                if not d.get("_shot_label") and shot.get("label"):
+                    d["_shot_label"] = shot["label"]
+                # Task F: attach the captured focus rect (card-local %) so the
+                # archetype's highlight-box / zoom targets the named UI element.
+                # Never overwrite an explicit plan-authored focus. Absent => no
+                # highlight (byte-identical to a plain shot).
+                if not d.get("focus") and isinstance(shot.get("focus"), dict):
+                    d["focus"] = shot["focus"]
+                    # R2 coherence: carry the labelled candidate rects so the shaper
+                    # can re-target the highlight to the rect the HEADLINE names.
+                    if isinstance(shot.get("focus_candidates"), list):
+                        d["_focus_candidates"] = shot["focus_candidates"]
                 shot_i += 1
             s["data"] = d
         elif stype == "walkthrough":
@@ -2039,6 +2922,8 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
     tl_scenes = timeline.get("scenes", [])
     last_idx = len(tl_scenes) - 1
     feature_counter = 0  # 0-based position among explainer/feature scenes (BUG C)
+    used_supporting: List[str] = []  # R2: cross-scene supporting-line dedup
+    used_headlines: List[str] = []   # R6: cross-scene screenshot HEADLINE dedup
     scenes: List[Dict[str, Any]] = []
     for idx, tl_scene in enumerate(tl_scenes):
         sid = tl_scene.get("id")
@@ -2074,6 +2959,24 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
         if archetype == ARCH_WALKTHROUGH and run_emphasis:
             # Title bar tracks the emphasized feature, not the planner's VO flow.
             d.setdefault("_emphasis", run_emphasis)
+        if archetype == ARCH_SCREENSHOT:
+            if run_emphasis:
+                # The split-layout eyebrow + punch word track the emphasized feature so
+                # the headline accent literally points at the highlighted UI element.
+                d.setdefault("_emphasis", run_emphasis)
+            # R2 coherence: share one cross-scene "used supporting lines" list so each
+            # screenshot scene's secondary line is DISTINCT (no "Build internet
+            # businesses" repeated across scenes 1/2/4). _supporting_line consults +
+            # appends to it; the same list object threads to every screenshot scene.
+            d["_used_supporting"] = used_supporting
+            # R6 coherence (the Notion miss): share one cross-scene "used headlines"
+            # list so each screenshot scene's HEADLINE (and eyebrow) is DISTINCT. Notion's
+            # <title> ("The AI workspace that works for you. | Notion") is identical on
+            # home + /product AND the VO distilled to the same line, so scenes 2 & 3 got
+            # an IDENTICAL headline+eyebrow. _shape_screenshot consults + appends to this;
+            # on a collision it falls to the scene's own surface-aligned headline / next
+            # distinct grounded clause (mirrors the supporting-line dedup, one level up).
+            d["_used_headlines"] = used_headlines
         plan_scene["data"] = d
 
         data = style.shape(plan_scene, brand)
@@ -2151,6 +3054,33 @@ def _stage_audio(props: Dict[str, Any], out_dir: str) -> Dict[str, Any]:
     runs don't clobber each other. Mutates + returns props."""
     run_tag = os.path.basename(os.path.normpath(out_dir)) or "run"
 
+    # Theme assets: BGM music (Task E/F) + real captured logo (Task F). Both are
+    # staged into studio/public/ with run-scoped names and rewritten to public-
+    # relative paths so Remotion's staticFile() resolves them. Each DROPS on a
+    # missing source so a build with no music/logo still renders (graceful fallback):
+    #   - missing music  -> theme.music removed; Timeline.tsx mounts no <Audio>.
+    #   - missing logo   -> theme.logoSrc removed; bookends fall to the wordmark.
+    theme = props.get("theme")
+    if isinstance(theme, dict):
+        music_src = theme.get("music")
+        if music_src and not str(music_src).startswith("http"):
+            mext = os.path.splitext(str(music_src))[1] or ".mp3"
+            music_rel = f"music-{run_tag}{mext}"
+            staged_music = _stage_one_asset(music_src, out_dir, music_rel)
+            if staged_music:
+                theme["music"] = staged_music
+            else:
+                theme.pop("music", None)
+        logo_src = theme.get("logoSrc")
+        if logo_src and not str(logo_src).startswith("http"):
+            lext = os.path.splitext(str(logo_src))[1] or ".svg"
+            logo_rel = f"brand-logo-{run_tag}{lext}"
+            staged_logo = _stage_one_asset(logo_src, out_dir, logo_rel)
+            if staged_logo:
+                theme["logoSrc"] = staged_logo
+            else:
+                theme.pop("logoSrc", None)
+
     # Full continuous track (fallback path).
     ap = props.get("audio_path")
     if ap and not ap.startswith("http"):
@@ -2216,6 +3146,18 @@ def run_pipeline(plan_path: str, brand_path: str, style_name: str, out_dir: str,
     os.makedirs(out_dir, exist_ok=True)
     plan = _load_json(plan_path)
     brand = _load_json(brand_path)
+    # Task-F logo staging (R2 gap): the brand_theme.json written at brand-resolve
+    # time predates screenshot capture, so brand_extract never saw the manifest's
+    # captured logo (theme.logoSrc came out None even though brand/logo.svg existed).
+    # The manifest DOES exist now (capture ran before style_fill), so inject the
+    # captured logo into the brand dict HERE — _theme_kinetic_light reads
+    # brand["logo_src"] -> theme.logoSrc and _stage_audio copies it into
+    # studio/public/. No-op (graceful) when no logo was captured.
+    try:
+        import brand_extract
+        brand_extract.apply_captured_logo(brand, out_dir)
+    except Exception:
+        pass  # never block a render on logo staging
     plan_scenes = _plan_scenes(plan)
 
     alignment_path = os.path.join(out_dir, "vo_alignment.json")

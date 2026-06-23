@@ -651,5 +651,101 @@ class TestPipelineOffline(unittest.TestCase):
             self.assertTrue(props["audio_path"].endswith(".mp3"))
 
 
+class TestClipToClauseOrphanConnector(unittest.TestCase):
+    """Boundary-safe clause clipping: a distilled headline / overlay title must end
+    on a COMPLETE phrase, never on a dangling connector whose object was severed by a
+    comma/limit cut. Regression for build-stripe-d0cf77 props.json:
+      - screenshot headline "Developers integrate Stripe Payments in minutes using clear"
+      - walkthrough overlayTitle "Stripe — Go to Get started, then go to Migrate to"
+    """
+
+    # --- the exact delivered-bug inputs ---
+    BEAT_USING_CLEAR = ("Developers integrate Stripe Payments in minutes using "
+                        "clear, comprehensive documentation for global scale.")
+    BEAT_API_LIST = ("The Payments API reference shows request parameters, error "
+                     "codes, and live examples.")
+    EMPHASIS_MIGRATE = "Go to Get started, then go to Migrate to"
+
+    def _ends_on_connector(self, text):
+        """A phrase ending on a bare connector word is the failure we forbid."""
+        words = [w.lower().strip(".,;:!?—–-") for w in text.split() if w]
+        return bool(words) and words[-1] in style_fill._ORPHAN_CONNECTORS
+
+    def test_clip_drops_severed_object_keeps_complete_phrase(self):
+        out = style_fill._clip_to_clause(self.BEAT_USING_CLEAR, 64)
+        # Must NOT preserve the orphaned "using clear" tail.
+        self.assertNotIn("using clear", out.lower())
+        self.assertFalse(out.lower().endswith(" using"))
+        self.assertFalse(out.lower().endswith(" clear"))
+        # The complete lead clause survives (keeps the meaningful "in minutes").
+        self.assertEqual(out, "Developers integrate Stripe Payments in minutes")
+
+    def test_grounded_headline_no_dangling_connector(self):
+        for beat in (self.BEAT_USING_CLEAR, self.BEAT_API_LIST):
+            h = style_fill._grounded_headline(
+                beat, {"wordmark": "Stripe"}, avoid="Stripe", limit=64)
+            self.assertTrue(h, "headline should be non-empty for %r" % beat)
+            self.assertFalse(self._ends_on_connector(h),
+                             "headline ends on a dangling connector: %r" % h)
+            # never a mid-word cut: the headline is a substring-of-words of the source
+            self.assertNotIn("using clear", h.lower())
+
+    def test_emphasis_phrase_clips_at_clause(self):
+        e = style_fill._emphasis_phrase(self.EMPHASIS_MIGRATE)
+        self.assertFalse(self._ends_on_connector(e),
+                         "emphasis ends on a dangling connector: %r" % e)
+        self.assertEqual(e, "Go to Get started")
+
+    def test_walkthrough_overlay_title_is_complete(self):
+        scene = {
+            "id": "wt", "type": "walkthrough",
+            "data": {"videoSrc": "/clip.mp4",
+                     "_emphasis": self.EMPHASIS_MIGRATE},
+        }
+        out = style_fill._shape_walkthrough(scene, {"wordmark": "Stripe"})
+        title = out["overlayTitle"]
+        self.assertFalse(self._ends_on_connector(title),
+                         "overlayTitle ends on a dangling connector: %r" % title)
+        self.assertTrue(title.startswith("Stripe"))
+        self.assertIn("Get started", title)
+
+    def test_complete_sub_limit_phrases_preserved(self):
+        # Naturally-complete lines that FIT the limit must pass through UNCHANGED —
+        # the orphan guard must not back-trim a complete trailing connector phrase.
+        for good in (
+            "Accept payments online with Stripe",
+            "Stripe powers payments for millions of internet businesses",
+            "Developers integrate Stripe Payments in minutes",
+            "Built for builders",
+            "Allbirds makes comfortable shoes from natural materials",
+            "Linear makes shipping faster",
+        ):
+            self.assertEqual(style_fill._punchy_headline(good, limit=64), good,
+                             "complete phrase was altered: %r" % good)
+            self.assertEqual(style_fill._clip_to_clause(good, 64), good,
+                             "_clip_to_clause altered a complete phrase: %r" % good)
+
+    def test_ends_on_orphan_connector_requires_cut(self):
+        # was_cut=False -> a trailing connector phrase is a COMPLETE phrase, not orphan.
+        self.assertFalse(style_fill._ends_on_orphan_connector(
+            "Accept payments with Stripe", was_cut=False))
+        self.assertFalse(style_fill._ends_on_orphan_connector(
+            "integrate Payments in minutes", was_cut=False))
+        # was_cut=True -> a connector with a short trailing object is an orphan.
+        self.assertTrue(style_fill._ends_on_orphan_connector(
+            "integrate Payments in minutes using clear", was_cut=True))
+
+    def test_drop_orphan_connector_single_backup(self):
+        # Single back-up over the right-most orphan; the complete prep phrase stays.
+        self.assertEqual(
+            style_fill._drop_orphan_connector_phrase(
+                "Developers integrate Stripe Payments in minutes using clear"),
+            "Developers integrate Stripe Payments in minutes")
+
+    def test_clip_empty_input(self):
+        self.assertEqual(style_fill._clip_to_clause("", 64), "")
+        self.assertEqual(style_fill._clip_to_clause("   ", 64), "")
+
+
 if __name__ == "__main__":
     unittest.main()

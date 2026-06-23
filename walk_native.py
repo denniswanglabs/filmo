@@ -95,7 +95,12 @@ _DESKTOP_UA = (
 )
 
 _EXTRA_HEADERS = {
-    "Accept-Language": "en-US,en;q=0.9",
+    # R5 (Shopify bug #5) — pin a BARE "en" so the walkthrough never drifts to a
+    # non-English locale (Shopify served zh-TW Traditional Chinese against an English
+    # script). A bare "en" (no regional "en-US,en;q=0.9") is the strongest signal to
+    # serve English regardless of the request's geo-IP. The context still sets
+    # locale="en-US" so JS-side Intl/navigator.language agrees.
+    "Accept-Language": "en",
     "Accept": (
         "text/html,application/xhtml+xml,application/xml;"
         "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
@@ -110,6 +115,20 @@ _EXTRA_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
+# R5 (Shopify bug #5) — URL path segments that indicate a geo-redirect to a
+# non-English locale (shopify.com/tw/..., site.com/zh-TW/..., /fr/...). When the
+# landed URL matches, we re-navigate to the locale-stripped path so the walkthrough
+# stays in English even when the site geo-redirects on IP (Accept-Language alone did
+# not stop Shopify). Mirrors capture_screenshots._GEO_LOCALE_RE.
+_GEO_LOCALE_RE = re.compile(
+    r"/(?:"
+    r"tw|zh-tw|zh-hk|zh-cn|zh|ja|ko|de|fr|es|pt|it|nl|pl|sv|da|fi|nb|"
+    r"ru|ar|he|tr|cs|sk|hu|ro|bg|hr|uk|vi|th|id|ms|"
+    r"zh_tw|zh_cn|zh_hk"
+    r")(?:/|$)",
+    re.IGNORECASE,
+)
+
 # Sub-page hint: if the emphasis mentions one of these, try to click an obvious
 # matching nav link. Phase 1 only follows ONE such link and degrades gracefully.
 _SUBPAGE_HINTS = (
@@ -117,6 +136,91 @@ _SUBPAGE_HINTS = (
     "solutions", "platform", "how it works", "how-it-works",
     "enterprise", "use cases", "use-cases", "about",
 )
+
+# ---------------------------------------------------------------------------
+# Stealth + hardened launch (R8 SHOPIFY-HARDENING) — mirror of
+# capture_screenshots._STEALTH_INIT_JS / _launch_browser / _proxy_settings so the
+# two Playwright entry points behave identically. A local copy (not a shared
+# import) keeps walk_native a standalone subprocess, consistent with the existing
+# duplicated _wait_for_spa_hydration / _GEO_LOCALE_RE / _dismiss_interstitial.
+# Defeats BOT-DETECTION only; a server-side geo-IP redirect (Taiwan egress -> /tw)
+# needs a US-egress proxy (WALK_PROXY) — see OVERHAUL-LOOP-STATE.md.
+# ---------------------------------------------------------------------------
+_STEALTH_INIT_JS = r"""
+(() => {
+  try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
+  try { Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']}); } catch (e) {}
+  try {
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5].map(i => ({name: 'Plugin ' + i, filename: 'p' + i})),
+    });
+    Object.defineProperty(navigator, 'mimeTypes', {get: () => [1, 2].map(i => ({type: 'application/x-' + i}))});
+  } catch (e) {}
+  try { window.chrome = window.chrome || {runtime: {}, app: {isInstalled: false}}; } catch (e) {}
+  try {
+    const _q = window.navigator.permissions && window.navigator.permissions.query;
+    if (_q) {
+      window.navigator.permissions.query = (p) => (
+        p && p.name === 'notifications'
+          ? Promise.resolve({state: Notification.permission})
+          : _q(p)
+      );
+    }
+  } catch (e) {}
+  try {
+    const _gp = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function (p) {
+      if (p === 37445) return 'Intel Inc.';
+      if (p === 37446) return 'Intel Iris OpenGL Engine';
+      return _gp.call(this, p);
+    };
+  } catch (e) {}
+})();
+"""
+
+
+def _proxy_settings():
+    """Optional Playwright proxy from WALK_PROXY (OFF by default). The only way to
+    beat a server-side geo-IP redirect (Taiwan egress -> /tw) is a US IP; set
+    WALK_PROXY=http://user:pass@host:port to route through one. Unset => no proxy."""
+    raw = (os.environ.get("WALK_PROXY") or "").strip()
+    if not raw:
+        return None
+    return {"server": raw}
+
+
+def _launch_browser(p):
+    """Launch a hardened Chromium that looks like a real desktop Chrome.
+
+    Order (most-realistic first, each falling through): real installed Chrome
+    channel + --headless=new -> bundled chromium + --headless=new -> bundled
+    chromium with the legacy launch args (original behavior). Keeps the existing
+    NetworkServiceInProcess + ignore-certificate-errors flags the promo-agent rule
+    requires. WALK_PROXY (if set) is applied at launch."""
+    # The promo-agent/NemoClaw launch rule: NetworkServiceInProcess avoids the
+    # netlink sandbox issue; ignore-cert keeps redirect chains from aborting.
+    legacy_args = [
+        "--no-sandbox",
+        "--enable-features=NetworkService,NetworkServiceInProcess",
+        "--ignore-certificate-errors",
+        "--disable-blink-features=AutomationControlled",
+    ]
+    common = {}
+    proxy = _proxy_settings()
+    if proxy:
+        common["proxy"] = proxy
+        print("WALK_NATIVE: using WALK_PROXY egress")
+    try:
+        return p.chromium.launch(channel="chrome",
+                                 args=legacy_args + ["--headless=new"], **common)
+    except Exception as e:
+        print("WALK_NATIVE: chrome channel unavailable (%s); using bundled chromium" % e)
+    try:
+        return p.chromium.launch(args=legacy_args + ["--headless=new"], **common)
+    except Exception as e:
+        print("WALK_NATIVE: --headless=new failed (%s); using default headless" % e)
+    return p.chromium.launch(args=legacy_args, **common)
+
 
 FFMPEG_FPS = 14  # ~12-15fps so the clip duration ≈ the captured motion span
 
@@ -196,6 +300,57 @@ def _wait_for_spa_hydration(page, settle_ms: int = 1200) -> None:
         page.wait_for_timeout(settle_ms)
     except Exception:
         pass
+
+
+# Close/confirm/accept affordance selectors for a geo-shipping / region / cookie
+# interstitial. Mirrors capture_screenshots._INTERSTITIAL_DISMISS_SELECTORS. We
+# dismiss the modal BEFORE the screencast starts so the recorded walk shows the
+# real product, not a "Where are we shipping to?" overlay (Allbirds + many
+# storefronts). Order: explicit close/dismiss first, then confirm/accept, so we
+# never submit an unrelated form when a plain close exists.
+_INTERSTITIAL_DISMISS_SELECTORS = (
+    "[aria-label*='close' i]",
+    "[aria-label*='dismiss' i]",
+    "button[class*='close' i]",
+    "button[class*='dismiss' i]",
+    "[data-testid*='close' i]",
+    "button:has-text('No thanks')",
+    "button:has-text('Continue')",
+    "button:has-text('Confirm')",
+    "button:has-text('Accept all')",
+    "button:has-text('Accept')",
+    "button:has-text('Got it')",
+    "button:has-text('Stay')",
+    "button:has-text('I agree')",
+)
+
+
+def _dismiss_interstitial(page) -> bool:
+    """Best-effort, non-destructive dismiss of a geo/shipping/region/cookie modal
+    that would otherwise occlude the recorded walkthrough. Clicks only the first
+    VISIBLE close/confirm/accept affordance, then falls back to ESC. Never raises;
+    a clean page with no modal is a silent no-op. Returns True if it clicked."""
+    clicked = False
+    for sel in _INTERSTITIAL_DISMISS_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible(timeout=400):
+                loc.click(timeout=800, no_wait_after=True)
+                clicked = True
+                try:
+                    page.wait_for_timeout(350)
+                except Exception:
+                    pass
+                break
+        except Exception:
+            continue
+    if not clicked:
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(250)
+        except Exception:
+            pass
+    return clicked
 
 
 # ===========================================================================
@@ -793,21 +948,23 @@ def run(url: str, goal: str, emphasis: str, out_path: str,
     p = None
     try:
         p = sync_playwright().start()
-        # Same launch posture as the NemoClaw/promo-agent rule + capture module:
-        # NetworkServiceInProcess avoids the netlink sandbox issue; ignore-cert
-        # keeps self-signed/redirect chains from aborting the screencast.
-        browser = p.chromium.launch(args=[
-            "--no-sandbox",
-            "--enable-features=NetworkService,NetworkServiceInProcess",
-            "--ignore-certificate-errors",
-        ])
+        # R8 SHOPIFY-HARDENING: hardened launch (real Chrome channel + new headless
+        # + stealth) so bot-detection serves the real page; keeps the promo-agent
+        # NetworkServiceInProcess + ignore-cert flags + optional WALK_PROXY.
+        browser = _launch_browser(p)
         ctx = browser.new_context(
             viewport=VIEWPORT,
             device_scale_factor=1,  # screencast is already capped at 1280x800
             locale="en-US",
+            # US timezone + geolocation so JS-side geo checks agree with en-US.
+            timezone_id="America/New_York",
+            geolocation={"latitude": 40.7128, "longitude": -74.0060},
+            permissions=["geolocation"],
             user_agent=_DESKTOP_UA,
             extra_http_headers=_EXTRA_HEADERS,
         )
+        # Stealth init runs BEFORE every navigation in this context.
+        ctx.add_init_script(_STEALTH_INIT_JS)
         page = ctx.new_page()
 
         # --- CDP screencast --------------------------------------------------
@@ -845,7 +1002,44 @@ def run(url: str, goal: str, emphasis: str, out_path: str,
             print("WALK_NATIVE: failed goto: %s" % e)
             return False
 
+        # R5 (Shopify bug #5) — PREFER English: if the site geo-redirected to a
+        # non-English locale path (shopify.com -> shopify.com/tw/), strip the locale
+        # segment and re-navigate once so the walkthrough stays English when an
+        # English path is reachable. Accept-Language=en alone didn't stop Shopify's
+        # IP-based redirect, so this is the belt-and-suspenders correction.
+        #
+        # POLICY (Dennis, 2026-06-23): when English is genuinely unreachable (the
+        # server re-redirects every English path back to the locale on egress IP),
+        # KEEP the foreign-language page and record a real walk clip on it — a valid
+        # foreign page is a SUCCESS to be captured, not a failure. Bilingual output
+        # (English planner copy over a foreign walkthrough) is acceptable; the goal
+        # is a COMPLETE video. We only fail the walk on a GENUINE failure (nav failed
+        # at goto above, screencast start failed below) — never merely for language.
+        try:
+            landed = page.url or url
+        except Exception:
+            landed = url
+        if _GEO_LOCALE_RE.search(landed):
+            corrected = _GEO_LOCALE_RE.sub("/", landed, count=1)
+            if corrected != landed:
+                print("WALK_NATIVE: geo-redirect to non-en locale (%s); "
+                      "trying English at %s (keep the foreign page if it re-redirects)"
+                      % (landed, corrected))
+                try:
+                    page.goto(corrected, wait_until="domcontentloaded", timeout=30000)
+                except Exception:
+                    pass  # keep the geo page and walk it rather than fail the walk
+
         _wait_for_spa_hydration(page)
+
+        # R7 gap 4 — dismiss a geo/shipping/region/cookie interstitial BEFORE the
+        # screencast starts, so the recorded walk shows the real product rather
+        # than a "Where are we shipping to?" overlay (Allbirds + many storefronts).
+        try:
+            if _dismiss_interstitial(page):
+                print("WALK_NATIVE: dismissed a geo/shipping/cookie interstitial")
+        except Exception:
+            pass
 
         # Start the screencast AFTER hydration so the first frames show real
         # content, not a blank shell.

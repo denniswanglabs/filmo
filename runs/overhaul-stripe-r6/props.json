@@ -1,0 +1,129 @@
+{
+  "fps": 30,
+  "total_frames": 900,
+  "audio_path": "vo-overhaul-stripe-r6.mp3",
+  "lang": "en",
+  "theme": {
+    "bg": "#0A2540",
+    "bgCard": "#0A2540",
+    "bgCardRaised": "#f9fafc",
+    "navy": "#80E9FF",
+    "navyBright": "#80E9FF",
+    "accent": "#635BFF",
+    "ok": "#80E9FF",
+    "text": "#FFFFFF",
+    "textMuted": "#3d4a5c",
+    "textDim": "#6b7589",
+    "border": "#e5e9f0",
+    "fontPrimary": "\"Sohne\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "fontMono": "\"Berkeley Mono\", \"GT America Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+    "fontDisplay": "\"Sohne\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "wordmark": "Stripe",
+    "logoSrc": "brand-logo-overhaul-stripe-r6.svg",
+    "music": "music-overhaul-stripe-r6.mp3"
+  },
+  "scenes": [
+    {
+      "id": "title-open",
+      "archetype": "hero-title",
+      "in_frame": 0,
+      "out_frame": 122,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Stripe powers online payments",
+        "subtitle": "Build internet businesses"
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-r6-title-open.mp3"
+      }
+    },
+    {
+      "id": "screenshot-home",
+      "archetype": "apple-screenshot",
+      "in_frame": 122,
+      "out_frame": 272,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-stripe-r6-screenshot-home.png",
+        "frame": "browser",
+        "caption": "https://stripe.com",
+        "headline": "Financial Infrastructure",
+        "layout": "split",
+        "kicker": "Financial Infrastructure",
+        "eyebrow": "Financial Infrastructure",
+        "supporting": "The backbone of global commerce",
+        "punchWord": "Infrastructure",
+        "focus": {
+          "x": 0.18,
+          "y": 0.263,
+          "w": 0.5338,
+          "h": 0.2759,
+          "label": "Financial infrastructure to grow your revenue. Accept paymen"
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-r6-screenshot-home.mp3"
+      }
+    },
+    {
+      "id": "screenshot-inner",
+      "archetype": "apple-screenshot",
+      "in_frame": 272,
+      "out_frame": 452,
+      "cues": [],
+      "data": {
+        "imageSrc": "shot-overhaul-stripe-r6-screenshot-inner.png",
+        "frame": "browser",
+        "caption": "https://stripe.com/pricing",
+        "headline": "Pricing & Fees",
+        "layout": "split",
+        "kicker": "& Fees",
+        "eyebrow": "& Fees",
+        "supporting": "Powering businesses of all sizes",
+        "punchWord": "Fees",
+        "focus": {
+          "x": 0.1625,
+          "y": 0.36,
+          "w": 0.675,
+          "h": 0.263,
+          "label": "Standard\nAccess a complete payments platform with simple, pa"
+        }
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-r6-screenshot-inner.mp3"
+      }
+    },
+    {
+      "id": "walkthrough",
+      "archetype": "walkthrough-player",
+      "in_frame": 452,
+      "out_frame": 722,
+      "cues": [],
+      "data": {
+        "videoSrc": "walk-overhaul-stripe-r6-walkthrough.mp4",
+        "overlayTitle": "Stripe \u2014 Accept payments in one integration",
+        "muteClip": true,
+        "videoFit": "contain"
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-r6-walkthrough.mp3"
+      }
+    },
+    {
+      "id": "title-close",
+      "archetype": "hero-title",
+      "in_frame": 722,
+      "out_frame": 900,
+      "cues": [],
+      "data": {
+        "kicker": "",
+        "title": "Start accepting payments",
+        "subtitle": "Start now \u2192 stripe.com"
+      },
+      "audio": {
+        "src": "vo-overhaul-stripe-r6-title-close.mp3"
+      }
+    }
+  ]
+}
