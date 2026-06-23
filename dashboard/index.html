@@ -89,6 +89,12 @@
       <button class="rail-collapse" id="rail-collapse" title="Hide sidebar" aria-label="Hide sidebar"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
     </div>
 
+    <!-- AGENT ACTIVITY panel — the live Hermes<->Nemotron conversation, rendered IN
+         the sidebar (the rail widens via .shell.activity-open). Direct child of .rail
+         so the activity-open rule can hide every other rail section but the brand
+         header and this. Populated by app.js (activityChat); hidden until opened. -->
+    <div class="rail-chat" id="rail-chat" hidden></div>
+
     <!-- sidebar Hermes badge removed at Dennis's request; the hero carries the Hermes credit -->
 
 
@@ -137,6 +143,11 @@
            auto-saved). NOT shown to customers; this is Dennis's view. Also openable
            via ?view=analytics. -->
       <button id="rail-analytics" class="rail-analytics" type="button" title="Operator analytics — P&amp;L across all builds"><svg class="ic" aria-hidden="true"><use href="#i-coin"/></svg><span>Analytics</span></button>
+      <!-- ACTIVITY (operator): the complete live log of what HERMES (the producer
+           agent) and NEMOTRON (the planning brain) did across every build — actor-
+           tagged events + the Nemotron planner calls (model + tokens). Mirrors the
+           Analytics entry's mechanism. Also openable via ?view=activity. -->
+      <button id="rail-activity" class="rail-analytics rail-activity" type="button" title="Activity — the complete Hermes + Nemotron log across every build"><svg class="ic" aria-hidden="true"><use href="#i-wave"/></svg><span>Activity</span></button>
       <div class="rail-conn">
         <span class="rec"><span class="rec-dot" id="conn-dot"></span><span id="conn-text">connecting</span></span>
         <button id="refresh" class="btn rail-sync" title="Reload runs"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg><span>SYNC</span></button>
@@ -251,15 +262,11 @@
             <div class="cmp-url-row">
               <input id="build-url" class="build-in cmp-in cmp-url" placeholder="Company URL — e.g. stripe.com" autocomplete="off" spellcheck="false" inputmode="url" />
             </div>
-            <!-- EMPHASIS — the walkthrough target. The agent steers the guided
-                 Walk Agent capture toward THIS feature/area (becomes the
-                 walkthrough's specific multi-step goal, avoiding the one-nav-link
-                 loop). Threaded into the /api/build payload as { emphasis } and on
-                 to build_runner.py as --emphasis. Empty is fine — the backend
+            <!-- Emphasis (walkthrough target) input removed from the front page to
+                 keep the composer to goal + URL. The agent now infers the walkthrough
+                 target from the goal + captured site; the /api/build payload sends
+                 emphasis="" (app.js reads #build-emphasis null-safely) and the backend
                  defaults emphasis="". -->
-            <div class="cmp-url-row cmp-emph-row">
-              <input id="build-emphasis" class="build-in cmp-in cmp-url cmp-emph" placeholder="What should the walkthrough show off? e.g. the pricing page" autocomplete="off" spellcheck="false" />
-            </div>
           </div>
 
           <!-- QUALITY moved UP into the setting-chips row above the input (Hera-style

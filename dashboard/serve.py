@@ -249,6 +249,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._api_active()
         if self.path.startswith("/api/analytics"):
             return self._api_analytics()
+        if self.path.startswith("/api/activity"):
+            return self._api_activity()
         if self.path.startswith("/api/editor/runs"):
             return self._api_editor_runs()
         if self.path.startswith("/api/editor/props"):
@@ -268,6 +270,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._json(200, analytics.summarize())
         except Exception as e:  # noqa: BLE001 - never let one bad ledger 500 the rest
             self._json(500, {"error": "analytics failed: %s" % e})
+
+    def _api_activity(self):
+        """READ-ONLY activity feed: aggregate every runs/*/ledger.json into the
+        actor-tagged Hermes/Nemotron event stream the Activity tab consumes.
+        Delegates to activity.feed(); lazy import + error-trapped so one bad ledger
+        (or a problem in activity.py) becomes a 500, never a server crash.
+        """
+        try:
+            if PROJECT_ROOT not in sys.path:
+                sys.path.insert(0, PROJECT_ROOT)
+            import activity
+            self._json(200, activity.feed())
+        except Exception as e:  # noqa: BLE001 - never let one bad ledger 500 the rest
+            self._json(500, {"error": "activity failed: %s" % e})
 
     def _api_active(self):
         """Report ONLY genuinely-live builds.

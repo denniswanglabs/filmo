@@ -2060,3 +2060,101 @@ button { font-family: inherit; cursor: pointer; }
   .about-thesis { grid-template-columns: 1fr; }
   .about-built-grid { grid-template-columns: 1fr; }
 }
+
+/* ============================================================================
+   AGENT ACTIVITY panel — the live Hermes <-> Nemotron CHAT, rendered INSIDE the
+   sidebar. Clicking the Activity tab adds .activity-open to #shell: the rail column
+   widens and every rail section but the brand header + this panel is hidden.
+   Hermes = brand coral (left bubbles), Nemotron = NVIDIA green (right bubbles),
+   Stripe = indigo (centered system note).
+   ========================================================================== */
+.shell.activity-open { grid-template-columns: min(480px, 80vw) 1fr; }
+.shell.activity-open .rail > :not(.rail-brand):not(.rail-chat) { display: none; }
+.shell.activity-open .rail-chat { display: flex; flex-direction: column; flex: 1 1 auto;
+  min-height: 0; overflow: hidden; }
+.rail-chat .activity { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+
+/* header (fixed) */
+.act-head { flex: none; padding: 12px 14px 12px; border-bottom: 1px solid var(--line); }
+.act-head-top { display: flex; align-items: center; justify-content: space-between; }
+.act-eyebrow { font-family: var(--mono); font-size: 9px; letter-spacing: .08em; color: var(--amber); }
+.act-close { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid transparent;
+  border-radius: var(--r-ctl); background: transparent; color: var(--ink-4); cursor: pointer;
+  font-size: 19px; line-height: 1; }
+.act-close:hover { color: var(--ink-2); background: var(--bg-2); border-color: var(--line); }
+.act-close .ic { width: 15px; height: 15px; }
+.act-head-title { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 17px; font-weight: 750; }
+.act-d-hermes { color: var(--amber); }
+.act-d-nemotron { color: #5a8c00; }
+.act-arrow { display: inline-flex; }
+.act-arrow .ic { width: 16px; height: 16px; color: var(--ink-4); }
+.act-headsub { margin-top: 6px; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+.act-stats { display: flex; gap: 16px; margin-top: 11px; }
+.act-stat { display: flex; flex-direction: column; gap: 1px; }
+.act-stat-v { font-size: 15px; font-weight: 650; color: var(--ink); line-height: 1.1; }
+.act-stat-k { font-family: var(--mono); font-size: 8.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
+
+/* scrollable feed */
+.act-feed { flex: 1 1 auto; overflow-y: auto; padding: 12px 12px 18px; display: flex; flex-direction: column; gap: 14px; }
+.act-loading, .act-empty { display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 44px 16px; color: var(--ink-3); text-align: center; }
+.act-loading .ic, .act-empty .ic { width: 24px; height: 24px; color: var(--ink-4); }
+.act-empty-t { font-weight: 600; color: var(--ink); font-size: 13px; }
+.act-empty-d { font-size: 11.5px; color: var(--ink-3); max-width: 34ch; line-height: 1.5; }
+.act-retry { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px;
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg-1); cursor: pointer; color: var(--ink-2); }
+.act-retry .ic { width: 13px; height: 13px; }
+.act-more { font-size: 10.5px; color: var(--ink-4); text-align: center; padding: 4px 0 2px; }
+
+/* the standing system prompt (real Hermes instructions) */
+.act-sys { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); padding: 8px 10px; }
+.act-sys summary { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-2); cursor: pointer; list-style: none; }
+.act-sys summary::-webkit-details-marker { display: none; }
+.act-sys summary .ic { width: 13px; height: 13px; color: var(--ink-3); }
+.act-sys-n { margin-left: auto; font-size: 9.5px; color: var(--ink-4); }
+.act-sys-pre { margin-top: 8px; font-family: var(--code); font-size: 10px; color: var(--ink-2);
+  white-space: pre-wrap; line-height: 1.55; max-height: 170px; overflow: auto; }
+
+/* one conversation per build */
+.act-conv { display: flex; flex-direction: column; gap: 8px; }
+.act-conv-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.act-conv-brand { font-size: 12.5px; font-weight: 650; color: var(--ink); }
+.act-conv-brain { font-size: 9px; color: var(--ink-3); }
+.act-conv-tok { font-size: 9px; color: var(--ink-4); margin-left: auto; }
+.act-conv-status { font-family: var(--mono); font-size: 8px; letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; background: var(--bg-2); color: var(--ink-3); border: 1px solid var(--line); }
+.act-conv-tok + .act-conv-status { margin-left: 0; }
+.act-conv-status.st-delivered { color: #1c7a4a; background: rgba(28,122,74,.10); border-color: rgba(28,122,74,.26); }
+.act-conv-status.st-running { color: var(--amber); background: rgba(214,53,28,.10); border-color: rgba(214,53,28,.26); }
+
+/* the chat thread: Hermes left, Nemotron right, Stripe centered */
+.act-turns { display: flex; flex-direction: column; gap: 7px; }
+.act-turn { display: flex; }
+.act-turn.t-hermes { justify-content: flex-start; }
+.act-turn.t-nemotron { justify-content: flex-end; }
+.act-turn.t-stripe { justify-content: center; }
+.act-bubble { max-width: 88%; border-radius: 12px; padding: 7px 11px; font-size: 12px; line-height: 1.5; }
+.t-hermes .act-bubble { background: rgba(214,53,28,.055); border: 1px solid rgba(214,53,28,.16); border-bottom-left-radius: 4px; }
+.t-nemotron .act-bubble { background: rgba(118,185,0,.08); border: 1px solid rgba(118,185,0,.28); border-bottom-right-radius: 4px; }
+.act-bubble-who { font-family: var(--mono); font-size: 8.5px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 3px; }
+.t-hermes .act-bubble-who { color: var(--amber); }
+.t-nemotron .act-bubble-who { color: #4f7a00; }
+.act-bubble-text { color: var(--ink); word-break: break-word; }
+/* execution-step bubbles are quieter than the request/plan conversation turns */
+.k-event .act-bubble { background: var(--bg-2); border-color: var(--line); font-size: 11.5px; }
+.k-event .act-bubble-who { display: none; }
+.k-event .act-bubble-text { color: var(--ink-2); }
+.act-bubble-meta { margin-top: 5px; font-size: 9.5px; color: var(--ink-3); }
+.act-scenes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.act-scene { font-family: var(--mono); font-size: 9px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(118,185,0,.12); color: #4f7a00; }
+.act-script { margin-top: 6px; }
+.act-script summary { font-size: 10px; color: var(--ink-3); cursor: pointer; list-style: none; }
+.act-script summary::-webkit-details-marker { display: none; }
+.act-script-t { margin-top: 5px; font-size: 11.5px; color: var(--ink-2); font-style: italic; line-height: 1.5; }
+.act-sys-note { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; color: #4f46c8;
+  background: rgba(99,91,255,.07); border: 1px solid rgba(99,91,255,.20); border-radius: 999px; padding: 3px 11px; }
+.act-sys-note .ic { width: 12px; height: 12px; }
+
+/* the Activity tab on-state */
+.rail-activity.is-on { color: var(--ink); background: var(--bg-2); }

@@ -526,6 +526,7 @@ function newBuild() {
   stopLiveStatus();         // …and the elapsed-timer rAF loop
   exitAnalytics();          // leaving the operator view (if it was open)
   exitAbout();              // leaving the About view (if it was open)
+  exitActivity();           // …and the Activity view (if it was open)
   state.building = null;
   state.selected = null;
   document.querySelectorAll(".run-wrap").forEach((c) => c.classList.remove("active"));
@@ -619,6 +620,7 @@ async function selectRun(runId, silent) {
   stopLiveStatus();         // …and the building-phase elapsed-timer rAF loop
   exitAnalytics();          // opening a build leaves the operator analytics view
   exitAbout();              // ...and the About view
+  exitActivity();           // ...and the Activity view
   state.selected = runId;
   document.querySelectorAll(".run-wrap").forEach((c) => c.classList.toggle("active", c.getAttribute("data-run") === runId));
   // On narrow viewports, opening a build closes the (overlay) sidebar so the build
@@ -2505,6 +2507,7 @@ async function openAnalytics() {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
   stopLiveStatus();        // …and the elapsed-timer rAF loop
   exitAbout();              // opening Analytics leaves the About view
+  exitActivity();           // …and the Activity view
   state.building = null;
   state.selected = null;
   state.view = "analytics";
@@ -2534,6 +2537,191 @@ async function openAnalytics() {
 function exitAnalytics() {
   state.view = null;
   const a = $("rail-analytics"); if (a) a.classList.remove("is-on");
+}
+
+/* ============================================================================
+   ACTIVITY view — the complete live log of what HERMES (the producer agent) and
+   NEMOTRON (the planning brain) did across every build. Operator-facing; opened
+   from the sidebar Activity tab or ?view=activity. Mirrors the Analytics view's
+   mechanism. Data source: GET /api/activity -> activity.feed() shape
+   { generated_at, truncated, totals:{...}, runs:[{ ...header, events:[{actor,msg}] }] }.
+   Auto-refreshes every few seconds so a live build streams in. The route may 404
+   until the server restarts to activate it — we render a graceful state then.
+   ========================================================================== */
+
+const ACTIVITY_REFRESH_MS = 4000;
+
+// Toggle the in-sidebar Agent activity panel. Opening WIDENS the rail (.activity-open
+// on #shell) and renders the Hermes<->Nemotron conversation into #rail-chat; it does
+// NOT touch the main panel (the composer / open build stays put). Clicking the tab
+// again — or the panel's close button, or any other nav — closes it.
+async function openActivity() {
+  if (state.chatOpen) { exitActivity(); return; }   // toggle off
+  state.chatOpen = true;
+  state.activitySig = null;                          // force a fresh render on open
+  const shell = $("shell"); if (shell) shell.classList.add("activity-open");
+  const a = $("rail-activity"); if (a) a.classList.add("is-on");
+  const chat = $("rail-chat");
+  if (chat) { chat.hidden = false; chat.innerHTML = activityLoading(); }
+  await refreshActivity();
+  if (state.activityTimer) clearInterval(state.activityTimer);
+  state.activityTimer = setInterval(() => {
+    if (!state.chatOpen) { clearInterval(state.activityTimer); state.activityTimer = null; return; }
+    refreshActivity();
+  }, ACTIVITY_REFRESH_MS);
+}
+
+async function refreshActivity() {
+  const chat = $("rail-chat");
+  if (!chat || !state.chatOpen) return;
+  try {
+    const res = await fetch("/api/activity", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (!state.chatOpen) return;                      // closed while fetching
+    // Skip the repaint (and its entrance animation) when nothing moved, so an idle
+    // feed never flickers on the live-tail timer; only re-render when it changed.
+    const sig = activitySig(data);
+    if (sig === state.activitySig && chat.querySelector(".act-feed")) return;
+    state.activitySig = sig;
+    chat.innerHTML = activityChat(data || {});
+    const c = $("act-close"); if (c) c.onclick = exitActivity;
+  } catch (e) {
+    if (!state.chatOpen) return;
+    if (!chat.querySelector(".act-feed")) {           // don't clobber a good feed on a blip
+      chat.innerHTML = activityUnavailable(e.message);
+      const r = $("act-retry"); if (r) r.onclick = () => { state.activitySig = null; refreshActivity(); };
+      const c = $("act-close"); if (c) c.onclick = exitActivity;
+    }
+  }
+}
+
+// Close the Agent activity panel: un-widen the rail, hide the chat, stop the tail.
+function exitActivity() {
+  if (!state.chatOpen && !(state.activityTimer)) {
+    const a0 = $("rail-activity"); if (a0) a0.classList.remove("is-on"); return;
+  }
+  state.chatOpen = false;
+  if (state.activityTimer) { clearInterval(state.activityTimer); state.activityTimer = null; }
+  const shell = $("shell"); if (shell) shell.classList.remove("activity-open");
+  const chat = $("rail-chat"); if (chat) chat.hidden = true;
+  const a = $("rail-activity"); if (a) a.classList.remove("is-on");
+}
+
+// Panel header: title + close + the "proof of execution" framing + token stats.
+function activityHead(t) {
+  const stats = t ? ('<div class="act-stats">' +
+    actStat("Builds", numfmt(t.builds)) +
+    actStat("Nemotron calls", numfmt(t.nemotron_calls)) +
+    actStat("Nemotron tokens", numfmt(t.nemotron_tokens)) +
+    "</div>") : "";
+  return '<div class="act-head">' +
+    '<div class="act-head-top">' +
+      '<span class="act-eyebrow">LIVE · AGENT ACTIVITY</span>' +
+      '<button class="act-close" id="act-close" type="button" title="Close activity" aria-label="Close activity">×</button>' +
+    "</div>" +
+    '<div class="act-head-title"><span class="act-d act-d-hermes">Hermes</span>' +
+      '<span class="act-arrow">' + icon("i-arrow") + "</span>" +
+      '<span class="act-d act-d-nemotron">Nemotron</span></div>' +
+    '<p class="act-headsub">The live conversation between the producer agent and the planning brain — proof the agent is really executing on Nemotron.</p>' +
+    stats + "</div>";
+}
+
+function actStat(k, v) {
+  return '<div class="act-stat"><span class="act-stat-v mono">' + v + '</span><span class="act-stat-k">' + esc(k) + "</span></div>";
+}
+
+// The real standing system prompt Hermes gives Nemotron — collapsed by default.
+function activitySystemPrompt(sp) {
+  if (!sp || !sp.chars) return "";
+  return '<details class="act-sys"><summary>' + icon("i-code") +
+    "Hermes’ standing instructions to Nemotron <span class=\"act-sys-n mono\">" + numfmt(sp.chars) + " chars</span></summary>" +
+    '<pre class="act-sys-pre">' + esc(sp.preview || "") + (sp.truncated ? "\n…" : "") + "</pre></details>";
+}
+
+function activityLoading() {
+  return '<div class="activity">' + activityHead(null) +
+    '<div class="act-loading">' + icon("i-loader", "ic spin") + "<span>Loading conversation…</span></div></div>";
+}
+
+function activityUnavailable(msg) {
+  return '<div class="activity">' + activityHead(null) +
+    '<div class="act-empty">' + icon("i-wave") +
+      '<div class="act-empty-t">Activity isn’t available yet.</div>' +
+      '<div class="act-empty-d">The <code>/api/activity</code> endpoint isn’t responding' +
+        (msg ? " (" + esc(msg) + ")" : "") + ". It activates when the server restarts.</div>" +
+      '<button class="act-retry" id="act-retry" type="button">' + icon("i-refresh") + "Retry</button>" +
+    "</div></div>";
+}
+
+function activityChat(data) {
+  const t = data.totals || {};
+  const runs = Array.isArray(data.runs) ? data.runs : [];
+  if (!runs.length) {
+    return '<div class="activity">' + activityHead(t) +
+      '<div class="act-empty">' + icon("i-wave") +
+        '<div class="act-empty-t">No activity yet.</div>' +
+        '<div class="act-empty-d">Run a build and the Hermes ↔ Nemotron conversation streams in here.</div>' +
+      "</div></div>";
+  }
+  return '<div class="activity">' + activityHead(t) +
+    '<div class="act-feed">' +
+      activitySystemPrompt(data.system_prompt) +
+      runs.map(activityRun).join("") +
+    "</div>" +
+    (data.truncated ? '<div class="act-more">Showing the ' + numfmt(t.builds_shown) + " most recent of " + numfmt(t.builds) + " builds.</div>" : "") +
+    "</div>";
+}
+
+// One build = one conversation: a divider (brand · brain · status · tokens) then the
+// turns rendered as a chat thread (Hermes left, Nemotron right, Stripe centered).
+function activityRun(r) {
+  const tok = (r.tokens && r.tokens.total != null) ? numfmt(r.tokens.total) + " tok" : "";
+  const div = '<div class="act-conv-head">' +
+    '<span class="act-conv-brand">' + esc(r.brand || r.run_id || "—") + "</span>" +
+    '<span class="act-conv-brain mono">' + esc(r.brain_label || "—") + "</span>" +
+    (tok ? '<span class="act-conv-tok mono">' + tok + "</span>" : "") +
+    '<span class="act-conv-status st-' + esc(r.status || "") + '">' + esc(r.status || "—") + "</span>" +
+    "</div>";
+  const turns = (r.turns || []).map(activityTurn).join("");
+  return '<div class="act-conv">' + div + '<div class="act-turns">' + turns + "</div></div>";
+}
+
+function activityTurn(t) {
+  const from = t.from || "hermes";
+  if (from === "stripe") {
+    return '<div class="act-turn t-stripe"><span class="act-sys-note">' + icon("i-card") + esc(t.text || "") + "</span></div>";
+  }
+  const who = from === "nemotron" ? "Nemotron" : "Hermes";
+  let body = '<div class="act-bubble-who">' + who + "</div>" +
+    '<div class="act-bubble-text">' + esc(t.text || "") + "</div>";
+  if (t.kind === "plan") {
+    const meta = [t.brain, (t.tokens && t.tokens.total != null ? numfmt(t.tokens.total) + " tok" : null),
+      (t.finish_reason ? "finish: " + t.finish_reason : null)].filter(Boolean).join("  ·  ");
+    body += '<div class="act-bubble-meta mono">' + esc(meta) + "</div>";
+    if (Array.isArray(t.scenes) && t.scenes.length) {
+      body += '<div class="act-scenes">' + t.scenes.map((s) => '<span class="act-scene">' + esc(s) + "</span>").join("") + "</div>";
+    }
+    if (t.script) {
+      body += '<details class="act-script"><summary>voiceover script</summary><div class="act-script-t">' + esc(t.script) + "</div></details>";
+    }
+  }
+  const kindCls = t.kind ? " k-" + t.kind : "";
+  return '<div class="act-turn t-' + from + kindCls + '"><div class="act-bubble">' + body + "</div></div>";
+}
+
+// Compact thousands-formatted integer ("79015" -> "79,015"); "—" for null.
+function numfmt(n) {
+  if (n == null || isNaN(n)) return "—";
+  return Math.round(n).toLocaleString("en-US");
+}
+
+// A cheap change-signature: total turns + build count + the newest run's id/status/
+// turn-count. Identical signature => nothing moved => skip repaint (no flicker).
+function activitySig(data) {
+  const t = data.totals || {};
+  const r0 = (data.runs || [])[0] || {};
+  return [t.turns, t.builds, r0.run_id, r0.status, (r0.turns || []).length].join("|");
 }
 
 function analyticsHead() {
@@ -2694,6 +2882,7 @@ function openAbout() {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
   stopLiveStatus();         // …and the elapsed-timer rAF loop
   exitAnalytics();          // opening About leaves the operator analytics view
+  exitActivity();           // …and the Activity view
   state.building = null;
   state.selected = null;
   state.view = "about";
@@ -3039,6 +3228,9 @@ function init() {
   // ABOUT entry (sidebar footer, customer-facing) — opens the how-it-works +
   // curation-thesis view (where the curated lookbook now lives).
   const rb = $("rail-about"); if (rb) rb.addEventListener("click", openAbout);
+  // ACTIVITY entry (sidebar footer, operator) — opens the complete live Hermes +
+  // Nemotron activity log across every build.
+  const rv = $("rail-activity"); if (rv) rv.addEventListener("click", openActivity);
   // Sidebar collapse / reopen. On wide layouts we toggle .rail-collapsed (slides
   // the grid column to 0). On narrow layouts the rail is collapsed by default and
   // .rail-open slides it in (see the <=940px @media). One toggle handles both.
@@ -3090,6 +3282,13 @@ function init() {
   if (_params && _params.get("view") === "about") {
     loadIndex(false);
     openAbout();
+    return;
+  }
+  // Deep-link to the operator Activity view (?view=activity). Same shape: load the
+  // rail so the sidebar populates, then open the live Hermes + Nemotron log.
+  if (_params && _params.get("view") === "activity") {
+    loadIndex(false);
+    openActivity();
     return;
   }
   // Resume an in-flight build FIRST so a live run takes priority over auto-selecting
