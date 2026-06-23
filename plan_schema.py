@@ -146,7 +146,10 @@ def validate_plan(plan, *, strict_durations=False):
 
     # `selection` is an OPTIONAL fourth top-level key (the premium menu). Plans
     # without it remain valid (back-compat, esp. when WS_PREMIUM_MENU is OFF).
-    allowed_top = {"job", "scenes", "voiceover", "selection"}
+    # `_planner` is an OPTIONAL internal provenance block (plan_source / brain /
+    # finish_reason / token usage) stamped by plan_job so EVERY build plainly shows
+    # whether the real LLM planned it or it fell back to the deterministic template.
+    allowed_top = {"job", "scenes", "voiceover", "selection", "_planner"}
     extra = set(plan.keys()) - allowed_top
     missing_core = {"job", "scenes", "voiceover"} - set(plan.keys())
     if extra or missing_core:

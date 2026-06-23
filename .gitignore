@@ -85,3 +85,6 @@ tmp/
 # per-run capture fixtures (regenerated each build; not source)
 studio/public/shot-*.png
 studio/public/brand-logo-*.svg
+
+# generated run artifacts (dashboard reads from disk; not versioned)
+runs/

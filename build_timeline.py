@@ -56,6 +56,18 @@ DEFAULT_HOLD_S = 1.5
 WALKTHROUGH_MAX_FRAMES = 270  # 9.0s @ 30fps
 _WALKTHROUGH_ROLES = ("walkthrough", "demo")
 
+# DURATION ROBUSTNESS — the per-scene HOLD budget. A non-walkthrough scene (title /
+# screenshot / explainer) holds at most this long on its finished card; growing a
+# sparse plan toward target spreads the deficit across scenes up to this cap so no
+# single card stares. == the walkthrough budget so every scene shares one ceiling.
+_SCENE_MAX_FRAMES = 270  # 9.0s @ 30fps
+
+# DURATION ROBUSTNESS — tolerance before the over-target shrink bites. A film may run
+# up to target * (1 + tol) before holds are squeezed back toward the ceiling; some
+# slack keeps a near-target plan untouched. The VO condense (style_fill) already pulls
+# a dense plan most of the way; this catches the residue.
+_OVER_TARGET_TOL = 0.08
+
 # Map a plan scene `type` (or id keyword) -> a semantic ROLE that style_fill's
 # registry can route to an archetype. The plan describes scenes by `type`
 # ("title" | "motion_graphic" | "cinematic" | "walkthrough" | "demo" | ...) but
@@ -264,6 +276,108 @@ def _scene_audio(scene_index: int, scene_id: str, alignment: Dict[str, Any],
     return {"src": beat_path}
 
 
+def _apportion(amount: int, capacities: List[int]) -> List[int]:
+    """Split a non-negative integer `amount` across buckets, each capped by its
+    capacity, proportional to capacity, summing to min(amount, sum(capacities)).
+    Largest-remainder method — deterministic, bounded, NEVER loops (the old
+    `while drift` round-robin could spin when rounding overshot). Used by both the
+    grow (capacity = headroom) and shrink (capacity = slack) passes."""
+    n = len(capacities)
+    total_cap = sum(capacities)
+    give = min(max(0, amount), total_cap)
+    if n == 0 or give <= 0 or total_cap <= 0:
+        return [0] * n
+    # Floor share + fractional remainder per bucket.
+    raw = [give * c / total_cap for c in capacities]
+    out = [min(int(r), cap) for r, cap in zip(raw, capacities)]
+    left = give - sum(out)
+    # Hand the remaining units one-by-one to the buckets with the largest fraction
+    # that still have headroom. Bounded by `left` (<= n in the worst case after the
+    # proportional pass, but loop on remaining-capacity buckets to be safe).
+    order = sorted(range(n), key=lambda i: (raw[i] - int(raw[i])), reverse=True)
+    idx = 0
+    guard = left + n  # hard upper bound on iterations — can never infinite-loop
+    while left > 0 and guard > 0:
+        i = order[idx % n]
+        if out[i] < capacities[i]:
+            out[i] += 1
+            left -= 1
+        idx += 1
+        guard -= 1
+    return out
+
+
+def _relayout(out_scenes: List[Dict[str, Any]], lengths: List[int]) -> None:
+    """Rewrite in/out frames contiguously from per-scene lengths (no gaps/overlaps),
+    sliding each scene's cues by the same delta its in_frame moved so a word-anchored
+    reveal stays put relative to its scene."""
+    cursor = 0
+    for s, length in zip(out_scenes, lengths):
+        delta = cursor - s["in_frame"]
+        s["in_frame"] = cursor
+        s["out_frame"] = cursor + length
+        if delta and s.get("cues"):
+            for c in s["cues"]:
+                c["at_frame"] = min(max(c["at_frame"] + delta, s["in_frame"]),
+                                    s["out_frame"])
+        cursor = s["out_frame"]
+
+
+def _grow_scenes_to_target(out_scenes: List[Dict[str, Any]], target_frames: int,
+                           fps: int) -> None:
+    """SPARSE-plan fill: grow scene HOLDS to reach target_frames, spread across ALL
+    scenes (each capped at the per-scene budget) rather than dumped on the last one.
+
+    A sparse planner (Super) sets short scenes whose VO under-fills the target; the
+    old code padded only the LAST scene and the 9s cap then left the film short. Here
+    every scene can grow up to _SCENE_MAX_FRAMES (walkthroughs to WALKTHROUGH_MAX),
+    so the deficit is absorbed evenly and the film reaches target without one staring
+    card. If even all scenes maxed out cannot reach target, the film simply lands as
+    long as it can (every scene at its cap) — a slightly short film beats a dead hold.
+    """
+    lengths = [s["out_frame"] - s["in_frame"] for s in out_scenes]
+    caps = [WALKTHROUGH_MAX_FRAMES if s.get("role") in _WALKTHROUGH_ROLES
+            else _SCENE_MAX_FRAMES for s in out_scenes]
+    # Never shrink here; the cap floor is the scene's current (content-driven) length.
+    caps = [max(cap, ln) for cap, ln in zip(caps, lengths)]
+
+    deficit = target_frames - sum(lengths)
+    if deficit <= 0:
+        return
+    # Spread the deficit proportional to each scene's headroom (toward its cap).
+    headroom = [cap - ln for cap, ln in zip(caps, lengths)]
+    total_head = sum(headroom)
+    if total_head <= 0:
+        return
+    grown = _apportion(deficit, headroom)
+    lengths = [ln + g for ln, g in zip(lengths, grown)]
+    _relayout(out_scenes, lengths)
+
+
+def _shrink_holds_to_ceiling(out_scenes: List[Dict[str, Any]], floors: List[int],
+                             ceiling: int) -> None:
+    """DENSE-plan clamp: shrink scene HOLDS (length above each scene's content floor)
+    proportionally so the film total drops to `ceiling`. NEVER shrinks a scene below
+    its floor = max(VO span, media) — narration is never cut, a clip never truncated.
+
+    The VO condense (style_fill) keeps the voice near budget upstream; this is the
+    safety net for a plan that STILL overruns (a brain that wrote past the budget). If
+    the floors alone already exceed the ceiling (all content, no holds to cut), the
+    film is left at its floor total — a faithful (slightly long) film beats cutting
+    the voice. Floors must not exceed the scene's current length (a defensive clamp).
+    """
+    lengths = [s["out_frame"] - s["in_frame"] for s in out_scenes]
+    floors = [min(f, ln) for f, ln in zip(floors, lengths)]
+    slack = [ln - f for ln, f in zip(lengths, floors)]  # removable hold per scene
+    total_slack = sum(slack)
+    overshoot = sum(lengths) - ceiling
+    if overshoot <= 0 or total_slack <= 0:
+        return
+    removed = _apportion(overshoot, slack)
+    lengths = [ln - r for ln, r in zip(lengths, removed)]
+    _relayout(out_scenes, lengths)
+
+
 def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
                    fps: int = DEFAULT_FPS,
                    brand_fallback: str = "",
@@ -388,6 +502,15 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
             # scene by the same offset the scene moved (in_frame - span start frame).
             "_cues_raw": _resolve_cues(scene, words, fps),
             "_span_in": (round(start_s * fps) if start_s is not None else in_frame),
+            # Content FLOORS for the duration-robustness grow/shrink passes: a scene
+            # may be grown above these (a hold) or shrunk back to them, but NEVER below
+            # — the VO is never cut, a media clip is never truncated. Walkthrough roles
+            # are capped at WALKTHROUGH_MAX_FRAMES, so their media floor must not exceed
+            # the cap (else the shrink pass could never bring an over-long clip down).
+            "_span_frames": span_frames,
+            "_media_frames": (min(media_frames, WALKTHROUGH_MAX_FRAMES)
+                              if _derive_role(scene) in _WALKTHROUGH_ROLES
+                              else media_frames),
         })
         cursor = out_frame
         scene_index += 1
@@ -402,35 +525,48 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
             cues.append({"label": c["label"], "word": c["word"], "at_frame": at})
         s["cues"] = cues
 
-    # Total = the laid-out picture. Pad the last scene up to target_duration_s when
-    # the plan asked for a longer film than the scenes summed to (the scene HOLDS on
-    # its finished card during the pad — correct, not blank). Never shrink below the
-    # laid-out length (so a VO that overran its slot is never cut).
-    #
-    # R6 — CAP the close-hero pad to the per-scene 9s budget. The unbounded pad bumped
-    # Notion's CLOSE scene to 11.3s (a 37.2s target on scenes that summed shorter), a
-    # dead hold that dragged pacing. Cap the LAST scene's total length at
-    # max(270f, its own content floor) so the close holds at most ~9s on its finished
-    # card; the leftover target time is just dropped (a slightly shorter film beats an
-    # 11s static close). A close whose VO/clip already runs longer keeps its floor
-    # (never cut). Drop the cap only for a 1-scene film (the whole video is that scene).
+    # -----------------------------------------------------------------------
+    # DURATION ROBUSTNESS — pull EITHER a sparse (Super) or dense (Ultra) plan
+    # toward the target ~duration. The VO condense (style_fill) keeps the voice
+    # near budget; this is the picture-side complement that fills/clamps the holds.
+    # -----------------------------------------------------------------------
     if out_scenes:
         total_frames = out_scenes[-1]["out_frame"]
         if honor_plan_durations and target_duration_s and target_duration_s > 0:
             target_frames = round(float(target_duration_s) * fps)
+            # Per-scene content FLOOR = max(VO span, media) — the length the scene must
+            # hold so narration is never cut and a clip is never truncated. We may
+            # GROW a scene above its floor (a hold) or SHRINK a hold back toward it,
+            # but NEVER below the floor.
+            floors = [max(s.get("_span_frames", 0), s.get("_media_frames", 0))
+                      for s in out_scenes]
+
             if target_frames > total_frames:
-                last = out_scenes[-1]
-                last_floor = last["out_frame"] - last["in_frame"]  # content-driven length
-                if len(out_scenes) > 1:
-                    pad_cap = last["in_frame"] + max(WALKTHROUGH_MAX_FRAMES, last_floor)
-                    padded = min(target_frames, pad_cap)
-                else:
-                    padded = target_frames  # single-scene film: honor the full target
-                if padded > last["out_frame"]:
-                    last["out_frame"] = padded
-                total_frames = last["out_frame"]
+                # SPARSE plan (Super, 23.6s on a 30s target): DISTRIBUTE the deficit
+                # across scenes — each grows toward the per-scene budget — instead of
+                # dumping it all on the last scene (which the 9s cap then blocked,
+                # leaving the film short). Spreading the hold across every scene fills
+                # the target more evenly and keeps any one card from staring.
+                _grow_scenes_to_target(out_scenes, target_frames, fps)
+            else:
+                # DENSE plan (Ultra, 33.1s): if the laid-out film overruns the target
+                # beyond tolerance, SHRINK the holds (scene length above its content
+                # floor) proportionally back down toward the ceiling. Never cut a VO
+                # span or a media clip (floors are hard). The VO condense already does
+                # most of this upstream; this is the safety net for a plan that still
+                # overruns (e.g. a brain that ignored the budget entirely).
+                ceiling = round(target_frames * (1.0 + _OVER_TARGET_TOL))
+                if total_frames > ceiling:
+                    _shrink_holds_to_ceiling(out_scenes, floors, ceiling)
+            total_frames = out_scenes[-1]["out_frame"]
     else:
         total_frames = max(audio_frames, 0)
+
+    # Strip the internal floor markers from the emitted scenes (kept only for the
+    # grow/shrink passes above).
+    for s in out_scenes:
+        s.pop("_span_frames", None)
+        s.pop("_media_frames", None)
 
     return {
         "fps": fps,

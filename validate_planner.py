@@ -381,7 +381,21 @@ def _brand_from_url(url):
     return name.capitalize()
 
 
-def call_model(messages, brain=None):
+# Output budget for the planner call. A full STANDARD/PREMIUM plan JSON is well
+# under ~2.5k tokens, but the Nemotron models (esp. the free 120B Super) emit
+# HIDDEN reasoning tokens that ALSO count against this completion budget while
+# NEVER appearing in `content`. At the old 8000 cap the 120B's reasoning (observed
+# ~8151 tokens) consumed the whole budget -> finish_reason=length -> the JSON was
+# truncated mid-object -> parse/repair failed -> the build silently fell back to the
+# deterministic template ~2 of 3 times. We now (a) turn reasoning OFF for this
+# structured-JSON call (reasoning.effort="none" stops generation and frees the
+# budget; exclude=true belt-and-suspenders strips any leaked reasoning from
+# `content`), AND (b) raise the cap so even if a model ignores the reasoning hint a
+# full plan is never truncated. The two together are what make Super plan reliably.
+PLANNER_MAX_TOKENS = 16000
+
+
+def call_model(messages, brain=None, meta=None):
     """Call the operator-selected planner BRAIN via OpenRouter (OpenAI-compatible).
 
     `brain` is one of brain.VALID_BRAINS (ultra-paid | super-free | super-paid);
@@ -389,6 +403,12 @@ def call_model(messages, brain=None):
     brain keep today's free behavior. Endpoint + model slug + key all come from the
     brain registry — the call body/response shape are unchanged from the legacy
     build.nvidia.com path.
+
+    `meta`: optional dict the caller passes in; when given it is populated with the
+    OpenRouter `finish_reason` and `usage` (prompt/completion/reasoning tokens) so
+    the planner can record WHY a build did or did not get an LLM plan and surface
+    real token costs in the ledger. The return value (the message content string)
+    is unchanged, so existing callers that don't pass `meta` are unaffected.
     """
     bdef = brain_mod.brain_def(brain)
     key = brain_mod.brain_key()
@@ -399,10 +419,18 @@ def call_model(messages, brain=None):
         "model": bdef["slug"],
         "messages": messages,
         "temperature": 0.2,
-        # This model emits hidden reasoning tokens that count against the
-        # completion budget but are not returned in `content`, so the plan + its
-        # reasoning needs generous headroom or the JSON truncates mid-object.
-        "max_tokens": 8000,
+        "max_tokens": PLANNER_MAX_TOKENS,
+        # Turn reasoning OFF for the structured-JSON planner call. effort="none"
+        # tells OpenRouter to stop the model GENERATING reasoning tokens (freeing
+        # the completion budget — the root-cause fix for the 120B truncation);
+        # exclude=true additionally strips any reasoning the model still emits from
+        # `content` so it can't corrupt the JSON we parse. OpenRouter filters
+        # unsupported reasoning fields per-model, so this is safe across all 3
+        # brains. (See OpenRouter "Reasoning Tokens" guide.)
+        "reasoning": {"effort": "none", "exclude": True},
+        # Ask OpenRouter to include token accounting in the response so we can log
+        # the real prompt/completion/reasoning token counts and dollar cost.
+        "usage": {"include": True},
     }
     req = urllib.request.Request(
         brain_mod.brain_endpoint(),
@@ -421,8 +449,12 @@ def call_model(messages, brain=None):
         body = json.loads(resp.read().decode("utf-8"))
     choice = body["choices"][0]
     fr = choice.get("finish_reason")
+    usage = body.get("usage")
+    if isinstance(meta, dict):
+        meta["finish_reason"] = fr
+        meta["usage"] = usage
     if fr and fr != "stop":
-        print(f"[finish_reason={fr} usage={body.get('usage')}]", file=sys.stderr)
+        print(f"[finish_reason={fr} usage={usage}]", file=sys.stderr)
     return choice["message"]["content"]
 
 

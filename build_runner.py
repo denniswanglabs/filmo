@@ -303,6 +303,11 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
     run_dir = os.path.join(RUNS, run_id)
     os.makedirs(run_dir, exist_ok=True)
     led_path = os.path.join(run_dir, "ledger.json")
+    # The build's start epoch (seconds). Stamped on the planning ledger below AND
+    # carried into orchestrate's ledger so created_at is DURABLE: orchestrate mints a
+    # fresh Ledger during production, and without this it would reset created_at to
+    # None, so a mid-build page reload would restart the dashboard's elapsed timer.
+    started_at = time.time()
     job = {"company_url": url, "goal": goal, "target_duration_s": target_duration,
            "target_margin": 0.6, "currency": "usd"}
 
@@ -339,8 +344,14 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         os.environ.setdefault("PRODUCER_COST_STUB",
                               json.dumps({"seedance_2_0": 22, "gpt_image_2": 7, "__default__": 10}))
 
-    # immediate 'planning' ledger so the console has something to show at once
-    led = ledger_mod.Ledger(run_id, job, mode)
+    # immediate 'planning' ledger so the console has something to show at once.
+    # Stamp created_at (epoch seconds, a plain number) at the very start so the
+    # dashboard's live status panel can show a SERVER-TRUTH elapsed timer that
+    # survives a page reload (previously created_at was always None, leaving the
+    # timer to guess from the client's first poll). It only ADDS a value to a field
+    # the schema already carries (index.json passes created_at through unchanged) —
+    # no money/ledger logic moves.
+    led = ledger_mod.Ledger(run_id, job, mode, now=started_at)
     led.set_status("running")
     led.set_phase("planning")
     led.event("info", "agent visiting %s — reading the site and planning the storyboard…" % url)
@@ -373,7 +384,30 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         # prices it (standard floors at $5; premium includes Higgsfield + ElevenLabs
         # COGS) and orchestrate produces the matching stack. Stamp the chosen BRAIN
         # too (operator observability / future planner-COGS; default super-free=$0).
-        plan["selection"] = {"quality": quality, "brain": brain}
+        # Carry the planner PROVENANCE (set by plan_job._planner) into selection so
+        # the dashboard/ledger plainly shows whether the REAL LLM planned this build
+        # or it fell back to the deterministic template — and WHY (finish_reason /
+        # reason) plus the token usage. This is what makes "testing on Super"
+        # trustworthy: a template build is no longer indistinguishable from an LLM
+        # one. plan_source defaults to "llm" if the provenance block is absent.
+        _prov = plan.get("_planner") or {}
+        plan_source = _prov.get("plan_source", "llm")
+        plan["selection"] = {
+            "quality": quality,
+            "brain": brain,
+            "plan_source": plan_source,
+            "finish_reason": _prov.get("finish_reason"),
+            "planner_reason": _prov.get("reason"),
+            "planner_usage": _prov.get("usage"),
+        }
+        if plan_source == "template":
+            led.event("info",
+                      "planner: brain=%s produced NO LLM plan (reason=%s) — this "
+                      "build used the DETERMINISTIC TEMPLATE, not the LLM"
+                      % (brain, _prov.get("reason")))
+        else:
+            led.event("info", "planner: brain=%s planned this build (LLM, finish_reason=%s)"
+                      % (brain, _prov.get("finish_reason")))
 
         # -- PRICE before producing -------------------------------------------
         price_cents, currency, est = _price_plan(plan, run_dir)
@@ -409,6 +443,14 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         # -- PRODUCE (only after payment) ------------------------------------
         led.event("money", "payment received — $%.2f" % ((price_cents or 0) / 100.0))
         led.set_phase("producing")
+        # SUB-STAGE signal for the live status panel: the producing PHASE spans
+        # several sub-steps (capture screenshots -> orchestrate the scenes ->
+        # render), and the long screenshot-capture step below is otherwise SILENT
+        # (no scene/phase change), so the panel would sit on a static "producing"
+        # chip. `stage` is a tiny advisory string the dashboard reads to advance its
+        # checklist; it NEVER gates money/ledger logic (the SACRED path keys off
+        # status/phase/earn only). Absent => the dashboard falls back to phase.
+        led.data["stage"] = "capturing"
         led.write(led_path)
 
         # SCREENSHOTS (mode-independent, $0): capture the real site BEFORE orchestrate
@@ -423,6 +465,12 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
 
         data, _ = orchestrator.orchestrate(
             plan, run_id, mode=mode,
+            # Carry the build's start epoch so the production ledger keeps the SAME
+            # created_at the planning ledger had — keeps the dashboard elapsed timer
+            # correct even if the customer reloads mid-build (otherwise orchestrate's
+            # fresh ledger would reset created_at to None). Reproducible-safe: `now`
+            # is only the ledger's created_at value, never used in any computation.
+            now=started_at,
             # Studio overlays (the white, brand-authored Remotion cards) render in
             # EVERY mode now — decoupled from mock. Previously real mode forced
             # overlays="mock", which routed title/motion_graphic scenes to the flat
@@ -451,6 +499,11 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
             except (OSError, ValueError):
                 disk_led = led  # no readable ledger on disk — keep the event somewhere
             try:
+                # Advisory sub-stage for the live panel during the otherwise-silent
+                # final render (the slowest, no-scene-change tail). Same contract as
+                # the "capturing" stage above: read-only hint, never a gate.
+                disk_led.data["stage"] = "rendering"
+                disk_led.write(led_path)
                 final = _run_vo_engine(plan, run_id, url, run_dir)
                 if final:
                     disk_led.event("info", "VO-ENGINE: rendered never-blank <Timeline> "
@@ -458,9 +511,11 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
                 else:
                     disk_led.event("info", "VO-ENGINE: engine render unavailable — kept the "
                                    "legacy picture for this run")
+                disk_led.data["stage"] = None  # render finished — clear the advisory
                 disk_led.write(led_path)
             except Exception as e:  # never let the picture step fail a delivered run
                 disk_led.event("info", "VO-ENGINE: skipped (%s) — kept the legacy picture" % e)
+                disk_led.data["stage"] = None
                 disk_led.write(led_path)
         return data
     except SystemExit:

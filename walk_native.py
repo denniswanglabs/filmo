@@ -105,14 +105,14 @@ _EXTRA_HEADERS = {
         "text/html,application/xhtml+xml,application/xml;"
         "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
     ),
-    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
-    "sec-fetch-dest": "document",
-    "sec-fetch-mode": "navigate",
-    "sec-fetch-site": "none",
-    "sec-fetch-user": "?1",
     "Upgrade-Insecure-Requests": "1",
+    # NOTE (gate/interstitial overhaul, 2026-06-23): deliberately NO pinned
+    # `sec-ch-ua*` / `sec-fetch-*` here. Hand-set client-hints override Chromium's
+    # accurate native ones with stale, mismatched values — a bot-tell that makes
+    # Allbirds (and similar CDN-fronted storefronts) serve a CSS-stripped degraded
+    # shell where the region modal never renders as a positioned overlay. Letting
+    # Chromium send its own restores the styled walk + surfaces the gate. Mirrors
+    # capture_screenshots._EXTRA_HEADERS.
 }
 
 # R5 (Shopify bug #5) — URL path segments that indicate a geo-redirect to a
@@ -302,55 +302,396 @@ def _wait_for_spa_hydration(page, settle_ms: int = 1200) -> None:
         pass
 
 
-# Close/confirm/accept affordance selectors for a geo-shipping / region / cookie
-# interstitial. Mirrors capture_screenshots._INTERSTITIAL_DISMISS_SELECTORS. We
-# dismiss the modal BEFORE the screencast starts so the recorded walk shows the
-# real product, not a "Where are we shipping to?" overlay (Allbirds + many
-# storefronts). Order: explicit close/dismiss first, then confirm/accept, so we
-# never submit an unrelated form when a plain close exists.
-_INTERSTITIAL_DISMISS_SELECTORS = (
-    "[aria-label*='close' i]",
-    "[aria-label*='dismiss' i]",
-    "button[class*='close' i]",
-    "button[class*='dismiss' i]",
-    "[data-testid*='close' i]",
-    "button:has-text('No thanks')",
-    "button:has-text('Continue')",
-    "button:has-text('Confirm')",
-    "button:has-text('Accept all')",
-    "button:has-text('Accept')",
-    "button:has-text('Got it')",
-    "button:has-text('Stay')",
-    "button:has-text('I agree')",
+# ===========================================================================
+# PRE-CONTENT GATE HANDLER (brand-agnostic, idempotent)
+# ===========================================================================
+# Self-contained duplicate of capture_screenshots' gate handler (per the L16
+# duplicated-helper convention — walk + capture run as separate subprocesses).
+# We run it BEFORE the screencast starts so the recorded walk shows real product,
+# not a "Where are we shipping to?" overlay. The naive "click first close" handler
+# FAILS on a gate that REQUIRES a choice (Allbirds' region selector has no
+# close-X); this handler SELECTS a US/English option + confirms for selectors and
+# only DISMISSES for newsletter/cookie overlays. Detect -> classify -> act ->
+# verify-gone -> retry/escalate -> log. Idempotent + non-destructive; never raises.
+
+_GATE_KW_REGION = (
+    "ship", "shipping", "region", "country", "where are you", "where are we",
+    "location", "choose your", "select your country", "select a country",
+    "select your region", "ship to", "shopping from", "deliver to",
+    "store", "your destination", "you're visiting from", "are you in",
+)
+_GATE_KW_AGE = (
+    "are you 21", "are you 18", "21 or older", "18 or older", "over 21",
+    "over 18", "of legal", "old enough", "your age", "verify your age",
+    "i am over", "are you of", "must be 21", "must be 18", "age verification",
+    "drinking age", "21+", "18+",
+)
+_GATE_KW_CONSENT = (
+    "cookie", "cookies", "consent", "privacy", "gdpr", "we use",
+    "your data", "tracking", "personalize", "we value your privacy",
+)
+_GATE_KW_NEWSLETTER = (
+    "subscribe", "newsletter", "sign up", "email", "discount", "% off",
+    "save 10", "save 15", "save 20", "get 10", "first order", "join our",
+    "unlock", "promo", "coupon", "deal",
+)
+_GATE_KW_GENERIC = (
+    "enter", "continue", "continue to site", "enter site", "proceed",
+    "skip", "no thanks", "maybe later",
+)
+_GATE_US_PREFER = (
+    "united states", "shop us", "shop usa", "usa", "u.s.", "us store",
+    "stay on", "stay here", "current site", "this site", "english",
+    "en-us", "go to us", "shop in usd", "$ usd", "usd",
+)
+_GATE_PROCEED_PREFER = (
+    "confirm", "continue", "proceed", "shop now", "enter", "enter site",
+    "go to site", "submit", "done", "save", "apply", "ok", "okay", "got it",
+    "i agree", "agree", "accept all", "accept",
+)
+_GATE_AGE_AFFIRM = (
+    "yes", "i am over", "i'm over", "21", "18", "of legal age", "enter",
+    "i am of", "over 21", "over 18", "confirm",
+)
+_GATE_CONSENT_AFFIRM = (
+    "accept all", "accept", "agree", "i agree", "allow all", "ok", "okay",
+    "got it", "continue",
+)
+_GATE_DISMISS_PREFER = (
+    "no thanks", "no, thanks", "not now", "maybe later", "close", "dismiss",
+    "skip", "x", "×",
 )
 
+_GATE_DETECT_JS = r"""
+() => {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const vArea = Math.max(1, vw * vh);
+  const isShown = (el) => {
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  };
+  const be = document.body, he = document.documentElement;
+  const bs = be ? getComputedStyle(be) : null, hs = he ? getComputedStyle(he) : null;
+  const scrollLocked = !!(
+    (bs && (bs.overflow === 'hidden' || bs.position === 'fixed')) ||
+    (hs && (hs.overflow === 'hidden'))
+  );
+  const hasDimBg = (s) => {
+    const bg = s.backgroundColor || '';
+    const m = bg.match(/rgba?\(([^)]+)\)/);
+    if (!m) return false;
+    const parts = m[1].split(',').map(x => parseFloat(x));
+    if (parts.length === 4) return parts[3] > 0.05 && parts[3] < 0.98;
+    return false;
+  };
+  const all = Array.from(document.querySelectorAll(
+    '[role="dialog"], [aria-modal="true"], dialog[open], div, section, aside'
+  ));
+  let best = null, bestArea = 0, bestBackdrop = null, bestBdArea = 0;
+  for (const el of all) {
+    if (!isShown(el)) continue;
+    const s = getComputedStyle(el);
+    const pos = s.position;
+    const z = parseInt(s.zIndex, 10);
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    const ariaModal = el.getAttribute('aria-modal') === 'true';
+    const isDialogRole = role === 'dialog' || role === 'alertdialog' ||
+                         ariaModal || el.tagName === 'DIALOG';
+    const r = el.getBoundingClientRect();
+    const frac = (Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) *
+                 Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0))) / vArea;
+    const isOverlayPos = pos === 'fixed' || pos === 'absolute' || pos === 'sticky';
+    const highLayer = isOverlayPos && (!isNaN(z) && z >= 50);
+    const fixedBackdrop = pos === 'fixed' && frac >= 0.85;
+    const dimBackdrop = isOverlayPos && frac >= 0.6 && hasDimBg(s);
+    const qualifies =
+      (isDialogRole && frac >= 0.05) ||
+      (highLayer && frac >= 0.3) ||
+      (fixedBackdrop) ||
+      (dimBackdrop) ||
+      (scrollLocked && isOverlayPos && frac >= 0.15);
+    if (qualifies && frac > bestArea) { best = el; bestArea = frac; }
+    if ((fixedBackdrop || dimBackdrop) && frac > bestBdArea) {
+      bestBackdrop = el; bestBdArea = frac;
+    }
+  }
+  if (!best) best = bestBackdrop;
+  if (!best) return null;
+  const root = best;
+  const candEls = Array.from(root.querySelectorAll(
+    'button, a, [role="button"], [role="option"], [role="radio"], ' +
+    '[role="menuitemradio"], input[type="submit"], input[type="button"], ' +
+    'label, li[role], option, [data-country], [data-locale], select'
+  ));
+  const seen = new Set();
+  const candidates = [];
+  for (const el of candEls) {
+    if (!isShown(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) continue;
+    let text = (el.innerText || el.textContent || el.value || '').trim()
+      .replace(/\s+/g, ' ').slice(0, 120);
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    const title = (el.getAttribute('title') || '').trim();
+    const val = (el.getAttribute('value') || '').trim();
+    const label = (text || aria || title || val);
+    const key = el.tagName + '|' + label + '|' + Math.round(r.x) + ',' + Math.round(r.y);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({
+      tag: el.tagName.toLowerCase(),
+      text: text, aria: aria, title: title, value: val,
+      type: (el.getAttribute('type') || '').toLowerCase(),
+      cx: r.x + r.width / 2, cy: r.y + r.height / 2,
+      w: r.width, h: r.height,
+    });
+    if (candidates.length >= 60) break;
+  }
+  const gateText = (root.innerText || root.textContent || '')
+    .replace(/\s+/g, ' ').trim().slice(0, 600);
+  return {
+    text: gateText, frac: bestArea, scrollLocked: scrollLocked,
+    candidates: candidates,
+  };
+}
+"""
 
-def _dismiss_interstitial(page) -> bool:
-    """Best-effort, non-destructive dismiss of a geo/shipping/region/cookie modal
-    that would otherwise occlude the recorded walkthrough. Clicks only the first
-    VISIBLE close/confirm/accept affordance, then falls back to ESC. Never raises;
-    a clean page with no modal is a silent no-op. Returns True if it clicked."""
-    clicked = False
-    for sel in _INTERSTITIAL_DISMISS_SELECTORS:
+
+def _classify_gate(text: str) -> str:
+    t = (text or "").lower()
+    if any(k in t for k in _GATE_KW_AGE):
+        return "age"
+    if any(k in t for k in _GATE_KW_REGION):
+        return "region"
+    if any(k in t for k in _GATE_KW_CONSENT):
+        return "consent"
+    if any(k in t for k in _GATE_KW_NEWSLETTER):
+        return "newsletter"
+    if any(k in t for k in _GATE_KW_GENERIC):
+        return "generic"
+    return "generic"
+
+
+def _cand_label(c: dict) -> str:
+    return (c.get("text") or c.get("aria") or c.get("title")
+            or c.get("value") or "").strip().lower()
+
+
+def _score_candidate(c: dict, prefer: tuple, *, exact_bonus=True) -> int:
+    label = _cand_label(c)
+    if not label:
+        return -1
+    best = -1
+    for i, kw in enumerate(prefer):
+        if kw in label:
+            score = (len(prefer) - i) * 10
+            if exact_bonus and label == kw:
+                score += 100
+            if score > best:
+                best = score
+    return best
+
+
+def _click_candidate(page, c: dict, *, settle_ms: int = 350) -> bool:
+    try:
+        page.mouse.click(float(c["cx"]), float(c["cy"]))
+        try:
+            page.wait_for_timeout(settle_ms)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def _pick_and_click(page, candidates: list, prefer: tuple) -> bool:
+    best_c, best_s = None, -1
+    for c in candidates:
+        s = _score_candidate(c, prefer)
+        if s > best_s:
+            best_s, best_c = s, c
+    if best_c is not None and best_s >= 0:
+        return _click_candidate(page, best_c)
+    return False
+
+
+def _act_on_gate(page, kind: str, candidates: list) -> str:
+    if kind == "region":
+        if _pick_and_click(page, candidates, _GATE_US_PREFER):
+            _pick_and_click(page, candidates, _GATE_PROCEED_PREFER)
+            return "selected US/English region + confirm"
+        if _pick_and_click(page, candidates, _GATE_PROCEED_PREFER):
+            return "confirmed default region"
+        return ""
+    if kind == "age":
+        if _pick_and_click(page, candidates, _GATE_AGE_AFFIRM):
+            return "confirmed age (affirmative)"
+        return ""
+    if kind == "consent":
+        if _pick_and_click(page, candidates, _GATE_CONSENT_AFFIRM):
+            return "accepted cookie/consent"
+        return ""
+    if kind == "newsletter":
+        if _pick_and_click(page, candidates, _GATE_DISMISS_PREFER):
+            return "closed newsletter/promo"
+        return ""
+    if _pick_and_click(page, candidates, _GATE_PROCEED_PREFER):
+        return "proceeded (generic)"
+    if _pick_and_click(page, candidates, _GATE_DISMISS_PREFER):
+        return "dismissed (generic)"
+    return ""
+
+
+def _escalate_gate(page) -> bool:
+    acted = False
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(250)
+        acted = True
+    except Exception:
+        pass
+    for sel in ("[aria-label*='close' i]", "[aria-label*='dismiss' i]",
+                "button[class*='close' i]", "[data-testid*='close' i]"):
         try:
             loc = page.locator(sel).first
-            if loc.count() and loc.is_visible(timeout=400):
-                loc.click(timeout=800, no_wait_after=True)
-                clicked = True
-                try:
-                    page.wait_for_timeout(350)
-                except Exception:
-                    pass
+            if loc.count() and loc.is_visible(timeout=300):
+                loc.click(timeout=600, no_wait_after=True)
+                page.wait_for_timeout(250)
+                acted = True
                 break
         except Exception:
             continue
-    if not clicked:
+    return acted
+
+
+def _handle_content_gate(page, *, log=None, max_tries: int = 3) -> bool:
+    """Robust pre-content gate handler. Detect -> classify -> act (SELECT-to-
+    proceed for region/age vs DISMISS for newsletter/cookie) -> verify-gone ->
+    retry/escalate. Idempotent, non-destructive, never raises. Returns True if it
+    acted on at least one gate."""
+    if log is None:
+        log = lambda *_a, **_k: None  # noqa: E731
+    acted_any = False
+    for attempt in range(1, max_tries + 1):
         try:
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(250)
+            gate = page.evaluate(_GATE_DETECT_JS)
+        except Exception:
+            gate = None
+        if not gate:
+            if attempt == 1:
+                log("[gate] no blocking overlay detected (clean page)")
+            else:
+                log("[gate] overlay cleared after action")
+            return acted_any
+        text = gate.get("text", "") or ""
+        cands = gate.get("candidates", []) or []
+        kind = _classify_gate(text)
+        snippet = text[:90].replace("\n", " ")
+        log("[gate] try %d: detected %s gate (frac=%.2f, scrollLocked=%s) — "
+            "text='%s'" % (attempt, kind, gate.get("frac", 0.0),
+                           gate.get("scrollLocked"), snippet))
+        action = _act_on_gate(page, kind, cands)
+        if action:
+            acted_any = True
+            log("[gate] action: %s" % action)
+        else:
+            esc = _escalate_gate(page)
+            if esc:
+                acted_any = True
+                log("[gate] no classified action matched -> escalated "
+                    "(ESC / close-X / backdrop)")
+            else:
+                log("[gate] could not act on the gate (no candidate matched)")
+        try:
+            page.wait_for_timeout(450)
         except Exception:
             pass
-    return clicked
+    try:
+        if page.evaluate(_GATE_DETECT_JS):
+            if _escalate_gate(page):
+                acted_any = True
+            still = None
+            try:
+                still = page.evaluate(_GATE_DETECT_JS)
+            except Exception:
+                still = None
+            if still:
+                log("[gate] STILL blocked after %d tries + escalation — "
+                    "proceeding anyway (walk may be occluded)" % max_tries)
+    except Exception:
+        pass
+    return acted_any
+
+
+# JS: True while a full-page LOADING SPINNER is still on screen and no gate has
+# appeared yet — used to delay the gate check a beat so a late-injected region/age
+# modal (Allbirds injects its shipping modal AFTER hydration) and the page CSS
+# both render before the screencast starts. Mirrors capture_screenshots.
+_PAGE_LOADING_JS = r"""
+() => {
+  const vw = innerWidth, vh = innerHeight;
+  const spin = Array.from(document.querySelectorAll(
+    'svg, [class*="spinner" i], [class*="loading" i], [class*="loader" i], ' +
+    '[role="progressbar"]'
+  ));
+  for (const el of spin) {
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') continue;
+    const r = el.getBoundingClientRect();
+    const big = Math.min(r.width, r.height) >= Math.min(vw, vh) / 3;
+    const onScreen = r.top < vh && r.bottom > 0 && r.left < vw && r.right > 0;
+    if (!big || !onScreen) continue;
+    const cls = (el.className && el.className.toString
+                 ? el.className.toString() : '').toLowerCase();
+    const animating = (s.animationName && s.animationName !== 'none') ||
+                      (s.transitionDuration && parseFloat(s.transitionDuration) > 0 &&
+                       s.transitionProperty.includes('transform'));
+    const named = /spinner|loading|loader|progress/.test(cls) ||
+                  el.getAttribute('role') === 'progressbar';
+    if (animating || named) return true;
+  }
+  return false;
+}
+"""
+
+
+def _wait_for_gate_or_settle(page, *, max_ms: int = 6000, step_ms: int = 400) -> None:
+    """Brief grace poll BEFORE the gate check: poll up to `max_ms` for EITHER a
+    blocking gate to appear (Allbirds injects its shipping modal AFTER hydration)
+    OR a full-page loading spinner to clear, so the recorded walk doesn't open on
+    the spinner phase. Returns as soon as a gate is detected. Never raises."""
+    waited = 0
+    while waited < max_ms:
+        try:
+            if page.evaluate(_GATE_DETECT_JS):
+                return
+        except Exception:
+            pass
+        try:
+            still_loading = bool(page.evaluate(_PAGE_LOADING_JS))
+        except Exception:
+            still_loading = False
+        if not still_loading and waited >= step_ms:
+            return
+        try:
+            page.wait_for_timeout(step_ms)
+        except Exception:
+            break
+        waited += step_ms
+
+
+def _dismiss_interstitial(page) -> bool:
+    """Public entry point (name kept for the existing call sites). Gives a late-
+    appearing modal / loading spinner a brief beat to settle, then runs the full
+    detect -> classify -> act -> verify -> retry/escalate gate handler so a
+    region/shipping/age gate that REQUIRES a choice is answered (not just
+    closed). Brand-agnostic, idempotent, never raises. Returns True if it acted
+    on at least one gate."""
+    _wait_for_gate_or_settle(page)
+    return _handle_content_gate(
+        page, log=lambda m: print("WALK_NATIVE:%s" % m))
 
 
 # ===========================================================================

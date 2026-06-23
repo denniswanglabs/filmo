@@ -104,6 +104,179 @@ def _plan_scenes(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     return plan["scenes"] if isinstance(plan, dict) else plan
 
 
+# ---------------------------------------------------------------------------
+# ROBUSTNESS — copy-length guards for planner-output VARIABILITY (Super↔Ultra)
+# ---------------------------------------------------------------------------
+# The timeline is VO-driven: each scene's window is the span of the words spoken
+# over it (build_timeline). A DENSER planner (Ultra/550B writes 14-18 word beats)
+# therefore produces a LONGER film (the A/B Stripe run hit 33.1s on a 30s target),
+# while a SPARSER planner (Super/120B, 8-13 word beats) under-fills it (23.6s).
+# The planner-prompt's "2.0-2.6 words/sec, never exceed 3" rule is ADVISORY — the
+# model does not reliably honor it. These guards ENFORCE it downstream so EITHER
+# brain's plan renders as a clean ~target-second film with no VO clipping.
+#
+# Words-per-second the TTS ACTUALLY reads. Measured from real edge-tts alignments
+# (runs/ab-stripe-*: 2.05-2.10 w/s incl. inter-word/sentence pauses) — markedly
+# slower than the planner-prompt's 2.6 "speaking" target, because synthesis adds
+# silence the prompt's rule ignores. Budget against the REAL rate so a condensed
+# beat lands in the time it is actually given. A hair above the measured mean so we
+# trim only genuinely over-long beats, never a beat already close to pace.
+_VO_WORDS_PER_SEC = 2.15
+# An absolute per-beat word ceiling: even a long scene must not narrate a wall of
+# text (keeps any single beat readable / on-pace regardless of its duration_s). At
+# ~2.05 w/s, 22 words ≈ 10.7s — already past the 9s/scene pacing budget, so this is
+# a hard upper guard the per-scene cap normally beats.
+_VO_BEAT_MAX_WORDS = 22
+# A per-beat FLOOR so condensing never strips a beat below a speakable line.
+_VO_BEAT_MIN_WORDS = 6
+# Hard ceiling for the split-layout SUPPORTING line (the muted secondary sentence in
+# the left column, 28px, maxWidth ≈ leftColW-30 ≈ 630px ≈ ~2 lines). Both the derived
+# (_supporting_line) and an explicit plan-authored supporting line are clamped here so
+# a DENSE planner can't author a full sentence that overflows the box.
+_SUPPORTING_MAX_CHARS = 84
+# Tolerance on the GLOBAL VO word budget. The summed narration may reach
+# target * words_per_sec * tol before the proportional squeeze bites. < 1.0 so the
+# WHOLE-FILM VO holds a little UNDER the target's worth of words — the remaining
+# time is the holds (titles/cards read past their VO) and pacing breath. This is the
+# lever that pulls a DENSE Ultra plan (67 words ≈ 32.6s VO) back toward ~30s while
+# leaving a SPARSE Super plan (39 words ≈ 18.6s VO) entirely untouched.
+_VO_GLOBAL_TOL = 0.96
+
+
+def _word_count(text: str) -> int:
+    return len((text or "").split())
+
+
+def _word_slice_clean(text: str, max_words: int) -> str:
+    """Hard word-boundary slice to <= max_words, with the dangling-function-word /
+    orphan-connector tail cleanup so it never ends mid-clause on a dangling
+    connector. Uses (close to) the FULL budget — the complement to the clause clip,
+    which can undershoot far. Drops a trailing comma so we never end on ", ...".
+    """
+    sliced = " ".join((text or "").split()[:max_words]).rstrip(",;:").strip()
+    cleaned = _strip_dangling_tail(sliced)
+    if _ends_on_orphan_connector(cleaned, was_cut=True):
+        cleaned = _drop_orphan_connector_phrase(cleaned)
+    return _strip_dangling_tail(cleaned) or sliced
+
+
+def _condense_to_words(text: str, max_words: int) -> str:
+    """Trim `text` to <= max_words, never mid-word, keeping CLOSE to the budget.
+
+    Two candidates, take the one that USES THE BUDGET BEST (the longest that fits):
+      1. A clause-boundary clip (_clip_to_clause) — cleanest, but can undershoot the
+         word budget badly when the first clause is short (a 6-word clause for a
+         13-word budget would WASTE more than half the scene's narration time).
+      2. A hard word-slice to the budget with the dangling/orphan tail cleanup — uses
+         (almost) the full budget so the beat still fills its scene.
+    Prefer the clause clip ONLY when it keeps at least ~70% of the budget's words
+    (a clean boundary worth the few dropped words); otherwise prefer the fuller
+    word-slice so a dense beat is shortened to fit WITHOUT starving its scene.
+    Never fabricates — only trims real narration."""
+    t = (text or "").strip()
+    if max_words <= 0 or _word_count(t) <= max_words:
+        return t
+    # ~6.2 chars/word (incl. spaces) over-estimates so _clip_to_clause has room.
+    char_budget = int(max_words * 6.2)
+    clause = _clip_to_clause(t, char_budget)
+    clause_ok = bool(clause) and 2 <= _word_count(clause) <= max_words
+    sliced = _word_slice_clean(t, max_words)
+    sliced_ok = bool(sliced) and _word_count(sliced) >= 2
+
+    # Keep the clause clip when it is BOTH valid AND not a heavy undershoot.
+    if clause_ok and _word_count(clause) >= max(2, int(round(max_words * 0.7))):
+        return clause
+    if sliced_ok:
+        return sliced
+    if clause_ok:
+        return clause
+    return t
+
+
+def _condense_vo_beats(plan: Dict[str, Any], fps: int = 30) -> List[Dict[str, Any]]:
+    """Return the plan's VO beats with each spoken line capped to fit its scene's
+    pacing budget AND the whole film's target duration. The core copy-length guard
+    that makes the framework robust to a DENSE (Ultra) vs SPARSE (Super) planner.
+
+    Two budgets, the tighter wins per beat:
+      1. PER-SCENE: words <= duration_s * _VO_WORDS_PER_SEC (clamped to a min/max).
+         A beat with no duration_s gets the absolute max ceiling.
+      2. GLOBAL: if the summed words would overrun target_duration_s * w/s (× a small
+         tolerance), scale every beat's budget down proportionally so the TOTAL VO
+         fits ~target. This is what reins a dense 5-scene Ultra plan back to ~30s.
+
+    A SPARSE plan (Super) is left ENTIRELY UNCHANGED — its beats are already under
+    budget, so condensing is a no-op and the duration-fill side (build_timeline) does
+    the work of reaching target. Mutates beat dicts in place (and returns the list)
+    so the caller's `plan` carries the condensed beats into align_vo/cost/console.
+    """
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats") or []
+    if not beats:
+        return beats
+    scenes_by_id = {s.get("id"): s for s in _plan_scenes(plan)}
+    target_s = float((plan.get("job") or {}).get("target_duration_s") or 0.0)
+
+    # Per-scene word budget = the words that fit in the scene's EVENTUAL rendered
+    # window, NOT its (possibly undersized) plan duration_s. A sparse planner (Super)
+    # routinely sets tiny duration_s (3,4,5,3 = 15s on a 30s target); build_timeline
+    # STRETCHES those scenes to fill the target, so budgeting off the raw duration_s
+    # would over-condense a beat that will actually be given far more screen time.
+    # Use max(duration_s, fair share of target) as each scene's effective time so the
+    # cap only trims a beat that is dense RELATIVE TO THE TIME IT WILL GET. The GLOBAL
+    # squeeze below is the real lever that pulls a dense plan down to target.
+    n = max(1, len(beats))
+    fair_share_s = (target_s / n) if target_s > 0 else 0.0
+    per_budgets: List[int] = []
+    for b in beats:
+        sc = scenes_by_id.get(b.get("scene_id")) or {}
+        try:
+            dur = float(sc.get("duration_s") or 0.0)
+        except (TypeError, ValueError):
+            dur = 0.0
+        eff_s = max(dur, fair_share_s)
+        if eff_s > 0:
+            budget = int(round(eff_s * _VO_WORDS_PER_SEC))
+            budget = max(_VO_BEAT_MIN_WORDS, min(_VO_BEAT_MAX_WORDS, budget))
+        else:
+            budget = _VO_BEAT_MAX_WORDS
+        per_budgets.append(budget)
+
+    # GLOBAL squeeze: the words that fit the WHOLE film at the real TTS rate. If the
+    # narration would overrun target * w/s * tol, scale every per-beat budget down by
+    # the SAME factor so the total VO fits ~target (the picture's holds + pacing fill
+    # the rest). Only bites on a genuinely DENSE plan (Ultra). A sparse plan (Super)
+    # already sits under this budget, so the squeeze is a no-op and every beat keeps
+    # its full, already-short narration. Distribute the squeeze on EXCESS over the
+    # min floor so a long beat gives up more words than a short one.
+    if target_s > 0:
+        global_word_budget = target_s * _VO_WORDS_PER_SEC * _VO_GLOBAL_TOL
+        # What we would actually narrate per beat under the per-scene cap.
+        planned = [min(per_budgets[i], _word_count(b.get("text", "")))
+                   for i, b in enumerate(beats)]
+        planned_total = sum(planned)
+        if planned_total > global_word_budget and planned_total > 0:
+            floor_total = _VO_BEAT_MIN_WORDS * n
+            excess_budget = max(0.0, global_word_budget - floor_total)
+            excess_total = max(1, planned_total - floor_total)
+            scale = excess_budget / excess_total
+            per_budgets = [
+                max(_VO_BEAT_MIN_WORDS,
+                    _VO_BEAT_MIN_WORDS + int(round((p - _VO_BEAT_MIN_WORDS) * scale)))
+                for p in planned
+            ]
+
+    for b, budget in zip(beats, per_budgets):
+        text = str(b.get("text") or "").strip()
+        if not text:
+            continue
+        if _word_count(text) > budget:
+            condensed = _condense_to_words(text, budget)
+            if condensed and _word_count(condensed) >= 2:
+                b["text"] = condensed
+    return beats
+
+
 def _scene_role(scene: Dict[str, Any]) -> str:
     """The classifier key for the registry: explicit `role`, else `type`."""
     return str(scene.get("role") or scene.get("type") or "").strip().lower()
@@ -2120,7 +2293,7 @@ def _pick_punch_word(headline: str, brand: Dict[str, Any], emphasis: str = "") -
 
 
 def _supporting_line(headline: str, raw_threaded: str, brief_seed: str,
-                     brand: Dict[str, Any], limit: int = 90,
+                     brand: Dict[str, Any], limit: int = _SUPPORTING_MAX_CHARS,
                      used: Optional[List[str]] = None) -> str:
     """A short muted SECONDARY sentence for the split layout's left column, DISTINCT
     from the headline. Never fabricated — trims real narrated/brief/brand text.
@@ -2536,6 +2709,15 @@ def _shape_screenshot(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str,
     used_supporting = used_supporting if isinstance(used_supporting, list) else None
     supporting = str(d.get("supporting") or "").strip()
     if supporting:
+        # ROBUSTNESS — CLAMP an explicit plan-authored supporting line to the same
+        # ~90-char ceiling _supporting_line enforces. The split layout's left column
+        # renders supporting as a SINGLE muted line (28px, maxWidth leftColW-30 ≈
+        # 630px ≈ ~2 lines of room); a dense planner can author a full sentence that
+        # overflows. Clause-clip it (never mid-word) so it fits regardless of brain.
+        if len(supporting) > _SUPPORTING_MAX_CHARS:
+            clamped = _clip_to_clause(supporting, _SUPPORTING_MAX_CHARS)
+            if clamped and len(clamped.split()) >= 2:
+                supporting = clamped
         # Register an explicit plan-authored line so later scenes don't repeat it.
         if used_supporting is not None and supporting not in used_supporting:
             used_supporting.append(supporting)
@@ -3159,6 +3341,17 @@ def run_pipeline(plan_path: str, brand_path: str, style_name: str, out_dir: str,
     except Exception:
         pass  # never block a render on logo staging
     plan_scenes = _plan_scenes(plan)
+
+    # ROBUSTNESS — copy-length guard. Cap each VO beat to its scene's pacing budget
+    # AND the film's target duration BEFORE synthesis, so a DENSE planner (Ultra) does
+    # not drive a 33s film off a 30s target and a SPARSE planner (Super) is left
+    # untouched. This must run before align_vo so the (shorter) audio drives the
+    # (shorter) timeline. plan_scenes already reflects plan["scenes"]; the condense
+    # mutates plan["voiceover"].beats in place so cost/console/build all see it.
+    try:
+        _condense_vo_beats(plan, fps=fps)
+    except Exception:
+        pass  # never block a render on the condense pass; raw beats still align fine
 
     alignment_path = os.path.join(out_dir, "vo_alignment.json")
     if do_align:

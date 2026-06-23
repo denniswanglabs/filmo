@@ -240,6 +240,32 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
         raise ValueError("invalid plan: " + "; ".join(problems))
     led.event("info", "plan validated: %d scenes" % len(plan["scenes"]))
 
+    # PLANNER PROVENANCE (non-silent template fallback). The on-disk ledger here is
+    # the durable one (it supersedes build_runner's in-memory ledger), so stamp the
+    # planner's plan_source / finish_reason / token-usage onto it too — otherwise a
+    # template-fallback build is indistinguishable from a real LLM build in the
+    # dashboard. Reads plan["_planner"] (set by plan_job); falls back to selection.
+    _prov = plan.get("_planner") or {}
+    _sel = plan.get("selection") or {}
+    _plan_source = _prov.get("plan_source") or _sel.get("plan_source") or "llm"
+    led.data["selection"] = {
+        "quality": _sel.get("quality"),
+        "brain": _prov.get("brain") or _sel.get("brain"),
+        "plan_source": _plan_source,
+        "finish_reason": _prov.get("finish_reason") or _sel.get("finish_reason"),
+        "planner_reason": _prov.get("reason") or _sel.get("planner_reason"),
+        "planner_usage": _prov.get("usage") or _sel.get("planner_usage"),
+    }
+    if _plan_source == "template":
+        led.event("info",
+                  "planner: brain=%s produced NO LLM plan (reason=%s) — this build "
+                  "used the DETERMINISTIC TEMPLATE, not the LLM"
+                  % (led.data["selection"]["brain"], led.data["selection"]["planner_reason"]))
+    else:
+        led.event("info", "planner: brain=%s planned this build (LLM, finish_reason=%s)"
+                  % (led.data["selection"]["brain"], led.data["selection"]["finish_reason"]))
+    flush()
+
     # Ensure the on-disk plan carries a flat `script` derived from the beats, so
     # the cost estimator (producer.py) and any legacy reader still see the full
     # narration. The beats stay authoritative for placement; this is a mirror.

@@ -37,6 +37,13 @@ const state = { runs: [], selected: null, ledger: null, typer: null, scriptTyper
      NOT Date.now() — that would defeat caching and re-download every load. null until
      the first ledger fetch resolves. */
   ledgerToken: null,
+  /* LIVE STATUS PANEL — a single rAF loop (keyed here so re-renders never stack it)
+     drives the always-moving mm:ss elapsed timer in the building-phase status panel,
+     so the wait never reads as static even between stage changes. statusStartMs is
+     the build's start epoch (ms): the ledger's server-truth created_at when present
+     (survives a page reload), else the client's first-poll time as a fallback. */
+  statusTimer: null,
+  statusStartMs: null,
   selection: { quality: "standard" } };
 
 const $ = (id) => document.getElementById(id);
@@ -485,6 +492,7 @@ function showEmpty(msg) {
 function newBuild() {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
   stopLiveWalk();           // drop any live-screencast interval before leaving
+  stopLiveStatus();         // …and the elapsed-timer rAF loop
   exitAnalytics();          // leaving the operator view (if it was open)
   exitAbout();              // leaving the About view (if it was open)
   state.building = null;
@@ -570,6 +578,7 @@ const runIsEditable = (runId) => !!(state.editorRuns && state.editorRuns.has(run
 
 async function selectRun(runId, silent) {
   stopLiveWalk();           // opening another build drops any live-screencast interval
+  stopLiveStatus();         // …and the building-phase elapsed-timer rAF loop
   exitAnalytics();          // opening a build leaves the operator analytics view
   exitAbout();              // ...and the About view
   state.selected = runId;
@@ -600,6 +609,112 @@ async function selectRun(runId, silent) {
     empty.hidden = false; detail.hidden = true;
     empty.querySelector("p").textContent = "Could not load ledger for " + runId + " — " + e.message;
   }
+}
+
+/* ---- TERMINAL / BLOCKED run state — a CLEAR reason, never a dark preview -----
+   A run that never produced a video (failed, payment-timed-out, aborted, or still
+   waiting at the pay gate) used to fall through to the bare slate header with the
+   greyed-out "Edit unavailable" control and — worse — a stale dark legacy preview,
+   so the customer couldn't tell WHY there was no video. This derives a clear,
+   accurate state card from the ledger's status + phase + earn block:
+
+     - awaiting_payment / earning  → "Waiting for payment — complete checkout…"
+       (with a Resume-to-pay action that re-opens the live pay-gate via beginPoll).
+     - payment_timeout             → "Build cancelled: payment not completed
+       (15-minute timeout). No charge was made."
+     - aborted                     → "Build stopped — the running production was
+       terminated."
+     - failed (any other reason)   → "Build failed: <reason from the ledger>."
+
+   Reuses the existing .live-head / .live-pill / .bs-* language (no new visual
+   vocabulary) and the awaiting_payment amber accent. Returns null when the run is
+   NOT in a terminal/blocked state (delivered or actively running) so renderDetail's
+   normal paths are untouched. */
+function runStateNotice(l, runId) {
+  const status = (l.status || "").toLowerCase();
+  const phase = (l.phase || "").toLowerCase();
+  const earn = l.earn || {};
+  const payStatus = (earn.payment_status || earn.status || "").toLowerCase();
+  // A delivered run, or one with a real assembled video, is never "blocked" here.
+  if (status === "delivered" || l.stitch) return null;
+
+  // Pull the most specific human reason the ledger carries (the last event msg),
+  // used as the failure detail line.
+  const lastMsg = (((l.events || []).slice(-1)[0]) || {}).msg || "";
+
+  // ---- Still waiting at the pay gate (not a terminal state, but no video yet). ----
+  const awaiting = phase === "awaiting_payment" || phase === "earning" ||
+    (status !== "failed" && status !== "aborted" &&
+     (payStatus === "unpaid" || payStatus === "awaiting_payment") && !!earn.checkout_url);
+  if (awaiting && status !== "failed" && status !== "aborted") {
+    const total = ledgerPriceCents(l);
+    const brand = gateBrand(l);
+    return '<div class="live-head"><div class="live-top">' +
+        '<span class="live-pill pay"><span class="ls-working-dot"></span>WAITING FOR PAYMENT</span>' +
+        '<span class="live-goal">complete checkout to produce your video</span></div>' +
+      '<div class="bs-body">' +
+        '<div class="bs-msg">This build is held at the payment gate. ' +
+          "Complete the secure Stripe test checkout" +
+          (total != null ? " (" + esc(cents(total)) + ")" : "") +
+          " for the <b>" + esc(brand) + "</b> video and production starts automatically." +
+        "</div>" +
+        '<div class="bs-actions"><button class="bs-new" id="rsn-resume" type="button">' +
+          icon("i-card") + "Resume &amp; pay</button></div>" +
+      "</div></div>";
+  }
+
+  // ---- Payment timed out: the build was cancelled for non-payment. ----
+  if (phase === "payment_timeout" || payStatus === "payment_timeout") {
+    return '<div class="live-head"><div class="live-top">' +
+        '<span class="live-pill bad">PAYMENT NOT COMPLETED</span>' +
+        '<span class="live-goal">build cancelled — no charge was made</span></div>' +
+      '<div class="bs-body">' +
+        '<div class="bs-msg">Checkout was not completed within the 15-minute window, ' +
+          "so this build was cancelled before any production ran. No charge was made. " +
+          "Start a new build to try again." +
+        "</div>" +
+        '<div class="bs-actions"><button class="bs-new" id="rsn-new" type="button">' +
+          icon("i-plus") + "New build</button></div>" +
+      "</div></div>";
+  }
+
+  // ---- Aborted: the operator/customer stopped the running build. ----
+  if (status === "aborted") {
+    return '<div class="live-head"><div class="live-top">' +
+        '<span class="live-pill stopped">' +
+          '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.6" fill="currentColor"/></svg>' +
+          "STOPPED</span></div>" +
+      '<div class="bs-body">' +
+        '<div class="bs-msg">This build was stopped — the running production was terminated, ' +
+          "so no video was produced. Start a new build to try again." +
+        "</div>" +
+        '<div class="bs-actions"><button class="bs-new" id="rsn-new" type="button">' +
+          icon("i-plus") + "New build</button></div>" +
+      "</div></div>";
+  }
+
+  // ---- Failed (any other reason): surface the ledger's reason verbatim. ----
+  if (status === "failed") {
+    const reason = lastMsg || "the build did not finish";
+    return '<div class="live-head"><div class="live-top">' +
+        '<span class="live-pill bad">BUILD FAILED</span>' +
+        '<span class="live-goal">no video was produced</span></div>' +
+      '<div class="bs-body">' +
+        '<div class="bs-msg">This build did not finish, so there is no video to show or edit. ' +
+          '<span style="color:var(--neg-2)">' + esc(reason) + "</span>" +
+        "</div>" +
+        '<div class="bs-actions"><button class="bs-new" id="rsn-new" type="button">' +
+          icon("i-plus") + "New build</button></div>" +
+      "</div></div>";
+  }
+  return null;
+}
+
+// Wire the run-state notice's action buttons after it's mounted. "New build"
+// returns to the composer; "Resume & pay" re-opens the live pay-gate for the run.
+function wireRunStateNotice(runId) {
+  const nb = $("rsn-new"); if (nb) nb.onclick = newBuild;
+  const rs = $("rsn-resume"); if (rs) rs.onclick = () => { state.selected = runId; beginPoll(runId); };
 }
 
 function renderDetail(root, l, runId) {
@@ -645,9 +760,32 @@ function renderDetail(root, l, runId) {
     return;
   }
 
-  // Non-delivered (running-but-rendered / browsing failed): the slate header
-  // carries the status (no video hero), then the same collapsed proof sections.
-  // A stitched-but-not-delivered run still gets an inline final-cut viewer, open.
+  // TERMINAL / BLOCKED runs (failed, payment-timeout, aborted, awaiting payment):
+  // lead with a CLEAR state card explaining WHY there is no video — never a bare
+  // slate next to a stale dark preview. The run's plan/script/storyboard still
+  // collapse below for inspection, but NO per-scene clip <video> is surfaced (those
+  // are the legacy dark intermediates; the deliverable is final.mp4, which doesn't
+  // exist for these runs). Run metadata stays available as a folded disclosure.
+  const notice = runStateNotice(l, runId);
+  if (notice) {
+    const noticeProof = proof.map((s, i) =>
+      disclosure(s[0], s[1], { n: String(i + 1).padStart(2, "0"), hint: s[2], open: false })).join("");
+    root.innerHTML = notice +
+      (noticeProof
+        ? '<div class="proof-fold"><div class="proof-lead">' +
+            '<span class="proof-k">What the agent had planned</span>' +
+            '<span class="proof-sub">the storyboard and code prepared before the build stopped</span>' +
+          "</div>" + noticeProof + "</div>"
+        : "") +
+      disclosure("Run metadata", slate(l), { n: String(proof.length + 1).padStart(2, "0"), hint: l.run_id + " · " + l.mode, open: false });
+    wireRunStateNotice(runId);
+    wireProofDisclosures(root, l, authored, runId);
+    return;
+  }
+
+  // Non-delivered but still running/rendered (e.g. browsing a run mid-flight): the
+  // slate header carries the status (no video hero), then the same collapsed proof
+  // sections. A stitched-but-not-delivered run still gets an inline final-cut viewer.
   const secs = [];
   if (l.stitch) secs.push(["Final cut", viewer(l, runId), "the assembled video", true]);
   proof.forEach((p) => secs.push([p[0], p[1], p[2], false]));
@@ -992,8 +1130,17 @@ function voRow(v, i) {
     '<span class="pill ' + dec + '">' + dec + "</span></div>";
 }
 
-/* ---- STUDIO: agent writes Remotion ---- */
+/* ---- STUDIO: agent writes Remotion ----
+   The editor LEFT is the real TSX the agent authored for each scene (proof of
+   craft). The PREVIEW RIGHT must reflect the REAL DELIVERABLE — the delivered
+   final.mp4 (the VO-driven <Timeline> render of the run's props.json). It must
+   NEVER play the per-scene intermediate clip (clips/NN_*.mp4): those are the
+   legacy `Scene`/active.tsx renders — the OLD DARK centered style — which would
+   contradict the light/split final the customer actually received. The comp label
+   reads "final.mp4 · Timeline" when a delivered cut exists. */
 function studio(l, authored, runId) {
+  const delivered = l && l.status === "delivered" && l.stitch;
+  const compLabel = delivered ? "final.mp4 · Timeline" : "Scene";
   const tabs = authored.map((s, i) =>
     '<button class="studio-tab' + (i === 0 ? " active" : "") + '" data-i="' + i + '">' + icon("i-code") +
       esc(s.id) + '.tsx <span class="dot-arch">' + esc(s.studio.archetype) + "</span></button>").join("");
@@ -1002,7 +1149,7 @@ function studio(l, authored, runId) {
       '<div class="editor"><div class="editor-bar"><span class="fname">' + icon("i-code") + '<span id="st-fname"></span></span>' +
         '<span class="right"><span id="st-arch"></span></span></div>' +
         '<div class="editor-scroll" id="st-scroll"><div class="code"><div class="gutter" id="st-gutter"></div><pre><code id="st-code"></code></pre></div></div></div>' +
-      '<div class="preview"><div class="preview-head"><span>PREVIEW · Remotion</span><span id="st-comp">Scene</span></div>' +
+      '<div class="preview"><div class="preview-head"><span>PREVIEW · Remotion</span><span id="st-comp">' + esc(compLabel) + "</span></div>" +
         '<div class="preview-stage"><video id="st-video" muted playsinline loop></video></div>' +
         '<div class="preview-foot"><span class="render-state"><span class="render-dot" id="st-dot"></span><span id="st-status">writing…</span></span>' +
           '<button class="replay" id="st-replay">REPLAY</button></div></div>' +
@@ -1012,21 +1159,24 @@ function studio(l, authored, runId) {
 function initStudio(l, authored, runId) {
   let cur = 0;
   const tabs = document.querySelectorAll(".studio-tab");
+  const delivered = l && l.status === "delivered" && l.stitch;
   const play = (i) => {
     cur = i;
     tabs.forEach((t, k) => t.classList.toggle("active", k === i));
     const s = authored[i];
     $("st-fname").textContent = s.id + ".tsx";
     $("st-arch").textContent = s.studio.code_lines + " lines · " + s.studio.archetype;
-    $("st-comp").textContent = s.studio.composition || "Scene";
-    typeCode(s, runId);
+    // The preview comp label reflects the REAL deliverable for a delivered run
+    // (final.mp4 · Timeline), not the per-scene "Scene" intermediate.
+    $("st-comp").textContent = delivered ? "final.mp4 · Timeline" : (s.studio.composition || "Scene");
+    typeCode(s, runId, l);
   };
   tabs.forEach((t) => t.onclick = () => play(+t.getAttribute("data-i")));
   $("st-replay").onclick = () => play(cur);
   play(0);
 }
 
-function typeCode(scene, runId) {
+function typeCode(scene, runId, l) {
   if (state.typer) { cancelAnimationFrame(state.typer); state.typer = null; }
   const code = scene.studio.generated_code || "";
   const toks = tokenizeTSX(code);
@@ -1034,6 +1184,16 @@ function typeCode(scene, runId) {
   const dot = $("st-dot"), status = $("st-status"), video = $("st-video");
   dot.className = "render-dot"; status.textContent = "writing…";
   video.removeAttribute("src"); video.style.opacity = ".25";
+  // PREVIEW SOURCE — the REAL deliverable, never the dark per-scene intermediate.
+  // For a delivered run the preview is the run's final.mp4 (the VO-driven Timeline
+  // render of props.json — the light/split video the customer received). The legacy
+  // per-scene clip (scene.output_path = clips/NN_*.mp4) is the old `Scene`/active.tsx
+  // render (dark, centered) and must NEVER be surfaced as the preview. Only when no
+  // delivered final exists (an older single-Scene run with no stitch) do we fall back
+  // to the per-scene clip so that path still previews something.
+  const delivered = l && l.status === "delivered" && l.stitch;
+  const finalPath = delivered ? ((l.stitch || {}).output_path || "final.mp4") : null;
+  const previewPath = finalPath || scene.output_path;
   const total = code.length;
   // time-based reveal: a fixed ~2.6s type regardless of frame throttling, and a
   // guaranteed completion so it can never stick on "writing…".
@@ -1041,10 +1201,28 @@ function typeCode(scene, runId) {
   let start = null;
   const finish = () => {
     state.typer = null;
-    status.textContent = "rendered · " + (scene.studio.render_ms || 0) + "ms";
+    status.textContent = delivered
+      ? "rendered · final.mp4"
+      : "rendered · " + (scene.studio.render_ms || 0) + "ms";
     dot.className = "render-dot done";
-    video.src = "/runs/" + encodeURIComponent(runId) + "/" + scene.output_path + mp4Bust();
-    video.style.opacity = "1"; video.load(); video.play().catch(() => {});
+    video.src = "/runs/" + encodeURIComponent(runId) + "/" + previewPath + mp4Bust();
+    video.style.opacity = "1";
+    // DELIVERED: the preview points at the (large) final.mp4 — the same cut the
+    // delivered hero already autoplays above. Don't autoplay a second heavy copy in
+    // this small proof-of-craft pane: load lazily (metadata only) and expose native
+    // controls so the user can scrub it on demand. NON-DELIVERED single-Scene runs
+    // keep the lightweight per-scene clip autoplaying as before.
+    if (delivered) {
+      video.preload = "metadata";
+      video.loop = false;
+      video.controls = true;
+      video.load();
+    } else {
+      video.preload = "auto";
+      video.loop = true;
+      video.controls = false;
+      video.load(); video.play().catch(() => {});
+    }
   };
   const frame = (ts) => {
     if (start == null) start = ts;
@@ -1126,6 +1304,156 @@ const kv = (k, v, cls) => '<div class="kv"><span class="k">' + esc(k) + '</span>
 const PHASES = ["planning", "pricing", "awaiting_payment", "producing", "voiceover", "stitching", "delivered"];
 const PHASE_LABEL = { awaiting_payment: "payment" };
 
+/* ====================================================================== LIVE
+   STATUS PANEL — make the building phase INFORMATIVE + visibly ALIVE.
+
+   The early build window used to show one static "spinning up the agent…" line,
+   so a user couldn't tell whether the page was alive or the agent was stuck. This
+   panel surfaces the REAL pipeline as a stage checklist that advances, an
+   always-moving elapsed timer, a plain-language current-activity line, and a
+   typical-duration hint — all derived from signals the ledger already carries
+   (phase + per-scene status + events) plus the tiny advisory `stage` field the
+   build runner now writes for its two otherwise-silent producing sub-steps
+   (capturing screenshots, rendering). No money/ledger logic is involved here.
+
+   STAGES — the real ordered pipeline, collapsed to the steps a customer cares
+   about. `key` matches against ledger phase/stage; `live` is the present-tense
+   activity copy shown when the stage is active. */
+const BUILD_STAGES = [
+  { key: "brand",      label: "Read the brand site",   live: "Reading the brand site and palette…" },
+  { key: "storyboard", label: "Write the storyboard",  live: "Writing the storyboard and script…" },
+  { key: "price",      label: "Set the price",         live: "Pricing the video cost-plus…" },
+  { key: "payment",    label: "Payment",               live: "Waiting for payment to start production…" },
+  { key: "capture",    label: "Capture screenshots",   live: "Capturing screenshots of the site…" },
+  { key: "scenes",     label: "Record the walkthrough",live: "Walking the site to record the demo…" },
+  { key: "voiceover",  label: "Record the voiceover",  live: "Recording the voiceover…" },
+  { key: "render",     label: "Render the scenes",     live: "Rendering the scenes…" },
+  { key: "deliver",    label: "Deliver",               live: "Finishing up your video…" },
+];
+const STAGE_INDEX = Object.fromEntries(BUILD_STAGES.map((s, i) => [s.key, i]));
+
+/* Map a live ledger to the index of the stage the build is CURRENTLY on. Reads,
+   in priority order: the advisory `stage` field (the producing sub-steps), then
+   per-scene progress while producing, then the coarse `phase`. Never throws; an
+   unknown shape resolves to the first stage so the panel still renders alive. */
+function currentStageIndex(l) {
+  const phase = l.phase || "planning";
+  const stage = l.stage || "";
+  // The producing PHASE is several sub-stages; the advisory `stage` (set by the
+  // build runner) pins the two that have no scene/phase signal of their own.
+  if (stage === "rendering") return STAGE_INDEX.render;
+  if (stage === "capturing") return STAGE_INDEX.capture;
+  if (phase === "delivered" || phase === "stitching") return STAGE_INDEX.render;
+  if (phase === "voiceover") return STAGE_INDEX.voiceover;
+  if (phase === "producing") {
+    // Within producing: if any scene is past 'queued', we're recording scenes;
+    // otherwise we're still on the screenshot-capture lead-in.
+    const scenes = l.scenes || [];
+    const started = scenes.some((s) => s.status && s.status !== "queued");
+    return started ? STAGE_INDEX.scenes : STAGE_INDEX.capture;
+  }
+  if (phase === "awaiting_payment") return STAGE_INDEX.payment;
+  if (phase === "earning") return STAGE_INDEX.payment;
+  if (phase === "pricing") return STAGE_INDEX.price;
+  if (phase === "planning") {
+    // Planning covers BOTH reading the brand and writing the storyboard. Once the
+    // priced storyboard lands on the ledger, advance to the storyboard step so the
+    // checklist visibly moves during the planning wait.
+    return (l.plan && (l.plan.scenes || []).length) ? STAGE_INDEX.storyboard : STAGE_INDEX.brand;
+  }
+  return 0;
+}
+
+/* The plain-language current-activity line: prefer a meaningful latest ledger
+   event (the real thing the agent just did), else the active stage's friendly
+   present-tense copy. Skips low-signal/internal event noise so the line stays
+   human. */
+function currentActivityLine(l, stageIdx) {
+  const stage = BUILD_STAGES[stageIdx] || BUILD_STAGES[0];
+  const events = l.events || [];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const m = (events[i] && events[i].msg) || "";
+    if (!m) continue;
+    // Skip internal/dev-affordance noise so the customer-facing line reads cleanly.
+    if (/SIMULATE_PAID|VO-ENGINE|poll error|grounded planner/i.test(m)) continue;
+    return m;
+  }
+  return stage.live;
+}
+
+/* Format ms -> "m:ss" for the elapsed timer (tabular, never jitters width). */
+function fmtElapsed(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(t / 60), s = t % 60;
+  return m + ":" + String(s).padStart(2, "0");
+}
+
+/* The status panel markup, shown across the whole building phase (planning …
+   render). PRESENT-TENSE, plain language, and visibly alive:
+     - a header with a pulsing "working" dot + the live mm:ss elapsed timer;
+     - the current-activity line;
+     - a stage CHECKLIST: done = a check, the current stage = a spinner + glow,
+       upcoming = dimmed;
+     - a typical-duration expectation hint.
+   The timer is animated by initLiveStatus() (a single rAF loop), so the panel
+   keeps moving even between ledger polls / stage changes — it can never read as a
+   frozen page. */
+function liveStatusPanel(l) {
+  const idx = currentStageIndex(l);
+  const activity = currentActivityLine(l, idx);
+  const rows = BUILD_STAGES.map((st, i) => {
+    const cls = i < idx ? "done" : i === idx ? "now" : "todo";
+    const mark = i < idx
+      ? '<span class="ls-mark done">' + icon("i-check", "ic") + "</span>"
+      : i === idx
+        ? '<span class="ls-mark now">' + icon("i-loader", "ic spin") + "</span>"
+        : '<span class="ls-mark todo"><span class="ls-num">' + (i + 1) + "</span></span>";
+    return '<div class="ls-row ' + cls + '">' + mark +
+      '<span class="ls-label">' + esc(st.label) + "</span></div>";
+  }).join("");
+  return '<div class="live-status" id="live-status">' +
+    '<div class="ls-head">' +
+      '<span class="ls-working"><span class="ls-working-dot"></span>Working</span>' +
+      '<span class="ls-elapsed" id="ls-elapsed">0:00</span>' +
+    "</div>" +
+    '<div class="ls-activity" id="ls-activity">' + esc(activity) + "</div>" +
+    '<div class="ls-stages">' + rows + "</div>" +
+    '<div class="ls-hint">' + icon("i-info", "ic") +
+      "<span>Most videos take about 2–3 minutes. You can leave this open — it updates live.</span></div>" +
+    "</div>";
+}
+
+/* Arm the elapsed-timer rAF loop. Idempotent + keyed on state.statusTimer so a
+   re-render never stacks loops; cancelled by stopLiveStatus() whenever the panel
+   could unmount. statusStartMs is the build start (server-truth created_at when
+   the ledger carries it — survives reload — else the client's first paint). */
+function initLiveStatus(l) {
+  stopLiveStatus();
+  if (state.statusStartMs == null) {
+    const c = l && l.created_at;
+    // created_at is epoch SECONDS (a number) from the build runner; tolerate an
+    // ISO string just in case. Fall back to now so the timer always advances.
+    let startMs = null;
+    if (typeof c === "number" && isFinite(c)) startMs = c * 1000;
+    else if (typeof c === "string" && c) { const t = Date.parse(c); if (!isNaN(t)) startMs = t; }
+    state.statusStartMs = startMs != null ? startMs : Date.now();
+  }
+  const el = $("ls-elapsed");
+  if (!el) return;
+  const tick = () => {
+    const node = $("ls-elapsed");
+    if (!node) { state.statusTimer = null; return; }  // panel unmounted — stop
+    node.textContent = fmtElapsed(Date.now() - state.statusStartMs);
+    state.statusTimer = requestAnimationFrame(tick);
+  };
+  state.statusTimer = requestAnimationFrame(tick);
+}
+
+/* Stop the elapsed-timer loop. Idempotent — safe wherever the panel can unmount. */
+function stopLiveStatus() {
+  if (state.statusTimer) { cancelAnimationFrame(state.statusTimer); state.statusTimer = null; }
+}
+
 async function startBuild() {
   const url = ($("build-url").value || "").trim();
   // Visibility of system status: a silent return left the user guessing why
@@ -1194,10 +1522,12 @@ function beginPoll(runId) {
   state.scriptShown = null;  // let the new build's narration type out fresh
   state.liveGoalShown = null; // let the new build's hero goal build word-by-word once
   state.payForShown = null;   // let the pay-gate "for <brand>" line build once
+  state.statusStartMs = null;  // re-derive the elapsed-timer start for this build
   if (state.pollTimer) clearInterval(state.pollTimer);
   if (state.typer) { cancelAnimationFrame(state.typer); state.typer = null; }
   if (state.scriptTyper) { cancelAnimationFrame(state.scriptTyper); state.scriptTyper = null; }
   stopLiveWalk();   // a fresh build starts with no live-screencast interval running
+  stopLiveStatus(); // …and no elapsed-timer loop until the first live render arms it
   const empty = $("stage-empty"), detail = $("detail");
   empty.hidden = true; detail.hidden = false;
   document.querySelectorAll(".run-wrap").forEach((c) => c.classList.remove("active"));
@@ -1218,6 +1548,7 @@ function beginPoll(runId) {
       if (l.status === "aborted") {
         if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
         stopLiveWalk();
+        stopLiveStatus();
         state.building = null;
         state.selected = runId;
         const gb = $("build-go"); if (gb) { gb.disabled = false; gb.classList.remove("is-loading"); }
@@ -1239,6 +1570,7 @@ function beginPoll(runId) {
 function finishBuild(runId, ok, l) {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
   stopLiveWalk();   // build left producing — the delivered/failed view takes over
+  stopLiveStatus(); // …and the elapsed-timer loop stops with it
   state.building = null;
   const btn = $("build-go"); btn.disabled = false; btn.classList.remove("is-loading");
   // pin the selection to this run BEFORE refreshing the rail, so loadIndex keeps
@@ -1272,13 +1604,18 @@ function renderLive(root, l, runId) {
   // storyboard collapse into "what you're paying for" disclosures.
   if (l.phase === "awaiting_payment") {
     const scenes = l.scenes || [];
-    root.innerHTML = liveHeader(l) +
+    // The live status panel rides above the pay-gate here too: it shows the agent
+    // already finished reading + storyboarding + pricing, the build is alive (timer
+    // ticking), and the current stage is "waiting for payment" — so the gate never
+    // reads as a dead end while the customer decides.
+    root.innerHTML = liveHeader(l, runId) + liveStatusPanel(l) +
       sectionLabel("·", "Payment · pay to start production") + payGate(l) +
       disclosure("The script — what the agent wrote before shooting", liveScript(l),
         { n: "·", hint: ((l.plan || {}).scenes || []).length + " scenes", open: false }) +
       disclosure("The storyboard — queued, awaiting payment", liveStoryboard(scenes, runId),
         { n: "·", hint: scenes.length + " scenes queued", open: false });
     initLiveScript(l);
+    initLiveStatus(l);
     initPayGate(l);
     wireLiveStop(runId);
     return;
@@ -1291,7 +1628,8 @@ function renderLive(root, l, runId) {
   // progress isn't drowned in a wall of log lines.
   const scenes = l.scenes || [];
   const done = scenes.filter((s) => s.status === "produced" || s.status === "declined").length;
-  root.innerHTML = liveHeader(l) +
+  root.innerHTML = liveHeader(l, runId) +
+    liveStatusPanel(l) +
     storyboardLead(done, scenes.length) +
     liveStoryboard(scenes, runId) +
     disclosure("The script — what the agent wrote before shooting", liveScript(l),
@@ -1299,6 +1637,7 @@ function renderLive(root, l, runId) {
     disclosure("Agent activity — live browser & action feed", liveAgent(l, runId),
       { n: "·", hint: (l.events || []).length + " events", open: false });
   initLiveScript(l);
+  initLiveStatus(l);
   wireLiveStop(runId);
 }
 
@@ -1326,6 +1665,7 @@ function wireLiveStop(runId) {
       // stopped state. Mirrors finishBuild's teardown (timers + state.building).
       if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
       stopLiveWalk();
+      stopLiveStatus();
       if (state.typer) { cancelAnimationFrame(state.typer); state.typer = null; }
       if (state.scriptTyper) { cancelAnimationFrame(state.scriptTyper); state.scriptTyper = null; }
       state.building = null;
@@ -1655,7 +1995,7 @@ function initLiveScript(l) {
   state.scriptTyper = requestAnimationFrame(frame);
 }
 
-function liveHeader(l) {
+function liveHeader(l, runId) {
   const ph = l.phase || "planning";
   const idx = PHASES.indexOf(ph);
   // Phase track: an amber fill sweeps left-to-right as phases advance, so the
@@ -2005,6 +2345,7 @@ function checkoutCancelled(runId) {
 async function openAnalytics() {
   // stop any live-build poll so it can't overwrite the analytics view
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  stopLiveStatus();        // …and the elapsed-timer rAF loop
   exitAbout();              // opening Analytics leaves the About view
   state.building = null;
   state.selected = null;
@@ -2193,6 +2534,7 @@ function anStatusClass(st) {
 // it renders synchronously — no loading/error path.
 function openAbout() {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  stopLiveStatus();         // …and the elapsed-timer rAF loop
   exitAnalytics();          // opening About leaves the operator analytics view
   state.building = null;
   state.selected = null;

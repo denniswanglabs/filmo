@@ -747,5 +747,103 @@ class TestClipToClauseOrphanConnector(unittest.TestCase):
         self.assertEqual(style_fill._clip_to_clause("   ", 64), "")
 
 
+class TestVoCondenseRobustness(unittest.TestCase):
+    """The copy-length guard that makes the framework robust to a DENSE (Ultra) vs
+    SPARSE (Super) planner: cap each VO beat to its scene's pacing + the film budget,
+    on a clause boundary (never mid-word), leaving a sparse plan untouched."""
+
+    def _dense_plan(self):
+        # 5 scenes summing to a 30s plan, dense (Ultra-like) VO beats.
+        return {
+            "job": {"target_duration_s": 30},
+            "scenes": [
+                {"id": "title-open", "type": "title", "duration_s": 4},
+                {"id": "shot-home", "type": "screenshot", "duration_s": 7},
+                {"id": "shot-bill", "type": "screenshot", "duration_s": 7},
+                {"id": "walk-bill", "type": "walkthrough", "duration_s": 8},
+                {"id": "title-close", "type": "title", "duration_s": 4},
+            ],
+            "voiceover": {"beats": [
+                {"scene_id": "title-open",
+                 "text": "Stripe powers global commerce for millions of businesses in 135 currencies."},
+                {"scene_id": "shot-home",
+                 "text": "Accept payments online with built-in fraud protection, instant payouts, and support for many currencies."},
+                {"scene_id": "shot-bill",
+                 "text": "Enable any billing model from subscriptions to usage-based pricing with automated invoicing in minutes."},
+                {"scene_id": "walk-bill",
+                 "text": "Set up recurring billing, customize trial periods, and automate revenue recovery in a single dashboard for global teams."},
+                {"scene_id": "title-close",
+                 "text": "Start accepting payments worldwide at stripe.com today and scale instantly."},
+            ]},
+        }
+
+    def _sparse_plan(self):
+        return {
+            "job": {"target_duration_s": 30},
+            "scenes": [
+                {"id": "open", "type": "title", "duration_s": 3},
+                {"id": "shot", "type": "screenshot", "duration_s": 4},
+                {"id": "walk", "type": "walkthrough", "duration_s": 5},
+                {"id": "close", "type": "title", "duration_s": 3},
+            ],
+            "voiceover": {"beats": [
+                {"scene_id": "open", "text": "Stripe powers online payments for internet businesses worldwide."},
+                {"scene_id": "shot", "text": "The Stripe Dashboard shows real-time payments, payouts, and customer insights."},
+                {"scene_id": "walk", "text": "Create a recurring subscription plan, set pricing, and let Stripe handle billing automatically."},
+                {"scene_id": "close", "text": "Start accepting payments today with Stripe's simple integration."},
+            ]},
+        }
+
+    def _words(self, plan):
+        return [len(b["text"].split()) for b in plan["voiceover"]["beats"]]
+
+    def test_dense_plan_is_condensed_under_global_budget(self):
+        plan = self._dense_plan()
+        before = sum(self._words(plan))
+        style_fill._condense_vo_beats(plan, fps=30)
+        after = sum(self._words(plan))
+        # Dense VO is reduced...
+        self.assertLess(after, before)
+        # ...to under the global word budget (target * w/s * tol, + small slack).
+        budget = 30 * style_fill._VO_WORDS_PER_SEC * style_fill._VO_GLOBAL_TOL
+        self.assertLessEqual(after, round(budget) + 2)
+        # ...and every condensed beat is still a real multi-word phrase (no fragments)
+        # that ends cleanly (no trailing comma / mid-clause dangling connector).
+        for b in plan["voiceover"]["beats"]:
+            t = b["text"].strip()
+            self.assertGreaterEqual(len(t.split()), 2)
+            self.assertFalse(t.endswith((",", ";", ":")), f"dangling tail: {t!r}")
+
+    def test_sparse_plan_is_left_untouched(self):
+        plan = self._sparse_plan()
+        before = [b["text"] for b in plan["voiceover"]["beats"]]
+        style_fill._condense_vo_beats(plan, fps=30)
+        after = [b["text"] for b in plan["voiceover"]["beats"]]
+        # A sparse plan already sits under budget — condensing must be a no-op so the
+        # duration-fill side (build_timeline) does the work of reaching target.
+        self.assertEqual(before, after)
+
+    def test_condense_to_words_never_cuts_mid_word(self):
+        out = style_fill._condense_to_words(
+            "Stripe powers global commerce for millions of businesses worldwide", 6)
+        self.assertLessEqual(len(out.split()), 6)
+        self.assertGreaterEqual(len(out.split()), 2)
+        # The result is a prefix of real words (no partial token at the end).
+        self.assertTrue(out and not out.endswith(("-", ",")))
+
+    def test_explicit_supporting_line_clamped(self):
+        # An explicit over-long plan supporting line must be clamped so it can't
+        # overflow the split-layout left column. Build a screenshot scene with one.
+        long_support = ("Stripe handles payments, billing, fraud prevention, payouts, "
+                        "invoicing, and revenue recovery for global teams at scale")
+        scene = {"id": "shot", "type": "screenshot",
+                 "data": {"imageSrc": "x.png", "supporting": long_support,
+                          "_text": "Accept payments online"}}
+        out = style_fill._shape_screenshot(scene, _brand())
+        if out.get("supporting"):
+            self.assertLessEqual(len(out["supporting"]),
+                                 style_fill._SUPPORTING_MAX_CHARS + 1)
+
+
 if __name__ == "__main__":
     unittest.main()

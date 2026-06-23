@@ -149,12 +149,33 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     _wm = (company_facts or {}).get("wordmark", "").strip() if company_facts else ""
     _resolved_brand = _wm if _wm and _wm.lower() != "the product" else _brand_name(company_url)
     emphasis = (emphasis or "").strip()
+    # Planner-call telemetry. _plan_with_nemotron populates this with finish_reason,
+    # token usage, and a `reason` string. We use it to (a) stamp plan_source on the
+    # plan so EVERY build plainly shows whether the real LLM planned it or it fell
+    # back to the deterministic template, and (b) emit a clear log line on fallback
+    # so a template build is NEVER silent. This is what lets Dennis trust that
+    # "testing on Super" actually exercised the 120B and not a canned template.
+    planner_meta = {}
     plan = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality,
-                               brain, company_facts)
+                               brain, company_facts, meta=planner_meta)
+    plan_source = "llm"
     if plan is None:
+        plan_source = "template"
+        reason = planner_meta.get("reason") or "error"
+        fr = planner_meta.get("finish_reason")
+        print(
+            "[planner] brain=%s LLM plan UNAVAILABLE (reason=%s finish_reason=%s) "
+            "-> FALLING BACK to deterministic template plan. This build was NOT "
+            "planned by the LLM." % (brain, reason, fr),
+            file=sys.stderr,
+        )
         plan = _template_plan(company_url, goal, target_duration_s, style, quality,
                               brand=_resolved_brand, emphasis=emphasis,
                               company_facts=company_facts)
+    else:
+        print("[planner] brain=%s LLM plan OK (finish_reason=%s usage=%s)"
+              % (brain, planner_meta.get("finish_reason"), planner_meta.get("usage")),
+              file=sys.stderr)
     # force the brief fields so the rest of the pipeline is consistent. emphasis +
     # the resolved wordmark are stamped onto job BEFORE _enforce_quality so the
     # STANDARD structure backstop can name the emphasized feature in the walkthrough
@@ -176,6 +197,11 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
         n_cine = sum(1 for s in (plan.get("scenes") or [])
                      if isinstance(s, dict) and s.get("type") == "cinematic")
         if n_cine < 2:
+            if plan_source == "llm":
+                plan_source = "template"
+                print("[planner] brain=%s PREMIUM LLM plan had <2 cinematic scenes "
+                      "-> FALLING BACK to deterministic premium template." % brain,
+                      file=sys.stderr)
             plan = _template_plan(company_url, goal, target_duration_s, style, quality,
                                   brand=_resolved_brand)
             plan["job"].update({"company_url": company_url, "goal": goal,
@@ -208,6 +234,11 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     (plan.get("job") or {}).pop("_wordmark", None)
     problems = validate_plan(plan)
     if problems:
+        if plan_source == "llm":
+            plan_source = "template"
+            print("[planner] brain=%s LLM plan FAILED final validation (%s) "
+                  "-> FALLING BACK to deterministic template." % (brain, "; ".join(problems)),
+                  file=sys.stderr)
         # one more chance on the deterministic template before giving up
         plan = _template_plan(company_url, goal, target_duration_s, style, quality,
                               brand=_resolved_brand, emphasis=emphasis,
@@ -217,6 +248,18 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
         problems = validate_plan(plan)
         if problems:
             raise ValueError("planner produced an invalid plan: " + "; ".join(problems))
+    # Stamp planner provenance on the plan so the ledger/console can show EVERY build
+    # plainly as LLM-planned or template-fallback (with finish_reason + token usage).
+    # build_runner reads plan["_planner"] into ledger selection. Not a frozen-schema
+    # key on `job`/`scenes`/`voiceover`, so the strict planner schema is unaffected;
+    # build_runner persists it under plan["selection"] for the dashboard.
+    plan["_planner"] = {
+        "plan_source": plan_source,
+        "brain": brain,
+        "finish_reason": planner_meta.get("finish_reason"),
+        "reason": planner_meta.get("reason") or ("ok" if plan_source == "llm" else "fallback"),
+        "usage": planner_meta.get("usage"),
+    }
     return plan
 
 
@@ -456,11 +499,22 @@ def _restyle_durations(plan, style, target_duration_s):
 
 
 def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
-                        quality="standard", brain="super-free", company_facts=None):
+                        quality="standard", brain="super-free", company_facts=None,
+                        meta=None):
+    # `meta`: optional dict the caller threads in to learn WHY the LLM path did or
+    # did not produce a plan. Populated with finish_reason / usage (token costs) and
+    # a short `reason` string ("ok", "no-key", "refusal", "truncated", "parse-fail",
+    # "error") so plan_job can stamp plan_source + finish_reason on the plan and log
+    # a NON-SILENT template fallback. Never raises on account of meta.
+    if meta is None:
+        meta = {}
+    meta.setdefault("finish_reason", None)
+    meta.setdefault("usage", None)
     # Gate on the OpenRouter key now that the planner brain routes through OpenRouter
     # (all 3 brains). When it's unset, return None so plan_job falls back to the
     # deterministic template plan (the live console always proceeds at $0).
     if not brain_mod.brain_key():
+        meta["reason"] = "no-key"
         return None
     brain = brain_mod.normalize_brain(brain)
     # GENRE HINT: detect the brand's business model (media/marketplace/ecommerce/
@@ -491,19 +545,86 @@ def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
             % (company_url, goal, target_duration_s))
     if facts_block:
         user = user + facts_block
+    # Anti-REFUSAL guard. The free 120B Super sometimes answers a perfectly complete
+    # brief with "I need the brief details…" instead of JSON, which produced no plan
+    # and silently dropped to the template. Make it explicit that the brief above is
+    # COMPLETE and that the ONLY acceptable response is the JSON object — never a
+    # question, apology, or request for more information.
+    user = user + (
+        "\nThe brief above is COMPLETE. Do NOT ask for more information, do NOT "
+        "apologize, and do NOT explain. Respond with ONLY the JSON scene-plan "
+        "object and nothing else.\n")
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": user}]
-    try:
-        raw = vp.call_model(messages, brain=brain)
+
+    def _looks_like_refusal(text):
+        # A refusal / clarifying-question reply has no JSON object and reads like
+        # prose ("I need the brief details", "Could you provide…"). If extract_json
+        # can't find a `{...}` AND the text is short, treat it as a refusal so the
+        # retry uses a firmer nudge rather than the generic repair.
+        t = (text or "").strip()
+        if "{" in t and "}" in t:
+            return False
+        return True
+
+    def _normalize_llm_plan(plan):
+        # The 120B reliably emits id/type/brief/model/duration_s but OMITS
+        # input_image (which is ALWAYS null for these scene types — every template
+        # scene sets it None). Without this, a perfectly good LLM plan failed the
+        # strict per-scene key check and was SILENTLY discarded to the template even
+        # though finish_reason=stop and the JSON parsed (observed on the real Stripe
+        # super-free call). Default the always-null structural field so a valid LLM
+        # plan is KEPT instead of thrown away. Only fills a MISSING key — never
+        # overwrites a value the model provided.
+        if isinstance(plan, dict):
+            for s in (plan.get("scenes") or []):
+                if isinstance(s, dict):
+                    s.setdefault("input_image", None)
+        return plan
+
+    # Try up to 2 fresh attempts. A transient refusal or truncation on the first
+    # call should NOT immediately drop to the template — one clean retry recovers
+    # most of them. Each attempt also gets a single JSON-repair sub-retry.
+    last_reason = "error"
+    for attempt in range(2):
         try:
-            return vp.extract_json(raw)
+            raw = vp.call_model(messages, brain=brain, meta=meta)
+        except Exception:
+            last_reason = "error"  # network/HTTP failure — try once more, then template
+            continue
+        fr = meta.get("finish_reason")
+        if fr == "length":
+            # Output budget exhausted (should be rare now that reasoning is off and
+            # the cap is raised). Record it and retry once fresh.
+            last_reason = "truncated"
+            continue
+        try:
+            plan = _normalize_llm_plan(vp.extract_json(raw))
+            meta["reason"] = "ok"
+            return plan
         except (ValueError, json.JSONDecodeError):
+            pass
+        # No parseable JSON. If it reads like a refusal, nudge firmly and retry the
+        # WHOLE call; otherwise do the in-context JSON repair.
+        if _looks_like_refusal(raw):
+            last_reason = "refusal"
+            messages = messages + [
+                {"role": "assistant", "content": raw},
+                {"role": "user", "content": "Do not ask for details — the brief is "
+                 "complete. Output ONLY the JSON scene-plan object now."}]
+            continue
+        last_reason = "parse-fail"
+        try:
             repair = messages + [
                 {"role": "assistant", "content": raw},
                 {"role": "user", "content": "Your previous output did not parse. Return ONLY the corrected JSON object."}]
-            return vp.extract_json(vp.call_model(repair, brain=brain))
-    except Exception:
-        return None  # any network/model failure -> fall back to the template
+            plan = _normalize_llm_plan(vp.extract_json(vp.call_model(repair, brain=brain, meta=meta)))
+            meta["reason"] = "ok"
+            return plan
+        except Exception:
+            continue  # fresh attempt on the next loop iteration
+    meta["reason"] = last_reason
+    return None  # all attempts failed -> fall back to the template (now logged by caller)
 
 
 # --- GENRE-aware grounding -------------------------------------------------

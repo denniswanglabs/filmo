@@ -557,25 +557,49 @@ const BrowserChrome: React.FC<{ theme: Theme; addr: string }> = ({ theme, addr }
   </div>
 );
 
-// Split a headline into <=2 display lines balanced near the midpoint (the split
-// layout wants a tall 2-line block, distinct from the body splitToLines heuristic).
+// Split a headline into display lines balanced near the midpoint (the split layout
+// wants a tall multi-line block, distinct from the body splitToLines heuristic).
+// ROBUSTNESS: at 76px in the ~660px left column a line holds ~HEADLINE_MAX_CHARS.
+// style_fill clamps the screenshot headline to ~38 chars upstream, but a DENSE
+// planner can author a longer explicit data.headline; cap each line and overflow to
+// a 3rd line (never beyond) so a long headline NEVER spills out of the column.
+const HEADLINE_MAX_CHARS = 18;
 const splitHeadline = (text: string): string[] => {
   const t = (text ?? "").trim();
   if (!t) return [];
   const words = t.split(/\s+/);
-  if (words.length <= 2) return [t];
-  // split at the word boundary closest to the char midpoint.
+  if (words.length <= 1) return [t];
+  // Greedy word-wrap into lines of <= HEADLINE_MAX_CHARS, then BALANCE: aim for 2
+  // lines when it fits, allow a 3rd, hard-cap at 3 (the layout's vertical budget).
+  // First try the original midpoint 2-way split; keep it only if both lines fit.
   const half = t.length / 2;
   let acc = 0;
   let splitAt = Math.floor(words.length / 2);
   for (let i = 0; i < words.length - 1; i++) {
     acc += words[i].length + 1;
-    if (acc >= half) {
-      splitAt = i + 1;
-      break;
+    if (acc >= half) { splitAt = i + 1; break; }
+  }
+  const a = words.slice(0, splitAt).join(" ");
+  const b = words.slice(splitAt).join(" ");
+  if (a.length <= HEADLINE_MAX_CHARS && b.length <= HEADLINE_MAX_CHARS) return [a, b];
+  // A line overflows — greedy-wrap the whole headline so no line exceeds the cap.
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? cur + " " + w : w;
+    if (next.length > HEADLINE_MAX_CHARS && cur) {
+      lines.push(cur);
+      cur = w;
+    } else {
+      cur = next;
     }
   }
-  return [words.slice(0, splitAt).join(" "), words.slice(splitAt).join(" ")];
+  if (cur) lines.push(cur);
+  // Hard-cap at 3 lines: fold any overflow into the 3rd so it never spills the box.
+  if (lines.length > 3) {
+    return [lines[0], lines[1], lines.slice(2).join(" ")];
+  }
+  return lines;
 };
 
 // Split a line around its punch word so the punch word can be accent-colored.
