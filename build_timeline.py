@@ -49,11 +49,15 @@ DEFAULT_FPS = 30
 DEFAULT_HOLD_S = 1.5
 
 # R5 (L9 confirmed on Stripe/Notion/Shopify) — the walkthrough scene must not exceed
-# the 9s/270f pacing budget. The captured walk clip's own length (media_frames floor)
-# pushed the scene window to 10-11s on all three brands, dragging pacing below 4.
-# Cap the walkthrough SCENE WINDOW (not the clip): the device-hero player just shows
-# the first WALKTHROUGH_MAX_FRAMES of the clip. Roles that get the clamp.
-WALKTHROUGH_MAX_FRAMES = 270  # 9.0s @ 30fps
+# the pacing budget. The captured walk clip's own length (media_frames floor) pushed
+# the scene window to 10-11s on all three brands, dragging pacing below 4.
+# DARKFIX (2026-06-23) — the walkthrough is the LONGEST scene (~1/3 of a 24s video)
+# and DRAGS on a dark site (the captured page reads heavy). Tighten the cap to ~5.5s
+# so the tour is brisk + intentional. Cap the walkthrough SCENE WINDOW (not the clip):
+# the device-frame player just shows the first WALKTHROUGH_MAX_FRAMES of the clip. The
+# clamp below is max(WALKTHROUGH_MAX_FRAMES, span_frames) so a longer VO span (and the
+# media floor, which is itself min()'d to this cap) is NEVER cut. Roles that get it.
+WALKTHROUGH_MAX_FRAMES = 165  # ~5.5s @ 30fps (was 270/9.0s — tightened to cut drag)
 _WALKTHROUGH_ROLES = ("walkthrough", "demo")
 
 # DURATION ROBUSTNESS — the per-scene HOLD budget. A non-walkthrough scene (title /

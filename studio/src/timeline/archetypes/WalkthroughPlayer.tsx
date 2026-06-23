@@ -1,41 +1,41 @@
 // WALKTHROUGH-PLAYER archetype — a produced walkthrough MP4 (Walk Agent capture)
 // played INSIDE the branded studio composition. Maps a scene role: the "here is
-// the actual guided walkthrough" beat. The clip plays inside a brand-tinted frame
-// (the same studio card language as apple-screenshot) with a kinetic title bar
-// over the top — the brand wordmark / emphasis (`overlayTitle`) with an accent
-// underline that sweeps in on the scene's cue frames, exactly like the cards.
+// the actual guided walkthrough" beat.
 //
 // The clip's OWN audio is muted by default (`muteClip`, default true): the scene
 // VO owns the audio (the Timeline places a per-scene <Audio> at this scene's
 // in_frame). So the produced clip inherits Walk Studio's branding + VO placement
 // instead of carrying its own baked-in narration.
 //
-// R4 (MOTION) — DEVICE-HERO retreatment. R3 judged the walkthrough as the ONE
-// dim still <4 (motion 3.5): the real clip rendered as a SMALL, FLOATING, near-
-// static card with big margins. This pass makes it OWN the frame like the TapPay
-// phone-hero and gives the HELD clip living motion that needs NO scene data:
-//   - the frame is BIG + slightly anchored (the device-hero footprint), and the
-//     clip defaults to COVER fit so the captured UI fills the window (no dark
-//     letterbox wells), arriving with frame-rise (the web analog of TapPay's
-//     phone-rise).
-//   - a SELF-SUFFICIENT motion layer plays over the held frame even when the
-//     scene carries no focus/cursor/zoom data (the common $0-standard case):
-//       * an auto Ken-Burns zoom-drift (`zoomPunch`) toward a derived hotspot so
-//         the UI is always slowly pushing in — nothing freezes;
-//       * an auto guided cursor that springs across the frame to the hotspot and
-//         clicks (ripple), the "guided walkthrough" gesture;
-//       * a highlight ring that draws on at the hotspot, tied to the cursor click;
-//       * a floating glass KPI chip that counts up (`rollNumber`) + springs in
-//         (the TapPay approve-chip analog) so the proof beat lands a number.
-//   - ANY explicit scene data (data.focus / data.cursorPath / data.zoomTo /
-//     data.kpi) OVERRIDES the synthetic default; absent data => the synthetic
-//     device-hero motion runs. Backward-compatible: a plain centered shot is no
-//     longer the output, but every prior field still works.
+// DARKFIX (2026-06-23) — SPLIT retreatment so the walkthrough reads as an
+// INTENTIONAL, LIGHT-framed, clearly-animated tour REGARDLESS of how dark the
+// captured site is.
+//
+//   WHY: the R4 "device-hero" filled the frame with an 880px clip window at
+//   cover-fit. On a LIGHT site (Stripe) that looked great. On a DARK site (e.g.
+//   Linear / linear.app) the captured page is near-black, so the clip window
+//   became a full-bleed black rectangle for ~1/3 of the video — jarring against
+//   the polished LIGHT split scenes before it (Dennis: "looks broken").
+//
+//   FIX: adopt the SAME text-left / UI-right SPLIT DNA as the apple-screenshot
+//   keystone. A clearly-LIGHT left column (tracked eyebrow + kinetic headline +
+//   accent underline + supporting line) always reads on the near-white page, and
+//   the walkthrough clip sits in a smaller, inset, browser-chrome DEVICE FRAME on
+//   the RIGHT — so even a dark captured page sits inside a deliberate, light,
+//   designed context, balanced exactly like the splits. The dark page no longer
+//   fills the frame; it's a framed artifact the LIGHT page wraps.
+//
+//   The synthetic device-hero motion (R4) is PRESERVED but re-scoped to the
+//   right-side clip window so it reads CLEARLY on a dark page: frame-rise arrival,
+//   an auto Ken-Burns push, a guided cursor + click ripple, a highlight ring, and
+//   an optional KPI counter-roll chip — all running with NO scene data (the
+//   common $0-standard case, L6) and all OVERRIDABLE by explicit data.* fields.
 //
 // Reveals fire on the scene's CUE frames (relative to scene in_frame):
-//   card-in  -> the video frame arrives (frame-rise, NO overshoot),
-//   title-in -> the overlay title bar slides in,
-//   accent   -> the brand accent underline sweeps in under the title.
+//   eyebrow-in -> the left eyebrow rises,
+//   headline-in/title-in -> the headline lines stagger in,
+//   frame-in/card-in -> the device frame arrives (frame-rise),
+//   accent -> the brand accent underline sweeps in under the headline.
 // Sensible fallback cue frames keep it animating even when a scene has no cues.
 import React from "react";
 import {
@@ -97,6 +97,73 @@ const fmtKpi = (n: number, to: number, prefix: string, suffix: string): string =
   return `${prefix}${v}${suffix ? suffix : ""}`;
 };
 
+// Derive a LEFT-column eyebrow + headline from the overlayTitle (which style_fill
+// builds as "Brand — emphasis", e.g. "Stripe — accept payments in one
+// integration"). The brand part feeds the eyebrow chrome; the emphasis is the
+// kinetic headline. Honest: only ever SPLITS the real overlayTitle, never invents.
+const splitOverlay = (raw: string, wordmark: string): { brand: string; headline: string } => {
+  const t = (raw || "").trim();
+  // Prefer an en-dash / em-dash / hyphen separator ("Brand — emphasis").
+  const m = t.match(/^(.*?)\s*[—–-]\s*(.+)$/);
+  if (m && m[1].trim() && m[2].trim()) {
+    return { brand: m[1].trim(), headline: m[2].trim() };
+  }
+  // No separator: the whole thing is the headline; eyebrow falls to the wordmark.
+  return { brand: (wordmark || "").trim(), headline: t || (wordmark || "").trim() };
+};
+
+// Capitalize the first letter of a display headline (the emphasis often arrives
+// lower-case, e.g. "accept payments in one integration"). Never touches the rest.
+const sentenceCase = (s: string): string =>
+  s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+// Split a headline into ~2 balanced display lines for the left column (mirrors the
+// apple-screenshot split heuristic; the column holds ~18 chars/line at this size).
+const splitHeadlineLines = (text: string, maxLines = 3): string[] => {
+  const t = (text || "").trim();
+  if (!t) return [];
+  const words = t.split(/\s+/);
+  if (words.length <= 2) return [t];
+  // Greedy wrap near a target line length so a long emphasis breaks cleanly.
+  const TARGET = Math.max(14, Math.ceil(t.length / Math.min(maxLines, 3)));
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (next.length > TARGET && cur) {
+      lines.push(cur);
+      cur = w;
+    } else {
+      cur = next;
+    }
+    if (lines.length === maxLines - 1) {
+      // last line takes the remainder
+      const idx = words.indexOf(w);
+      cur = words.slice(idx).join(" ");
+      break;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.slice(0, maxLines);
+};
+
+// Render a single headline line with the punch noun (if any) accent-popped.
+const splitPunch = (line: string, punch?: string): { pre: string; hit: string; post: string } => {
+  const p = (punch || "").trim();
+  if (!p) return { pre: line, hit: "", post: "" };
+  const i = line.toLowerCase().indexOf(p.toLowerCase());
+  if (i < 0) return { pre: line, hit: "", post: "" };
+  return { pre: line.slice(0, i), hit: line.slice(i, i + p.length), post: line.slice(i + p.length) };
+};
+
+// A web address for the device-frame chrome bar (the captured-page URL, when the
+// caption carries one). Strips the scheme so it reads like a browser address.
+const toAddr = (caption: string, fallback: string): string => {
+  const c = (caption || "").trim();
+  const base = c || fallback;
+  return base.replace(/^https?:\/\//, "").replace(/\/$/, "");
+};
+
 export const WalkthroughPlayer: React.FC<{
   data: SceneData;
   cues: Cue[];
@@ -114,42 +181,85 @@ export const WalkthroughPlayer: React.FC<{
   const { fps } = useVideoConfig();
 
   const src = data.videoSrc ? resolveSrc(data.videoSrc) : "";
-  // R4: walkthrough clips default to COVER so the captured UI fills the device-
-  // hero window (no dark letterbox wells around a small clip). An explicit
+  // DARKFIX: the walkthrough clip defaults to COVER so the captured UI fills the
+  // device-frame window (no dark letterbox wells inside the frame). An explicit
   // data.videoFit still wins (set "contain" for a clip you must not crop).
+  // NOTE: style_fill sets "contain" by default; the frame is light-chromed so even
+  // contain reads fine, but cover keeps the framed clip looking full.
   const fit = data.videoFit ?? "cover";
   // VO owns the audio: clips mute by default. Only an explicit false keeps sound.
   const muted = data.muteClip !== false;
-  const title = (data.overlayTitle ?? theme.wordmark ?? "").trim();
 
-  const cardAt = cueAt(cues, "card-in", 6);
-  const titleAt = cueAt(cues, "title-in", cardAt + 10);
-  const accentAt = cueAt(cues, "accent", titleAt + 8);
+  // ---- Left-column copy (derived from overlayTitle: "Brand — emphasis") -------
+  const overlay = (data.overlayTitle ?? theme.wordmark ?? "").trim();
+  const wordmark = (theme.wordmark ?? "").trim();
+  const { brand, headline: rawHeadline } = splitOverlay(overlay, wordmark);
+  const headlineText = sentenceCase(rawHeadline) || wordmark;
+  const headlineLines = splitHeadlineLines(headlineText, 3);
+  // Supporting line: an explicit caption is used as the device URL, so the muted
+  // supporting line under the headline is the kicker (when distinct) else nothing.
+  const kickerText = (data.kicker ?? "").trim();
+  const supportingLine =
+    kickerText && kickerText.toLowerCase() !== headlineText.toLowerCase() ? kickerText : "";
 
-  // frame-rise (spec §1): the browser/video card itself springs up from +dy &
-  // scale 0.9→1 with a slight rotateX tilt-settle (the web analog of TapPay's
-  // phone-rise). The clip inside then mask-reveals top-down.
-  const rise = frameRise(frame, cardAt, fps, { dy: 64, scaleFrom: 0.9, tilt: 7, fadeDur: 14 });
-  const cardOpacity = rise.opacity;
-  const ARRIVE = 26;
+  // ---- Cue timeline (scene-length-scaled fallbacks so SHORT scenes still land) -
+  const eyebrowAt = cueAt(cues, "eyebrow-in", Math.min(4, Math.round(durationInFrames * 0.04)));
+  const headlineAt = cueAt(
+    cues,
+    "headline-in",
+    cueAt(cues, "title-in", Math.min(16, Math.round(durationInFrames * 0.1)))
+  );
+  const cardAt = cueAt(cues, "frame-in", cueAt(cues, "card-in", headlineAt + 6));
+  const accentAt = cueAt(cues, "accent", headlineAt + 26);
+
+  // ---- LEFT column motion -----------------------------------------------------
+  const eyebrowOpacity = interpolate(frame, [eyebrowAt, eyebrowAt + 12], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_OUT_QUART,
+  });
+  const eyebrowY = interpolate(frame, [eyebrowAt, eyebrowAt + 12], [10, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_OUT_QUART,
+  });
+  const LINE_STAGGER = 16;
+  const LINE_DUR = 18;
+  const punchAt = headlineAt + 14;
+  const punchGlow = interpolate(
+    frame,
+    [punchAt, punchAt + 14, punchAt + 40, durationInFrames - 18, durationInFrames],
+    [0, 1, 0.6, 0.85, 0.5],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+  const underlineW = interpolate(frame, [accentAt, accentAt + 20], [0, 132], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: EASE_OUT_QUART,
+  });
+  const supportingMotion = appleRise(frame, headlineAt + 30, 18, 18);
+
+  // ---- RIGHT column: device frame geometry (the split UI-right card) ----------
+  // Mirrors the apple-screenshot split: a fixed left column + a right-inset card.
+  // The card is generous (the walkthrough is the demo beat) but NOT full-bleed —
+  // the left light column + page margins always frame it, so a dark page reads as
+  // a deliberate framed artifact, never a black rectangle.
+  const leftX = 110;
+  const leftColW = 620;
+  const CARD_W = 1010;
+  const CARD_RIGHT = 70;
+  const WIN_W = CARD_W;
+  const WIN_H = 632; // clip window (matches the split shot footprint, ~16:10)
+
+  const rise = frameRise(frame, cardAt, fps, { dy: 56, scaleFrom: 0.92, tilt: 6, fadeDur: 16 });
+  const ARRIVE = 28;
   const maskReveal = interpolate(frame, [cardAt + 4, cardAt + 4 + ARRIVE], [100, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: EASE_OUT_QUART,
   });
-
-  // Title bar slides in (Apple rise), then a brand accent underline sweeps in
-  // under it on the `accent` cue — the SAME cue-driven underline the cards use.
-  const titleRise = appleRise(frame, titleAt, 16, 18);
-  const underline = interpolate(frame, [accentAt, accentAt + 22], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-    easing: EASE_OUT_QUART,
-  });
-
-  // parallax / breath drift keeps the settled frame alive (tiny, deterministic).
-  const breath = breathDrift(frame, cardAt + ARRIVE + 6, 3, 120);
-  const breathX = breathDrift(frame, cardAt + ARRIVE + 6, 2, 150);
+  // breath drift keeps the settled card alive (tiny, deterministic).
+  const breath = breathDrift(frame, cardAt + ARRIVE + 6, 2.5, 110);
 
   const exitFade = interpolate(frame, [durationInFrames - 14, durationInFrames], [1, 0], {
     extrapolateLeft: "clamp",
@@ -157,45 +267,34 @@ export const WalkthroughPlayer: React.FC<{
     easing: EASE_OUT_QUART,
   });
 
-  // --- DEVICE-HERO frame geometry (R4) ----------------------------------------
-  // Bigger footprint than R3 (was 1420×738 centered with big margins). The card
-  // now owns the frame like the TapPay phone: ~1640 wide, an 880px clip window,
-  // nudged slightly UP so the act badge + corner mark have air without shrinking
-  // the device. The motion layer below is sized to this window.
-  const CARD_W = 1640;
-  const WIN_W = CARD_W; // clip window == card width
-  const WIN_H = 880; // clip window height (16:8.6, device-hero footprint)
   // The motion layer starts AFTER the clip has revealed.
   const motionAt = cardAt + 4 + ARRIVE;
-  const tailEnd = durationInFrames - 18;
+  const tailEnd = durationInFrames - 16;
 
-  // Derived HOTSPOT (card-local normalized 0..1): where the cursor goes, the
-  // ring draws, and the auto Ken-Burns pushes. Use data.focus center when given;
-  // else a sensible upper-center bias (where app UI action usually lives).
+  // Derived HOTSPOT (card-local normalized 0..1): where the cursor goes, the ring
+  // draws, and the Ken-Burns pushes. data.focus center when given; else an
+  // upper-center bias (where app UI action usually lives).
   const focus = data.focus;
   const hotspot = focus
     ? { x: focus.x + focus.w / 2, y: focus.y + focus.h / 2 }
-    : { x: 0.62, y: 0.34 };
+    : { x: 0.6, y: 0.32 };
 
-  // AUTO Ken-Burns zoom-drift (spec §1 zoom-punch) — runs even with NO data:
-  // a gentle continuous push toward the hotspot so the held UI never freezes.
-  // data.zoomTo (if present) overrides target + scale.
+  // AUTO Ken-Burns zoom-drift — runs even with NO data so the held UI never freezes.
   const zTarget = data.zoomTo ?? { x: hotspot.x, y: hotspot.y, scale: 1.1 };
   const zoom = zoomPunch(frame, motionAt, zTarget, zTarget.scale ?? 1.1, {
-    dur: 70, // slow Ken-Burns push, not a snap
+    dur: 60,
     holdEnd: tailEnd,
     boxW: WIN_W,
     boxH: WIN_H,
   });
 
-  // AUTO guided cursor (spec §1 cursor-move) — synthesize a path when none given.
-  // Springs from lower-left in toward the hotspot, clicks there (ripple), then
-  // drifts a touch. data.cursorPath (card-local %) overrides.
-  const clickFrame = motionAt + 30;
+  // AUTO guided cursor — springs from lower-left toward the hotspot, clicks
+  // (ripple), then drifts a touch. data.cursorPath (card-local %) overrides.
+  const clickFrame = motionAt + 26;
   const autoPath = [
     { at: motionAt + 4, x: 0.2, y: 0.78 },
     { at: clickFrame, x: hotspot.x, y: hotspot.y, click: true },
-    { at: clickFrame + 40, x: hotspot.x + 0.06, y: hotspot.y + 0.05 },
+    { at: clickFrame + 36, x: hotspot.x + 0.06, y: hotspot.y + 0.05 },
   ];
   const cursorKeys = (data.cursorPath && data.cursorPath.length
     ? data.cursorPath.map((k) => ({ at: motionAt + k.at, x: k.x, y: k.y, click: k.click }))
@@ -208,24 +307,20 @@ export const WalkthroughPlayer: React.FC<{
     easing: EASE_OUT_QUART,
   });
 
-  // highlight ring at the hotspot, drawn on at the cursor click (ties the gesture
-  // to the named element). Auto when no data.focus; sized small around the click.
+  // highlight ring at the hotspot, drawn on at the cursor click.
   const ringAt = clickFrame - 4;
   const hl = highlightBox(frame, ringAt, tailEnd, 14);
-  const ringRect = focus ?? { x: hotspot.x - 0.13, y: hotspot.y - 0.06, w: 0.26, h: 0.12 };
+  const ringRect = focus ?? { x: hotspot.x - 0.14, y: hotspot.y - 0.07, w: 0.28, h: 0.14 };
 
-  // KPI counter-roll chip (the TapPay approve-chip / proof-stat analog). Reads
-  // data.kpi if given, else a number out of the title/caption; else nothing
-  // (never invents a stat). Springs in + counts up over the held tail.
+  // KPI counter-roll chip — only when a real number exists (never invents).
   const kpiRaw = (data.kpi ?? "").trim();
   const kpi = kpiRaw ? parseKpi(kpiRaw) : null;
-  const kpiAt = motionAt + 20;
+  const kpiAt = motionAt + 18;
   const kpiPop = approveChip(frame, kpiAt, fps);
   const kpiNow = kpi ? rollNumber(frame, kpiAt + 4, kpi.to, 44) : 0;
   const kpiGlow = tailGlow(frame, kpiAt + 10, tailEnd);
 
-  // Persistent corner brand mark (spec §4): real logo when present, else
-  // wordmark; nothing when neither exists.
+  // Persistent corner brand mark (spec §4): real logo when present, else wordmark.
   const logoSrc = (theme.logoSrc ?? "").trim();
   const cornerWordmark = (theme.wordmark ?? "").trim();
   const cornerOpacity = interpolate(frame, [cardAt, cardAt + 18], [0, 0.7], {
@@ -234,10 +329,15 @@ export const WalkthroughPlayer: React.FC<{
     easing: EASE_OUT_QUART,
   });
 
-  // Act badge label from kicker (≤2 words, all-caps); fall back to overlayTitle.
-  const badgeSource = (data.kicker ?? data.overlayTitle ?? "").trim();
-  const badgeLabel = actIndex > 0 ? actLabel(badgeSource) : "";
-  const badgeText = actIndex > 0 ? `${actNum(actIndex)}${badgeLabel ? ` — ${badgeLabel}` : ""}` : "";
+  // Eyebrow text: "NN · BRAND" (act badge folded in, like the screenshot split).
+  const eyebrowLabel = actLabel(brand) || brand.toUpperCase();
+  const eyebrowText =
+    actIndex > 0
+      ? `${actNum(actIndex)}${eyebrowLabel ? ` · ${eyebrowLabel}` : ""}`
+      : eyebrowLabel;
+
+  // Device-frame chrome address (captured URL when caption carries one).
+  const addr = toAddr(data.caption ?? "", `${(wordmark || "app").toLowerCase()}.com`);
 
   return (
     <AbsoluteFill
@@ -247,40 +347,158 @@ export const WalkthroughPlayer: React.FC<{
         opacity: exitFade,
       }}
     >
-      {/* soft brand mesh so the floating frame has something to sit on */}
+      {/* soft brand mesh — drifting blooms so the near-white page breathes (same
+          light page language as the apple-screenshot split). */}
       <AbsoluteFill
         style={{
           background: `
-            radial-gradient(ellipse 1000px 720px at 26% 22%, ${theme.navy}1c 0%, transparent 60%),
-            radial-gradient(ellipse 1000px 760px at 78% 80%, ${theme.accent}16 0%, transparent 60%),
+            radial-gradient(ellipse 1100px 780px at ${22 + breath * 0.4}% 24%, ${theme.navy}1c 0%, transparent 60%),
+            radial-gradient(ellipse 1000px 760px at ${80 - breath * 0.4}% 82%, ${theme.accent}18 0%, transparent 60%),
             ${theme.bg}
           `,
         }}
       />
 
-      <AbsoluteFill
+      {/* LEFT COLUMN — eyebrow + kinetic headline + accent underline + supporting.
+          ALWAYS light + always visible, regardless of how dark the captured page
+          on the right is. This is what makes the dark-site walkthrough read as a
+          deliberate, light-framed tour instead of a black rectangle. */}
+      <div
         style={{
+          position: "absolute",
+          left: leftX,
+          top: 0,
+          bottom: 0,
+          width: leftColW,
+          display: "flex",
           flexDirection: "column",
-          alignItems: "center",
           justifyContent: "center",
-          // nudge the device-hero up slightly so the badge/corner-mark get air
-          // without shrinking the frame.
-          paddingTop: 24,
-          transform: `translate(${breathX}px, ${breath}px)`,
+          gap: 22,
+          zIndex: 3,
         }}
       >
-        {/* The brand-tinted video frame — studio card chrome around the clip.
-            frame-rise (spec §1): the whole card springs up + scales + tilt-
-            settles as it arrives (the web analog of TapPay's phone-rise). */}
+        {eyebrowText && (
+          <div
+            data-scene-id={sceneId}
+            data-field="kicker"
+            style={{
+              opacity: eyebrowOpacity,
+              transform: `translateY(${eyebrowY}px)`,
+              fontSize: 22,
+              fontWeight: 700,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              color: theme.accent,
+              fontFamily: theme.fontMono,
+            }}
+          >
+            {eyebrowText}
+          </div>
+        )}
+
+        {/* Headline — staggered lines, punch noun accent-popped. */}
+        <div
+          data-scene-id={sceneId}
+          data-field="overlayTitle"
+          style={{ display: "flex", flexDirection: "column", gap: 2 }}
+        >
+          {headlineLines.map((line, li) => {
+            const lineStart = headlineAt + li * LINE_STAGGER;
+            const lineOpacity = interpolate(frame, [lineStart, lineStart + LINE_DUR], [0, 1], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+              easing: EASE_OUT_QUART,
+            });
+            const lineY = interpolate(frame, [lineStart, lineStart + LINE_DUR], [28, 0], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+              easing: EASE_OUT_QUART,
+            });
+            const { pre, hit, post } = splitPunch(line, data.punchWord);
+            return (
+              <div
+                key={li}
+                style={{
+                  opacity: lineOpacity,
+                  transform: `translateY(${lineY}px)`,
+                  fontSize: 64,
+                  fontWeight: 700,
+                  lineHeight: 1.08,
+                  letterSpacing: "-0.02em",
+                  color: theme.text,
+                }}
+              >
+                {pre}
+                {hit && (
+                  <span
+                    style={{
+                      color: theme.accent,
+                      textShadow: `0 0 ${44 * punchGlow}px ${theme.accent}${alphaHex(punchGlow * 0.7)}`,
+                    }}
+                  >
+                    {hit}
+                  </span>
+                )}
+                {post}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* accent underline wipe */}
+        <div
+          style={{
+            width: underlineW,
+            height: 5,
+            borderRadius: 3,
+            backgroundColor: theme.accent,
+            boxShadow: `0 0 ${16 * Math.max(0.3, punchGlow)}px ${theme.accent}88`,
+          }}
+        />
+
+        {/* supporting line (muted) — the kicker, when distinct from the headline. */}
+        {supportingLine && (
+          <div
+            data-scene-id={sceneId}
+            data-field="supporting"
+            style={{
+              opacity: supportingMotion.opacity,
+              transform: supportingMotion.transform,
+              fontSize: 26,
+              fontWeight: 400,
+              lineHeight: 1.4,
+              maxWidth: leftColW - 30,
+              color: theme.textMuted,
+            }}
+          >
+            {supportingLine}
+          </div>
+        )}
+      </div>
+
+      {/* RIGHT COLUMN — the walkthrough clip inside a light browser-chrome device
+          frame, inset from the right edge. frame-rise arrival; the synthetic
+          device-hero motion plays over the held clip. */}
+      <div
+        style={{
+          position: "absolute",
+          right: CARD_RIGHT,
+          top: 0,
+          bottom: 0,
+          display: "flex",
+          alignItems: "center",
+          transform: `translateY(${breath}px)`,
+        }}
+      >
         <div
           data-scene-id={sceneId}
           data-field="card"
           style={{
-            opacity: cardOpacity,
+            opacity: rise.opacity,
             transform: rise.transform,
             transformOrigin: "center bottom",
             width: CARD_W,
-            borderRadius: 20,
+            borderRadius: 18,
             overflow: "hidden",
             backgroundColor: theme.bgCardRaised,
             border: `1px solid ${theme.border}`,
@@ -291,62 +509,51 @@ export const WalkthroughPlayer: React.FC<{
             ].join(", "),
           }}
         >
-          {/* Kinetic title bar — brand wordmark / emphasis over the clip. */}
+          {/* Light mac browser chrome — brand-tinted dots + address pill (the SAME
+              chrome as the apple-screenshot split). A LIGHT bar is always on top,
+              so even a dark captured page sits under a clearly light header. */}
           <div
             style={{
-              height: 64,
+              height: 52,
               display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              gap: 8,
-              padding: "0 26px",
+              alignItems: "center",
+              gap: 16,
+              padding: "0 22px",
               backgroundColor: theme.bgCard,
               borderBottom: `1px solid ${theme.border}`,
             }}
           >
+            <div style={{ display: "flex", gap: 9 }}>
+              {[theme.navy, theme.accent, theme.navyBright].map((c, i) => (
+                <div
+                  key={i}
+                  style={{ width: 13, height: 13, borderRadius: "50%", backgroundColor: c, opacity: 0.85 }}
+                />
+              ))}
+            </div>
             <div
+              data-scene-id={sceneId}
+              data-field="caption"
               style={{
+                flex: 1,
+                height: 30,
+                borderRadius: 8,
+                backgroundColor: theme.bg,
+                border: `1px solid ${theme.border}`,
                 display: "flex",
                 alignItems: "center",
-                gap: 16,
-                opacity: titleRise.opacity,
-                transform: titleRise.transform,
+                padding: "0 14px",
+                fontSize: 18,
+                fontFamily: theme.fontMono,
+                letterSpacing: "0.01em",
+                color: theme.textMuted,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}
             >
-              {/* brand accent dot (NOT macOS traffic lights) */}
-              <div
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: "50%",
-                  backgroundColor: theme.accent,
-                  boxShadow: `0 0 14px ${theme.accent}aa`,
-                }}
-              />
-              <span
-                data-scene-id={sceneId}
-                data-field="overlayTitle"
-                style={{
-                  fontSize: 26,
-                  fontWeight: 700,
-                  letterSpacing: "-0.01em",
-                  color: theme.text,
-                }}
-              >
-                {title}
-              </span>
+              {addr}
             </div>
-            {/* accent underline sweeps in on the `accent` cue (same as the cards) */}
-            <div
-              style={{
-                marginLeft: 28,
-                height: 4,
-                width: `${Math.round(underline * 220)}px`,
-                borderRadius: 4,
-                background: theme.accent,
-                boxShadow: `0 0 16px ${theme.accent}${alphaHex(0.4 * underline)}`,
-              }}
-            />
           </div>
 
           {/* the produced walkthrough clip, mask-revealed top-down as it arrives */}
@@ -354,19 +561,17 @@ export const WalkthroughPlayer: React.FC<{
             style={{
               position: "relative",
               width: "100%",
-              // device-hero clip window — bigger than R3 (738) so the captured
-              // UI dominates the frame; cover fit fills it (no letterbox wells).
               height: WIN_H,
               overflow: "hidden",
-              // light-treatment: the well reads as a light card surface (never a
-              // dark box) for the no-clip placeholder / any contain-fit clip.
+              // light-treatment: the well reads as a light card surface for the
+              // no-clip placeholder / any contain-fit clip (never a dark box).
               backgroundColor: theme.bgCard,
               clipPath: `inset(${maskReveal}% 0 0 0)`,
             }}
           >
-            {/* zoom-punch layer (spec §1): AUTO Ken-Burns push toward the hotspot
-                so the held UI is always slowly moving. transformOrigin top-left
-                so the normalized math is exact. */}
+            {/* zoom-punch layer — AUTO Ken-Burns push toward the hotspot so the
+                held UI is always slowly moving. transformOrigin top-left so the
+                normalized math is exact. */}
             <div
               style={{
                 position: "absolute",
@@ -399,14 +604,13 @@ export const WalkthroughPlayer: React.FC<{
                     letterSpacing: "0.04em",
                   }}
                 >
-                  {title || theme.wordmark}
+                  {headlineText || theme.wordmark}
                 </AbsoluteFill>
               )}
             </div>
 
-            {/* highlight-box (spec §1) — a rounded accent ring + tint draws ON at
-                the hotspot, tied to the cursor click; auto when no data.focus.
-                Ties the gesture to the named UI element. */}
+            {/* highlight-box — a rounded accent ring + tint draws ON at the hotspot,
+                tied to the cursor click. Reads CLEARLY over a dark page. */}
             {hl.opacity > 0.001 && (
               <div
                 data-scene-id={sceneId}
@@ -420,16 +624,15 @@ export const WalkthroughPlayer: React.FC<{
                   borderRadius: 14,
                   border: `2.5px solid ${theme.accent}`,
                   backgroundColor: `${theme.accent}${alphaHex(0.08 * hl.opacity)}`,
-                  boxShadow: `0 0 0 4px ${theme.accent}${alphaHex(0.12 * hl.opacity)}, 0 0 30px ${theme.accent}${alphaHex(0.32 * hl.opacity)}`,
+                  boxShadow: `0 0 0 4px ${theme.accent}${alphaHex(0.12 * hl.opacity)}, 0 0 30px ${theme.accent}${alphaHex(0.34 * hl.opacity)}`,
                   opacity: hl.opacity,
                   pointerEvents: "none",
                 }}
               />
             )}
 
-            {/* cursor-move (spec §1) — an arrow cursor springs to the hotspot and
-                clicks (ripple). AUTO path when no data.cursorPath. SVG overlay
-                scaled to the clip window. */}
+            {/* cursor-move — an arrow cursor springs to the hotspot and clicks
+                (ripple). AUTO path when no data.cursorPath. */}
             <svg
               viewBox={`0 0 ${WIN_W} ${WIN_H}`}
               preserveAspectRatio="none"
@@ -458,30 +661,27 @@ export const WalkthroughPlayer: React.FC<{
               <g transform={`translate(${cursor.x - 4} ${cursor.y - 2})`}>
                 <path
                   d="M0 0 L0 34 L9 26 L14 38 L20 36 L15 24 L26 24 Z"
-                  fill={theme.text}
-                  stroke="#ffffff"
+                  fill="#ffffff"
+                  stroke={theme.text}
                   strokeWidth={1.6}
                   strokeLinejoin="round"
                 />
               </g>
             </svg>
 
-            {/* KPI counter-roll chip (the TapPay approve-chip / proof-stat analog)
-                — a floating glass chip that springs in + counts up over the held
-                tail. Only when a real number exists (data.kpi / title); never
-                invents a stat. */}
+            {/* KPI counter-roll chip — only when a real number exists; never invents. */}
             {kpi && kpiPop.opacity > 0.001 && (
               <div
                 data-scene-id={sceneId}
                 data-field="kpi"
                 style={{
                   position: "absolute",
-                  left: 40,
-                  bottom: 40,
+                  left: 36,
+                  bottom: 36,
                   display: "flex",
                   alignItems: "center",
                   gap: 14,
-                  padding: "16px 22px",
+                  padding: "14px 20px",
                   borderRadius: 16,
                   backgroundColor: `${theme.bgCardRaised}f2`,
                   border: `1px solid ${theme.border}`,
@@ -502,7 +702,7 @@ export const WalkthroughPlayer: React.FC<{
                 />
                 <span
                   style={{
-                    fontSize: 38,
+                    fontSize: 34,
                     fontWeight: 800,
                     letterSpacing: "-0.02em",
                     color: theme.text,
@@ -513,14 +713,7 @@ export const WalkthroughPlayer: React.FC<{
                   {fmtKpi(kpiNow, kpi.to, kpi.prefix, kpi.suffix)}
                 </span>
                 {kpi.label ? (
-                  <span
-                    style={{
-                      fontSize: 20,
-                      fontWeight: 500,
-                      color: theme.textMuted,
-                      maxWidth: 220,
-                    }}
-                  >
+                  <span style={{ fontSize: 18, fontWeight: 500, color: theme.textMuted, maxWidth: 200 }}>
                     {kpi.label}
                   </span>
                 ) : null}
@@ -528,48 +721,7 @@ export const WalkthroughPlayer: React.FC<{
             )}
           </div>
         </div>
-
-        {/* optional muted caption under the frame */}
-        {data.caption ? (
-          <div
-            data-scene-id={sceneId}
-            data-field="caption"
-            style={{
-              marginTop: 22,
-              opacity: titleRise.opacity,
-              transform: titleRise.transform,
-              fontSize: 26,
-              fontWeight: 500,
-              letterSpacing: "0.02em",
-              color: theme.textMuted,
-              fontFamily: theme.fontMono,
-            }}
-          >
-            {data.caption}
-          </div>
-        ) : null}
-      </AbsoluteFill>
-
-      {/* Numbered act badge — top-left eyebrow: "NN — LABEL".
-          Rendered LAST (highest z-order) so it paints over the mesh + frame. */}
-      {actIndex > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            left: 60,
-            top: 52,
-            opacity: titleRise.opacity,
-            fontSize: 22,
-            fontWeight: 700,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
-            color: theme.accent,
-            fontFamily: theme.fontMono,
-          }}
-        >
-          {badgeText}
-        </div>
-      )}
+      </div>
 
       {/* Persistent corner brand mark (spec §4) — bottom-right, low-key. */}
       {(logoSrc || cornerWordmark) && (
@@ -579,12 +731,13 @@ export const WalkthroughPlayer: React.FC<{
           style={{
             position: "absolute",
             right: 56,
-            bottom: 44,
+            bottom: 40,
             opacity: cornerOpacity,
             display: "flex",
             alignItems: "center",
-            height: 32,
+            height: 30,
             pointerEvents: "none",
+            zIndex: 4,
           }}
         >
           {logoSrc ? (

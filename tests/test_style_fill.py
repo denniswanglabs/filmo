@@ -845,5 +845,266 @@ class TestVoCondenseRobustness(unittest.TestCase):
                                  style_fill._SUPPORTING_MAX_CHARS + 1)
 
 
+class TestScreenshotVoGrounding(unittest.TestCase):
+    """VO<->VISUAL grounding: a screenshot scene's SPOKEN beat is re-grounded to the
+    surface the capture step actually reached, so the narration and the (surface-
+    aligned) on-screen headline tell one coherent story. Bookend (title) + walkthrough
+    beats are NEVER touched; a home capture and an already-coherent beat are left alone.
+    """
+
+    def _write_manifest(self, out_dir, shots):
+        shots_dir = os.path.join(out_dir, "screenshots")
+        os.makedirs(shots_dir, exist_ok=True)
+        manifest = {"url": "https://example.com", "count": len(shots),
+                    "ok": True, "shots": shots}
+        with open(os.path.join(shots_dir, "manifest.json"), "w") as f:
+            json.dump(manifest, f)
+
+    def _stripe_brand(self):
+        return {"wordmark": "Stripe", "name": "Stripe",
+                "tagline": "Build internet businesses", "palette": {}, "features": []}
+
+    def _stripe_plan(self):
+        # The exact drift the brief flags: a billing-feature beat over a /pricing shot.
+        return {
+            "job": {"target_duration_s": 30, "emphasis": "billing"},
+            "scenes": [
+                {"id": "opening-title", "type": "title", "duration_s": 4},
+                {"id": "homepage-screenshot", "type": "screenshot", "duration_s": 6},
+                {"id": "billing-screenshot", "type": "screenshot", "duration_s": 6},
+                {"id": "walkthrough", "type": "walkthrough", "duration_s": 8},
+                {"id": "closing-title", "type": "title", "duration_s": 4},
+            ],
+            "voiceover": {"beats": [
+                {"scene_id": "opening-title",
+                 "text": "Stripe is the backbone of global commerce."},
+                {"scene_id": "homepage-screenshot",
+                 "text": "See what's happening in real time as money moves worldwide."},
+                {"scene_id": "billing-screenshot",
+                 "text": "Enable recurring billing, fraud protection, and instant payouts with Stripe Billing."},
+                {"scene_id": "walkthrough",
+                 "text": "Set up payments in minutes and start accepting money worldwide."},
+                {"scene_id": "closing-title",
+                 "text": "Start accepting payments at stripe.com today."},
+            ]},
+        }
+
+    def test_billing_vo_over_pricing_shot_is_regrounded_to_pricing(self):
+        # The flagged Stripe case: VO narrates "Stripe Billing" while the shot is the
+        # Pricing page. After grounding, the screenshot beat must talk about PRICING.
+        with tempfile.TemporaryDirectory() as out:
+            self._write_manifest(out, [
+                {"file": "shot-01.png", "label": "home",
+                 "title": "Stripe | Financial Infrastructure", "url": "https://stripe.com"},
+                {"file": "shot-02.png", "label": "route",
+                 "title": "Pricing & Fees", "url": "https://stripe.com/pricing"},
+            ])
+            plan = self._stripe_plan()
+            style_fill._ground_screenshot_vo_beats(plan, out, self._stripe_brand())
+            beats = {b["scene_id"]: b["text"] for b in plan["voiceover"]["beats"]}
+            # The billing beat is now about pricing (matches the on-screen "Pricing & Fees").
+            self.assertIn("pricing", beats["billing-screenshot"].lower())
+            self.assertNotIn("billing", beats["billing-screenshot"].lower())
+
+    def test_bookend_and_walkthrough_beats_are_never_touched(self):
+        with tempfile.TemporaryDirectory() as out:
+            self._write_manifest(out, [
+                {"file": "shot-01.png", "label": "home", "title": "Stripe", "url": "https://stripe.com"},
+                {"file": "shot-02.png", "label": "route", "title": "Pricing & Fees",
+                 "url": "https://stripe.com/pricing"},
+            ])
+            plan = self._stripe_plan()
+            before = {b["scene_id"]: b["text"] for b in plan["voiceover"]["beats"]}
+            style_fill._ground_screenshot_vo_beats(plan, out, self._stripe_brand())
+            after = {b["scene_id"]: b["text"] for b in plan["voiceover"]["beats"]}
+            for sid in ("opening-title", "walkthrough", "closing-title"):
+                self.assertEqual(before[sid], after[sid], f"{sid} must not change")
+
+    def test_coherent_home_beat_is_kept(self):
+        # A home beat that ALREADY speaks to the homepage headline ("Financial
+        # Infrastructure") is left untouched — no needless rewrite of a good brand line.
+        with tempfile.TemporaryDirectory() as out:
+            self._write_manifest(out, [
+                {"file": "shot-01.png", "label": "home",
+                 "title": "Stripe | Financial Infrastructure", "url": "https://stripe.com"},
+                {"file": "shot-02.png", "label": "route", "title": "Pricing & Fees",
+                 "url": "https://stripe.com/pricing"},
+            ])
+            plan = self._stripe_plan()
+            coherent = "Stripe is the financial infrastructure behind global commerce."
+            for b in plan["voiceover"]["beats"]:
+                if b["scene_id"] == "homepage-screenshot":
+                    b["text"] = coherent
+            style_fill._ground_screenshot_vo_beats(plan, out, self._stripe_brand())
+            home_after = next(b["text"] for b in plan["voiceover"]["beats"]
+                              if b["scene_id"] == "homepage-screenshot")
+            self.assertEqual(home_after, coherent)
+
+    def test_drifting_home_beat_is_regrounded_to_homepage_line(self):
+        # When the planner puts a NARROW feature line on the home shot that drifts from
+        # the homepage headline, it is re-grounded to a coherent brand-level homepage
+        # line (built from the home headline the on-screen headline also uses).
+        with tempfile.TemporaryDirectory() as out:
+            self._write_manifest(out, [
+                {"file": "shot-01.png", "label": "home",
+                 "title": "Stripe | Financial Infrastructure", "url": "https://stripe.com"},
+                {"file": "shot-02.png", "label": "route", "title": "Pricing & Fees",
+                 "url": "https://stripe.com/pricing"},
+            ])
+            plan = self._stripe_plan()
+            for b in plan["voiceover"]["beats"]:
+                if b["scene_id"] == "homepage-screenshot":
+                    b["text"] = "Enable any billing model for your subscriptions and invoices."
+            style_fill._ground_screenshot_vo_beats(plan, out, self._stripe_brand())
+            home_after = next(b["text"] for b in plan["voiceover"]["beats"]
+                              if b["scene_id"] == "homepage-screenshot")
+            # No longer a billing line; now names the homepage's financial-infrastructure
+            # headline, agreeing with the on-screen home headline.
+            self.assertIn("infrastructure", home_after.lower())
+            self.assertNotIn("billing", home_after.lower())
+            self.assertGreaterEqual(len(home_after.split()), 4)
+
+    def test_already_coherent_beat_is_left_untouched(self):
+        # When the VO already names the captured surface, leave it (no needless rewrite).
+        with tempfile.TemporaryDirectory() as out:
+            self._write_manifest(out, [
+                {"file": "shot-01.png", "label": "home", "title": "Stripe", "url": "https://stripe.com"},
+                {"file": "shot-02.png", "label": "route", "title": "Pricing & Fees",
+                 "url": "https://stripe.com/pricing"},
+            ])
+            plan = self._stripe_plan()
+            for b in plan["voiceover"]["beats"]:
+                if b["scene_id"] == "billing-screenshot":
+                    b["text"] = "See Stripe's simple, transparent pricing with no hidden fees."
+            style_fill._ground_screenshot_vo_beats(plan, out, self._stripe_brand())
+            txt = next(b["text"] for b in plan["voiceover"]["beats"]
+                       if b["scene_id"] == "billing-screenshot")
+            self.assertEqual(txt, "See Stripe's simple, transparent pricing with no hidden fees.")
+
+    def test_calendar_shot_regrounds_to_calendar(self):
+        # The flagged Notion case: an assistant/databases beat over a "Notion Calendar" shot.
+        with tempfile.TemporaryDirectory() as out:
+            self._write_manifest(out, [
+                {"file": "shot-01.png", "label": "home",
+                 "title": "The AI workspace that works for you. | Notion",
+                 "url": "https://www.notion.com"},
+                {"file": "shot-02.png", "label": "route", "title": "Notion Calendar",
+                 "url": "https://www.notion.com/product/calendar"},
+            ])
+            plan = {
+                "job": {"target_duration_s": 30, "emphasis": "assistants"},
+                "scenes": [
+                    {"id": "title-open", "type": "title", "duration_s": 4},
+                    {"id": "screenshot-home", "type": "screenshot", "duration_s": 6},
+                    {"id": "screenshot-inner", "type": "screenshot", "duration_s": 6},
+                    {"id": "title-close", "type": "title", "duration_s": 4},
+                ],
+                "voiceover": {"beats": [
+                    {"scene_id": "title-open", "text": "Notion is the connected workspace."},
+                    {"scene_id": "screenshot-home",
+                     "text": "Write docs, build wikis, and track projects in one place."},
+                    {"scene_id": "screenshot-inner",
+                     "text": "Ask your on-demand assistants for instant answers across your workspace."},
+                    {"scene_id": "title-close", "text": "Build your workspace on Notion."},
+                ]},
+            }
+            brand = {"wordmark": "Notion", "name": "Notion", "palette": {}, "features": []}
+            style_fill._ground_screenshot_vo_beats(plan, out, brand)
+            inner = next(b["text"] for b in plan["voiceover"]["beats"]
+                         if b["scene_id"] == "screenshot-inner")
+            self.assertIn("calendar", inner.lower())
+            self.assertNotIn("assistant", inner.lower())
+            self.assertGreaterEqual(len(inner.split()), 4)
+
+    def test_no_manifest_is_a_noop(self):
+        # No screenshots captured -> grounding is a clean no-op (beats unchanged).
+        with tempfile.TemporaryDirectory() as out:
+            plan = self._stripe_plan()
+            before = [b["text"] for b in plan["voiceover"]["beats"]]
+            style_fill._ground_screenshot_vo_beats(plan, out, self._stripe_brand())
+            after = [b["text"] for b in plan["voiceover"]["beats"]]
+            self.assertEqual(before, after)
+
+    def test_surface_noun_from_phrase_detects_known_surfaces(self):
+        self.assertEqual(style_fill._surface_noun_from_phrase("Pricing & Fees"), "pricing")
+        self.assertEqual(style_fill._surface_noun_from_phrase("Notion Calendar"), "calendar")
+        self.assertEqual(style_fill._surface_noun_from_phrase("Dashboard"), "the dashboard")
+        self.assertEqual(style_fill._surface_noun_from_phrase("Random Heading"), "")
+
+    def test_phrase_to_sentence_case_preserves_acronyms(self):
+        # A Title-Case page phrase folds into running prose, but acronyms keep case.
+        self.assertEqual(style_fill._phrase_to_sentence_case("Financial Infrastructure"),
+                         "financial infrastructure")
+        self.assertEqual(style_fill._phrase_to_sentence_case("Pricing & Fees"),
+                         "pricing & fees")
+        self.assertEqual(style_fill._phrase_to_sentence_case("API Reference"),
+                         "API reference")
+
+
+class TestShortEyebrow(unittest.TestCase):
+    """The AppleScreenshot EYEBROW is derived from the scene headline by
+    _short_eyebrow. A Title-Case multi-word page phrase must yield a clean,
+    correctly-cased FEATURE label — never a bare connector tail ("& Fees") and
+    never a mangled acronym ("Ai"). These pin the two real-build regressions
+    (runs/vogrounding-stripe "& Fees", runs/vogrounding-notion "Notion Ai")."""
+
+    def test_pricing_and_fees_keeps_feature_noun_not_connector_tail(self):
+        # The flagged Stripe case: "Pricing & Fees" must NOT become "& Fees".
+        # "Pricing" is a feature noun, not an action gerund, and the "& Fees"
+        # alternation tail is dropped — the eyebrow names the head noun.
+        self.assertEqual(style_fill._short_eyebrow("Pricing & Fees"), "Pricing")
+
+    def test_notion_ai_workspace_preserves_acronym_and_picks_feature(self):
+        # The flagged Notion case: "Notion is the AI workspace" must keep "AI"
+        # cased (not "Ai") and name the workspace, not "Notion AI".
+        self.assertEqual(
+            style_fill._short_eyebrow("Notion is the AI workspace"), "AI Workspace")
+
+    def test_copula_headline_uses_the_predicate_feature(self):
+        # "<Subject> is the <feature>" -> name the feature, not the subject.
+        self.assertEqual(
+            style_fill._short_eyebrow("Stripe is the financial infrastructure"),
+            "Financial Infrastructure")
+
+    def test_never_leads_with_a_bare_connector(self):
+        # A phrase that opens on a connector must drop it, never keep it leading.
+        out = style_fill._short_eyebrow("& Fees")
+        self.assertFalse(out.startswith("&"))
+        self.assertEqual(out, "Fees")
+
+    def test_preserves_uppercase_acronym(self):
+        # Plain ".title()" would mangle "API" -> "Api"; acronyms keep their case.
+        self.assertEqual(style_fill._short_eyebrow("API Reference"), "API Reference")
+
+    def test_real_gerund_is_still_stripped_when_a_noun_follows(self):
+        # The leading-gerund strip MUST still fire for genuine action gerunds
+        # ("Accepting card payments" -> "Card Payments"); only a noun that merely
+        # ends in "-ing" before a connector tail is protected.
+        self.assertEqual(
+            style_fill._short_eyebrow("Accepting card payments"), "Card Payments")
+
+    def test_truncates_at_of_connector(self):
+        # "Terms of Service" -> "Terms": the connector "of" splits the phrase, the
+        # eyebrow keeps the head noun and never keeps a bare "of".
+        self.assertEqual(style_fill._short_eyebrow("Terms of Service"), "Terms")
+
+    def test_empty_input_is_empty(self):
+        self.assertEqual(style_fill._short_eyebrow(""), "")
+        self.assertEqual(style_fill._short_eyebrow("   "), "")
+
+    def test_output_never_contains_a_bare_connector_token(self):
+        # Property check across a spread of real page-title shapes: no eyebrow may
+        # contain a standalone connector token ("&", "and", "of", "or", "+").
+        bare = {"&", "+", "and", "or", "of"}
+        for label in (
+            "Pricing & Fees", "Notion is the AI workspace", "Terms of Service",
+            "Plans and pricing", "Docs & API reference", "Sales + Marketing",
+        ):
+            out = style_fill._short_eyebrow(label)
+            toks = {t.lower() for t in out.split()}
+            self.assertEqual(toks & bare, set(),
+                             f"{label!r} -> {out!r} contains a bare connector")
+
+
 if __name__ == "__main__":
     unittest.main()

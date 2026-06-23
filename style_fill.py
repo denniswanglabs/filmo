@@ -277,6 +277,285 @@ def _condense_vo_beats(plan: Dict[str, Any], fps: int = 30) -> List[Dict[str, An
     return beats
 
 
+# ---------------------------------------------------------------------------
+# VO<->VISUAL GROUNDING — align a screenshot scene's SPOKEN beat to the page it shows
+# ---------------------------------------------------------------------------
+# The planner writes each screenshot scene's VO from the run EMPHASIS (PRE-capture),
+# while the screenshot + its distilled headline come from whatever page the capture
+# step actually reached (POST-capture). When those disagree, the on-screen headline
+# (already surface-aligned by _shape_screenshot's R5 pass) and the spoken VO contradict
+# each other on the SAME scene — e.g. the headline reads "Pricing & Fees" (the /pricing
+# page that got captured) while the voice says "...recurring billing, fraud protection,
+# and instant payouts" (the feature the planner emphasized). The audio is synthesized
+# in align_vo BEFORE the captured surface is known, so the headline got fixed but the
+# voice did not. This pass closes that gap: AFTER capture (the manifest is on disk) and
+# BEFORE align_vo synthesizes the audio, it re-grounds each screenshot scene's beat to
+# describe the surface actually shown, so narration and visual tell ONE coherent story.
+#
+# Surface-grounded VO sentence templates, keyed by the captured surface NOUN
+# (_surface_aligned_headline distills the manifest <title>/label down to this same
+# noun, so the spoken line and the on-screen headline name the SAME thing). The brand
+# wordmark is folded in at compose time. Kept natural — a real value-prop line about
+# that page, never "here is the pricing page" capture-narration.
+_SURFACE_VO_TEMPLATES = {
+    "pricing": "See {brand}'s clear, transparent pricing built for teams of every size.",
+    "the dashboard": "Get a clear, real-time view of everything that matters from the {brand} dashboard.",
+    "dashboard": "Get a clear, real-time view of everything that matters from the {brand} dashboard.",
+    "the app": "Manage everything from one place inside the {brand} app.",
+    "payments": "Accept payments from customers worldwide with {brand}.",
+    "checkout": "Give customers a fast, secure checkout built and hosted by {brand}.",
+    "billing": "Run subscriptions, invoicing, and recurring billing with {brand} Billing.",
+    "the docs": "Get up and running fast with {brand}'s clear, developer-first documentation.",
+    "developers": "Build on {brand}'s developer-first APIs in just a few lines of code.",
+    "the api": "Integrate {brand}'s powerful API with just a few lines of code.",
+    "integrations": "Connect the tools you already use with {brand}'s integrations.",
+    "analytics": "Understand your business with built-in analytics and reporting from {brand}.",
+    "calendar": "Plan your day and keep every event in sync with {brand} Calendar.",
+    "templates": "Start fast with ready-made templates built into {brand}.",
+    "security": "Keep your data safe with enterprise-grade security from {brand}.",
+}
+
+# Tokens that KEEP their capitalization when a Title-Case page phrase is folded into a
+# lower-case sentence position (acronyms / proper-noun-ish all-caps). Everything else
+# is lowercased so "Financial Infrastructure" -> "financial infrastructure" reads as
+# running prose, not a mid-sentence Title Case wall.
+_KEEP_CASE_RE = re.compile(r"^[A-Z0-9]{2,}$|^[A-Z][a-z]*[A-Z]")  # API, SDK, CRM, PayPal
+
+
+def _phrase_to_sentence_case(phrase: str) -> str:
+    """Lowercase a Title-Case page phrase for use INSIDE a sentence, preserving
+    acronyms / camel-cased proper tokens ("Pricing & Fees" -> "pricing & fees";
+    "API Reference" -> "API reference"). Empty in -> empty out."""
+    p = (phrase or "").strip()
+    if not p:
+        return ""
+    out = [w if _KEEP_CASE_RE.match(w) else w.lower() for w in p.split()]
+    return " ".join(out)
+
+
+# Surface keywords (substring-matched in the captured page <title> phrase) -> the
+# normalized surface NOUN key into _SURFACE_VO_TEMPLATES. Lets a generically-labelled
+# capture ("route") still resolve the right template from its page title ("Pricing &
+# Fees" -> "pricing"). Order matters: more specific keys first.
+_SURFACE_PHRASE_KEYWORDS = (
+    ("pricing", "pricing"), ("price", "pricing"), ("plans", "pricing"),
+    ("dashboard", "the dashboard"), ("checkout", "checkout"),
+    ("billing", "billing"), ("invoic", "billing"), ("subscription", "billing"),
+    ("payment", "payments"), ("docs", "the docs"), ("documentation", "the docs"),
+    ("developer", "developers"), ("api", "the api"),
+    ("integration", "integrations"), ("analytic", "analytics"),
+    ("report", "analytics"), ("calendar", "calendar"),
+    ("template", "templates"), ("security", "security"),
+)
+
+
+def _surface_noun_from_phrase(phrase: str) -> str:
+    """Detect a known surface NOUN inside a captured page-title phrase, or "".
+
+    A capture often labels an emphasized page generically (e.g. label "route") while
+    its <title> carries the real surface name ("Pricing & Fees"). This maps such a
+    phrase to the surface key the VO templates use, so the spoken line names the page
+    even when the capture-target label was generic. "" when no known surface matches."""
+    p = (phrase or "").lower()
+    if not p:
+        return ""
+    for kw, noun in _SURFACE_PHRASE_KEYWORDS:
+        if kw in p:
+            return noun
+    return ""
+
+
+def _surface_grounded_vo(surface_noun: str, surface_phrase: str,
+                         brand: Dict[str, Any]) -> str:
+    """A natural VO sentence that DESCRIBES the captured surface, or "".
+
+    `surface_noun` is the normalized surface key (e.g. "pricing", "the dashboard");
+    `surface_phrase` is the display headline _surface_aligned_headline produced for the
+    SAME shot (e.g. "Pricing & Fees", "Dashboard"). We keep the spoken line about the
+    same subject as the on-screen headline so voice and picture agree.
+
+    Source priority (honest — only real brand/surface text, never invented features):
+      1. A template keyed by the surface noun, with the brand wordmark folded in.
+      2. A generic, surface-named line built from the display phrase when the noun is
+         unmapped but the page is still specifically named ("See {brand}'s {phrase}.").
+    Returns "" for a generic/home surface (the caller then keeps the planner's beat)."""
+    brand_name = (brand.get("wordmark") or brand.get("brand")
+                  or brand.get("name") or "").strip()
+    key = (surface_noun or "").strip().lower()
+    tmpl = _SURFACE_VO_TEMPLATES.get(key)
+    if tmpl:
+        # Fold the brand in; if we have no brand name, drop the possessive/brand token
+        # gracefully so the line still reads ("See clear, transparent pricing...").
+        if brand_name:
+            line = tmpl.format(brand=brand_name)
+        else:
+            line = (tmpl.replace("{brand}'s ", "").replace(" {brand}", "")
+                    .replace("{brand} ", "").replace("{brand}", "").strip())
+            line = re.sub(r"\s{2,}", " ", line).strip()
+            if line and line[0].islower():
+                line = line[0].upper() + line[1:]
+        return line.strip()
+    # Unmapped but specifically-named surface: build a clean generic line from the
+    # display phrase so the voice still names what's on screen (no capture-narration).
+    phrase = (surface_phrase or "").strip()
+    if phrase and brand_name and not _is_ui_nav_label(phrase) \
+            and not _is_prompt_artifact(phrase):
+        # Lead with a richer, natural frame so the line is a real value-prop sentence
+        # (>= 4 words) about the page on screen, never bare page-narration. Sentence-case
+        # the phrase so a Title-Case page name folds into the sentence ("...Notion's
+        # api reference...") while acronyms/proper tokens keep their case.
+        head = _phrase_to_sentence_case(phrase)
+        return f"Take a closer look at {brand_name}'s {head}.".strip()
+    return ""
+
+
+def _homepage_grounded_vo(home_phrase: str, brand: Dict[str, Any]) -> str:
+    """A brand-level homepage VO line built from the home page's headline phrase, or "".
+
+    Used only when the planner put a NARROW feature beat on the home shot that drifts
+    from the homepage headline. Keeps the spoken line agreeing with the on-screen
+    home headline (both derive from the same captured <title>/tagline). Honest — it
+    only reuses the real home headline phrase + the brand wordmark, never invents.
+
+    Two shapes, chosen by the phrase:
+      - a SHORT noun phrase ("Financial Infrastructure") -> "Stripe is the financial
+        infrastructure that powers businesses of all sizes." (frame supplies the verb);
+      - a phrase that ALREADY reads like a value-prop clause ("The AI workspace that
+        works for you") -> "Notion is the AI workspace that works for you." (use it
+        directly — wrapping it would double the article and ramble).
+    A leading article on the phrase is stripped so we never produce "is the the …".
+    Returns "" when there is no usable phrase."""
+    brand_name = (brand.get("wordmark") or brand.get("brand")
+                  or brand.get("name") or "").strip()
+    phrase = (home_phrase or "").strip()
+    if not phrase or _is_ui_nav_label(phrase) or _is_prompt_artifact(phrase):
+        return ""
+    head = _phrase_to_sentence_case(phrase)
+    # Strip a leading article so the "{brand} is the {head}" frame never doubles it.
+    head_noart = re.sub(r"^(the|a|an)\s+", "", head, flags=re.IGNORECASE).strip()
+    if not head_noart:
+        return ""
+    subj = brand_name or "It"
+    # A multi-word phrase that already carries a verb / relative clause is a full
+    # value-prop — use it directly ("{brand} is the {phrase}.") rather than wrapping it
+    # in the "...that powers businesses..." frame (which would ramble + risk a condense
+    # clip). _looks_like_headline detects the verb/clause shape.
+    if _word_count(head_noart) >= 4 and _looks_like_headline(head_noart):
+        return f"{subj} is the {head_noart}.".strip()
+    # Short noun phrase: supply the value-prop frame so the line stands on its own.
+    return f"{subj} is the {head_noart} that powers businesses of all sizes.".strip()
+
+
+def _beat_references_surface(beat_text: str, surface_noun: str,
+                             surface_phrase: str) -> bool:
+    """True when the VO beat ALREADY talks about the captured surface, so we leave it
+    alone (no regression on a coherent plan whose VO matches the page). Word-overlap
+    test against the surface noun + the display phrase's content words."""
+    bt = {w for w in re.findall(r"[a-z]+", (beat_text or "").lower()) if len(w) > 2}
+    if not bt:
+        return False
+    surf_words = set()
+    for src in (surface_noun, surface_phrase):
+        surf_words |= {w for w in re.findall(r"[a-z]+", (src or "").lower())
+                       if len(w) > 2 and w not in _PUNCH_STOPWORDS}
+    if not surf_words:
+        return False
+    return bool(bt & surf_words)
+
+
+def _ground_screenshot_vo_beats(plan: Dict[str, Any], out_dir: str,
+                                brand: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Re-ground each screenshot scene's VO beat to the SURFACE actually captured, so
+    the spoken line and the (surface-aligned) on-screen headline agree.
+
+    Runs AFTER capture (the screenshots manifest exists on disk) and BEFORE align_vo
+    synthesizes the audio, inside run_pipeline. For each `screenshot` scene (mapped in
+    order to the Nth captured shot):
+      - derive the captured SURFACE NOUN + display phrase from the shot's <title>/label
+        (the SAME machinery _shape_screenshot uses for the headline);
+      - if the surface is GENERIC (home / unnamed inner page) -> leave the beat (the VO
+        already speaks to the brand/homepage);
+      - if the beat ALREADY references that surface -> leave it (coherent already);
+      - otherwise REPLACE the beat text with a natural surface-grounded value-prop line
+        so the narration describes what's on screen.
+
+    Honest + additive: only the screenshot beats can change; bookend (title) and
+    walkthrough beats are NEVER touched. A surface with no grounded line, or any
+    failure, leaves the original beat intact. Mutates beats in place (and returns the
+    list) so align_vo/cost/console all see the grounded copy."""
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats") or []
+    if not beats or not out_dir:
+        return beats
+    try:
+        shots = _load_screenshot_manifest(out_dir)
+    except Exception:
+        return beats
+    if not shots:
+        return beats
+
+    scenes = _plan_scenes(plan)
+    # Map each screenshot scene (in plan order) -> its captured shot (Nth shot).
+    screenshot_ids: List[str] = []
+    for s in scenes:
+        if str(s.get("type") or s.get("role") or "").strip().lower() == "screenshot":
+            screenshot_ids.append(s.get("id"))
+    if not screenshot_ids:
+        return beats
+    shot_for_id = {sid: shots[i] for i, sid in enumerate(screenshot_ids)
+                   if i < len(shots)}
+
+    wordmark = (brand.get("wordmark") or brand.get("brand")
+                or brand.get("name") or "").strip()
+    for b in beats:
+        sid = b.get("scene_id")
+        shot = shot_for_id.get(sid)
+        if not shot:
+            continue
+        shot_title = str(shot.get("title") or "").strip()
+        shot_label = str(shot.get("label") or "").strip()
+        lbl = re.sub(r"^mock-", "", shot_label.lower()).strip()
+        # HOME / homepage scene: the home page IS the brand, so a BRAND-LEVEL beat is
+        # right here (the value-prop / "global commerce" line). We DON'T impose a
+        # surface noun — but if the planner put a NARROW feature line on the home shot
+        # that drifts from the home headline (e.g. "...enables any billing model" over
+        # the homepage whose headline reads "Financial Infrastructure"), re-ground it to
+        # the brand-level homepage line the headline is built from, so voice + picture
+        # agree on the first screenshot too. A beat that already speaks to the homepage
+        # headline is left untouched.
+        if lbl in ("home", "homepage", ""):
+            home_phrase = _surface_aligned_headline(shot_title, shot_label, brand,
+                                                    avoid=wordmark, limit=38)
+            home_line = _homepage_grounded_vo(home_phrase, brand)
+            text = str(b.get("text") or "").strip()
+            if (home_line and _word_count(home_line) >= 4 and home_phrase
+                    and not _beat_references_surface(text, home_phrase, home_phrase)):
+                b["text"] = home_line
+            continue
+        # The display phrase the headline will show for this shot (home/generic -> "").
+        surface_phrase = _surface_aligned_headline(shot_title, shot_label, brand,
+                                                   avoid=wordmark, limit=38)
+        if not surface_phrase:
+            continue  # generic/unnamed inner page: keep the planner's beat (no regression)
+        # The normalized surface NOUN (pricing / the dashboard / ...) for the template.
+        # Resolve from BOTH the capture-target label AND the captured page <title>
+        # phrase: capture often labels an emphasized page generically ("route") while
+        # its <title> names the surface ("Pricing & Fees"), so the phrase carries the
+        # real noun. Prefer a mapped label noun; else detect a known surface keyword
+        # inside the phrase; else fall back to the phrase itself.
+        surface_noun = (_SURFACE_LABEL_WORDS.get(lbl, "")
+                        or _surface_noun_from_phrase(surface_phrase)
+                        or surface_phrase.lower())
+        text = str(b.get("text") or "").strip()
+        # Already coherent? (VO names the surface) -> leave it untouched.
+        if _beat_references_surface(text, surface_noun, surface_phrase):
+            continue
+        grounded = _surface_grounded_vo(surface_noun, surface_phrase, brand)
+        if grounded and _word_count(grounded) >= 4:
+            b["text"] = grounded
+    return beats
+
+
 def _scene_role(scene: Dict[str, Any]) -> str:
     """The classifier key for the registry: explicit `role`, else `type`."""
     return str(scene.get("role") or scene.get("type") or "").strip().lower()
@@ -2199,38 +2478,157 @@ _PUNCH_STOPWORDS = frozenset((
 ))
 
 
-def _short_eyebrow(label: str, max_words: int = 2) -> str:
-    """Trim a phrase to a SHORT, CLEAN tracked-uppercase eyebrow label (default <= 2
-    words) that names the FEATURE, not the action ("Accept payments in one integration"
-    -> "Payments"; "The dashboard's real-time revenue and payouts view" -> "Dashboard
-    Revenue"). Keeps it honest — only trims/normalizes the real label. "" for empty.
+# Known acronyms / proper-cased tokens that must KEEP their casing in an eyebrow
+# label (so "AI" never title-cases to "Ai"). Matched case-insensitively against the
+# token; the canonical form here is emitted. A token already mixed-case or all-caps
+# (e.g. "PayPal", "SaaS", "iOS") is also preserved by _eyebrow_case below.
+_EYEBROW_ACRONYMS = {
+    "ai": "AI", "ml": "ML", "ui": "UI", "ux": "UX", "api": "API", "sdk": "SDK",
+    "saas": "SaaS", "b2b": "B2B", "b2c": "B2C", "erp": "ERP", "crm": "CRM",
+    "ios": "iOS", "id": "ID", "url": "URL", "cli": "CLI", "kpi": "KPI",
+    "seo": "SEO", "pdf": "PDF", "qr": "QR", "faq": "FAQ", "ceo": "CEO",
+}
 
-    Cleanup: drop a leading article ("the"/"a"/"an"), a leading imperative verb or
-    gerund ("Accept"/"Accepting" -> the following noun), strip possessive "'s",
-    drop bare connectors, and Title-Case so it reads as a label."""
+# Bare connectors / conjunctions / symbols that may NEVER stand as (or lead) an
+# eyebrow label — they are glue, not the topic. A leading one is dropped; a label
+# made only of these collapses to the remaining content noun.
+_EYEBROW_CONNECTORS = frozenset((
+    "&", "+", "/", "and", "or", "but", "the", "a", "an", "of", "for", "to",
+    "with", "in", "on", "at", "by", "from", "is", "are", "be", "your", "our",
+))
+
+# Leading IMPERATIVE / action verbs to drop so an eyebrow leads with the NOUN topic
+# ("Accept payments" -> "Payments", "Run subscriptions" -> "Subscriptions", "Take a
+# closer look" -> the trailing noun). Only stripped when a content noun follows. A
+# gerund ("Accepting") is caught separately by the "ing" heuristic; a real noun ending
+# in "ing" (Pricing/Billing/Marketing) is NOT a verb and is kept.
+_EYEBROW_LEAD_VERBS = frozenset((
+    "accept", "run", "take", "manage", "track", "build", "get", "see", "view",
+    "use", "make", "give", "send", "start", "create", "explore", "discover",
+    "connect", "integrate", "understand", "keep", "plan", "show", "find",
+    "accepts", "runs", "takes", "manages", "tracks", "builds", "gets",
+    "do", "go", "add", "set", "put", "let", "try", "join",
+))
+
+# Words ending in "ing" that are real NOUNS (a topic/feature), not gerund verbs — so
+# the leading-verb stripper never mistakes them for an action. Lowercased.
+_EYEBROW_NOUN_INGS = frozenset((
+    "pricing", "billing", "marketing", "training", "onboarding", "reporting",
+    "accounting", "shipping", "booking", "listing", "messaging", "meeting",
+    "engineering", "advertising", "branding", "banking", "lending", "trading",
+))
+
+
+def _eyebrow_case(word: str) -> str:
+    """Casing for ONE eyebrow token: keep a known acronym ("AI", "API"), keep an
+    already mixed/all-caps proper token ("PayPal", "iOS", "SaaS"), else Title-case a
+    plain lowercase word ("pricing" -> "Pricing"). Never lowercases an acronym."""
+    w = (word or "").strip()
+    if not w:
+        return ""
+    low = w.lower()
+    if low in _EYEBROW_ACRONYMS:
+        return _EYEBROW_ACRONYMS[low]
+    # Already carries internal/uppercase signal (acronym or camel/proper token) — keep.
+    if w[1:] and any(c.isupper() for c in w[1:]):
+        return w  # "PayPal", "iOS", "GitHub"
+    if w.isupper() and len(w) >= 2:
+        return w  # "SDK", "CRM" not in the table
+    return w[:1].upper() + w[1:].lower()
+
+
+# Connector tokens that SPLIT a page phrase into clauses. We keep only the HEAD
+# clause (before the first such connector) so an eyebrow names ONE feature, never a
+# multi-clause tail ("Pricing & Fees" -> "Pricing", "Terms of Service" -> "Terms").
+_EYEBROW_SPLIT_CONNECTORS = frozenset((
+    "&", "+", "/", "and", "or", "of", "plus", "vs",
+))
+
+
+def _short_eyebrow(label: str, max_words: int = 2, avoid: str = "") -> str:
+    """Trim a phrase to a SHORT, CLEAN eyebrow label (default <= 2 words) that names
+    the FEATURE / key topic, NEVER a dangling fragment, a leading conjunction, or
+    mangled casing:
+        "Pricing & Fees"                  -> "Pricing"               (not "& Fees")
+        "Notion is the AI workspace"      -> "AI Workspace"          (not "Notion Ai")
+        "Stripe is the financial …"       -> "Financial Infrastructure"
+        "Accepting card payments"         -> "Card Payments"
+        "Terms of Service"                -> "Terms"
+        "API Reference"                   -> "API Reference"
+    Keeps it honest — only selects/normalizes words that are really in the label. ""
+    for empty input.
+
+    Pipeline:
+      1. Tokenize, stripping surrounding punctuation; strip possessive "'s".
+      2. COPULA: for "<subject> is/are the <feature>" keep the PREDICATE feature, not
+         the subject ("Notion is the AI workspace" -> "AI workspace") so the eyebrow
+         names what the page is, not the brand. Also drop the brand wordmark (`avoid`).
+      3. Drop a leading article and a leading imperative / action verb or GERUND so we
+         lead with the noun — but NEVER a real noun that merely ends in "ing" (Pricing).
+      4. SPLIT on the first clause-connector ("&", "and", "of", "+", "/") and keep only
+         the HEAD clause, so the eyebrow is one feature, never a connector tail.
+      5. Take the first <= max_words tokens of that head clause and acronym-safe case.
+    """
     t = (label or "").strip()
     if not t:
         return ""
-    words = [w.strip(" .,!?;:—–-") for w in t.split() if w.strip(" .,!?;:—–-")]
-    if not words:
+    avoid_l = (avoid or "").strip().lower()
+    # Tokenize; surrounding punctuation stripped, but a lone "&"/"+"/"/" survives as its
+    # own token so it acts as a clause split (rather than gluing onto a noun).
+    raw = [w.strip(" .,!?;:—–-\"'’“”()") for w in t.split()]
+    tokens = [re.sub(r"['’]s$", "", w) for w in raw if w]
+    if not tokens:
         return ""
-    # Drop a leading article.
-    if len(words) > 1 and words[0].lower() in ("the", "a", "an"):
-        words = words[1:]
-    # Drop a leading imperative verb / gerund so we lead with the noun
-    # ("Accept payments" / "Accepting card ..." -> "payments" / "card ...").
-    if len(words) > 1 and (words[0].lower() in _PUNCH_STOPWORDS
-                           or (len(words[0]) >= 5 and words[0].lower().endswith("ing"))):
-        words = words[1:]
-    # Strip a possessive on the (new) leading word ("dashboard's" -> "dashboard").
-    words = [re.sub(r"['’]s$", "", w) for w in words]
-    # Drop connector/stopword tokens so we keep content nouns only.
-    content = [w for w in words if w.lower() not in _PUNCH_STOPWORDS]
-    words = (content or words)[:max_words]
-    out = " ".join(words).strip(" .,!?;:—–-")
-    # Title-case for the tracked-uppercase eyebrow (the archetype upcases, but a clean
-    # cased form keeps acronyms/casing sane if it doesn't).
-    return out.title() if out else ""
+
+    # (2) COPULA — "<subject> is/are [the/a/an] <feature>": keep the predicate feature.
+    # Scan for a copula verb and, if a noun-bearing predicate follows, drop everything up
+    # to and including the copula (+ a trailing article). Names the feature, not the
+    # subject brand, even when no `avoid` wordmark was supplied.
+    for i, w in enumerate(tokens):
+        if w.lower() in ("is", "are", "was", "were"):
+            pred = tokens[i + 1:]
+            # Drop a leading article on the predicate ("the AI workspace" -> "AI ...").
+            if pred and pred[0].lower() in ("the", "a", "an"):
+                pred = pred[1:]
+            if pred:  # only collapse to the predicate when one actually exists
+                tokens = pred
+            break
+
+    # Drop the brand wordmark token so the eyebrow names the feature, not the brand.
+    if avoid_l:
+        tokens = [w for w in tokens if w.lower() != avoid_l] or tokens
+
+    # (3) Drop a leading article, then a leading imperative / action verb or gerund so
+    # the label leads with the topic noun. A real noun ending in "ing" (Pricing/Billing)
+    # is in _EYEBROW_NOUN_INGS and is kept. Loop to shed stacked leading glue.
+    while len(tokens) > 1 and (
+            tokens[0].lower() in ("the", "a", "an")
+            or tokens[0].lower() in _PUNCH_STOPWORDS
+            or tokens[0].lower() in _EYEBROW_LEAD_VERBS
+            or (len(tokens[0]) >= 5 and tokens[0].lower().endswith("ing")
+                and tokens[0].lower() not in _EYEBROW_NOUN_INGS)):
+        tokens = tokens[1:]
+
+    # (4) SPLIT on the first clause-connector — keep only the HEAD clause so the eyebrow
+    # is ONE feature ("Pricing & Fees" -> "Pricing", "Terms of Service" -> "Terms").
+    head: List[str] = []
+    for w in tokens:
+        if w.lower() in _EYEBROW_SPLIT_CONNECTORS:
+            break
+        head.append(w)
+    head = head or tokens  # connector led (shouldn't, after the strip) -> keep tokens
+
+    # Drop any residual non-splitting connector/stopword glue (articles, "in", "on"…)
+    # so we keep content tokens only; fall back to the head if that empties it.
+    content = [w for w in head if w.lower() not in _EYEBROW_CONNECTORS] or head
+    # Trim a trailing glue/verb token so the label never ends on a dangling word.
+    while len(content) > 1 and content[-1].lower() in _PUNCH_STOPWORDS:
+        content = content[:-1]
+
+    # (5) Lead with the topical noun phrase: the FIRST up-to-max_words content tokens.
+    chosen = content[:max_words] if max_words > 0 else content
+    out = " ".join(_eyebrow_case(w) for w in chosen).strip(" .,!?;:—–-")
+    return out
 
 
 def _pick_punch_word(headline: str, brand: Dict[str, Any], emphasis: str = "") -> str:
@@ -2690,10 +3088,10 @@ def _shape_screenshot(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str,
     # (so two screenshot scenes get DISTINCT eyebrows — "Payments" vs "Dashboard" —
     # each matching its own headline), then the run emphasis, then the wordmark. An
     # explicit plan kicker still wins.
-    scene_eyebrow = _short_eyebrow(headline) if headline else ""
+    scene_eyebrow = _short_eyebrow(headline, avoid=wordmark) if headline else ""
     kicker = (str(d.get("kicker") or "").strip()
               or scene_eyebrow
-              or _short_eyebrow(_emphasis_phrase(run_emphasis))
+              or _short_eyebrow(_emphasis_phrase(run_emphasis), avoid=wordmark)
               or wordmark)
     if kicker:
         kicker = _decode(kicker)
@@ -3342,6 +3740,18 @@ def run_pipeline(plan_path: str, brand_path: str, style_name: str, out_dir: str,
         pass  # never block a render on logo staging
     plan_scenes = _plan_scenes(plan)
 
+    # VO<->VISUAL GROUNDING — align each screenshot scene's SPOKEN beat to the page the
+    # capture step actually reached, so the narration and the (surface-aligned) on-screen
+    # headline tell ONE coherent story (no "billing" VO over a /pricing shot). Runs BEFORE
+    # synthesis (the manifest is already on disk — capture precedes run_pipeline) so the
+    # grounded line is the audio that gets spoken. Only screenshot beats can change; the
+    # bookend (title) + walkthrough beats are never touched. Runs BEFORE the condense pass
+    # so the swapped-in surface line is itself length-capped to the pacing budget below.
+    try:
+        _ground_screenshot_vo_beats(plan, out_dir, brand)
+    except Exception:
+        pass  # never block a render on the grounding pass; original beats still align fine
+
     # ROBUSTNESS — copy-length guard. Cap each VO beat to its scene's pacing budget
     # AND the film's target duration BEFORE synthesis, so a DENSE planner (Ultra) does
     # not drive a 33s film off a 30s target and a SPARSE planner (Super) is left
@@ -3352,6 +3762,21 @@ def run_pipeline(plan_path: str, brand_path: str, style_name: str, out_dir: str,
         _condense_vo_beats(plan, fps=fps)
     except Exception:
         pass  # never block a render on the condense pass; raw beats still align fine
+
+    # SINGLE SOURCE OF TRUTH — persist the GROUNDED + condensed VO back into the run's
+    # plan.json. The two passes above mutate plan["voiceover"].beats IN PLACE, and that
+    # grounded copy is what align_vo synthesizes into vo_alignment.json + the audio. But
+    # plan.json on disk still held the STALE pre-grounding VO, so anything that reads the
+    # script FROM plan.json (e.g. an editor's script panel) would show the OLD mismatched
+    # narration even though the rendered video is correct. Write the in-memory (grounded)
+    # plan back so plan.json's voiceover.beats MATCH vo_alignment.json. plan_path is the
+    # run's own runs/<id>/plan.json (build_runner/orchestrator write it there before this
+    # call), so this updates the run artifact in place — never blocks a render on failure.
+    try:
+        with open(plan_path, "w", encoding="utf-8") as fh:
+            json.dump(plan, fh, indent=2)
+    except Exception:
+        pass  # plan.json sync is advisory; the audio + props are already grounded
 
     alignment_path = os.path.join(out_dir, "vo_alignment.json")
     if do_align:

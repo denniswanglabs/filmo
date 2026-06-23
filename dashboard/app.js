@@ -44,6 +44,14 @@ const state = { runs: [], selected: null, ledger: null, typer: null, scriptTyper
      (survives a page reload), else the client's first-poll time as a fallback. */
   statusTimer: null,
   statusStartMs: null,
+  /* RECENTS SEARCH — the live filter query typed in the sidebar search box. Empty
+     string = show the full recency-grouped list; otherwise renderRail() keeps only
+     the runs whose brand/title/URL/run-id contains this (lower-cased) substring. */
+  railQuery: "",
+  /* DEAD-PROCESS STRIKES — consecutive live-poll ticks where the building run was
+     absent from /api/active. The live view bails after 2 strikes so a momentary blip
+     (or a just-spawned build not yet registered) never false-trips the bail. */
+  deadProbes: 0,
   selection: { quality: "standard" } };
 
 const $ = (id) => document.getElementById(id);
@@ -375,6 +383,19 @@ function railGroup(ts) {
   return { key: "older", label: "Older", order: 2 };
 }
 
+/* Does this run match the current Recents search query? Matches on the rendered
+   title ("<Brand> — <descriptor>"), the brand, the company URL, and the raw run-id
+   so typing "linear", "linear.app", or a partial id all find the run. Empty query
+   matches everything (filtering is short-circuited by the caller). */
+function runMatchesQuery(r, q) {
+  if (!q) return true;
+  const hay = [
+    railTitle(r), railBrand(r), railDescriptor(r.goal),
+    r.run_id, r.company_url, r.goal, r.status, r.mode,
+  ].join("  ").toLowerCase();
+  return hay.indexOf(q) !== -1;
+}
+
 function renderRail() {
   const list = $("rail-list");
   const stats = $("rail-stats");
@@ -385,10 +406,20 @@ function renderRail() {
     return;
   }
 
+  // Apply the live search filter (empty query = the full list). Filtering before
+  // bucketing keeps the recency section labels honest (an empty band never shows).
+  const q = (state.railQuery || "").trim().toLowerCase();
+  const runs = q ? state.runs.filter((r) => runMatchesQuery(r, q)) : state.runs;
+  if (!runs.length) {
+    list.innerHTML = '<div class="rail-noresult">No builds match <b>' + esc(state.railQuery.trim()) +
+      "</b>. Try a brand name, URL, or run id.</div>";
+    return;
+  }
+
   // Bucket runs by recency, preserving the index.json order within each bucket.
-  const anyTs = state.runs.some((r) => r.created_at && !isNaN(Date.parse(r.created_at)));
+  const anyTs = runs.some((r) => r.created_at && !isNaN(Date.parse(r.created_at)));
   const buckets = {};
-  state.runs.forEach((r) => {
+  runs.forEach((r) => {
     const g = anyTs ? railGroup(r.created_at) : { key: "recents", label: "Recents", order: 5 };
     (buckets[g.key] || (buckets[g.key] = { label: g.label, order: g.order, runs: [] })).runs.push(r);
   });
@@ -561,15 +592,22 @@ const clip = (s, n) => { s = s || ""; return s.length > n ? s.slice(0, n - 1) + 
    lands on the right run or says, plainly, that this one isn't editable yet.
    Best-effort: on any failure we cache an empty set (Edit shows the not-editable
    note rather than risking the wrong-video link). */
-async function ensureEditorRuns() {
-  if (state.editorRuns) return state.editorRuns;
+async function ensureEditorRuns(force) {
+  // `force` refetches even when a set is already cached. Needed because the cache
+  // is captured at the FIRST selection and a run can become editable LATER (a build
+  // delivered after the page loaded writes its props.json after this fetch). Without
+  // a forced refresh that run would read "Edit unavailable" forever until a manual
+  // reload — the exact bug on a just-delivered run (e.g. build-linear-3c4fe2).
+  if (state.editorRuns && !force) return state.editorRuns;
   try {
     const res = await fetch("/api/editor/runs", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     state.editorRuns = new Set((data.runs || []).map((r) => r.id));
   } catch (e) {
-    state.editorRuns = new Set();   // unknown → treat as not-editable, never wrong-video
+    // On a forced refresh, keep any set we already had rather than wiping a known-good
+    // cache to empty on a transient blip (that would falsely hide a working Edit link).
+    if (!state.editorRuns) state.editorRuns = new Set();
   }
   return state.editorRuns;
 }
@@ -602,6 +640,13 @@ async function selectRun(runId, silent) {
     // Know which runs the editor can deep-load BEFORE rendering, so the delivered
     // view's "Edit video" affordance is correct on first paint (no wrong-video link).
     await ensureEditorRuns();
+    // STALENESS GUARD: if this run is delivered but the cached editor-runs set (taken
+    // at the first selection) doesn't list it, the run was likely delivered AFTER that
+    // fetch. Force ONE refresh so a freshly-delivered editable run shows "Edit video"
+    // immediately instead of a stale "Edit unavailable" until a manual reload.
+    if ((state.ledger.status || "").toLowerCase() === "delivered" && !runIsEditable(runId)) {
+      await ensureEditorRuns(true);
+    }
     empty.hidden = true; detail.hidden = false;
     renderDetail(detail, state.ledger, runId);
     if (!silent) $("stage").scrollTo({ top: 0 });
@@ -783,8 +828,19 @@ function renderDetail(root, l, runId) {
     return;
   }
 
-  // Non-delivered but still running/rendered (e.g. browsing a run mid-flight): the
-  // slate header carries the status (no video hero), then the same collapsed proof
+  // RUNNING run opened from the sidebar: resolve its TRUE state instead of painting
+  // a static "STATUS: running" slate that can never advance. If the process is alive,
+  // hand off to the live poll (the user clicked a genuinely in-flight build, so they
+  // get the live view, not a frozen-looking slate). If it's dead, bail the same way
+  // the live poll does — delivered view when a final.mp4 exists, else the stopped
+  // card — so a crashed/orphaned "running" run never reads as still in progress.
+  if ((l.status || "").toLowerCase() === "running") {
+    resolveRunningRun(root, l, runId);
+    return;
+  }
+
+  // Non-delivered but still rendered (failed-mid intermediates etc.): the slate
+  // header carries the status (no video hero), then the same collapsed proof
   // sections. A stitched-but-not-delivered run still gets an inline final-cut viewer.
   const secs = [];
   if (l.stitch) secs.push(["Final cut", viewer(l, runId), "the assembled video", true]);
@@ -794,6 +850,36 @@ function renderDetail(root, l, runId) {
   root.innerHTML = slate(l) + secHtml;
   wireProofDisclosures(root, l, authored, runId);
   const vid = root.querySelector(".viewer video"); if (vid) vid.load();
+}
+
+/* Resolve a run whose ledger says "running" when it's opened from the sidebar.
+   Paints a brief "checking…" placeholder, then probes /api/active:
+     - alive  → beginPoll(): the build is genuinely in flight, so show the LIVE view.
+     - dead   → final.mp4 present ⇒ selectRun re-renders the delivered view (the
+                ledger flips to delivered on the way); otherwise the stopped card.
+   This is what stops a dead "running" run from sitting on a static slate forever. */
+async function resolveRunningRun(root, l, runId) {
+  root.innerHTML = liveStarting();
+  const alive = await buildIsAlive(runId);
+  // Bail if the user navigated away while we were probing (clicked another run,
+  // hit New build, opened Analytics): don't yank the view out from under them.
+  if (state.selected !== runId || state.building) return;
+  if (alive) { beginPoll(runId); return; }
+  let hasFinal = false;
+  try {
+    const h = await fetch("/runs/" + encodeURIComponent(runId) + "/final.mp4", { method: "HEAD", cache: "no-store" });
+    hasFinal = h.ok;
+  } catch (e) { hasFinal = false; }
+  if (state.selected !== runId || state.building) return;
+  if (hasFinal) {
+    // final.mp4 exists but the ledger wasn't finalized — refresh the rail/ledger and
+    // re-open so the delivered view (and a correct Edit affordance) paints.
+    loadIndex(true).then(() => { if (state.selected === runId) selectRun(runId, true); });
+    return;
+  }
+  root.innerHTML = buildDied(runId);
+  const nb = $("bs-new"); if (nb) nb.onclick = newBuild;
+  loadIndex(true);   // refresh the rail so the dead run reflects its status
 }
 
 /* Lazily start the Studio code-typing the first time its disclosure opens (so a
@@ -1515,6 +1601,18 @@ function buildSelectionPayload() {
   return { quality: q };
 }
 
+/* Tear down the live poll + its loops and pin the run as the (non-building)
+   selection. Shared by the out-of-band aborted branch and the dead-process bail so
+   neither leaves a timer running or the Build button stuck loading. */
+function teardownLivePoll(runId) {
+  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  stopLiveWalk();
+  stopLiveStatus();
+  state.building = null;
+  state.selected = runId;
+  const gb = $("build-go"); if (gb) { gb.disabled = false; gb.classList.remove("is-loading"); }
+}
+
 function beginPoll(runId) {
   state.building = runId;
   state.selected = null;
@@ -1523,6 +1621,7 @@ function beginPoll(runId) {
   state.liveGoalShown = null; // let the new build's hero goal build word-by-word once
   state.payForShown = null;   // let the pay-gate "for <brand>" line build once
   state.statusStartMs = null;  // re-derive the elapsed-timer start for this build
+  state.deadProbes = 0;        // consecutive "not in /api/active" probes for THIS poll
   if (state.pollTimer) clearInterval(state.pollTimer);
   if (state.typer) { cancelAnimationFrame(state.typer); state.typer = null; }
   if (state.scriptTyper) { cancelAnimationFrame(state.scriptTyper); state.scriptTyper = null; }
@@ -1546,15 +1645,38 @@ function beginPoll(runId) {
       // Aborted out-of-band (e.g. stopped from another tab) — stop polling and show
       // the stopped state rather than spinning on a build that will never finish.
       if (l.status === "aborted") {
-        if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
-        stopLiveWalk();
-        stopLiveStatus();
-        state.building = null;
-        state.selected = runId;
-        const gb = $("build-go"); if (gb) { gb.disabled = false; gb.classList.remove("is-loading"); }
+        teardownLivePoll(runId);
         detail.innerHTML = buildStopped(runId);
         const nb = $("bs-new"); if (nb) nb.onclick = newBuild;
         return;
+      }
+      // DEAD-PROCESS BAIL: the ledger still says "running" but the build process is
+      // gone (absent from /api/active — its files went stale past the 180s guard, or
+      // it crashed). Left alone, the live view would spin on a spinner forever. Probe
+      // liveness and, after 2 consecutive misses (≈2s, so a momentary blip or a just-
+      // spawned build that hasn't registered yet doesn't false-trip), bail OUT: if the
+      // run actually delivered (final.mp4 present), switch to the delivered view; else
+      // mark it stopped with a clear "process ended" message. NEVER a frozen spinner.
+      if (!(await buildIsAlive(runId))) {
+        state.deadProbes = (state.deadProbes || 0) + 1;
+        if (state.deadProbes >= 2) {
+          // A final.mp4 may exist even if the ledger wasn't finalized to "delivered"
+          // (e.g. the process died right after the stitch wrote the file). Prefer the
+          // delivered view in that case so a real video is never hidden behind a stop.
+          let hasFinal = false;
+          try {
+            const h = await fetch("/runs/" + encodeURIComponent(runId) + "/final.mp4", { method: "HEAD", cache: "no-store" });
+            hasFinal = h.ok;
+          } catch (e) { hasFinal = false; }
+          if (hasFinal) { finishBuild(runId, true); return; }
+          teardownLivePoll(runId);
+          detail.innerHTML = buildDied(runId);
+          const nb = $("bs-new"); if (nb) nb.onclick = newBuild;
+          loadIndex(true);   // refresh the rail so the dead run reflects its status
+          return;
+        }
+      } else {
+        state.deadProbes = 0;   // alive this tick → reset the strike count
       }
       // include earn.payment_status in the signature so the pay-gate status line
       // updates the instant the ledger poll flips unpaid -> paid.
@@ -1683,6 +1805,42 @@ function wireLiveStop(runId) {
       setConn("err", "stop failed: " + e.message);
     }
   };
+}
+
+/* LIVENESS PROBE — is this run's build process actually alive? The server's
+   /api/active reports ONLY genuinely-live builds (ledger status=="running" AND
+   files touched within the 180s freshness guard); a "running" ledger whose process
+   is gone is excluded as an orphaned corpse. So: ledger says "running" but the id
+   is absent from /api/active ⇒ the process is dead. Returns true when alive (or when
+   we can't tell — fail-open so a transient /api/active blip never falsely declares a
+   genuinely-live build dead and tears down its view). */
+async function buildIsAlive(runId) {
+  try {
+    const r = await fetch("/api/active?_=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return true;               // can't tell → assume alive, keep polling
+    const d = await r.json();
+    const ids = (d.active || []).map((a) => a.run_id);
+    return ids.indexOf(runId) !== -1;
+  } catch (e) {
+    return true;                          // probe failed → assume alive, keep polling
+  }
+}
+
+/* The "Build interrupted" state for a run whose process died WITHOUT delivering
+   (ledger frozen at status=="running", but absent from /api/active and no final.mp4).
+   Without this the live view spins forever on a build that will never finish. Mirrors
+   buildStopped's vocabulary but names the cause (the process ended unexpectedly). */
+function buildDied(runId) {
+  return '<div class="live-head"><div class="live-top">' +
+    '<span class="live-pill stopped">' +
+      '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.6" fill="currentColor"/></svg>' +
+      "STOPPED</span>" +
+    '<span class="live-goal">the build process ended before finishing</span></div>' +
+    '<div class="bs-body">' +
+      '<div class="bs-msg">This build stopped on its own — the production process is no longer running and ' +
+        "no video was delivered. Nothing further will be produced or spent. Start a new build to try again.</div>" +
+      '<div class="bs-actions"><button class="bs-new" id="bs-new" type="button">' + icon("i-plus") + "New build</button></div>" +
+    "</div></div>";
 }
 
 /* The "Build stopped" state shown after a successful abort: a clear stopped badge,
@@ -2850,6 +3008,31 @@ function init() {
   // fresh run (like Claude's "New chat"). Each past build is a sidebar item that
   // opens its view via the existing renderRail()->selectRun wiring.
   const nb = $("rail-new"); if (nb) nb.addEventListener("click", newBuild);
+  // Recents SEARCH — live filter on the build list. Typing re-renders the rail
+  // against state.railQuery (matches brand/title/URL/run-id); the × clears it. Esc
+  // also clears (a fast keyboard exit). Cheap to re-render: renderRail() rebuilds
+  // the DOM list, which is small, on each keystroke — no debounce needed.
+  const si = $("rail-search-input"), sclr = $("rail-search-clear");
+  const applyRailQuery = (v) => {
+    state.railQuery = v || "";
+    if (sclr) sclr.hidden = !state.railQuery.length;
+    renderRail();
+  };
+  if (si) {
+    si.addEventListener("input", () => applyRailQuery(si.value));
+    si.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && si.value) { e.preventDefault(); si.value = ""; applyRailQuery(""); }
+    });
+  }
+  if (sclr) sclr.addEventListener("click", () => {
+    if (si) { si.value = ""; si.focus(); }
+    applyRailQuery("");
+  });
+  // Brand wordmark (sidebar top) is a HOME control: clicking the "Walk Studio" mark
+  // resets the center to the composer / new-build view — same clean reset as
+  // "New build" (clears selection, stops any live poll, exits Analytics/About). It
+  // never reloads into a stale run or a building view.
+  const bh = $("brand-home"); if (bh) bh.addEventListener("click", newBuild);
   // OPERATOR Analytics entry (sidebar footer) — opens the P&L-across-all-builds
   // view. Quiet on purpose: this is Dennis's view, not the customer's.
   const ra = $("rail-analytics"); if (ra) ra.addEventListener("click", openAnalytics);
@@ -2868,13 +3051,10 @@ function init() {
   };
   const rc = $("rail-collapse"); if (rc) rc.addEventListener("click", () => setRail(true));
   const rr = $("rail-reopen"); if (rr) rr.addEventListener("click", () => setRail(false));
-  // Pace segmented pill (D6): one selection at a time, stored on state.pace and
-  // sent with the build request. Named tiers, not a hidden env var.
-  const pace = $("build-pace");
-  if (pace) pace.querySelectorAll(".pace-opt").forEach((b) => b.addEventListener("click", () => {
-    pace.querySelectorAll(".pace-opt").forEach((o) => o.classList.toggle("is-on", o === b));
-    state.pace = b.getAttribute("data-pace") || "standard";
-  }));
+  // Pacing pill (Snappy/Standard/Cinematic) was REMOVED from the composer — we no
+  // longer expose the motion-style variants. state.pace stays "standard" (the
+  // SPD=1.0 baseline) and still rides the build payload as `pace`, so the backend
+  // codegen plumbing is untouched and every build quietly uses the standard style.
   // QUALITY toggle (Standard | Premium): the ONE upfront choice that changes what
   // the agent makes. One selection at a time, stored on state.selection.quality and
   // sent with the build request. Each option carries a small explanation (in HTML);

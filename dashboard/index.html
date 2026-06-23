@@ -42,6 +42,7 @@
   <symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M12 6v12M6 12h12"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M6 12h12"/></symbol>
   <symbol id="i-menu" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6"/><path d="m20 20-4.3-4.3"/></g></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.6" fill="currentColor" stroke="none"/></g></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M12 3.5l2.6 5.3 5.9.85-4.25 4.15 1 5.85L12 17.9l-5.25 2.6 1-5.85L3.5 9.65l5.9-.85z"/></symbol>
   <symbol id="i-layers" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16.5 12 21l9-4.5"/></g></symbol>
@@ -60,8 +61,13 @@
 <div class="shell" id="shell">
 
   <aside class="rail" id="rail">
-    <!-- brand: the inline horizontal Walk Studio mark, moved here from the old top bar -->
+    <!-- brand: the inline horizontal Walk Studio mark, moved here from the old top bar.
+         The wordmark is now a CLICKABLE home control (#brand-home) — clicking it
+         returns the center to the composer / new-build view (newBuild() in app.js),
+         exactly like the "New build" button. Pointer cursor + subtle hover lift make
+         it read as clickable. -->
     <div class="rail-brand">
+      <button class="brand-home" id="brand-home" type="button" title="Walk Studio — back to a new build" aria-label="Walk Studio home — start a new build">
       <svg class="bar-logo" viewBox="0 0 432 120" role="img" aria-label="Walk Studio">
         <g transform="translate(18 18)">
           <rect x="0" y="0" width="84" height="84" rx="22" fill="#FFF1EE"/>
@@ -79,11 +85,28 @@
         <text x="120" y="78" font-family="'Hanken Grotesk', -apple-system, system-ui, 'Segoe UI', Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#16181D">Walk</text>
         <text x="248" y="78" font-family="'Hanken Grotesk', -apple-system, system-ui, 'Segoe UI', Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="-1.2" fill="#D6351C">Studio</text>
       </svg>
+      </button>
       <button class="rail-collapse" id="rail-collapse" title="Hide sidebar" aria-label="Hide sidebar"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
     </div>
 
+    <!-- sidebar Hermes badge removed at Dennis's request; the hero carries the Hermes credit -->
+
+
     <!-- the single primary action: start a fresh build (returns the center to the composer) -->
     <button class="rail-new" id="rail-new" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span>New build</span></button>
+
+    <!-- live filter for the Recents list — matches brand / title / URL / run-id as
+         you type, so a long history stays findable (type "linear" -> only Linear
+         builds). Empty query shows the full recency-grouped list. Wired in app.js. -->
+    <div class="rail-search" id="rail-search">
+      <svg class="ic rail-search-ic" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="rail-search-input" type="search" inputmode="search" autocomplete="off"
+             spellcheck="false" placeholder="Search builds" aria-label="Search builds by brand, URL, or id" />
+      <button id="rail-search-clear" class="rail-search-clear" type="button"
+              title="Clear search" aria-label="Clear search" hidden>
+        <svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
 
     <!-- recency-grouped build list — section labels are emitted by renderRail.
          #rail-stats is kept (hidden) so app.js's existing wiring stays valid. -->
@@ -146,13 +169,28 @@
         <h1 class="hero-title hiro-greet" id="hero-title" data-setup="Got a video idea," data-accent="Dennis?">Got a video idea, Dennis?</h1>
         <p class="hero-sub hiro-sub" id="stage-empty-msg">The agent does the rest.</p>
 
+        <!-- POWERED-BY-HERMES HERO CREDIT — the prominent, tasteful badge that names
+             the agent runtime on the front page. Built on Nous Hermes; this is the
+             NVIDIA x Stripe x Nous hackathon entry. Coral-tinted pill that echoes the
+             brand accent without competing with the greeting above it. The wave glyph
+             nods to the reasoning runtime; text stays strictly factual. -->
+        <a class="hermes-hero" id="hermes-hero" href="https://nousresearch.com/" target="_blank" rel="noopener noreferrer" title="Powered by Hermes, built by Nous Research — the agent runtime that drives the whole studio end to end">
+          <span class="hermes-hero-spark" aria-hidden="true"><img class="hermes-hero-logo" src="assets/hermes-logo.svg" alt="Hermes" width="26" height="26" decoding="async" /></span>
+          <span class="hermes-hero-txt">Powered by <strong>Hermes</strong></span>
+          <span class="hermes-hero-div" aria-hidden="true"></span>
+          <span class="hermes-hero-meta">built by Nous Research</span>
+        </a>
+
         <!-- SETTING-CHIPS ABOVE THE COMPOSER (Hera-style) — a single scannable row of
              clean white pill-chips that surfaces the build options before the input:
-             Quality (Standard | Premium), Aspect (16:9), Pacing. Each is a self-
-             contained chip; the QUALITY chip keeps #cmp-quality / .q-opt / data-quality
-             so app.js's wiring (state.selection.quality) is untouched, and Pacing keeps
-             #build-pace / .pace-opt (state.pace). Operator-only Brain stays in the
-             sidebar. The coral PLAY button remains the one hero action below. -->
+             Quality (Standard | Premium) and Aspect (16:9). Each is a self-contained
+             chip; the QUALITY chip keeps #cmp-quality / .q-opt / data-quality so
+             app.js's wiring (state.selection.quality) is untouched. The Pacing
+             (Snappy/Standard/Cinematic) pill was removed — every build now uses the
+             standard pacing baseline (state.pace stays "standard"). A "What's the
+             difference?" disclosure (#q-explain) below the row explains the tiers.
+             Operator-only Brain stays in the sidebar. The coral PLAY button remains
+             the one hero action below. -->
         <div class="hiro-pills" id="composer-chips">
           <!-- QUALITY — the one upfront choice that changes WHAT the agent makes,
                now a compact segmented chip instead of two nested description cards.
@@ -169,13 +207,39 @@
             <svg class="ic" aria-hidden="true"><use href="#i-film"/></svg>
             <span class="hpill-lbl">Widescreen 16:9</span>
           </div>
-          <div class="hpill hpill-pace hpill-seg" id="build-pace" role="group" aria-labelledby="build-pace-lbl">
-            <span class="hpill-seg-lbl" id="build-pace-lbl">Pacing</span>
-            <button type="button" class="seg-opt pace-opt" data-pace="snappy" title="Quick cuts — punchy, social-ready">Snappy</button>
-            <button type="button" class="seg-opt pace-opt is-on" data-pace="standard" title="Balanced pacing — the default">Standard</button>
-            <button type="button" class="seg-opt pace-opt" data-pace="cinematic" title="Slower, held shots — premium feel">Cinematic</button>
-          </div>
         </div>
+
+        <!-- QUALITY EXPLAINER — a lightweight, self-contained "What's the difference?"
+             disclosure that sits under the Quality chip. Native <details> (keyboard-
+             accessible, no JS needed, deterministic in headless checks). Copy is pulled
+             straight from the code: standard = Remotion designed motion graphics +
+             edge-tts synthetic voice, $5-$10 band; premium = adds cinematic Higgsfield
+             AI footage + a natural ElevenLabs studio voice, $15-$25 band (see pricing.py
+             / pricing.json quality block). The Pacing (Snappy/Standard/Cinematic) pill
+             was removed — every build now uses the standard pacing baseline. -->
+        <details class="q-explain" id="q-explain">
+          <summary class="q-explain-sum">
+            <svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg>
+            <span class="q-explain-q">What's the difference between Standard and Premium?</span>
+            <svg class="ic q-explain-chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+          </summary>
+          <div class="q-explain-body">
+            <div class="q-tier">
+              <div class="q-tier-head">
+                <span class="q-tier-name">Standard</span>
+                <span class="q-tier-price">$5&ndash;$10</span>
+              </div>
+              <p class="q-tier-desc">Designed motion graphics, rendered on-brand from your site, with a clean synthetic voiceover. Fast, deterministic, and free to make &mdash; price scales with scene count and length.</p>
+            </div>
+            <div class="q-tier">
+              <div class="q-tier-head">
+                <span class="q-tier-name">Premium</span>
+                <span class="q-tier-price">$15&ndash;$25</span>
+              </div>
+              <p class="q-tier-desc">Everything in Standard, plus cinematic AI footage (Higgsfield) and a natural studio voice (ElevenLabs). Richer and more lifelike &mdash; price scales with how much cinematic footage, length, and voiceover the plan uses.</p>
+            </div>
+          </div>
+        </details>
 
         <!-- THE COMPOSER — a polished white card. The goal is the main prompt line;
              the company URL is a small clean field below. Bottom row: subtle mock
