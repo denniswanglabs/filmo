@@ -35,6 +35,20 @@ agentic than authorize-and-capture); (b) real-product grounding (commerce, not a
 top loop priorities below exist to CLOSE THEIR GAPS and SHIP OUR KNOCKOUT. Live demo to
 ground-truth (read-only): https://ved.techgyro.ovh/ + /hermes-admin/ , login judge / judge2026.
 
+GROUND-TRUTHED 01:55 (clicked through both apps — they are STRONG + REAL, not vaporware):
+- Nemotron-3 IS real for them (brain = nemotron-3-super via self-hosted ollama proxy; gemma4:31b +
+  gemini-2.5-flash do the writing/critique). DO NOT pursue a "they fake Nemotron" angle — false.
+- Their Stripe = real authorize-and-capture (pre-auth $2.00 HOLD; over-hold → HUMAN approval gate;
+  shows P&L charge-vs-COGS). Real + polished. Our edge is narrower than assumed: the cost-side
+  Issuing DECLINE (Stripe itself declines, NO human) is the rarer surface — must ship it real.
+- Their NemoClaw/OpenShell egress allow-list is real (6 verified host presets, redacted stems).
+  Their security NARRATIVE is genuine, not just a slide → matching it is table stakes, not a win.
+- Their image quality (nano-banana-pro cinematic frames) + UI polish (two apps + a real ops console:
+  Agent Activity, Sessions, Egress, Logs) are AHEAD of us. Do NOT try to out-spectacle the film.
+- OUR TWO REAL EDGES: (1) GROUNDING — real product walkthrough (commerce) vs their synthetic film
+  (art); "a real customer would pay for this". (2) the real Issuing DECLINE (no human). Lead on these.
+- Polish is the gap to close: our dashboard + activity log must reach their fit-and-finish.
+
 ## Mission order (each firing: pick the highest-impact open item, do it, BACK IT UP)
 0a. **TEE UP THE REAL STRIPE DECLINE (highest leverage — our knockout vs VED).** The real-time
    Issuing authorization decline is currently a SIM (`iauth_sim_…`), dry-run-verified only
