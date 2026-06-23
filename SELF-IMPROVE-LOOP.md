@@ -24,7 +24,34 @@ we can go back to."_ So after EVERY meaningful change (code, fix, deploy-worthy 
 This is the restore point: `git checkout hosted-saas` brings the whole cloud build back.
 Backup discipline is autonomous for THIS loop only; `main` stays untouched.
 
+## COMPETITIVE CONTEXT (NEW 01:20 — Dennis surfaced a rival)
+A rival entry **VED / TechGyro** (Karthik @trackkartmac) hit the SAME hackathon: brief →
+generative film (Nano Banana Pro + Veo) → **authorize-and-capture** bill to the customer,
+sandboxed in NemoClaw on Nemotron-3. Their edges: (a) a complete NemoClaw security NARRATIVE
+(keys never leave backend, masked proxy token, egress allow-list); (b) demo polish + cinematic
+spectacle. Our edges: (a) the Stripe axis — **Issuing + real-time authorization decisioning**
+where the agent's own budget brain DECLINES an over-budget charge, no human (rarer + more
+agentic than authorize-and-capture); (b) real-product grounding (commerce, not art). The two
+top loop priorities below exist to CLOSE THEIR GAPS and SHIP OUR KNOCKOUT. Live demo to
+ground-truth (read-only): https://ved.techgyro.ovh/ + /hermes-admin/ , login judge / judge2026.
+
 ## Mission order (each firing: pick the highest-impact open item, do it, BACK IT UP)
+0a. **TEE UP THE REAL STRIPE DECLINE (highest leverage — our knockout vs VED).** The real-time
+   Issuing authorization decline is currently a SIM (`iauth_sim_…`), dry-run-verified only
+   (OVERNIGHT-LOG.md:96, TECHNICAL-ROADMAP.md item 1.1). Convert to a REAL declined
+   `issuing_authorization` so Dennis's morning is JUST `stripe login`. Loop does the $0,
+   no-credential prep: re-verify orchestrator→`runs/active_budget.json` bridge end-to-end in
+   dry-run; confirm the `--stripe-live` path routes the over-budget cinematic charge through the
+   listener (not in-process `money.authorize()`); confirm `stripe_webhook.py --dry-run` decides
+   correctly against the live budget file; write/refresh `.handoff-webhook-bridge.md` with the
+   EXACT 4 commands Dennis runs (`stripe login` → `python3 stripe_webhook.py` → `stripe listen
+   --events issuing_authorization.request` → over-budget `--mode real --stripe-live` run). DON'T
+   run `stripe login` (Dennis's credential step). Goal: his 5 min captures a genuine decline.
+0b. **CLOSE THE NemoClaw NARRATIVE GAP (vs VED's security story).** Finish the sandbox capture
+   path (see item 3) AND write the talking points so we can say the same true things: provider
+   keys stay backend-side, sandbox runs behind an egress allow-list, Nemotron planning via
+   OpenRouter is separate from the NemoClaw execution sandbox. Put them in a SECURITY-NARRATIVE
+   section of HANDOFF/DEMO-BEAT-SHEET. Only claim what's actually true — verify before writing.
 1. **Verify cloud delivery GREEN end-to-end.** Confirm the Railway walkthrough-fix rebuild
    reached SUCCESS (`railway deployment list --json`) → enqueue a $0 mock cloud build
    (worker/enqueue.js) → poll `runs.status` to `delivered`. If delivered, cloud loop is GREEN.
