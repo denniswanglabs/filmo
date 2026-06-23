@@ -69,6 +69,23 @@ ground-truth (read-only): https://ved.techgyro.ovh/ + /hermes-admin/ , login jud
    → ffmpeg contact sheet → JUDGE THE WHOLE VIDEO scene-by-scene (not one frame) + catch flakes
    → fix highest-impact issue → BACK IT UP (commit+push) → append a lesson below.
 
+## RAISE THE BAR — "work harder to beat them" (Dennis 01:25)
+Confirmed: Walk Studio closes BOTH sides of the economic loop (VED only does revenue):
+- REVENUE in: `stripe_earn.py` — real `cs_test_` Checkout, customer pays the quote.
+- COST out: `stripe_money.py` — Stripe Issuing virtual card, per-scene budget gate, decline.
+That's a full P&L with a Stripe-enforced, no-human guardrail. This two-sided loop is the moat.
+Higher-ambition targets (pursue alongside 0a/0b, not just maintenance):
+- **Center the demo on the two-sided P&L money-shot:** customer pays → agent spends per scene →
+  Stripe DECLINES the over-budget scene → P&L tallies live. Update DEMO-BEAT-SHEET to build to it.
+- **Lead grounding with docs.stripe.com** (already in `sample-plan.json`) — a real promo of Stripe's
+  own product shown to Stripe judges. Verify that build is clean end-to-end.
+- **NemoClaw: wire it AND show it** — sandbox boundary + masked proxy token visible on screen, not
+  just a slide. Stronger than VED's narrative if it's live.
+- **Produce a tight 60-90s judge-facing cut** once the money-shot + NemoClaw are real.
+Don't out-spectacle their generative film — win the Stripe axis (real, two-sided, autonomous) +
+the realness/grounding. NOTE: Dennis did NOT say "full force" — keep the measured self-paced loop
+(do NOT fan out a parallel fleet) unless he explicitly triggers full-force.
+
 ## Pending one-shot (handle on first firing if still queued)
 - `daily-synth` scheduled task — claim atomically then execute
   `/Users/dennis/.claude/scheduled-prompts/daily-synth.md` (`.due`→`.claimed` mv, rm on success).
