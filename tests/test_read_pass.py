@@ -35,5 +35,18 @@ class ReadPassSuccess(unittest.TestCase):
         self.assertLessEqual(len(r["body_text"]), 4000)
 
 
+class CaptureExposesBodyText(unittest.TestCase):
+    def test_screenshot_record_helper_includes_body_text(self):
+        # The capture module exposes a pure helper that maps a (title, body) pair
+        # onto the shot record's body_text field, capped. We test the helper, not
+        # Playwright, so this stays $0/offline.
+        import capture_screenshots as cs
+        rec = {"index": 0, "file": "shot-00.png"}
+        cs._attach_read_text(rec, title="Acme", body_text="y" * 5000)
+        self.assertIn("body_text", rec)
+        self.assertLessEqual(len(rec["body_text"]), 4000)
+        self.assertEqual(rec["body_text"], "y" * 4000)
+
+
 if __name__ == "__main__":
     unittest.main()

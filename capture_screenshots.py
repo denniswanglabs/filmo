@@ -1493,6 +1493,14 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
                 "height": VIEWPORT["height"] * DEVICE_SCALE,
                 "bytes": size,
             }
+            # READ-PASS copy: pull the visible body text ONCE for the hero shot so
+            # the Conversion Read's read_pass can diagnose the real page copy without
+            # a second navigation. Best-effort; an unreadable body just leaves "".
+            try:
+                _btext = (pg.inner_text("body") or "")
+            except Exception:
+                _btext = ""
+            _attach_read_text(rec, title=title, body_text=_btext)
             # Focus rect (Task F): mark a prominent UI element so the archetype's
             # highlight-box / zoom can target it (the headline<->UI tie). Best-
             # effort; a None just degrades to a plain shot with no highlight.
@@ -1825,6 +1833,16 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
     return manifest
+
+
+def _attach_read_text(rec, title="", body_text=""):
+    """Attach the read-pass fields (title already on rec; body_text capped at 4000)
+    to a shot record. Pure + idempotent; used by the hero shot so read_pass.read_pass
+    can pull the page copy from the manifest without a second navigation."""
+    if title and not rec.get("title"):
+        rec["title"] = title
+    rec["body_text"] = (body_text or "")[:4000]
+    return rec
 
 
 def capture_url(url: str, out_dir: str, max_shots: int = 2) -> Dict[str, Any]:
