@@ -44,6 +44,19 @@ EDITOR_DIST = os.path.join(STUDIO_DIR, "editor", "dist")
 # body's `pace` field). Anything else falls back to "standard" (today's default).
 _STYLES = ("snappy", "standard", "cinematic")
 
+
+def _build_child_env(body, mode):
+    """Build the build_runner subprocess env. MOCK auto-simulates the test payment;
+    a truthy body['conversion_read'] turns on the ANALYZE stage feature flag. Pure +
+    testable (no socket)."""
+    env = os.environ.copy()
+    if mode == "mock":
+        env["PRODUCER_SIMULATE_PAID"] = "1"
+    if body.get("conversion_read"):
+        env["PRODUCER_CONVERSION_READ"] = "1"
+    return env
+
+
 # OPERATOR planner-BRAIN keys accepted from the dashboard's operator control
 # (carried in the POST body's `brain` field). All three route through OpenRouter;
 # anything else falls back to the free Super default ($0). Sourced from brain.py so
@@ -397,9 +410,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # test-mode Stripe gate that requires the test card. Inherit the current env
         # (zsh -lc still sources ~/.zshrc for the API keys) and add the flag only for
         # mock.
-        child_env = os.environ.copy()
-        if mode == "mock":
-            child_env["PRODUCER_SIMULATE_PAID"] = "1"
+        child_env = _build_child_env(body, mode)
         proc = subprocess.Popen(["zsh", "-lc", inner], stdout=logf, stderr=subprocess.STDOUT,
                                 cwd=PROJECT_ROOT, start_new_session=True, env=child_env)
         # Record the spawned PID so POST /api/abort can stop this build. Because
