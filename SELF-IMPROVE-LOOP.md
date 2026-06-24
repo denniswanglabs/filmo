@@ -5,7 +5,12 @@ beat the rival VED/StoryPrompting. Dennis is ASLEEP (~02:00, 2026-06-25) — FUL
 Spend ceiling: **$20 EXTERNAL** (paid Nemotron 550B for sharper diagnoses; flag before any
 Higgsfield burst). `main` = untouched fallback. Backup: commit+push after every change._
 
-## ⚠ WAITING ON DENNIS (do first thing — unblocks P0 + the NVIDIA sandbox)
+## ✓ DENNIS BLOCKERS CLEARED (~03:40) — railway login + Docker BOTH DONE
+P0 redeploy in flight (agent `ab03a8679fd3f0e23`: redeploy → bind 8GB → enqueue → prove delivery);
+NemoClaw in flight (agent `aebbe0d84f2a68543`: recover gateway → install in walk-ultra → capture).
+The two asks below are now satisfied — kept for context.
+
+## ~~⚠ WAITING ON DENNIS~~ (CLEARED — do first thing — unblocks P0 + the NVIDIA sandbox)
 **1) Run `railway login`, then ping me** — unblocks P0 "works for everyone". The hosted worker
 can't deliver until it's REDEPLOYED to bind the new 8GB Hobby plan (still the starved ~512MB
 container `worker-2808d1734f1f`, SIGKILLs on trivial ffmpeg). After login I redeploy (`railway
@@ -146,3 +151,12 @@ login` if Track A needs it), and the state of each priority P0–P5.
   work on free — the hosted product runs on free; 550B is a quality bonus, not the reliability
   crutch). Watchdog `bpipa8zti` over the fix. After this the differentiator should be robustly
   demo-ready; remaining wins (P0 cloud, P3 NemoClaw) stay gated on Dennis.
+- iter-winrun-7 (~03:40): **BOTH Dennis blockers CLEARED.** Helped Dennis live: ran `railway
+  login` (he approved → authed as Dennis Wang; service walk-studio-hosted online sfo) + launched
+  Docker (`open -a Docker` → daemon up, 16GB). GOTCHA: my first `railway whoami` raced the login
+  and showed `invalid_grant`; the login TASK then completed fine — re-check after the login task
+  EXITS, not immediately. Dispatched the 2 now-unblocked big wins: **P0 redeploy+verify
+  `ab03a8679fd3f0e23`** (redeploy → bind 8GB → enqueue → prove delivery; anti-stall remote-poll) +
+  **NemoClaw `aebbe0d84f2a68543`** (recover gateway → install Playwright+Chromium in walk-ultra →
+  test capture). JSON-reliability fix `a5895796eaaee1bb1` still running. 3 live tracks; watchdogs
+  `bpipa8zti` (json-fix) + `bor1iw9jr` (p0+nemoclaw).
