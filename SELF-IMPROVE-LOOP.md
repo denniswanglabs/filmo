@@ -134,3 +134,15 @@ login` if Track A needs it), and the state of each priority P0–P5.
   (promote): a subagent that runs a >600s build then idles for a completion notification STRANDS**
   — subagents aren't re-invoked by background processes; the orchestrator must finish it, OR the
   build subagent must background+poll in <600s chunks.
+- iter-winrun-6 (~03:25): **Stripe per-brand validation PASSED — demo-quality.** Delivered a 30s
+  video; the delivered-ledger fix holds on a 2nd brand; the diagnosis is real+grounded (rewards
+  Stripe's strengths proof4/cta4, flags only the vague hero; cites real $1.9T/99.999% metrics);
+  whole-video on the design bar, no violations. BUT caught a **demo-reliability bug**: on the FREE
+  Nemotron tier the Read DEGRADES to a generic fallback ~2 of 3 runs — the 120B packs comma-
+  separated strings into `evidence`, breaking JSON parse (analyze.py:159 →
+  validate_planner.extract_json:483). A live judge demo would show a generic diagnosis 2/3 of the
+  time. Dispatched JSON-hardening fix `a5895796eaaee1bb1` (tighten analyzer-prompt + analyze-local
+  robust json-repair + retry budget; TDD on the exact malformed JSON; target degrade <1/5; MUST
+  work on free — the hosted product runs on free; 550B is a quality bonus, not the reliability
+  crutch). Watchdog `bpipa8zti` over the fix. After this the differentiator should be robustly
+  demo-ready; remaining wins (P0 cloud, P3 NemoClaw) stay gated on Dennis.
