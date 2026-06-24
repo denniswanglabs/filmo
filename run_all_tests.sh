@@ -44,6 +44,21 @@ python3 -m unittest tests.test_style_fill -v                  || fail=1
 python3 -m unittest tests.test_pricing -v                     || fail=1
 python3 -m unittest tests.test_premium_produce -v             || fail=1
 python3 -m unittest tests.test_analytics -v                   || fail=1
+python3 -m unittest tests.test_analyze -v                     || fail=1
+python3 -m unittest tests.test_read_pass -v                   || fail=1
+python3 -m unittest tests.test_plan_seeding -v                || fail=1
+python3 -m unittest tests.test_conversion_read_e2e -v         || fail=1
+python3 -m unittest tests.test_serve_conversion_flag -v       || fail=1
+
+echo
+echo "================================================================"
+echo " 2b-js. CONVERSION READ — Analysis panel renderer (node, \$0)"
+echo "================================================================"
+if command -v node >/dev/null 2>&1; then
+  node tests/test_analysis_panel.js || fail=1
+else
+  echo "  SKIPPED — node not on PATH."
+fi
 
 echo
 echo "================================================================"
