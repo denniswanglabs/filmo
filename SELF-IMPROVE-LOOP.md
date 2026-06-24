@@ -87,9 +87,28 @@ No unilateral aesthetic flips. No premature "ship what's done" — match Dennis'
 - `walk-studio-hosted` (`hosted-saas`) = cloud build + this loop-state + the design doc; backup target.
 - `walk-studio-conversion-read` (`conversion-read`) = the Conversion Read feature build.
 
-## MORNING SUMMARY (write before Dennis wakes)
-Leave a tight summary: what shipped, what was learned, what's waiting on him (esp. `railway
-login` if Track A needs it), and the state of each priority P0–P5.
+## ★ MORNING SUMMARY (~04:10 — autonomous mission COMPLETE; loop wound down)
+**Shipped tonight (all backed up: hosted-saas + conversion-read):**
+- **P0 cloud delivery GREEN ✓** — hosted Walk Studio delivers a real 1080p/AAC video for any
+  visitor (cloud-1782331169508 → h264 1920×1080 / 32.4s / 9.45MB). Was the 8GB-redeploy bind.
+- **P1 Conversion Read (differentiator) DONE ✓** — 15 TDD tasks; adversarially verified to genuinely
+  work; demo-quality on linear.app + Stripe; delivered-ledger bug fixed; free-tier reliability
+  hardened (0/12 degrades). On `conversion-read` branch (`82c081f`).
+- **P3 NemoClaw/NVIDIA capture PROVEN ✓** — nvidia.com captured inside the walk-ultra sandbox.
+- **P4 Design bar set + met ✓** (`docs/DESIGN-BEST-PRACTICES.md`).
+- **P2 Stripe** — autonomous Issuing decline in hand locally (authorization_controls artifact).
+
+**Decisions waiting on Dennis (not autonomous-doable):**
+1. Wire `CAPTURE_BACKEND=nemoclaw` into the pipeline so the demo actually captures in-sandbox
+   (spec in `.handoff-nemoclaw.md`; needs sign-off).
+2. demo-targets allowlist: sandbox captures allowlisted hosts (nvidia/docs.stripe.com/…) but not
+   arbitrary customer URLs — expanding is a gated egress change. (docs.stripe.com already allowed.)
+3. Merge `conversion-read` → the demo baseline (`main` untouched per policy).
+4. Optional `railway up` (~15min) to ship the run.js `completed_with_warnings` fix.
+5. Optional sharper Stripe: local `webhook_declined` capture (5-min stripe login + listener).
+6. The pitch / demo cut (P5) — held for Dennis's voice.
+
+**Net:** from 'never delivered' → all 3 sponsor axes covered + works for everyone, in one night.
 
 ## Lessons log (append each pass; prior lessons in git history)
 - iter-winrun-kickoff (~02:00, 2026-06-25): launched 3 parallel tracks (cloud delivery /
