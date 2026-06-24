@@ -1062,6 +1062,30 @@ button { font-family: inherit; cursor: pointer; }
 .viewer-cap { background: var(--bg-1); padding: 11px 16px; display: flex; justify-content: space-between; color: var(--ink-3); font-size: 11px; letter-spacing: .5px; border-top: 1px solid var(--line); }
 .viewer-cap .cut { color: var(--neg); }
 
+/* ---- CONVERSION READ: the diagnosis panel, shown before the video ---- */
+.analysis-panel { border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px 18px; margin: 0 0 18px; background: var(--bg-1); }
+.ap-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ap-title { font-weight: 650; letter-spacing: .2px; color: var(--ink); }
+.ap-degraded { font-size: 11px; color: var(--ink-4); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+.ap-verdict { color: var(--ink-2); margin-bottom: 12px; }
+.ap-grid { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.ap-row { display: grid; grid-template-columns: 88px auto 34px 1fr; align-items: center; gap: 10px; font-size: 13px; }
+.ap-key { text-transform: capitalize; color: var(--ink-2); }
+.ap-pips { display: flex; gap: 3px; }
+.ap-pip { width: 10px; height: 10px; border-radius: 3px; background: var(--bg-3); }
+.ap-pip.on { background: var(--amber); }
+.ap-row.ap-bad .ap-pip.on { background: #D6351C; }
+.ap-row.ap-weak .ap-pip.on { background: #E0922F; }
+.ap-row.ap-good .ap-pip.on { background: #2E9E5B; }
+.ap-score { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ap-finding { color: var(--ink-3); }
+.ap-fixes-h { font-weight: 600; margin: 4px 0 6px; color: var(--ink); }
+.ap-fixes { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.ap-fix { display: flex; align-items: baseline; gap: 8px; color: var(--ink-2); }
+.ap-rank { width: 18px; height: 18px; border-radius: 50%; background: var(--amber); color: #fff; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.ap-map { color: var(--ink-4); }
+.ap-headline { margin-top: 12px; color: var(--ink-2); }
+
 /* ---- DELIVERED HERO: the video is the payoff ------------------------- */
 .delivered-hero {
   margin-top: 22px; border: 1px solid rgba(214,53,28,.28); border-radius: 18px;

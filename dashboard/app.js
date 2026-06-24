@@ -764,6 +764,43 @@ function wireRunStateNotice(runId) {
   const rs = $("rsn-resume"); if (rs) rs.onclick = () => { state.selected = runId; beginPoll(runId); };
 }
 
+/* The Conversion Read diagnosis panel — the first-class deliverable that shows the
+   user how the page converts BEFORE the video. Pure: ledger in -> HTML string out.
+   Returns "" when there is no Read on the ledger (flag off / older run), so the
+   panel is simply absent and the rest of the view is unchanged. */
+function analysisPanel(l) {
+  const cr = l && l.conversion_read;
+  if (!cr || !cr.dimensions) return "";
+  const KEYS = ["promise", "outcome", "proof", "show", "specificity", "cta"];
+  const byKey = {};
+  (cr.dimensions || []).forEach((d) => { byKey[d.key] = d; });
+  const rows = KEYS.map((k) => {
+    const d = byKey[k] || { score: 0, finding: "", fix: "" };
+    const score = Math.max(0, Math.min(5, parseInt(d.score, 10) || 0));
+    const pips = Array.from({ length: 5 }, (_, i) =>
+      '<span class="ap-pip ' + (i < score ? "on" : "") + '"></span>').join("");
+    const tone = score <= 1 ? "bad" : score <= 2 ? "weak" : score >= 4 ? "good" : "ok";
+    return '<div class="ap-row ap-' + tone + '">' +
+      '<span class="ap-key">' + esc(k) + "</span>" +
+      '<span class="ap-pips">' + pips + "</span>" +
+      '<span class="ap-score">' + score + "/5</span>" +
+      '<span class="ap-finding">' + esc(d.finding || "") + "</span>" +
+    "</div>";
+  }).join("");
+  const fixes = (cr.priority_fixes || []).map((f) =>
+    '<li class="ap-fix"><span class="ap-rank">' + esc(String(f.rank || "")) + "</span>" +
+    esc(f.fix || "") + (f.maps_to ? ' <span class="ap-map">→ ' + esc(f.maps_to) + "</span>" : "") +
+    "</li>").join("");
+  const deg = cr.degraded ? '<span class="ap-degraded">best-effort read</span>' : "";
+  return '<section class="analysis-panel">' +
+    '<div class="ap-head"><span class="ap-title">Conversion Read</span>' + deg + "</div>" +
+    '<div class="ap-verdict">' + esc(cr.verdict || "") + "</div>" +
+    '<div class="ap-grid">' + rows + "</div>" +
+    (fixes ? '<div class="ap-fixes-h">What the video fixes</div><ol class="ap-fixes">' + fixes + "</ol>" : "") +
+    (cr.headline_fix ? '<div class="ap-headline">Opens with: <em>' + esc(cr.headline_fix) + "</em></div>" : "") +
+  "</section>";
+}
+
 function renderDetail(root, l, runId) {
   if (state.typer) { cancelAnimationFrame(state.typer); state.typer = null; }
   const scenes = l.scenes || [];
@@ -791,7 +828,7 @@ function renderDetail(root, l, runId) {
   if (delivered) {
     const proofHtml = proof.map((s, i) =>
       disclosure(s[0], s[1], { n: String(i + 1).padStart(2, "0"), hint: s[2], open: false })).join("");
-    root.innerHTML = deliveredHero(l, runId) +
+    root.innerHTML = analysisPanel(l) + deliveredHero(l, runId) +
       '<div class="proof-fold"><div class="proof-lead">' +
         '<span class="proof-k">The proof of craft</span>' +
         '<span class="proof-sub">how the agent built it — open any section: pricing, the budget gate, the code, the footage</span>' +
@@ -1431,6 +1468,10 @@ function currentStageIndex(l) {
   // build runner) pins the two that have no scene/phase signal of their own.
   if (stage === "rendering") return STAGE_INDEX.render;
   if (stage === "capturing") return STAGE_INDEX.capture;
+  // ANALYZE (Conversion Read) runs before planning; it shares the first checklist
+  // step ("Read the brand site") so the chip lights up without adding a new stage
+  // (the checklist is byte-identical for runs that never analyze — flag off).
+  if (phase === "analyzing" || stage === "analyzing") return STAGE_INDEX.brand;
   if (phase === "delivered" || phase === "stitching") return STAGE_INDEX.render;
   if (phase === "voiceover") return STAGE_INDEX.voiceover;
   if (phase === "producing") {
@@ -1732,7 +1773,7 @@ function renderLive(root, l, runId) {
     // already finished reading + storyboarding + pricing, the build is alive (timer
     // ticking), and the current stage is "waiting for payment" — so the gate never
     // reads as a dead end while the customer decides.
-    root.innerHTML = liveHeader(l, runId) + liveStatusPanel(l) +
+    root.innerHTML = liveHeader(l, runId) + liveStatusPanel(l) + analysisPanel(l) +
       sectionLabel("·", "Payment · pay to start production") + payGate(l) +
       disclosure("The script — what the agent wrote before shooting", liveScript(l),
         { n: "·", hint: ((l.plan || {}).scenes || []).length + " scenes", open: false }) +
@@ -1754,6 +1795,7 @@ function renderLive(root, l, runId) {
   const done = scenes.filter((s) => s.status === "produced" || s.status === "declined").length;
   root.innerHTML = liveHeader(l, runId) +
     liveStatusPanel(l) +
+    analysisPanel(l) +
     storyboardLead(done, scenes.length) +
     liveStoryboard(scenes, runId) +
     disclosure("The script — what the agent wrote before shooting", liveScript(l),
