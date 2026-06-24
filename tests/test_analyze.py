@@ -42,5 +42,19 @@ class ValidateRead(unittest.TestCase):
         self.assertTrue(analyze.validate_read(r))
 
 
+class MinimalRead(unittest.TestCase):
+    def test_minimal_read_is_valid(self):
+        r = analyze.minimal_read("https://acme.com", body_text="Acme builds widgets.")
+        self.assertEqual(analyze.validate_read(r), [])
+
+    def test_minimal_read_is_marked_degraded(self):
+        r = analyze.minimal_read("https://acme.com", body_text="")
+        self.assertTrue(r["degraded"])
+
+    def test_minimal_read_carries_url(self):
+        r = analyze.minimal_read("https://acme.com", body_text="x")
+        self.assertEqual(r["url"], "https://acme.com")
+
+
 if __name__ == "__main__":
     unittest.main()

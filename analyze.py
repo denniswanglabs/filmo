@@ -61,3 +61,30 @@ def validate_read(read):
             if not isinstance(fix, dict) or not isinstance(fix.get("fix"), str) or not fix.get("fix").strip():
                 problems.append("priority_fix missing a non-empty 'fix' string")
     return problems
+
+
+def minimal_read(url, body_text=""):
+    """Deterministic, always-valid Conversion Read used when the live model is
+    unavailable / unparseable, or the page could not be read. Marked degraded=True
+    so the dashboard can flag it as a best-effort diagnosis. NEVER raises — this is
+    the floor that guarantees the pipeline always has a Read object to seed/render."""
+    snippet = (body_text or "").strip().replace("\n", " ")[:120]
+    evidence = snippet or "(page copy unavailable)"
+    dims = [
+        {"key": k, "score": 2,
+         "finding": "Not assessed in detail — using a best-effort baseline read.",
+         "evidence": evidence,
+         "fix": "Lead with the buyer's outcome and add one concrete proof point."}
+        for k in DIMENSION_KEYS
+    ]
+    return {
+        "url": url,
+        "verdict": "Best-effort read: lead with the outcome and show one real proof point.",
+        "dimensions": dims,
+        "priority_fixes": [
+            {"rank": 1, "fix": "Open on the buyer's outcome, not a feature list.", "maps_to": "outcome"},
+            {"rank": 2, "fix": "Show one real, specific proof point (number, demo, or logo).", "maps_to": "proof"},
+        ],
+        "headline_fix": "The outcome your customer gets — in one clear line.",
+        "degraded": True,
+    }
