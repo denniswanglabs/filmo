@@ -254,7 +254,7 @@ _GENRE_ENRICH_EXAMPLES = {
 }
 
 
-def company_facts_block(facts, company_url=None, genre=None):
+def company_facts_block(facts, company_url=None, genre=None, conversion_read=None):
     """Format a 'COMPANY FACTS' block to APPEND to the planner USER prompt.
 
     `facts` is the normalized dict from build_runner._brand_facts:
@@ -362,6 +362,28 @@ def company_facts_block(facts, company_url=None, genre=None):
         "video, the screenshot, the capture, or 'the real site'; describe what the "
         "PRODUCT does for the user."
     )
+    # CONVERSION READ prescriptions (additive; only when a Read is supplied). These
+    # are the diagnosed fixes the produced video must EMBODY: the headline_fix opens
+    # the video, and each priority_fix becomes a directed beat. None/absent => no
+    # block, so the prompt is byte-identical to before (behavior unchanged when the
+    # PRODUCER_CONVERSION_READ flag is off).
+    if isinstance(conversion_read, dict):
+        cr_lines = ["", "CONVERSION READ — PRESCRIPTIONS (diagnosed fixes the video MUST embody):"]
+        hf = (conversion_read.get("headline_fix") or "").strip()
+        if hf:
+            cr_lines.append("- OPEN the video with this outcome-led hero line (the opening "
+                            "title's voiceover beat): \"%s\"" % hf)
+        pfs = [f for f in (conversion_read.get("priority_fixes") or []) if isinstance(f, dict)]
+        if pfs:
+            cr_lines.append("- The video MUST address each of these prioritized fixes, in a beat:")
+            for f in pfs:
+                fix = (f.get("fix") or "").strip()
+                mt = (f.get("maps_to") or "").strip()
+                if fix:
+                    cr_lines.append("    * %s%s" % (fix, (" [%s]" % mt if mt else "")))
+        cr_lines.append("Treat these prescriptions as REQUIRED -- the produced video is the "
+                        "diagnosis, fixed. Do not contradict them.")
+        lines += cr_lines
     return "\n".join(lines) + "\n"
 
 
