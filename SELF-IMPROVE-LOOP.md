@@ -160,3 +160,16 @@ login` if Track A needs it), and the state of each priority P0–P5.
   **NemoClaw `aebbe0d84f2a68543`** (recover gateway → install Playwright+Chromium in walk-ultra →
   test capture). JSON-reliability fix `a5895796eaaee1bb1` still running. 3 live tracks; watchdogs
   `bpipa8zti` (json-fix) + `bor1iw9jr` (p0+nemoclaw).
+- iter-winrun-8 (~03:55): **NemoClaw/NVIDIA story PROVEN** — agent `aebbe0d84f2a68543` captured
+  www.nvidia.com (HTTP 200, real 1440×900 1MB PNG at `nemoclaw-capture.png`, visually verified)
+  INSIDE the walk-ultra sandbox. Findings solved (exec≠shell → `bash -lc`; PEP668 → venv;
+  playwright-cdn keyed to host+binary → install into `/sandbox/explainer-agent` + share to venv;
+  TLS-intercept → `--ignore-certificate-errors`). GATED follow-ups for Dennis: (a) wire
+  `CAPTURE_BACKEND=nemoclaw|native` into the pipeline (his sign-off), (b) demo-targets allowlist
+  excludes arbitrary customer URLs (allows nvidia/docs.stripe.com/etc.) — adding hosts is a gated
+  egress change. Spec in `.handoff-nemoclaw.md`. **P0 CLOUD: redeploy took effect** (active
+  deployment changed 46d3d4b3→`fde5941c` Online = fresh container, should carry 8GB). Enqueued a
+  $0 delivery test `cloud-1782331169508` (stripe.com, mock) — polling to delivered/failed = the
+  ground-truth "works for everyone" test. The P0 agent had stalled (created a monitor + idled);
+  I took over. GOTCHA: `status` is a read-only var in zsh ($?) — don't assign to it. JSON-fix
+  `a5895796eaaee1bb1` still running.
