@@ -86,5 +86,23 @@ class StandardBackstopSeeding(unittest.TestCase):
         self.assertEqual(after["voiceover"]["beats"][0]["text"], before["voiceover"]["beats"][0]["text"])
 
 
+class PlanJobThreadsRead(unittest.TestCase):
+    def setUp(self):
+        self._orig = plan_job.brain_mod.brain_key
+        plan_job.brain_mod.brain_key = lambda: None  # force the template path ($0)
+
+    def tearDown(self):
+        plan_job.brain_mod.brain_key = self._orig
+
+    def test_read_headline_lands_on_template_plan_open(self):
+        plan = plan_job.plan_job(
+            "https://acme.com", "promo", 30, style="standard", quality="standard",
+            company_facts={"wordmark": "Acme", "tagline": "", "features": ["a", "b", "c"]},
+            conversion_read=_read())
+        beats = {b["scene_id"]: b["text"] for b in plan["voiceover"]["beats"]}
+        opener = plan["scenes"][0]["id"]
+        self.assertEqual(beats[opener], "Ship 10x faster with Acme.")
+
+
 if __name__ == "__main__":
     unittest.main()

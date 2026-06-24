@@ -130,7 +130,8 @@ def _normalize_quality(quality):
 
 def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
              currency="usd", style="standard", quality="standard",
-             brain="super-free", company_facts=None, emphasis=None):
+             brain="super-free", company_facts=None, emphasis=None,
+             conversion_read=None):
     style = style if style in VALID_STYLES else "standard"
     quality = _normalize_quality(quality)
     # BRAIN: the operator-chosen planner LLM (all via OpenRouter). Defaults to
@@ -157,7 +158,8 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # "testing on Super" actually exercised the 120B and not a canned template.
     planner_meta = {}
     plan = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality,
-                               brain, company_facts, meta=planner_meta)
+                               brain, company_facts, meta=planner_meta,
+                               conversion_read=conversion_read)
     plan_source = "llm"
     if plan is None:
         plan_source = "template"
@@ -228,6 +230,10 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # names a real feature/metric (world-knowledge first, then scraped features).
     plan = _degut_bare_wordmark_beats(plan, _resolved_brand, company_url,
                                       company_facts, emphasis)
+    # CONVERSION READ seeding backstop: guarantee the diagnosed top fixes appear as
+    # beats and the headline_fix opens the video, even if the LLM/template dropped
+    # them. No-op when conversion_read is None (flag off) -> behavior unchanged.
+    plan = seed_plan_with_read(plan, conversion_read)
     # Drop the internal-only `_wordmark` hint before validation/return — `emphasis`
     # stays (a recognized optional job key), but `_wordmark` is a private plumbing
     # field that must not leak into the persisted plan or the strict planner schema.
@@ -576,7 +582,7 @@ def _restyle_durations(plan, style, target_duration_s):
 
 def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
                         quality="standard", brain="super-free", company_facts=None,
-                        meta=None):
+                        meta=None, conversion_read=None):
     # `meta`: optional dict the caller threads in to learn WHY the LLM path did or
     # did not produce a plan. Populated with finish_reason / usage (token costs) and
     # a short `reason` string ("ok", "no-key", "refusal", "truncated", "parse-fail",
@@ -615,7 +621,7 @@ def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
     # hollow. Call unconditionally so even a None/empty facts dict still grounds on
     # the URL's brand.
     facts_block = vp.company_facts_block(company_facts or {}, company_url=company_url,
-                                         genre=genre)
+                                         genre=genre, conversion_read=conversion_read)
     user = ("Build the scene plan for this brief. Output JSON only.\n\n"
             "company_url: %s\ngoal: %s\ntarget_duration_s: %d\n"
             % (company_url, goal, target_duration_s))
