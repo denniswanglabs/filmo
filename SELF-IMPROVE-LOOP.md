@@ -122,3 +122,15 @@ login` if Track A needs it), and the state of each priority P0–P5.
   ledger lost the data. NEXT after fix lands + demo-ready: per-brand build→judge cycles (P4
   quality across Stripe/Notion/Vercel, judge whole) — that's the remaining autonomous work; P0/P3
   stay gated on Dennis.
+- iter-winrun-5 (~03:15): **Ledger fix DONE + verified → Conversion Read is DEMO-READY.** The
+  fix-agent applied the fix correctly but STALLED on its e2e build (idled waiting for a completion
+  notification that never reaches a subagent). I took over: confirmed the fix (re-attaches
+  conversion_read to the delivered ledger after orchestrate; guarded; both VO paths), ran the
+  authoritative tests myself — all 7 green incl. `test_delivered_ledger_carries_read_vo_off/on`.
+  Cleaned the agent's leftovers (reverted generated active.tsx; removed the `.venv-capture`
+  symlink), committed+pushed (build_runner.py + tests). Differentiator built+verified+demo-ready
+  (linear.app). Dispatched per-brand validation `a5cb2f7290f18039d` (Stripe — build+judge whole vs
+  the design bar; anti-stall: background build + poll, not wait-for-notification). **LESSON
+  (promote): a subagent that runs a >600s build then idles for a completion notification STRANDS**
+  — subagents aren't re-invoked by background processes; the orchestrator must finish it, OR the
+  build subagent must background+poll in <600s chunks.
