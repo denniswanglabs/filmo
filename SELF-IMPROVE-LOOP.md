@@ -108,3 +108,17 @@ login` if Track A needs it), and the state of each priority P0–P5.
   (`promo-agent` lacks `playwright-cdn` egress → use `walk-ultra`) in `.handoff-nemoclaw.md`.
   Verifier `afe1c81186b235fe4` still running — disciplined wait (P4 polish held on it; P2 + P3
   now both Dennis-gated; nothing non-premature to dispatch).
+- iter-winrun-4 (~03:00): **Conversion Read adversarially VERIFIED — the feature WORKS.**
+  Prescribe→produce confirmed LIVE (real Nemotron on linear.app: scored proof=1/show=1 → outcome
+  headline → 27s video opens on the fix, real customer logos = proof made visible, single CTA;
+  on the design bar; LIGHT panel tokens correct). All tests green, flag-OFF byte-identical, $0.
+  BUT the verify caught a **demo-critical bug the unit tests MISSED**: `conversion_read` is
+  clobbered out of the DELIVERED ledger (orchestrator rebuilds Ledger; VO-tail reloads disk_led
+  w/o it) → Analysis panel renders EMPTY on finished runs. Dispatched TDD fix-and-reverify
+  `aae194149a8626d50` (re-attach to the delivered ledger, both VO-on/off; new test asserts the
+  on-disk delivered ledger — the gap the old tests left). Watchdog retired → new over the fix.
+  **LESSON (promote): test/verify the DELIVERED artifact, not the in-memory run-level state** —
+  the unit tests checked `led` in memory; only adversarial e2e caught that the on-disk delivered
+  ledger lost the data. NEXT after fix lands + demo-ready: per-brand build→judge cycles (P4
+  quality across Stripe/Notion/Vercel, judge whole) — that's the remaining autonomous work; P0/P3
+  stay gated on Dennis.
