@@ -5,11 +5,16 @@ beat the rival VED/StoryPrompting. Dennis is ASLEEP (~02:00, 2026-06-25) — FUL
 Spend ceiling: **$20 EXTERNAL** (paid Nemotron 550B for sharper diagnoses; flag before any
 Higgsfield burst). `main` = untouched fallback. Backup: commit+push after every change._
 
-## ⚠ WAITING ON DENNIS (do first thing — unblocks P0 "works for everyone")
-**Run `railway login`, then ping me.** The hosted worker can't deliver until it's REDEPLOYED to
-bind the new 8GB Hobby plan — it's still the same starved ~512MB container (`worker-2808d1734f1f`)
-that SIGKILLs on trivial ffmpeg. After you log in I redeploy (`railway up` — redeploy, NOT an
-upgrade, **no spend**) → re-enqueue → re-poll to `delivered`. That's the for-everyone proof.
+## ⚠ WAITING ON DENNIS (do first thing — unblocks P0 + the NVIDIA sandbox)
+**1) Run `railway login`, then ping me** — unblocks P0 "works for everyone". The hosted worker
+can't deliver until it's REDEPLOYED to bind the new 8GB Hobby plan (still the starved ~512MB
+container `worker-2808d1734f1f`, SIGKILLs on trivial ffmpeg). After login I redeploy (`railway
+up` — redeploy NOT upgrade, **no spend**) → re-enqueue → re-poll to `delivered`.
+**2) Start Docker Desktop** (GUI, ~30-60s) — unblocks the NemoClaw/NVIDIA sandbox capture. The
+local Docker daemon is down so NemoClaw's OpenShell gateway can't start (every sandbox `exec` =
+Connection refused). NemoClaw + the NVIDIA inference route are healthy; only the sandbox layer
+needs Docker. Then I run install+capture (prefer the `walk-ultra` sandbox — it carries the
+`playwright-cdn` policy `promo-agent` lacks). Full path in `.handoff-nemoclaw.md`.
 
 ## WIN THESIS
 VED is real, polished, spectacular — but makes a SYNTHETIC FILM. We win on GROUNDING +
@@ -96,3 +101,10 @@ login` if Track A needs it), and the state of each priority P0–P5.
   `a2a7b3ce91dea1692`** (P3 NVIDIA story — install Playwright+Chromium in `promo-agent` + test
   capture, fail-fast if down). Retired watchdog bmxm3deqt; new watchdog over the 2. P4 polish
   HELD until the verifier confirms the feature (don't polish something that might be buggy).
+- iter-winrun-3 (~02:40): **NemoClaw track DONE → BLOCKED on Dennis (start Docker Desktop).**
+  NemoClaw up (v0.0.50; sandboxes promo-agent/walk-ultra/walk-ultra-2) + NVIDIA inference route
+  healthy, but the local Docker daemon is DOWN → OpenShell gateway can't start → every sandbox
+  `exec` = Connection refused. Fail-fast (didn't spin). Integration path + key finding
+  (`promo-agent` lacks `playwright-cdn` egress → use `walk-ultra`) in `.handoff-nemoclaw.md`.
+  Verifier `afe1c81186b235fe4` still running — disciplined wait (P4 polish held on it; P2 + P3
+  now both Dennis-gated; nothing non-premature to dispatch).
