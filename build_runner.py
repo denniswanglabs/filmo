@@ -548,6 +548,33 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
             overlays="studio",
             earn=earn)
 
+        # RE-ATTACH the Conversion Read to the DELIVERED on-disk ledger. orchestrate()
+        # just minted a FRESH Ledger and wrote it to runs/<id>/ledger.json with NO
+        # conversion_read — clobbering the diagnosis the ANALYZE stage put on the
+        # run-level `led` above. The dashboard's Analysis panel reads l.conversion_read
+        # ONLY from this delivered ledger (dashboard/app.js), so without this re-attach
+        # the panel renders empty on every finished run. Reload the delivered ledger,
+        # restore conversion_read + re-emit the 'analyzing' event so run history shows
+        # it, and write it back. This single re-attach covers BOTH render paths:
+        #   - VO-OFF: orchestrate is the LAST writer, so this is the final on-disk state.
+        #   - VO-ON : the VO-engine tail below reloads disk_led from THIS file (565),
+        #             so Ledger.load's merge carries conversion_read into the last write.
+        # Guarded so a flag-OFF run (conversion_read is None) stays byte-identical.
+        if conversion_read is not None:
+            try:
+                delivered_led = ledger_mod.Ledger.load(led_path)
+            except (OSError, ValueError):
+                delivered_led = None
+            if delivered_led is not None and delivered_led.data.get("conversion_read") is None:
+                delivered_led.data["conversion_read"] = conversion_read
+                scored = ", ".join("%s %d" % (d.get("key"), d.get("score", 0))
+                                   for d in conversion_read.get("dimensions", []))
+                delivered_led.event("info", "analyzing — conversion read attached to the "
+                                    "delivered ledger: %s — scores [%s]%s"
+                                    % (conversion_read.get("verdict", ""), scored,
+                                       " (degraded)" if conversion_read.get("degraded") else ""))
+                delivered_led.write(led_path)
+
         # PICTURE via the VO-driven engine (the blank-scenes fix). The SACRED money
         # path (budget gate + Stripe authorize + ledger/P&L) has ALREADY run inside
         # orchestrate above; here we only replace the final.mp4 picture with the
