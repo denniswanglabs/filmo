@@ -340,6 +340,82 @@ def _walkthrough_brief_for_emphasis(brand, emphasis):
             "steps through its core product flow." % brand)
 
 
+def seed_plan_with_read(plan, conversion_read):
+    """Deterministic backstop that GUARANTEES the Conversion Read's top prescriptions
+    appear in the plan, even when the LLM silently dropped them:
+      - headline_fix -> the OPENING title scene's voiceover beat text (the outcome-led
+        hero line the Read prescribes).
+      - the top priority_fixes -> directed into the content scenes' briefs (and a
+        marker in the matching beat) so each diagnosed fix maps to a beat the producer
+        will shoot. Mapping is by `maps_to`: a 'proof'/'show' fix targets the
+        screenshot/walkthrough beats (the real-capture pillars that BEAT AI-film
+        rivals); a 'cta' fix targets the CLOSING title.
+
+    Mutates + returns `plan`. No-op when conversion_read is falsy. Never raises."""
+    if not isinstance(conversion_read, dict):
+        return plan
+    scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+        vo["beats"] = beats
+        plan["voiceover"] = vo
+    beat_by_id = {b.get("scene_id"): b for b in beats if isinstance(b, dict)}
+
+    titles = [s for s in scenes if s.get("type") == "title"]
+    opening = titles[0] if titles else (scenes[0] if scenes else None)
+    closing = titles[-1] if len(titles) >= 2 else None
+    content = [s for s in scenes if s.get("type") in ("screenshot", "walkthrough")]
+
+    # 1) headline_fix -> opening title beat text (the diagnosis's outcome-led open).
+    hf = (conversion_read.get("headline_fix") or "").strip()
+    if hf and opening is not None:
+        sid = opening.get("id")
+        b = beat_by_id.get(sid)
+        if b is None:
+            b = {"scene_id": sid, "text": hf}
+            beats.insert(0, b)
+            beat_by_id[sid] = b
+        else:
+            b["text"] = hf
+
+    # 2) priority_fixes -> directed beats. Append the fix to the target scene's brief
+    # and mark its beat so the prescription is shot. Targeting by maps_to keyword.
+    def _target_for(maps_to):
+        mt = (maps_to or "").lower()
+        if "cta" in mt and closing is not None:
+            return closing
+        if ("proof" in mt or "show" in mt) and content:
+            # prefer the walkthrough (the strongest 'show' surface), else a screenshot
+            walk = [s for s in content if s.get("type") == "walkthrough"]
+            return (walk or content)[0]
+        return content[0] if content else (opening if opening is not None else None)
+
+    for f in (conversion_read.get("priority_fixes") or []):
+        if not isinstance(f, dict):
+            continue
+        fix = (f.get("fix") or "").strip()
+        if not fix:
+            continue
+        tgt = _target_for(f.get("maps_to"))
+        if tgt is None:
+            continue
+        prior = (tgt.get("brief") or "").strip()
+        tgt["brief"] = (prior + " " if prior else "") + ("CONVERSION FIX: %s" % fix)
+        sid = tgt.get("id")
+        tb = beat_by_id.get(sid)
+        if tb is not None and "CONVERSION FIX" not in (tb.get("text") or "") \
+                and tgt is not opening:
+            # surface the prescription in the spoken beat too (skip the opening,
+            # which is already the headline_fix line).
+            tb["text"] = (tb.get("text") or "").strip()
+            if tb["text"] and not tb["text"].endswith("."):
+                tb["text"] += "."
+            tb["text"] = (tb["text"] + " " if tb["text"] else "") + fix
+    return plan
+
+
 def _enforce_standard_structure(plan, scenes):
     """Deterministically force the Standard shape: title -> 1-2 screenshot ->
     walkthrough -> title (model null everywhere). Defense-in-depth so a STANDARD

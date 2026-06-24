@@ -45,5 +45,46 @@ class FactsBlockWithRead(unittest.TestCase):
         self.assertEqual(with_none, without)
 
 
+import plan_job
+
+
+def _std_plan():
+    return {
+        "job": {"company_url": "https://acme.com", "goal": "promo",
+                "target_duration_s": 30, "_wordmark": "Acme"},
+        "scenes": [
+            {"id": "00_open", "type": "title", "brief": "", "model": None, "duration_s": 4, "input_image": None},
+            {"id": "shot", "type": "screenshot", "brief": "", "model": None, "duration_s": 8, "input_image": None},
+            {"id": "walk", "type": "walkthrough", "brief": "", "model": None, "duration_s": 10, "input_image": None},
+            {"id": "99_close", "type": "title", "brief": "", "model": None, "duration_s": 4, "input_image": None},
+        ],
+        "voiceover": {"voice": "adam", "beats": [
+            {"scene_id": "00_open", "text": "Acme."},
+            {"scene_id": "shot", "text": "A screenshot."},
+            {"scene_id": "walk", "text": "A walkthrough."},
+            {"scene_id": "99_close", "text": "Try Acme."},
+        ]},
+    }
+
+
+class StandardBackstopSeeding(unittest.TestCase):
+    def test_headline_fix_becomes_opening_title_beat(self):
+        plan = plan_job.seed_plan_with_read(_std_plan(), _read())
+        beats = {b["scene_id"]: b["text"] for b in plan["voiceover"]["beats"]}
+        self.assertEqual(beats["00_open"], "Ship 10x faster with Acme.")
+
+    def test_top_proof_fix_lands_as_a_beat_brief(self):
+        plan = plan_job.seed_plan_with_read(_std_plan(), _read())
+        # the rank-1 fix text must appear somewhere in a scene brief OR a vo beat
+        briefs = " ".join(s.get("brief", "") for s in plan["scenes"])
+        beats = " ".join(b["text"] for b in plan["voiceover"]["beats"])
+        self.assertIn("proof beat", (briefs + " " + beats).lower())
+
+    def test_no_read_is_a_noop(self):
+        before = _std_plan()
+        after = plan_job.seed_plan_with_read(_std_plan(), None)
+        self.assertEqual(after["voiceover"]["beats"][0]["text"], before["voiceover"]["beats"][0]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()
