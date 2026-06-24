@@ -5,6 +5,12 @@ beat the rival VED/StoryPrompting. Dennis is ASLEEP (~02:00, 2026-06-25) — FUL
 Spend ceiling: **$20 EXTERNAL** (paid Nemotron 550B for sharper diagnoses; flag before any
 Higgsfield burst). `main` = untouched fallback. Backup: commit+push after every change._
 
+## ⚠ WAITING ON DENNIS (do first thing — unblocks P0 "works for everyone")
+**Run `railway login`, then ping me.** The hosted worker can't deliver until it's REDEPLOYED to
+bind the new 8GB Hobby plan — it's still the same starved ~512MB container (`worker-2808d1734f1f`)
+that SIGKILLs on trivial ffmpeg. After you log in I redeploy (`railway up` — redeploy, NOT an
+upgrade, **no spend**) → re-enqueue → re-poll to `delivered`. That's the for-everyone proof.
+
 ## WIN THESIS
 VED is real, polished, spectacular — but makes a SYNTHETIC FILM. We win on GROUNDING +
 RELIABILITY + INTELLIGENCE: a hosted tool anyone can use that READS a real product,
@@ -14,8 +20,14 @@ Don't out-spectacle the film; out-substance it.
 
 ## DESIGN GATE (Dennis is meticulous — NEW HARD REQUIREMENT)
 Every UI surface AND every produced video frame must clear a researched design bar.
-Reference: `docs/DESIGN-BEST-PRACTICES.md` (Track C is writing it). NO polish or video ships
-that doesn't meet it. Judge videos WHOLE (ffmpeg contact sheet, scene-by-scene), never a frame.
+Reference: `docs/DESIGN-BEST-PRACTICES.md` (Track C DONE ✓, verified grounded — 399 lines,
+concrete numbers/ratios/frames/beziers). NO polish or video ships that doesn't meet it.
+Judge videos WHOLE (ffmpeg contact sheet, scene-by-scene), never a frame.
+KEY PALETTE FACT (corrects an earlier wrong "dark console" assumption): the **Producer Console
+is a LIGHT theme** — `--bg #F4F5F7`, cards `#FFFFFF`, ink `#14171C`, coral `#D6351C` (primary),
+green `#0E9F6E` (approve), crimson `#C01A2B` (decline-ONLY), Hanken Grotesk + Newsreader, easings
+`--ease-rise` / `--ease-spring`. The **video output is DARK** (`#0C0E12`). The Conversion Read
+Analysis panel must use the LIGHT console tokens — never apply the wrong palette to the wrong surface.
 
 ## ACTIVE TRACKS (launched ~02:00; monitor + verify each firing)
 - **Track A — Cloud delivery (P0)** agent `a26ec6e905f7463a4`: prove the hosted worker
@@ -67,3 +79,12 @@ login` if Track A needs it), and the state of each priority P0–P5.
 - iter-winrun-kickoff (~02:00, 2026-06-25): launched 3 parallel tracks (cloud delivery /
   Conversion Read build / design research) + watchdog `bmxm3deqt`. $20 external ceiling.
   Design is now a hard gate. Awaiting track completions.
+- iter-winrun-1 (~02:15): **Track C DONE + verified** — `docs/DESIGN-BEST-PRACTICES.md` (399
+  lines; cited tokens confirmed real in styles.css; LIGHT console / DARK video). The polish bar.
+  **Track A DONE → P0 BLOCKED on Dennis `railway login` + REDEPLOY** — the 8GB upgrade is INERT
+  until redeploy (worker still the starved same-container `worker-2808d1734f1f`; SIGKILL on
+  trivial ffmpeg). APPLIED a real worker fix: `run.js:137` now also accepts
+  `completed_with_warnings` (was `delivered`-only), so a partial-but-shipped video isn't thrown
+  away — committed, ships on redeploy, confirms on the first post-redeploy render. **Track B
+  (Conversion Read build) still running.** Held off new speculative tracks (P2 Dennis-gated,
+  P3 premature pre-sandbox, P4 polish blocked on B) — disciplined wait, not idle fan-out.

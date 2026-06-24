@@ -134,7 +134,7 @@ async function processJob(job) {
   await syncEvents(runId, ledger, lastSeq)   // final flush
   const mapped = mapLedgerToRun(ledger)
 
-  if (code === 0 && mapped.status === 'delivered') {
+  if (code === 0 && (mapped.status === 'delivered' || mapped.status === 'completed_with_warnings')) {
     const url = await uploadVideo(runKey, runId)
     await setRun(runId, { ...mapped, final_url: url })
     await db.database.from('jobs').update({ status: 'done' }).eq('id', job.id)
