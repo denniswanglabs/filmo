@@ -70,6 +70,16 @@ def vo_engine_enabled():
     """
     return (os.environ.get(VO_ENGINE_ENV) or "").strip().lower() not in ("0", "false", "no", "off")
 
+
+# CONVERSION READ feature flag. When PRODUCER_CONVERSION_READ=1, build_runner runs
+# the ANALYZE stage (read_pass -> analyze -> persist) BEFORE planning and seeds the
+# planner with the Read. Default OFF -> main's behavior is byte-unchanged.
+CONVERSION_READ_ENV = "PRODUCER_CONVERSION_READ"
+
+
+def conversion_read_enabled():
+    return (os.environ.get(CONVERSION_READ_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
+
 # Poll cadence + wall-clock cap for the payment gate (webhook backstop).
 PAYMENT_POLL_INTERVAL_S = 2.5
 PAYMENT_TIMEOUT_S = 15 * 60  # 15 minutes
@@ -224,6 +234,42 @@ def _brand_facts(url, run_dir):
         return {"wordmark": "", "tagline": "", "features": []}
 
 
+def _maybe_conversion_read(url, run_dir, brain="super-free",
+                           read_pass_fn=None, analyze_fn=None):
+    """Run the ANALYZE stage and return the Conversion Read dict, or None when the
+    flag is OFF. Persists runs/<id>/conversion_read.json on success. Best-effort:
+    a read-pass failure degrades to a minimal Read (video still proceeds); the Read
+    is NEVER allowed to block the build. read_pass_fn/analyze_fn are injectable for
+    tests; they default to the real read_pass.read_pass / analyze.analyze_read."""
+    if not conversion_read_enabled():
+        return None
+    import analyze
+    read_pass_fn = read_pass_fn or (lambda u, rd: __import__("read_pass").read_pass(u, rd))
+    analyze_fn = analyze_fn or analyze.analyze_read
+    try:
+        rp = read_pass_fn(url, run_dir)
+    except Exception as e:
+        print("[build_runner] read_pass crashed: %s" % e, file=sys.stderr)
+        rp = {"url": url, "body_text": "", "hero_screenshot_path": None,
+              "headline": "", "degraded": True}
+    try:
+        read = analyze_fn(url, rp.get("body_text", ""),
+                          hero_path=rp.get("hero_screenshot_path"),
+                          headline=rp.get("headline"), brain=brain)
+    except Exception as e:
+        print("[build_runner] analyze crashed: %s" % e, file=sys.stderr)
+        read = analyze.minimal_read(url, rp.get("body_text", ""))
+    if rp.get("degraded"):
+        read["degraded"] = True
+    read["hero_screenshot_path"] = rp.get("hero_screenshot_path")
+    try:
+        with open(os.path.join(run_dir, "conversion_read.json"), "w") as f:
+            json.dump(read, f, indent=2)
+    except OSError as e:
+        print("[build_runner] could not persist conversion_read.json: %s" % e, file=sys.stderr)
+    return read
+
+
 def _capture_screenshots_for_run(url, run_dir):
     """Capture real website screenshots into runs/<id>/screenshots/ (idempotent).
 
@@ -358,6 +404,26 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
     led.write(led_path)
 
     try:
+        # -- ANALYZE (Conversion Read) -- runs BEFORE planning, behind the flag.
+        conversion_read = None
+        if conversion_read_enabled():
+            led.set_phase("analyzing")
+            led.data["stage"] = "analyzing"
+            led.event("info", "analyzing %s — reading the page and diagnosing how it "
+                      "converts before planning the video" % url)
+            led.write(led_path)
+            conversion_read = _maybe_conversion_read(url, run_dir, brain=brain)
+            if conversion_read is not None:
+                led.data["conversion_read"] = conversion_read
+                scored = ", ".join("%s %d" % (d.get("key"), d.get("score", 0))
+                                   for d in conversion_read.get("dimensions", []))
+                led.event("info", "conversion read: %s — scores [%s]%s"
+                          % (conversion_read.get("verdict", ""), scored,
+                             " (degraded)" if conversion_read.get("degraded") else ""))
+                led.set_phase("planning")
+                led.data["stage"] = None
+                led.write(led_path)
+
         # GROUND THE BRAIN IN REAL BRAND FACTS (the VO-vs-visual coherence fix).
         # Resolve the company's real wordmark/tagline/features from the SAME brand
         # resolver the visual cards use, BEFORE planning, and thread them into the
@@ -379,7 +445,8 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         # could still list Seedance / GPT-image cinematic scenes.)
         plan = plan_job.plan_job(url, goal, target_duration, style=style,
                                  quality=quality, brain=brain,
-                                 company_facts=company_facts, emphasis=emphasis)
+                                 company_facts=company_facts, emphasis=emphasis,
+                                 conversion_read=conversion_read)
         # Carry the upfront QUALITY choice onto the plan so producer.cmd_estimate
         # prices it (standard floors at $5; premium includes Higgsfield + ElevenLabs
         # COGS) and orchestrate produces the matching stack. Stamp the chosen BRAIN
