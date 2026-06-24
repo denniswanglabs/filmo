@@ -102,5 +102,18 @@ class AnalyzeRead(unittest.TestCase):
         self.assertEqual(r["url"], "https://other.com")  # model's url is overwritten
 
 
+class AnalyzerPromptDoc(unittest.TestCase):
+    def test_doc_exists_and_lists_all_dimensions(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(here, "analyzer-prompt.md")
+        self.assertTrue(os.path.exists(path), "analyzer-prompt.md missing")
+        with open(path) as f:
+            doc = f.read()
+        for k in analyze.DIMENSION_KEYS:
+            self.assertIn(k, doc, "dimension %r not documented" % k)
+        for field in ("headline_fix", "priority_fixes", "verdict"):
+            self.assertIn(field, doc)
+
+
 if __name__ == "__main__":
     unittest.main()
