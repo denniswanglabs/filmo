@@ -11,6 +11,7 @@ planner uses) so the analyze call inherits the planner's reasoning-off + token
 accounting + brain-registry behavior. Default brain = super-free ($0).
 """
 import json
+import re
 import sys
 
 import brain as brain_mod
@@ -20,6 +21,191 @@ import validate_planner as vp
 # these exact names. Order of dimensions is free; presence of all six is required.
 DIMENSION_KEYS = ("promise", "outcome", "proof", "show", "specificity", "cta")
 SCORE_MIN, SCORE_MAX = 0, 5
+
+
+# --- ANALYZE-LOCAL JSON REPAIR ------------------------------------------------
+# The super-free Nemotron 120B reliably emits a handful of small malformations
+# that break strict json.loads (and therefore vp.extract_json). The most common,
+# and the one that DEGRADED the Read ~2/3 of runs, is packing multiple
+# comma-separated quoted strings into ONE field value, e.g.
+#     "evidence": "Financial infrastructure", "and", "Millions of companies",
+# which strict JSON reads as an extra (key-less) value and rejects. We repair
+# these locally, on the ANALYZE path ONLY -- the shared vp.extract_json /
+# planner stay untouched to avoid planner regressions.
+
+# Curly/smart quote -> straight quote. (Apostrophes inside words are handled by
+# only swapping the double-quote variants; single curly quotes are left as text
+# unless they sit at a value boundary, which json tolerates inside a string.)
+_SMART_QUOTES = {
+    "“": '"', "”": '"',  # “ ”
+    "‘": "'", "’": "'",  # ‘ ’
+}
+
+# A run of >=2 comma-separated double-quoted fragments sitting where a single
+# OBJECT VALUE belongs:   "key": "frag1", "frag2"[, "frag3"...]  followed by a
+# value terminator (a comma+next-key, or a closing } / ]). The run MUST begin
+# right after a ':' -- i.e. a value position -- so we never touch a genuine
+# string array like ["a","b","c"] (whose elements follow '[' or ',', never ':').
+_FRAGMENT_RUN = re.compile(
+    r'(?P<lead>:\s*)'                         # object-value position: after ':'
+    r'(?P<frags>"(?:[^"\\]|\\.)*"'            # first quoted fragment
+    r'(?:\s*,\s*"(?:[^"\\]|\\.)*")+)'         # >=1 more comma-separated fragments
+    r'(?P<tail>\s*[,}\]])'                    # terminator: , } or ]
+)
+
+
+def _collapse_fragment_run(m):
+    """Join a run of comma-separated quoted fragments into ONE JSON string,
+    space-separated, preserving each fragment's text."""
+    pieces = re.findall(r'"((?:[^"\\]|\\.)*)"', m.group("frags"))
+    joined = " ".join(p.strip() for p in pieces if p.strip())
+    return '%s"%s"%s' % (m.group("lead"), joined, m.group("tail"))
+
+
+def _requote_single_quoted(t):
+    """Convert SINGLE-quoted JSON keys/values to double-quoted, e.g.
+        "finding": 'Primary CTAs are clear ("Get started", "Sign up") but ...'
+    The super-free model reaches for single quotes precisely when a value already
+    contains double quotes, which strict JSON rejects. We rewrite only single
+    quotes that sit at a key/value DELIMITER position (after { [ : , or run start,
+    ignoring whitespace) and run to a matching close (a ' followed by : , } ] or
+    end). Inner double-quotes in the rewritten token are escaped; apostrophes
+    inside legit double-quoted strings are never touched (we skip those spans).
+    ANALYZE-path only."""
+    out = []
+    i, n = 0, len(t)
+    while i < n:
+        c = t[i]
+        if c == '"':  # skip an entire double-quoted string verbatim
+            out.append(c)
+            i += 1
+            while i < n:
+                out.append(t[i])
+                if t[i] == "\\" and i + 1 < n:
+                    out.append(t[i + 1]); i += 2; continue
+                if t[i] == '"':
+                    i += 1; break
+                i += 1
+            continue
+        if c == "'":
+            # Is this a delimiter-position opening quote? Look back past spaces.
+            j = len(out) - 1
+            while j >= 0 and out[j] in " \t\r\n":
+                j -= 1
+            prev = out[j] if j >= 0 else "{"
+            if prev in "{[:,":
+                # consume to the closing ' that precedes : , } ] or end
+                k = i + 1
+                buf = []
+                while k < n:
+                    if t[k] == "\\" and k + 1 < n:
+                        buf.append(t[k:k + 2]); k += 2; continue
+                    if t[k] == "'":
+                        m = k + 1
+                        while m < n and t[m] in " \t\r\n":
+                            m += 1
+                        if m >= n or t[m] in ',}]:':  # real close
+                            break
+                        buf.append("'"); k += 1; continue  # apostrophe inside value
+                    buf.append(t[k]); k += 1
+                inner = "".join(buf).replace('"', '\\"')
+                out.append('"%s"' % inner)
+                i = k + 1
+                continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _escape_inner_quotes(t):
+    """Escape stray (unescaped) double-quotes INSIDE string values, e.g.
+        "evidence": "they say "powerful" a lot"
+    A value's real closing quote is a `"` immediately followed by `\\s*[,}\\]]`
+    (or `:` for a key). Any other `"` while we're inside a string is an inner
+    quote the small model forgot to escape -- so we escape it. Bounded to the
+    flat scalar/object shape the Conversion Read uses; never invoked unless a
+    cheaper repair already failed to parse."""
+    out = []
+    in_str = False
+    i, n = 0, len(t)
+    while i < n:
+        c = t[i]
+        if not in_str:
+            out.append(c)
+            if c == '"':
+                in_str = True
+            i += 1
+            continue
+        # inside a string
+        if c == "\\":  # keep escape pairs intact
+            out.append(t[i:i + 2])
+            i += 2
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n and t[j] in " \t\r\n":
+                j += 1
+            if j >= n or t[j] in ',}]:':  # legit closing quote
+                out.append('"')
+                in_str = False
+            else:                          # stray inner quote -> escape it
+                out.append('\\"')
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def repair_json(text):
+    """Best-effort repair of common small-model JSON slips, then parse.
+
+    Repairs, in order: strip code fences / prose, normalize smart quotes,
+    collapse comma-separated quoted fragments inside a value into one string,
+    drop trailing commas before } or ], and (only if still unparseable) escape
+    stray inner double-quotes. Returns the parsed object or raises
+    ValueError/JSONDecodeError if it still can't parse. ANALYZE-path only."""
+    t = text.strip()
+    t = re.sub(r"^```(?:json)?\s*", "", t)
+    t = re.sub(r"\s*```$", "", t)
+    start, end = t.find("{"), t.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("no JSON object found in model output")
+    t = t[start : end + 1]
+    for bad, good in _SMART_QUOTES.items():
+        t = t.replace(bad, good)
+    # Collapse fragment runs repeatedly (a terminator consumed by one match can
+    # be the lead-in for the next, so iterate until stable).
+    for _ in range(8):
+        new = _FRAGMENT_RUN.sub(_collapse_fragment_run, t)
+        if new == t:
+            break
+        t = new
+    # Drop trailing commas: , followed by optional ws then } or ].
+    t = re.sub(r",(\s*[}\]])", r"\1", t)
+    try:
+        return json.loads(t)
+    except (ValueError, json.JSONDecodeError):
+        pass
+    # The model single-quoted a value (usually because it held double quotes).
+    requoted = _requote_single_quoted(t)
+    try:
+        return json.loads(requoted)
+    except (ValueError, json.JSONDecodeError):
+        pass
+    # Last resort: an unescaped double-quote left inside a value.
+    return json.loads(_escape_inner_quotes(requoted))
+
+
+def extract_read_json(text):
+    """Parse a Conversion Read from raw model output. Tries the planner's strict
+    extractor first (so well-formed output is byte-for-byte identical to before),
+    then falls back to the analyze-local repair_json. ANALYZE-path only; never
+    mutates vp.extract_json. Raises if neither succeeds."""
+    try:
+        return vp.extract_json(text)
+    except (ValueError, json.JSONDecodeError):
+        return repair_json(text)
 
 
 def validate_read(read):
@@ -121,6 +307,13 @@ SYSTEM_PROMPT = (
     "5. Do NOT invent a DIFFERENT product than the one in the copy. Describe what the PRODUCT does.\n"
     "6. Self-check before emitting: all 6 dimension keys present once, every score an int 0-5, "
     "JSON parses, first char { and last char }.\n"
+    "7. EACH field value is ONE JSON string. Never split a value into multiple comma-"
+    "separated quoted pieces. If you must quote several phrases from the page, join them "
+    "INSIDE one pair of quotes.\n"
+    '   CORRECT:   "evidence": "Financial infrastructure; Millions of companies of all sizes"\n'
+    '   MALFORMED (never do this): "evidence": "Financial infrastructure", "and", '
+    '"Millions of companies"\n'
+    "   No trailing commas, no smart/curly quotes -- use straight \" only.\n"
 )
 
 # Hidden-reasoning budget is generous; the Read is small but the model may reason.
@@ -156,14 +349,17 @@ def analyze_read(url, body_text, hero_path=None, headline=None, brain="super-fre
     _restore = getattr(vp, "PLANNER_MAX_TOKENS", ANALYZE_MAX_TOKENS)
     _patch_token_cap()
     try:
-        for attempt in range(2):
+        # Budget of 4 attempts: each tries vp.extract_json then the analyze-local
+        # repair before any reprompt, so the common small-model slips recover
+        # in-attempt instead of degrading to minimal_read.
+        for attempt in range(4):
             try:
                 raw = vp.call_model(messages, brain=brain)
             except Exception as e:  # network/HTTP — try once more, then minimal
                 print("[analyze] call_model error (attempt %d): %s" % (attempt, e), file=sys.stderr)
                 continue
             try:
-                read = vp.extract_json(raw)
+                read = extract_read_json(raw)
             except (ValueError, json.JSONDecodeError):
                 # malformed — repair-nudge once, then loop to a fresh attempt / minimal
                 messages = messages + [

@@ -42,10 +42,27 @@ biggest lever"); `priority_fixes` weights toward them.
 4. `headline_fix` = one outcome-led sentence (never a feature, never the bare brand name).
 5. Never invent a different product than the one in the copy.
 6. Self-check before emitting: 6 keys present once, int scores 0-5, JSON parses, `{`…`}`.
+7. EACH field value (especially `evidence`, `finding`, `fix`) is **one** JSON string —
+   never split it into multiple comma-separated quoted pieces. No trailing commas, no
+   smart/curly quotes (use straight `"`).
+
+```text
+CORRECT:    "evidence": "Financial infrastructure; Millions of companies of all sizes"
+MALFORMED:  "evidence": "Financial infrastructure", "and", "Millions of companies"
+```
 
 ## Failure handling
 
-`analyze.analyze_read` does up to 2 attempts with a JSON-repair nudge; on no-key,
-network error, unparseable output, or a Read that fails `validate_read`, it returns
-`analyze.minimal_read(url, body_text)` (deterministic, valid, `degraded=true`). The
-pipeline is NEVER blocked by the analyzer.
+`analyze.analyze_read` does up to **4 attempts**. Each attempt first tries the planner's
+strict `vp.extract_json`, then an **analyze-local `repair_json`** that fixes the common
+super-free Nemotron slips before any reprompt:
+
+- collapses multiple comma-separated quoted fragments inside one value into a single
+  string (the `"a", "b", "c"` evidence bug that degraded ~2/3 of runs),
+- normalizes smart/curly quotes to straight quotes,
+- drops trailing commas before `}`/`]`.
+
+`repair_json` is ANALYZE-path only — it never touches the shared `vp.extract_json`/planner.
+On no-key, network error, output still unparseable after repair across all attempts, or a
+Read that fails `validate_read`, it returns `analyze.minimal_read(url, body_text)`
+(deterministic, valid, `degraded=true`). The pipeline is NEVER blocked by the analyzer.

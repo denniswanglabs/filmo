@@ -45,6 +45,7 @@ python3 -m unittest tests.test_pricing -v                     || fail=1
 python3 -m unittest tests.test_premium_produce -v             || fail=1
 python3 -m unittest tests.test_analytics -v                   || fail=1
 python3 -m unittest tests.test_analyze -v                     || fail=1
+python3 -m unittest tests.test_analyze_repair -v              || fail=1
 python3 -m unittest tests.test_read_pass -v                   || fail=1
 python3 -m unittest tests.test_plan_seeding -v                || fail=1
 python3 -m unittest tests.test_conversion_read_e2e -v         || fail=1
