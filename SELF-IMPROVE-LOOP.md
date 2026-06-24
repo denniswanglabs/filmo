@@ -5,7 +5,13 @@ beat the rival VED/StoryPrompting. Dennis is ASLEEP (~02:00, 2026-06-25) — FUL
 Spend ceiling: **$20 EXTERNAL** (paid Nemotron 550B for sharper diagnoses; flag before any
 Higgsfield burst). `main` = untouched fallback. Backup: commit+push after every change._
 
-## ✓ DENNIS BLOCKERS CLEARED (~03:40) — railway login + Docker BOTH DONE
+## ✓ BOTH DENNIS-CLEARED GATES CONVERTED TO WINS
+★ **P0 GREEN (~04:03): the hosted cloud DELIVERS a real 1080p video FOR EVERYONE** — run
+`cloud-1782331169508` (stripe.com, $0) → ffprobe h264 1920×1080 / AAC / 32.4s / 9.45MB at the
+walk-videos bucket. The 8GB redeploy (active `fde5941c`) beat the OOM. ★ **NemoClaw capture
+PROVEN** — nvidia.com captured inside the walk-ultra sandbox (1MB PNG verified).
+
+## (history) DENNIS BLOCKERS CLEARED (~03:40) — railway login + Docker BOTH DONE
 P0 redeploy in flight (agent `ab03a8679fd3f0e23`: redeploy → bind 8GB → enqueue → prove delivery);
 NemoClaw in flight (agent `aebbe0d84f2a68543`: recover gateway → install in walk-ultra → capture).
 The two asks below are now satisfied — kept for context.
@@ -173,3 +179,11 @@ login` if Track A needs it), and the state of each priority P0–P5.
   ground-truth "works for everyone" test. The P0 agent had stalled (created a monitor + idled);
   I took over. GOTCHA: `status` is a read-only var in zsh ($?) — don't assign to it. JSON-fix
   `a5895796eaaee1bb1` still running.
+- iter-winrun-9 (~04:03): ★★ **P0 GREEN — THE HOSTED CLOUD DELIVERS FOR EVERYONE.** ★★ Delivery
+  test `cloud-1782331169508` (stripe.com) ran→delivered; the final.mp4 is REAL + VALID — ffprobe:
+  **h264 1920×1080, AAC, 32.4s, 9.45MB** at the walk-videos bucket. The 8GB redeploy beat the OOM:
+  a stranger's URL → a finished 1080p video, end-to-end, $0. NOTE: the deployed image is the 19:47
+  build (lacks the run.js `completed_with_warnings` fix committed ~02:15) — clean builds deliver
+  fine; a follow-up `railway up` would ship it for partial-success robustness (OPTIONAL, don't
+  disrupt the working deploy now). JSON-reliability fix `a5895796eaaee1bb1` still running — last
+  active autonomous track; after it: consolidated MORNING SUMMARY + settle.
