@@ -88,3 +88,11 @@ login` if Track A needs it), and the state of each priority P0–P5.
   away — committed, ships on redeploy, confirms on the first post-redeploy render. **Track B
   (Conversion Read build) still running.** Held off new speculative tracks (P2 Dennis-gated,
   P3 premature pre-sandbox, P4 polish blocked on B) — disciplined wait, not idle fan-out.
+- iter-winrun-2 (~02:35): **Track B (Conversion Read) DONE** — 15 TDD tasks, all tests green,
+  pushed `conversion-read` @323dca3 (14 ahead of main; flag-OFF byte-identical). The
+  differentiator is built. Dispatched 2 state-isolated tracks: **verifier `afe1c81186b235fe4`**
+  (adversarial e2e — does the Read genuinely drive the plan + render a video; flag-OFF parity;
+  whole-video judgment vs the design bar; symlink heavy deps from main for the e2e) + **NemoClaw
+  `a2a7b3ce91dea1692`** (P3 NVIDIA story — install Playwright+Chromium in `promo-agent` + test
+  capture, fail-fast if down). Retired watchdog bmxm3deqt; new watchdog over the 2. P4 polish
+  HELD until the verifier confirms the feature (don't polish something that might be buggy).
