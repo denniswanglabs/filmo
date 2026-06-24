@@ -76,5 +76,84 @@ class AnalyzeStage(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(run_dir, "conversion_read.json")))
 
 
+class FullRunSmoke(unittest.TestCase):
+    """Drive build_runner.run() end-to-end at $0: every external boundary is stubbed
+    (plan = template via no key, payment = simulated, production = stubbed). Proves
+    the analyzing ledger event + conversion_read.json are present on a real run() with
+    the flag ON, and absent with it OFF -- the demo's $0 parity."""
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._prev_runs = build_runner.RUNS
+        build_runner.RUNS = self._tmp.name
+        self._saved = {}
+        # No OpenRouter key -> planner uses the deterministic template ($0).
+        import plan_job, analyze
+        self._saved["pk"] = plan_job.brain_mod.brain_key
+        self._saved["ak"] = analyze.brain_mod.brain_key
+        plan_job.brain_mod.brain_key = lambda: None
+        analyze.brain_mod.brain_key = lambda: None
+        # Stub the heavy boundaries: pricing, payment gate, orchestrate, VO engine.
+        self._saved["price"] = build_runner._price_plan
+        self._saved["quote"] = build_runner._build_quote
+        self._saved["gate"] = build_runner._payment_gate
+        self._saved["orch"] = build_runner.orchestrator.orchestrate
+        self._saved["vo"] = build_runner.vo_engine_enabled
+        self._saved["facts"] = build_runner._brand_facts
+        self._saved["read"] = build_runner._maybe_conversion_read
+        build_runner._price_plan = lambda plan, run_dir: (500, "usd", {"menu": None})
+        build_runner._build_quote = lambda est, currency="usd": None
+        build_runner._payment_gate = lambda *a, **k: {"status": "paid", "price_cents": 500,
+                                                      "currency": "usd"}
+        build_runner.orchestrator.orchestrate = lambda plan, run_id, **k: ({"status": "delivered"}, None)
+        build_runner.vo_engine_enabled = lambda: False
+        build_runner._brand_facts = lambda url, rd: {"wordmark": "Acme", "tagline": "", "features": ["a", "b", "c"]}
+        # Keep analyze offline/deterministic in the staged helper.
+        def _fake_maybe(url, run_dir, brain="super-free", read_pass_fn=None, analyze_fn=None):
+            if not build_runner.conversion_read_enabled():
+                return None
+            import analyze as _a
+            read = _a.minimal_read(url, "Acme copy")
+            with open(os.path.join(run_dir, "conversion_read.json"), "w") as f:
+                json.dump(read, f, indent=2)
+            return read
+        build_runner._maybe_conversion_read = _fake_maybe
+
+    def tearDown(self):
+        build_runner.RUNS = self._prev_runs
+        import plan_job, analyze
+        plan_job.brain_mod.brain_key = self._saved["pk"]
+        analyze.brain_mod.brain_key = self._saved["ak"]
+        build_runner._price_plan = self._saved["price"]
+        build_runner._build_quote = self._saved["quote"]
+        build_runner._payment_gate = self._saved["gate"]
+        build_runner.orchestrator.orchestrate = self._saved["orch"]
+        build_runner.vo_engine_enabled = self._saved["vo"]
+        build_runner._brand_facts = self._saved["facts"]
+        build_runner._maybe_conversion_read = self._saved["read"]
+        os.environ.pop("PRODUCER_CONVERSION_READ", None)
+        self._tmp.cleanup()
+
+    def test_flag_on_run_has_analyzing_event_and_read_file(self):
+        os.environ["PRODUCER_CONVERSION_READ"] = "1"
+        build_runner.run("https://acme.com", "promo", "build-acme-on", mode="mock",
+                         target_duration=30)
+        run_dir = os.path.join(build_runner.RUNS, "build-acme-on")
+        self.assertTrue(os.path.exists(os.path.join(run_dir, "conversion_read.json")))
+        import ledger as ledger_mod
+        led = ledger_mod.Ledger.load(os.path.join(run_dir, "ledger.json"))
+        msgs = " ".join(e.get("msg", "") for e in led.data["events"])
+        self.assertIn("analyzing", msgs.lower())
+        self.assertIsInstance(led.data.get("conversion_read"), dict)
+
+    def test_flag_off_run_has_no_read(self):
+        build_runner.run("https://acme.com", "promo", "build-acme-off2", mode="mock",
+                         target_duration=30)
+        run_dir = os.path.join(build_runner.RUNS, "build-acme-off2")
+        self.assertFalse(os.path.exists(os.path.join(run_dir, "conversion_read.json")))
+        import ledger as ledger_mod
+        led = ledger_mod.Ledger.load(os.path.join(run_dir, "ledger.json"))
+        self.assertIsNone(led.data.get("conversion_read"))
+
+
 if __name__ == "__main__":
     unittest.main()
