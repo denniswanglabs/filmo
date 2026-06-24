@@ -1,116 +1,69 @@
-# Self-improving loop — state (read FIRST on each loop firing)
+# Self-improving loop — WIN RUN (read FIRST on each firing)
 
-_Self-paced /loop. Mission: drive Walk Studio to hackathon-ready, improving each pass.
-Dennis is ASLEEP (went to bed ~01:00, 2026-06-24) — FULL AUTONOMY, no questions.
-$0 mock builds only. `main` = untouched local fallback (never touch)._
+_Self-paced /loop. MISSION: win the Hermes×NVIDIA×Stripe hackathon (due 2026-06-30) —
+beat the rival VED/StoryPrompting. Dennis is ASLEEP (~02:00, 2026-06-25) — FULL AUTONOMY.
+Spend ceiling: **$20 EXTERNAL** (paid Nemotron 550B for sharper diagnoses; flag before any
+Higgsfield burst). `main` = untouched fallback. Backup: commit+push after every change._
 
-## CANONICAL DIR (changed 01:00 — consolidated)
-**`~/Desktop/Projects/Hackathons/walk-studio-hosted`** (branch `hosted-saas`) is now the
-SINGLE source for the whole cloud build: pipeline + `worker/` + `Dockerfile` + `web/` (Next.js
-frontend) + `insforge/migrations/`. It is self-sufficient (gitignored, present on disk):
-`web/.vercel` (Vercel link → walkstudioprojects), `web/.env.local`, `.insforge` (InsForge CLI
-link), `worker/.env`. The old `walk-studio-cloud/` dir is DEPRECATED — work here.
-- Deploy frontend: `cd web && vercel --prod --yes` (→ https://walkstudioprojects.vercel.app)
-- Deploy worker:   `RAILWAY_CALLER=skill:use-railway@1.3.0 railway up --detach` (from repo root)
-- InsForge ops:    `npx @insforge/cli ...` (or worker/enqueue.js to enqueue a cloud build)
+## WIN THESIS
+VED is real, polished, spectacular — but makes a SYNTHETIC FILM. We win on GROUNDING +
+RELIABILITY + INTELLIGENCE: a hosted tool anyone can use that READS a real product,
+DIAGNOSES how it fails to convert (the Conversion Read), and PRODUCES the video that fixes
+it — billed autonomously, Stripe declining the agent's own over-budget spend, no human.
+Don't out-spectacle the film; out-substance it.
 
-## GITHUB BACKUP — the safety net (NEW, Dennis 01:00, STANDING AUTHORIZATION)
-Dennis: _"keep the GitHub updated such that if anything goes wrong, we always have a backup
-we can go back to."_ So after EVERY meaningful change (code, fix, deploy-worthy edit):
-1. SECRET-SCAN staged content FIRST — never commit `.env*`, `.insforge`, `.vercel`, or any
-   `sk_*`/`ik_*`/`whsec_*`/`eyJ...` key material. (`.gitignore` already covers these; verify.)
-2. `git add -A && git commit` (end msg with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`)
-3. `git push origin hosted-saas`.
-This is the restore point: `git checkout hosted-saas` brings the whole cloud build back.
-Backup discipline is autonomous for THIS loop only; `main` stays untouched.
+## DESIGN GATE (Dennis is meticulous — NEW HARD REQUIREMENT)
+Every UI surface AND every produced video frame must clear a researched design bar.
+Reference: `docs/DESIGN-BEST-PRACTICES.md` (Track C is writing it). NO polish or video ships
+that doesn't meet it. Judge videos WHOLE (ffmpeg contact sheet, scene-by-scene), never a frame.
 
-## COMPETITIVE CONTEXT (NEW 01:20 — Dennis surfaced a rival)
-A rival entry **VED / TechGyro** (Karthik @trackkartmac) hit the SAME hackathon: brief →
-generative film (Nano Banana Pro + Veo) → **authorize-and-capture** bill to the customer,
-sandboxed in NemoClaw on Nemotron-3. Their edges: (a) a complete NemoClaw security NARRATIVE
-(keys never leave backend, masked proxy token, egress allow-list); (b) demo polish + cinematic
-spectacle. Our edges: (a) the Stripe axis — **Issuing + real-time authorization decisioning**
-where the agent's own budget brain DECLINES an over-budget charge, no human (rarer + more
-agentic than authorize-and-capture); (b) real-product grounding (commerce, not art). The two
-top loop priorities below exist to CLOSE THEIR GAPS and SHIP OUR KNOCKOUT. Live demo to
-ground-truth (read-only): https://ved.techgyro.ovh/ + /hermes-admin/ , login judge / judge2026.
+## ACTIVE TRACKS (launched ~02:00; monitor + verify each firing)
+- **Track A — Cloud delivery (P0)** agent `a26ec6e905f7463a4`: prove the hosted worker
+  delivers on the new 8GB (enqueue a $0 build → InsForge `runs.status` → `delivered`, else
+  diagnose+fix). BLOCKER WATCH: Railway CLI is UNAUTHORIZED — if it needs logs/redeploy that's
+  Dennis's `railway login` (queue it for morning).
+- **Track B — Conversion Read build (P1)** agent `a7a1c8c464bdeb474`: execute the 15-task TDD
+  plan in `walk-studio-conversion-read` (`conversion-read`), test-first, commit+push per few
+  tasks. The differentiator. Flag-gated `PRODUCER_CONVERSION_READ`; `main` byte-identical when off.
+- **Track C — Design research** agent `afdaeb7c72280db13`: write `docs/DESIGN-BEST-PRACTICES.md`
+  (UI/UX + motion-graphics, CONCRETE rules). Feeds the DESIGN GATE.
+- Watchdog: bg `bmxm3deqt` (alerts if any track's output stalls >180s).
 
-GROUND-TRUTHED 01:55 (clicked through both apps — they are STRONG + REAL, not vaporware):
-- Nemotron-3 IS real for them (brain = nemotron-3-super via self-hosted ollama proxy; gemma4:31b +
-  gemini-2.5-flash do the writing/critique). DO NOT pursue a "they fake Nemotron" angle — false.
-- Their Stripe = real authorize-and-capture (pre-auth $2.00 HOLD; over-hold → HUMAN approval gate;
-  shows P&L charge-vs-COGS). Real + polished. Our edge is narrower than assumed: the cost-side
-  Issuing DECLINE (Stripe itself declines, NO human) is the rarer surface — must ship it real.
-- Their NemoClaw/OpenShell egress allow-list is real (6 verified host presets, redacted stems).
-  Their security NARRATIVE is genuine, not just a slide → matching it is table stakes, not a win.
-- Their image quality (nano-banana-pro cinematic frames) + UI polish (two apps + a real ops console:
-  Agent Activity, Sessions, Egress, Logs) are AHEAD of us. Do NOT try to out-spectacle the film.
-- OUR TWO REAL EDGES: (1) GROUNDING — real product walkthrough (commerce) vs their synthetic film
-  (art); "a real customer would pay for this". (2) the real Issuing DECLINE (no human). Lead on these.
-- Polish is the gap to close: our dashboard + activity log must reach their fit-and-finish.
+## PRIORITIES (top-down; tracks run parallel where independent)
+- **P0** hosted delivery works for everyone (Track A).
+- **P1** Conversion Read built + integrated (Track B) → then ADVERSARIALLY verified.
+- **P2** Stripe money-shot: lock the autonomous Issuing decline as a clean demo artifact;
+  experimentally land `webhook_declined` (high card limit + webhook up; see prior lessons).
+- **P3** NemoClaw/NVIDIA: wire sandbox capture + write the TRUE security narrative.
+- **P4** Polish to the DESIGN GATE: dashboard Analysis panel + run view + a recorded demo;
+  judge whole videos per real brand (Stripe, Linear, Notion, Vercel, Beside, Ashlar).
+- **P5** The pitch: tight narrative + demo cut hitting all 3 sponsors + the grounding wedge.
 
-## Mission order (each firing: pick the highest-impact open item, do it, BACK IT UP)
-0a. **TEE UP THE REAL STRIPE DECLINE (highest leverage — our knockout vs VED).** The real-time
-   Issuing authorization decline is currently a SIM (`iauth_sim_…`), dry-run-verified only
-   (OVERNIGHT-LOG.md:96, TECHNICAL-ROADMAP.md item 1.1). Convert to a REAL declined
-   `issuing_authorization` so Dennis's morning is JUST `stripe login`. Loop does the $0,
-   no-credential prep: re-verify orchestrator→`runs/active_budget.json` bridge end-to-end in
-   dry-run; confirm the `--stripe-live` path routes the over-budget cinematic charge through the
-   listener (not in-process `money.authorize()`); confirm `stripe_webhook.py --dry-run` decides
-   correctly against the live budget file; write/refresh `.handoff-webhook-bridge.md` with the
-   EXACT 4 commands Dennis runs (`stripe login` → `python3 stripe_webhook.py` → `stripe listen
-   --events issuing_authorization.request` → over-budget `--mode real --stripe-live` run). DON'T
-   run `stripe login` (Dennis's credential step). Goal: his 5 min captures a genuine decline.
-0b. **CLOSE THE NemoClaw NARRATIVE GAP (vs VED's security story).** Finish the sandbox capture
-   path (see item 3) AND write the talking points so we can say the same true things: provider
-   keys stay backend-side, sandbox runs behind an egress allow-list, Nemotron planning via
-   OpenRouter is separate from the NemoClaw execution sandbox. Put them in a SECURITY-NARRATIVE
-   section of HANDOFF/DEMO-BEAT-SHEET. Only claim what's actually true — verify before writing.
-1. **Verify cloud delivery GREEN end-to-end.** Confirm the Railway walkthrough-fix rebuild
-   reached SUCCESS (`railway deployment list --json`) → enqueue a $0 mock cloud build
-   (worker/enqueue.js) → poll `runs.status` to `delivered`. If delivered, cloud loop is GREEN.
-   Then rebuild to ship the staged activity-classifier fix (run.js) too.
-2. **Drive + fix the LIVE app** (Chrome MCP, walkstudioprojects.vercel.app) — judge's-eye pass.
-   DONE: demo auto-login (frictionless), canonical cursor-mark logo, project renamed clean.
-   OPEN: Build button resting style reads as disabled (light coral) though enabled — brighten
-   to solid coral so it invites the click; re-check the run page, delivered view, recents.
-3. **NemoClaw** (NVIDIA story): install Playwright+Chromium in `promo-agent` sandbox
-   (`nemoclaw promo-agent exec --timeout <s> -- <single-line>`, `dangerouslyDisableSandbox`),
-   run a capture, wire as a guarded walkthrough path; keep OpenRouter for the Nemotron planner.
-   Cloud wrinkle: NemoClaw is local-only (:10254) → the LOCAL demo uses it; the Railway worker
-   keeps the Remotion walkthrough. Frame: "plans on Nemotron 550B, navigates in a NemoClaw sandbox, paid on Stripe."
-4. **Per-brand build→judge→fix→log** (Stripe, Linear, Notion, Vercel, Beside, Ashlar): $0 mock
-   → ffmpeg contact sheet → JUDGE THE WHOLE VIDEO scene-by-scene (not one frame) + catch flakes
-   → fix highest-impact issue → BACK IT UP (commit+push) → append a lesson below.
+## SELF-IMPROVING MECHANICS (each firing)
+1. Read this file + `LESSONS.md`. Check the 3 tracks (completion notifications + watchdog).
+2. When a track completes: ADVERSARIALLY VERIFY with a fresh verifier subagent (no
+   self-certification) before accepting; judge any video whole.
+3. Advance the next highest-impact open priority — dispatch fresh-context subagent(s), fan out.
+4. Log the lesson below; promote recurring ones to a `feedback_*` memory. Post-mortem any
+   premature subagent failure (forensic root-cause, patch the brief, then re-dispatch).
+5. Commit+push backups on every branch. Gate money/outward for Dennis's morning.
 
-## RAISE THE BAR — "work harder to beat them" (Dennis 01:25)
-Confirmed: Walk Studio closes BOTH sides of the economic loop (VED only does revenue):
-- REVENUE in: `stripe_earn.py` — real `cs_test_` Checkout, customer pays the quote.
-- COST out: `stripe_money.py` — Stripe Issuing virtual card, per-scene budget gate, decline.
-That's a full P&L with a Stripe-enforced, no-human guardrail. This two-sided loop is the moat.
-Higher-ambition targets (pursue alongside 0a/0b, not just maintenance):
-- **Center the demo on the two-sided P&L money-shot:** customer pays → agent spends per scene →
-  Stripe DECLINES the over-budget scene → P&L tallies live. Update DEMO-BEAT-SHEET to build to it.
-- **Lead grounding with docs.stripe.com** (already in `sample-plan.json`) — a real promo of Stripe's
-  own product shown to Stripe judges. Verify that build is clean end-to-end.
-- **NemoClaw: wire it AND show it** — sandbox boundary + masked proxy token visible on screen, not
-  just a slide. Stronger than VED's narrative if it's live.
-- **Produce a tight 60-90s judge-facing cut** once the money-shot + NemoClaw are real.
-Don't out-spectacle their generative film — win the Stripe axis (real, two-sided, autonomous) +
-the realness/grounding. NOTE: Dennis did NOT say "full force" — keep the measured self-paced loop
-(do NOT fan out a parallel fleet) unless he explicitly triggers full-force.
+## GUARDRAILS (hard)
+`main` untouched (branches only). Money + irreversible/outward GATED → queue for Dennis,
+never execute (except ≤$20 external as authorized). Secret-scan → commit → push each change.
+No unilateral aesthetic flips. No premature "ship what's done" — match Dennis's commitment.
 
-## Pending one-shot (handle on first firing if still queued)
-- `daily-synth` scheduled task — claim atomically then execute
-  `/Users/dennis/.claude/scheduled-prompts/daily-synth.md` (`.due`→`.claimed` mv, rm on success).
+## WORKING DIRS
+- `hermes-video-agent` (`main`) = local demo baseline (real Stripe Issuing decline; demo runs
+  here). DON'T commit to main.
+- `walk-studio-hosted` (`hosted-saas`) = cloud build + this loop-state + the design doc; backup target.
+- `walk-studio-conversion-read` (`conversion-read`) = the Conversion Read feature build.
 
-## NemoClaw integration — path (discovered iter 1)
-- Sandbox `promo-agent` healthy: Linux, Python 3.13.5, Node v22.22.2, pip 25.1.1.
-  MISSING: Playwright + Chromium. Invoke: single-line `exec` (newlines rejected), hard `--timeout`.
+## MORNING SUMMARY (write before Dennis wakes)
+Leave a tight summary: what shipped, what was learned, what's waiting on him (esp. `railway
+login` if Track A needs it), and the state of each priority P0–P5.
 
-## Lessons / improvements log (append each pass)
-- iter1 (15:43): NemoClaw sandbox probed; integration path found. No code change yet.
-- iter-deploy (00:15): DEPLOYED Railway worker + Vercel frontend. Fixed Remotion concurrency=8→50% (2-core box). Flagged InsForge ~4min cold-start timeout window (transient, recovered).
-- iter-deploy2 (00:24): concurrency fix worked. Cloud render fails on the WALKTHROUGH mp4 — ffprobe `-select_streams a:0` exits 1 (amd64 only).
-- iter-walkfix (00:30): ROOT CAUSE = walk_native.py assembled walkthrough with `-an` (no audio). FIX: mux silent anullsrc stereo (`-c:a aac -shortest`). Railway redeploying.
-- iter-frontend (01:00): Dennis drove the LIVE app + flagged the logo. Fixed: (a) demo auto-login (AuthProvider auto-signs-in shared demo@walk.studio → no sign-in friction); (b) renamed Vercel project web→walkstudioprojects (clean URL, needed vercel.json framework pin); (c) canonical cursor-mark logo replaces the "W" badge; (d) activity classifier over-broad "stripe" cue removed (run.js, staged — needs a worker rebuild to deploy). VERIFIED full flow live: composer→Build→run page→Railway worker claims it→Nemotron plans→activity streams. OPEN: Build button looks disabled. GITHUB BACKUP set up: hosted-saas branch pushed to denniswanglabs/walk-studio with the whole cloud build. Worktree is now canonical + self-sufficient.
+## Lessons log (append each pass; prior lessons in git history)
+- iter-winrun-kickoff (~02:00, 2026-06-25): launched 3 parallel tracks (cloud delivery /
+  Conversion Read build / design research) + watchdog `bmxm3deqt`. $20 external ceiling.
+  Design is now a hard gate. Awaiting track completions.
