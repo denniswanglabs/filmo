@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Reveal } from './Motion'
 
 interface StackItem {
   glyph: ReactNode
@@ -71,7 +72,7 @@ const ITEMS: StackItem[] = [
 export default function TrustBar() {
   return (
     <section className="bg-[#F7F8FA] px-5 py-12 sm:py-14">
-      <div className="mx-auto flex max-w-5xl flex-col items-center gap-7 text-center lg:flex-row lg:justify-between lg:text-left">
+      <Reveal className="mx-auto flex max-w-5xl flex-col items-center gap-7 text-center lg:flex-row lg:justify-between lg:text-left">
         <p className="max-w-xs text-sm font-medium text-slate-500">
           Grounded in your real product — and built on a serious stack
         </p>
@@ -89,7 +90,7 @@ export default function TrustBar() {
             </li>
           ))}
         </ul>
-      </div>
+      </Reveal>
     </section>
   )
 }

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Reveal, RevealGroup, RevealItem } from './Motion'
 
 interface Feature {
   title: string
@@ -95,7 +96,7 @@ export default function Differentiators() {
     <section className="bg-[#F7F8FA] px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
-        <div className="mx-auto max-w-xl text-center">
+        <Reveal className="mx-auto max-w-xl text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
             Why Walk Studio
           </span>
@@ -106,12 +107,12 @@ export default function Differentiators() {
             Most AI video tools hallucinate footage. Walk Studio is grounded in
             your actual product — so the video is true, on-brand, and editable.
           </p>
-        </div>
+        </Reveal>
 
         {/* Feature grid */}
-        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <RevealGroup className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
-            <div
+            <RevealItem
               key={f.title}
               className="rounded-2xl border border-black/5 bg-white p-6 shadow-[0_18px_50px_-20px_rgba(20,23,28,0.25)] transition hover:border-black/10 hover:shadow-sm"
             >
@@ -124,9 +125,9 @@ export default function Differentiators() {
               <p className="mt-2 text-sm leading-relaxed text-slate-500">
                 {f.body}
               </p>
-            </div>
+            </RevealItem>
           ))}
-        </div>
+        </RevealGroup>
       </div>
     </section>
   )

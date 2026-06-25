@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Reveal, RevealGroup, RevealItem } from './Motion'
 
 interface UseCase {
   title: string
@@ -73,7 +74,7 @@ export default function UseCases() {
   return (
     <section className="px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
-        <div className="mx-auto max-w-xl text-center">
+        <Reveal className="mx-auto max-w-xl text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
             What you can ship
           </span>
@@ -83,11 +84,12 @@ export default function UseCases() {
           <p className="mx-auto mt-3 max-w-xl text-slate-500">
             The same grounded engine, pointed at whatever you&rsquo;re launching.
           </p>
-        </div>
+        </Reveal>
 
-        <ul className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <RevealGroup as="ul" className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {USE_CASES.map((u) => (
-            <li
+            <RevealItem
+              as="li"
               key={u.title}
               className="rounded-xl border border-black/5 bg-white p-5 transition hover:border-black/10 hover:shadow-sm"
             >
@@ -107,9 +109,9 @@ export default function UseCases() {
               </span>
               <h3 className="mt-4 font-semibold tracking-tight text-ink">{u.title}</h3>
               <p className="mt-1 text-sm text-slate-500">{u.line}</p>
-            </li>
+            </RevealItem>
           ))}
-        </ul>
+        </RevealGroup>
       </div>
     </section>
   )

@@ -6,6 +6,7 @@
 // Studio customers.
 
 import { useRef } from 'react'
+import { Reveal, RevealGroup, RevealItem, Parallax } from './Motion'
 
 interface Film {
   /** unique key */
@@ -112,7 +113,7 @@ export default function LuceoShowcase() {
     <section id="examples" className="bg-[#F7F8FA] px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         {/* Section header */}
-        <div className="mx-auto max-w-xl text-center">
+        <Reveal className="mx-auto max-w-xl text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
             The taste behind the engine
           </span>
@@ -124,14 +125,18 @@ export default function LuceoShowcase() {
             launch-film studio. Every generated cut inherits that craft: deliberate pacing, kinetic
             typography, and a studio&rsquo;s eye for making a product feel inevitable.
           </p>
-        </div>
+        </Reveal>
 
         {/* Film cards */}
-        <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-2">
+        <RevealGroup className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-2">
           {FILMS.map((film) => (
-            <VideoCard key={film.slug} film={film} />
+            <RevealItem key={film.slug}>
+              <Parallax range={[10, -10]} scaleRange={[0.98, 1]}>
+                <VideoCard film={film} />
+              </Parallax>
+            </RevealItem>
           ))}
-        </div>
+        </RevealGroup>
 
         {/* Attribution */}
         <p className="mt-10 text-center text-sm text-slate-500">

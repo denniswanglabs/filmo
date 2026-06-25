@@ -14,6 +14,7 @@ import UseCases from './components/landing/UseCases'
 import LuceoShowcase from './components/landing/LuceoShowcase'
 import ClosingCTA from './components/landing/ClosingCTA'
 import SiteFooter from './components/landing/SiteFooter'
+import { ParallaxWindows } from './components/landing/Motion'
 import { BRAINS, type Run } from '../lib/types'
 
 // Composer state stashed across the Google OAuth round-trip so the prompt survives
@@ -144,8 +145,14 @@ export default function Home() {
   return (
     <>
       <TopBar />
-      <section id="start" className="surface-dots border-b border-black/5">
-      <main className="mx-auto max-w-3xl px-5 pb-16 pt-14 sm:pt-20">
+      <section
+        id="start"
+        className="surface-dots relative overflow-hidden border-b border-black/5"
+      >
+      {/* Decorative floating "windows" parallax layer — sits behind the composer
+          (z-0, pointer-events none), never covers the headline or form. */}
+      <ParallaxWindows />
+      <main className="relative z-10 mx-auto max-w-3xl px-5 pb-16 pt-14 sm:pt-20">
         {/* Hero */}
         <div className="mb-8 text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
@@ -297,6 +304,14 @@ export default function Home() {
       <TrustBar />
       <HowItWorks />
       <Differentiators />
+      {/* Decorative parallax band between sections (depth cue; behind nothing
+          interactive, pointer-events none). */}
+      <div
+        aria-hidden="true"
+        className="relative h-24 overflow-hidden sm:h-32"
+      >
+        <ParallaxWindows />
+      </div>
       <UseCases />
       <LuceoShowcase />
       <ClosingCTA />

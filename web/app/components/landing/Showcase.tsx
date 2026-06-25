@@ -1,6 +1,8 @@
 // Showcase — example output cards (by format, not by client). Each card's 16:9
 // "video poster" is a pure-SVG mock drawn inline (no screenshots, no raster, no
-// brand names). Server component — fully static.
+// brand names). Reveal/parallax motion via the shared Motion helpers.
+
+import { Reveal, RevealGroup, RevealItem, Parallax } from './Motion'
 
 interface Example {
   /** unique suffix for SVG def ids so the three posters never collide */
@@ -198,7 +200,7 @@ export default function Showcase() {
     <section id="examples" className="bg-[#F7F8FA] px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         {/* Section header */}
-        <div className="mx-auto max-w-xl text-center">
+        <Reveal className="mx-auto max-w-xl text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
             Example outputs
           </span>
@@ -208,25 +210,26 @@ export default function Showcase() {
           <p className="mx-auto mt-3 text-slate-500">
             Finished, editable launch videos — generated from a single URL.
           </p>
-        </div>
+        </Reveal>
 
         {/* Example cards */}
-        <div className="mt-12 grid gap-6 sm:grid-cols-3">
+        <RevealGroup className="mt-12 grid gap-6 sm:grid-cols-3">
           {EXAMPLES.map((ex) => (
-            <figure
-              key={ex.id}
-              className="overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_18px_50px_-20px_rgba(20,23,28,0.25)] transition hover:border-black/10 hover:shadow-sm"
-            >
-              <div className="aspect-video w-full">
-                <Poster id={ex.id} />
-              </div>
-              <figcaption className="p-5">
-                <p className="font-semibold text-ink">{ex.label}</p>
-                <p className="mt-1 text-sm text-slate-500">{ex.caption}</p>
-              </figcaption>
-            </figure>
+            <RevealItem key={ex.id}>
+              <Parallax range={[8, -8]} scaleRange={[0.98, 1]}>
+                <figure className="overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_18px_50px_-20px_rgba(20,23,28,0.25)] transition hover:border-black/10 hover:shadow-sm">
+                  <div className="aspect-video w-full">
+                    <Poster id={ex.id} />
+                  </div>
+                  <figcaption className="p-5">
+                    <p className="font-semibold text-ink">{ex.label}</p>
+                    <p className="mt-1 text-sm text-slate-500">{ex.caption}</p>
+                  </figcaption>
+                </figure>
+              </Parallax>
+            </RevealItem>
           ))}
-        </div>
+        </RevealGroup>
       </div>
     </section>
   )

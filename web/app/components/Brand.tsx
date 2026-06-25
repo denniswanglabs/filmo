@@ -19,20 +19,12 @@ export function Wordmark({ className = '' }: { className?: string }) {
   return (
     <span className={`inline-flex items-center gap-2 font-semibold tracking-tight ${className}`}>
       {/* Canonical Walk Studio mark: cursor/arrow in a light-coral tile with ruler ticks */}
+      {/* Soft organic mark — abstract, no tile/border (Filmo/Walk Studio) */}
       <svg aria-hidden viewBox="0 0 84 84" className="h-7 w-7 shrink-0">
-        <rect x="0" y="0" width="84" height="84" rx="22" fill="#E6EEFF" />
-        <rect x="1" y="1" width="82" height="82" rx="21" fill="none" stroke="#B3C9FF" strokeWidth="1.5" />
-        <g fill="#99B8FF">
-          <rect x="10" y="17" width="5.5" height="8" rx="2.75" />
-          <rect x="10" y="38" width="5.5" height="8" rx="2.75" />
-          <rect x="10" y="59" width="5.5" height="8" rx="2.75" />
-          <rect x="68.5" y="17" width="5.5" height="8" rx="2.75" />
-          <rect x="68.5" y="38" width="5.5" height="8" rx="2.75" />
-          <rect x="68.5" y="59" width="5.5" height="8" rx="2.75" />
-        </g>
         <path
-          d="M32 20 L32 64 L42.8 53.4 L50.4 68.2 L57.6 64.6 L50 49.8 L62.8 49.8 Z"
-          fill="#0052FF" stroke="#0052FF" strokeWidth="1.4" strokeLinejoin="round"
+          fillRule="evenodd"
+          fill="#0052FF"
+          d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"
         />
       </svg>
       <span className="text-ink">
