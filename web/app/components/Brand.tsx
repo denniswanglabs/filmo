@@ -15,7 +15,14 @@ export function StatusChip({ status }: { status: string }) {
   )
 }
 
-export function Wordmark({ className = '' }: { className?: string }) {
+export function Wordmark({
+  className = '',
+  tone = 'dark',
+}: {
+  className?: string
+  /** 'dark' = ink text (light backgrounds, default); 'light' = near-white text (dark stage). */
+  tone?: 'dark' | 'light'
+}) {
   return (
     <span className={`inline-flex items-center gap-1.5 font-semibold tracking-tight ${className}`}>
       {/* Canonical Walk Studio mark: cursor/arrow in a light-coral tile with ruler ticks */}
@@ -27,7 +34,7 @@ export function Wordmark({ className = '' }: { className?: string }) {
           d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"
         />
       </svg>
-      <span className="text-ink">Filmo</span>
+      <span className={tone === 'light' ? 'text-[#F2F4F7]' : 'text-ink'}>Filmo</span>
     </span>
   )
 }

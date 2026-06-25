@@ -75,7 +75,7 @@ function VideoCard({ film }: { film: Film }) {
     <figure
       onMouseEnter={play}
       onMouseLeave={reset}
-      className="group overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_18px_50px_-20px_rgba(20,23,28,0.25)] transition hover:border-black/10 hover:shadow-sm"
+      className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_24px_60px_-30px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 transition hover:border-white/20"
     >
       <div className="relative">
         <video
@@ -101,8 +101,8 @@ function VideoCard({ film }: { film: Film }) {
         </div>
       </div>
       <figcaption className="p-5">
-        <p className="font-semibold text-ink">{film.title}</p>
-        <p className="mt-1 text-sm text-slate-500">{film.descriptor}</p>
+        <p className="font-semibold text-[#F2F4F7]">{film.title}</p>
+        <p className="mt-1 text-sm text-slate-400">{film.descriptor}</p>
       </figcaption>
     </figure>
   )
@@ -110,17 +110,17 @@ function VideoCard({ film }: { film: Film }) {
 
 export default function LuceoShowcase() {
   return (
-    <section id="examples" className="bg-[#F7F8FA] px-5 py-20 sm:py-24">
+    <section id="examples" className="border-t border-white/5 bg-[#111316] px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         {/* Section header */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
+          <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
             The taste behind the engine
           </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#F2F4F7] sm:text-4xl">
             Built on Luceo Studio&rsquo;s launch films.
           </h2>
-          <p className="mx-auto mt-3 text-slate-500">
+          <p className="mx-auto mt-3 text-slate-400">
             Filmo takes its cues from the curated film library of Luceo Studio — a real
             launch-film studio. Every generated cut inherits that craft: deliberate pacing, kinetic
             typography, and a studio&rsquo;s eye for making a product feel inevitable.
@@ -139,12 +139,12 @@ export default function LuceoShowcase() {
         </RevealGroup>
 
         {/* Attribution */}
-        <p className="mt-10 text-center text-sm text-slate-500">
+        <p className="mt-10 text-center text-sm text-slate-400">
           <a
             href="https://www.youtube.com/@luceo-studio"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-amber hover:underline"
+            className="inline-flex items-center gap-1 font-medium text-[#6F9BFF] hover:underline"
           >
             Films by Luceo Studio
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

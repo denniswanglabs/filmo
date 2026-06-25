@@ -71,21 +71,21 @@ const ITEMS: StackItem[] = [
 
 export default function TrustBar() {
   return (
-    <section className="bg-[#F7F8FA] px-5 py-12 sm:py-14">
+    <section className="border-b border-white/5 bg-[#111316] px-5 py-12 sm:py-14">
       <Reveal className="mx-auto flex max-w-5xl flex-col items-center gap-7 text-center lg:flex-row lg:justify-between lg:text-left">
-        <p className="max-w-xs text-sm font-medium text-slate-500">
+        <p className="max-w-xs text-sm font-medium text-slate-400">
           Grounded in your real product — and built on a serious stack
         </p>
 
         <ul className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6">
           {ITEMS.map((item) => (
             <li key={item.label} className="flex items-center gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber/10 text-amber">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber/15 text-[#6F9BFF]">
                 <span className="h-5 w-5">{item.glyph}</span>
               </span>
               <span className="text-left">
-                <span className="block text-sm font-semibold text-ink">{item.label}</span>
-                <span className="block text-xs text-slate-400">{item.sub}</span>
+                <span className="block text-sm font-semibold text-[#F2F4F7]">{item.label}</span>
+                <span className="block text-xs text-slate-500">{item.sub}</span>
               </span>
             </li>
           ))}

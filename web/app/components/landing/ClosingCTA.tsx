@@ -13,16 +13,16 @@ export default function ClosingCTA() {
   }
 
   return (
-    <section className="px-5 py-20 sm:py-24">
+    <section className="bg-[#0b0c0e] px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
-        <Reveal className="overflow-hidden rounded-2xl border border-amber/15 bg-amber/5 px-6 py-14 text-center shadow-[0_18px_50px_-20px_rgba(20,23,28,0.25)] sm:px-12 sm:py-16">
-          <span className="inline-block rounded-full border border-amber/20 bg-amber/10 px-3 py-1 text-xs font-medium text-amber">
+        <Reveal className="stage-aura overflow-hidden rounded-2xl border border-amber/25 bg-amber/[0.07] px-6 py-14 text-center shadow-[0_30px_80px_-30px_rgba(0,82,255,0.45)] sm:px-12 sm:py-16">
+          <span className="inline-block rounded-full border border-amber/30 bg-amber/15 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
             Your launch is one link away
           </span>
-          <h2 className="mx-auto mt-4 max-w-xl text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+          <h2 className="mx-auto mt-4 max-w-xl text-3xl font-semibold tracking-tight text-[#F2F4F7] sm:text-4xl">
             Paste your URL. Get the video that sells it.
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-slate-500">
+          <p className="mx-auto mt-3 max-w-xl text-slate-300">
             Filmo reads your product, plans the cut, prices the job, and ships a finished MP4.
           </p>
           <button

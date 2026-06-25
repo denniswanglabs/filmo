@@ -72,16 +72,16 @@ const USE_CASES: UseCase[] = [
 
 export default function UseCases() {
   return (
-    <section className="px-5 py-20 sm:py-24">
+    <section className="bg-[#0b0c0e] px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
+          <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
             What you can ship
           </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#F2F4F7] sm:text-4xl">
             One link. Every launch asset.
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-slate-500">
+          <p className="mx-auto mt-3 max-w-xl text-slate-400">
             The same grounded engine, pointed at whatever you&rsquo;re launching.
           </p>
         </Reveal>
@@ -91,9 +91,9 @@ export default function UseCases() {
             <RevealItem
               as="li"
               key={u.title}
-              className="rounded-xl border border-black/5 bg-white p-5 transition hover:border-black/10 hover:shadow-sm"
+              className="rounded-xl border border-white/10 bg-white/[0.04] p-5 ring-1 ring-inset ring-white/5 transition hover:border-white/20"
             >
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-amber/10 text-amber">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-amber/15 text-[#6F9BFF]">
                 <svg
                   viewBox="0 0 24 24"
                   className="h-5 w-5"
@@ -107,8 +107,8 @@ export default function UseCases() {
                   {u.icon}
                 </svg>
               </span>
-              <h3 className="mt-4 font-semibold tracking-tight text-ink">{u.title}</h3>
-              <p className="mt-1 text-sm text-slate-500">{u.line}</p>
+              <h3 className="mt-4 font-semibold tracking-tight text-[#F2F4F7]">{u.title}</h3>
+              <p className="mt-1 text-sm text-slate-400">{u.line}</p>
             </RevealItem>
           ))}
         </RevealGroup>

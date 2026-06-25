@@ -13,3 +13,44 @@ body {
   background-image: radial-gradient(rgba(20, 23, 28, 0.05) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+
+/* -------------------------------------------------------------------------
+   Landing-only DARK STAGE (Hera-style). Scoped to `.landing-dark`; it does
+   NOT touch /login, /runs/[id], or the AuthGate — those stay light. The wrapper
+   paints its own charcoal background over the white <body>.
+   ------------------------------------------------------------------------- */
+.landing-dark {
+  background: #0b0c0e;
+  color: #f2f4f7;
+}
+
+/* Dark dotted texture behind the hero stage — light dots on charcoal. */
+.surface-dots-dark {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Soft blue aura that grounds the dark hero (static; no layout cost). */
+.stage-aura {
+  background:
+    radial-gradient(60% 55% at 50% -5%, rgba(0, 82, 255, 0.22) 0%, transparent 70%),
+    radial-gradient(45% 45% at 85% 25%, rgba(0, 82, 255, 0.1) 0%, transparent 70%);
+}
+
+/* Edge masks so the parallax columns fade out top & bottom into the stage. */
+.mask-fade-y {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 12%,
+    #000 88%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 12%,
+    #000 88%,
+    transparent 100%
+  );
+}

@@ -93,17 +93,17 @@ const FEATURES: Feature[] = [
 
 export default function Differentiators() {
   return (
-    <section className="bg-[#F7F8FA] px-5 py-20 sm:py-24">
+    <section className="border-y border-white/5 bg-[#111316] px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
+          <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
             Why Filmo
           </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#F2F4F7] sm:text-4xl">
             Not another random-pixel generator.
           </h2>
-          <p className="mx-auto mt-3 text-slate-500">
+          <p className="mx-auto mt-3 text-slate-400">
             Most AI video tools hallucinate footage. Filmo is grounded in
             your actual product — so the video is true, on-brand, and editable.
           </p>
@@ -114,15 +114,15 @@ export default function Differentiators() {
           {FEATURES.map((f) => (
             <RevealItem
               key={f.title}
-              className="rounded-2xl border border-black/5 bg-white p-6 shadow-[0_18px_50px_-20px_rgba(20,23,28,0.25)] transition hover:border-black/10 hover:shadow-sm"
+              className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_24px_60px_-30px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 transition hover:border-white/20"
             >
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-amber/10 text-amber">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-amber/15 text-[#6F9BFF]">
                 <span className="h-6 w-6">{f.icon}</span>
               </span>
-              <h3 className="mt-5 text-base font-semibold tracking-tight text-ink">
+              <h3 className="mt-5 text-base font-semibold tracking-tight text-[#F2F4F7]">
                 {f.title}
               </h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-500">
+              <p className="mt-2 text-sm leading-relaxed text-slate-400">
                 {f.body}
               </p>
             </RevealItem>
