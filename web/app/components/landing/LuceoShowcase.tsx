@@ -75,7 +75,7 @@ function VideoCard({ film }: { film: Film }) {
     <figure
       onMouseEnter={play}
       onMouseLeave={reset}
-      className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_24px_60px_-30px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 transition hover:border-white/20"
+      className="group overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:border-[#B9D2F8]"
     >
       <div className="relative">
         <video
@@ -86,23 +86,23 @@ function VideoCard({ film }: { film: Film }) {
           loop
           playsInline
           preload="none"
-          className="aspect-video w-full bg-ink object-cover"
+          className="aspect-video w-full bg-[#F5F8FF] object-cover"
         />
         {/* Play affordance — fades out on hover. */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 grid place-items-center transition-opacity duration-300 group-hover:opacity-0"
         >
-          <span className="grid h-12 w-12 place-items-center rounded-full bg-white/20 ring-1 ring-white/50 backdrop-blur-sm">
+          <span className="grid h-12 w-12 place-items-center rounded-full bg-white/70 ring-1 ring-[#3B82F6]/40 backdrop-blur-sm">
             <svg viewBox="0 0 24 24" className="h-5 w-5 translate-x-[1px]" aria-hidden="true">
-              <path d="M8 5.5 L18 12 L8 18.5 Z" fill="#FFFFFF" fillOpacity="0.95" />
+              <path d="M8 5.5 L18 12 L8 18.5 Z" fill="#3B82F6" fillOpacity="1" />
             </svg>
           </span>
         </div>
       </div>
       <figcaption className="p-5">
-        <p className="font-semibold text-[#F2F4F7]">{film.title}</p>
-        <p className="mt-1 text-sm text-slate-400">{film.descriptor}</p>
+        <p className="font-semibold text-[#0E1320]">{film.title}</p>
+        <p className="mt-1 text-sm text-[#5A6472]">{film.descriptor}</p>
       </figcaption>
     </figure>
   )
@@ -110,19 +110,19 @@ function VideoCard({ film }: { film: Film }) {
 
 export default function LuceoShowcase() {
   return (
-    <section id="examples" className="panel panel--dark px-5 py-20 sm:py-24">
+    <section id="luceo" className="panel panel--dark px-5 py-20 sm:py-24">
       {/* Blue glass top edge — our signature on the rounded panel lip. */}
       <span aria-hidden="true" className="panel__edge" />
       <div className="mx-auto max-w-5xl">
         {/* Section header */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
+          <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
             The taste behind the engine
           </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#F2F4F7] sm:text-4xl">
+          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
             Built on Luceo Studio&rsquo;s launch films.
           </h2>
-          <p className="mx-auto mt-3 text-slate-400">
+          <p className="mx-auto mt-3 text-[#5A6472]">
             Filmo takes its cues from the curated film library of Luceo Studio — a real
             launch-film studio. Every generated cut inherits that craft: deliberate pacing, kinetic
             typography, and a studio&rsquo;s eye for making a product feel inevitable.
@@ -141,12 +141,12 @@ export default function LuceoShowcase() {
         </RevealGroup>
 
         {/* Attribution */}
-        <p className="mt-10 text-center text-sm text-slate-400">
+        <p className="mt-10 text-center text-sm text-[#5A6472]">
           <a
             href="https://www.youtube.com/@luceo-studio"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-[#6F9BFF] hover:underline"
+            className="inline-flex items-center gap-1 font-medium text-[#2563EB] hover:underline"
           >
             Films by Luceo Studio
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

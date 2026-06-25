@@ -86,7 +86,7 @@ function ColumnCard({ film }: { film: Film }) {
     <figure
       onMouseEnter={play}
       onMouseLeave={reset}
-      className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_24px_60px_-24px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 transition hover:border-white/20"
+      className="group relative overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white shadow-[0_24px_60px_-28px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:border-[#B9D2F8]"
     >
       <video
         ref={videoRef}
@@ -96,23 +96,23 @@ function ColumnCard({ film }: { film: Film }) {
         loop
         playsInline
         preload="none"
-        className="aspect-video w-full bg-black object-cover"
+        className="aspect-video w-full bg-[#F5F8FF] object-cover"
       />
       {/* Play affordance — fades out on hover. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 grid place-items-center transition-opacity duration-300 group-hover:opacity-0"
       >
-        <span className="grid h-11 w-11 place-items-center rounded-full bg-white/15 ring-1 ring-white/40 backdrop-blur-sm">
+        <span className="grid h-11 w-11 place-items-center rounded-full bg-white/70 ring-1 ring-[#3B82F6]/40 backdrop-blur-sm">
           <svg viewBox="0 0 24 24" className="h-4 w-4 translate-x-[1px]" aria-hidden="true">
-            <path d="M8 5.5 L18 12 L8 18.5 Z" fill="#FFFFFF" fillOpacity="0.95" />
+            <path d="M8 5.5 L18 12 L8 18.5 Z" fill="#3B82F6" fillOpacity="1" />
           </svg>
         </span>
       </div>
       {/* Bottom label gradient. */}
-      <figcaption className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3.5 pb-3 pt-8">
+      <figcaption className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-3.5 pb-3 pt-8">
         <p className="text-sm font-semibold text-white">{film.title}</p>
-        <p className="text-xs text-slate-300">{film.descriptor}</p>
+        <p className="text-xs text-slate-100">{film.descriptor}</p>
       </figcaption>
     </figure>
   )
@@ -182,13 +182,13 @@ export default function ParallaxColumns() {
       <span aria-hidden="true" className="panel__edge" />
       {/* Header */}
       <Reveal className="relative z-10 mx-auto mb-14 max-w-xl text-center">
-        <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
+        <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
           Example outputs
         </span>
-        <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#F2F4F7] sm:text-4xl">
+        <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
           A gallery that moves like the films do.
         </h2>
-        <p className="mx-auto mt-3 text-slate-400">
+        <p className="mx-auto mt-3 text-[#5A6472]">
           Real launch films, drifting on the stage. Hover any card to watch it play.
         </p>
       </Reveal>
@@ -224,7 +224,7 @@ export default function ParallaxColumns() {
             <button
               type="button"
               onClick={jumpToExamples}
-              className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#0052FF]/40 bg-[#0b0c0e]/75 px-5 py-2.5 text-sm font-medium text-slate-100 shadow-[0_12px_40px_-16px_rgba(0,82,255,0.6)] backdrop-blur-xl transition hover:border-[#0052FF]/70 hover:bg-[#0b0c0e]/90"
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#3B82F6]/40 bg-white/85 px-5 py-2.5 text-sm font-medium text-[#0E1320] shadow-[0_12px_40px_-16px_rgba(59,130,246,0.5)] backdrop-blur-xl transition hover:border-[#3B82F6]/70 hover:bg-white"
             >
               See every example
               <svg

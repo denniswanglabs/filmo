@@ -32,8 +32,25 @@ export default function FloatingNav() {
 
   function jumpToComposer() {
     if (typeof document === 'undefined') return
-    document.getElementById('start')?.scrollIntoView({ behavior: 'smooth' })
+    const start = document.getElementById('start')
+    if (!start) {
+      // Not on the landing (e.g. /how-it-works) — route to the composer there.
+      router.push('/#start')
+      return
+    }
+    start.scrollIntoView({ behavior: 'smooth' })
     document.getElementById('hero-url')?.focus()
+  }
+
+  function jumpToExamples() {
+    if (typeof document === 'undefined') return
+    const el = document.getElementById('examples')
+    if (!el) {
+      // Not on the landing — route home with the hash; the gallery lives there.
+      router.push('/#examples')
+      return
+    }
+    el.scrollIntoView({ behavior: 'smooth' })
   }
 
   return (
@@ -41,8 +58,8 @@ export default function FloatingNav() {
       <nav
         className={`pointer-events-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-full border px-3 py-2 pl-4 transition-all duration-300 ${
           scrolled
-            ? 'border-white/12 bg-[#0b0c0e]/80 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.8)] backdrop-blur-xl'
-            : 'border-white/8 bg-white/[0.04] backdrop-blur-md'
+            ? 'border-[#D4E2FB] bg-white/85 shadow-[0_12px_40px_-16px_rgba(30,58,120,0.22)] backdrop-blur-xl'
+            : 'border-[#E2ECFB] bg-white/70 backdrop-blur-md'
         }`}
       >
         {/* Wordmark (left) */}
@@ -50,40 +67,44 @@ export default function FloatingNav() {
           <Wordmark tone="light" />
         </Link>
 
-        {/* Anchor links (center) — hidden on small screens */}
+        {/* Center links — "How it works" routes to its own page; "Examples"
+            jumps to the landing's gallery (works from any page via /#examples).
+            Hidden on small screens. */}
         <div className="hidden items-center gap-1 text-sm sm:flex">
-          <a
-            href="#how"
-            className="rounded-full px-3 py-1.5 text-slate-300 transition hover:bg-white/5 hover:text-white"
+          <button
+            type="button"
+            onClick={() => router.push('/how-it-works')}
+            className="rounded-full px-3 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
           >
             How it works
-          </a>
-          <a
-            href="#examples"
-            className="rounded-full px-3 py-1.5 text-slate-300 transition hover:bg-white/5 hover:text-white"
+          </button>
+          <button
+            type="button"
+            onClick={jumpToExamples}
+            className="rounded-full px-3 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
           >
             Examples
-          </a>
+          </button>
         </div>
 
         {/* Auth + CTA (right) */}
         <div className="flex shrink-0 items-center gap-2 text-sm">
           {loading ? (
-            <span className="inline-block h-7 w-20 animate-pulse rounded-full bg-white/10" />
+            <span className="inline-block h-7 w-20 animate-pulse rounded-full bg-[#EAF1FF]" />
           ) : user ? (
             <>
-              <span className="hidden max-w-[160px] truncate text-slate-400 lg:inline">
+              <span className="hidden max-w-[160px] truncate text-[#5A6472] lg:inline">
                 {user.email}
               </span>
               <button
                 onClick={handleSignOut}
-                className="rounded-full border border-white/12 px-3.5 py-1.5 text-slate-200 transition hover:bg-white/5"
+                className="rounded-full border border-[#D4E2FB] px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
               >
                 Sign out
               </button>
               <button
                 onClick={jumpToComposer}
-                className="rounded-full bg-amber px-4 py-1.5 font-semibold text-white transition hover:opacity-90"
+                className="rounded-full bg-amber px-4 py-1.5 font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90"
               >
                 Build
               </button>
@@ -92,13 +113,13 @@ export default function FloatingNav() {
             <>
               <Link
                 href="/login"
-                className="rounded-full px-3.5 py-1.5 text-slate-200 transition hover:bg-white/5"
+                className="rounded-full px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
               >
                 Sign in
               </Link>
               <button
                 onClick={jumpToComposer}
-                className="rounded-full bg-amber px-4 py-1.5 font-semibold text-white transition hover:opacity-90"
+                className="rounded-full bg-amber px-4 py-1.5 font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90"
               >
                 Build
               </button>

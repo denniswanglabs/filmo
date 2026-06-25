@@ -8,13 +8,9 @@ import { createBuild } from './actions'
 import { StatusChip } from './components/Brand'
 import { AuthGate } from './components/AuthGate'
 import FloatingNav from './components/landing/FloatingNav'
-import TrustBar from './components/landing/TrustBar'
-import HowItWorks from './components/landing/HowItWorks'
-import Differentiators from './components/landing/Differentiators'
-import UseCases from './components/landing/UseCases'
+import Examples from './components/landing/Examples'
 import LuceoShowcase from './components/landing/LuceoShowcase'
-import ParallaxColumns from './components/landing/ParallaxColumns'
-import ClosingCTA from './components/landing/ClosingCTA'
+import ReadyToCreate from './components/landing/ReadyToCreate'
 import SiteFooter from './components/landing/SiteFooter'
 import { ParallaxWindows, ScrubbedHero } from './components/landing/Motion'
 import { BRAINS, type Run } from '../lib/types'
@@ -166,9 +162,9 @@ export default function Home() {
 
       <section
         id="start"
-        className="surface-dots-dark relative overflow-hidden border-b border-white/5"
+        className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60"
       >
-        {/* Blue aura grounds the dark hero. */}
+        {/* Soft light-blue aura grounds the light hero. */}
         <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
         {/* Decorative floating "windows" parallax layer — sits behind the composer
             (z-0, pointer-events none), never covers the headline or form. */}
@@ -179,27 +175,27 @@ export default function Home() {
               stays fully functional — ScrubbedHero only wraps it in a transform.
               Reduced motion / SSR: renders untransformed in normal flow. */}
           <ScrubbedHero className="w-full">
-            {/* Hero */}
-            <div className="mb-8 text-center">
-              <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
-                Your Product Launch AI Agent
-              </span>
-              <h1 className="mt-4 text-4xl font-semibold tracking-tight text-[#F2F4F7] sm:text-5xl">
-                Launch your product with a video that sells it.
+            {/* Hero — left-aligned, indented to line up with the composer's
+                inner labels (card uses p-6, so px-6 here shares that left edge). */}
+            <div className="mb-8 px-6 text-left">
+              <h1 className="text-5xl font-semibold leading-[1.03] tracking-tight text-[#0E1320] sm:text-[3.75rem]">
+                Your AI Product
+                <br />
+                Launch Producer
               </h1>
-              <p className="mx-auto mt-4 max-w-xl text-lg text-slate-400">
+              <p className="mt-4 max-w-xl text-lg text-[#5A6472]">
                 Paste your URL. Filmo reads your real product, diagnoses how it converts, and
                 ships a finished launch video — planned, priced, and produced on autopilot.
               </p>
             </div>
 
-            {/* Composer card — dark glass */}
+            {/* Composer card — white, light-blue accents, soft shadow */}
             <form
               onSubmit={onBuild}
-              className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)] ring-1 ring-inset ring-white/5 backdrop-blur-xl"
+              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
             >
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-slate-200">
+              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">
                 What should the video show?
               </span>
               <textarea
@@ -207,20 +203,20 @@ export default function Home() {
                 onChange={(e) => setGoal(e.target.value)}
                 rows={2}
                 placeholder={EXAMPLE_PROMPTS[phIndex]}
-                className="w-full resize-none rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber"
+                className="w-full resize-none rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] px-3.5 py-3 text-[#0E1320] outline-none transition placeholder:text-[#9AA6B8] focus:border-amber focus:bg-white"
               />
             </label>
 
             <label className="mt-4 block">
-              <span className="mb-1.5 block text-sm font-medium text-slate-200">Company URL</span>
-              <div className="flex items-center rounded-lg border border-white/10 bg-white/[0.03] transition focus-within:border-amber">
-                <span className="select-none pl-3.5 pr-1 text-slate-500">https://</span>
+              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Company URL</span>
+              <div className="flex items-center rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] transition focus-within:border-amber focus-within:bg-white">
+                <span className="select-none pl-3.5 pr-1 text-[#9AA6B8]">https://</span>
                 <input
                   id="hero-url"
                   value={url.replace(/^https?:\/\//, '')}
                   onChange={(e) => setUrl('https://' + e.target.value.replace(/^https?:\/\//, ''))}
                   placeholder="acme.com"
-                  className="w-full rounded-lg bg-transparent py-3 pr-3.5 text-slate-100 outline-none placeholder:text-slate-500"
+                  className="w-full rounded-lg bg-transparent py-3 pr-3.5 text-[#0E1320] outline-none placeholder:text-[#9AA6B8]"
                 />
               </div>
             </label>
@@ -229,8 +225,8 @@ export default function Home() {
             <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
               {/* Quality toggle */}
               <div>
-                <span className="mb-1.5 block text-sm font-medium text-slate-200">Quality</span>
-                <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.03] p-0.5">
+                <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Quality</span>
+                <div className="inline-flex rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] p-0.5">
                   {(['standard', 'premium'] as const).map((q) => (
                     <button
                       key={q}
@@ -239,7 +235,7 @@ export default function Home() {
                       className={`rounded-[7px] px-4 py-1.5 text-sm font-medium capitalize transition ${
                         quality === q
                           ? 'bg-amber text-white shadow-sm'
-                          : 'text-slate-400 hover:text-slate-100'
+                          : 'text-[#5A6472] hover:text-[#0E1320]'
                       }`}
                     >
                       {q}
@@ -250,16 +246,16 @@ export default function Home() {
 
               {/* Brain selector (operator-scale) */}
               <div className="text-right">
-                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[#5A6472]">
                   Model
                 </span>
                 <select
                   value={brain}
                   onChange={(e) => setBrain(e.target.value)}
-                  className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-sm text-slate-300 outline-none focus:border-amber"
+                  className="rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] px-2.5 py-1.5 text-sm text-[#0E1320] outline-none focus:border-amber"
                 >
                   {BRAINS.map((b) => (
-                    <option key={b.value} value={b.value} className="bg-[#15171b] text-slate-100">
+                    <option key={b.value} value={b.value} className="bg-white text-[#0E1320]">
                       {b.label} ({b.note})
                     </option>
                   ))}
@@ -267,16 +263,16 @@ export default function Home() {
               </div>
             </div>
 
-            {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+            {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
             <button
               disabled={!canBuild}
-              className="mt-6 w-full rounded-xl bg-amber py-3 font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              className="mt-6 w-full rounded-xl bg-amber py-3 font-semibold text-white shadow-[0_10px_30px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {building ? 'Starting build…' : 'Build'}
             </button>
               {!user && !loading && (
-                <p className="mt-3 text-center text-xs text-slate-500">
+                <p className="mt-3 text-center text-xs text-[#5A6472]">
                   You&rsquo;ll sign in with Google to start — your prompt is saved.
                 </p>
               )}
@@ -287,21 +283,21 @@ export default function Home() {
           {user && (
             <section className="mt-12">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#5A6472]">
                   Recents
                 </h2>
                 <button
                   onClick={() => void loadRuns()}
-                  className="text-sm text-slate-500 transition hover:text-slate-200"
+                  className="text-sm text-[#5A6472] transition hover:text-[#0E1320]"
                 >
                   Refresh
                 </button>
               </div>
 
               {runs == null ? (
-                <p className="text-sm text-slate-500">Loading runs…</p>
+                <p className="text-sm text-[#5A6472]">Loading runs…</p>
               ) : runs.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-white/12 px-5 py-10 text-center text-sm text-slate-500">
+                <div className="rounded-xl border border-dashed border-[#D4E2FB] px-5 py-10 text-center text-sm text-[#5A6472]">
                   No builds yet. Your first one will show up here.
                 </div>
               ) : (
@@ -310,13 +306,13 @@ export default function Home() {
                     <li key={r.id}>
                       <Link
                         href={`/runs/${r.id}`}
-                        className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 transition hover:border-white/20 hover:bg-white/[0.05]"
+                        className="flex items-center justify-between gap-4 rounded-xl border border-[#D4E2FB] bg-white px-4 py-3 transition hover:border-[#B9D2F8] hover:bg-[#F8FAFF]"
                       >
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-slate-100">
+                          <p className="truncate font-medium text-[#0E1320]">
                             {r.brand || r.company_url}
                           </p>
-                          <p className="truncate text-sm text-slate-500">{r.goal || 'Brand video'}</p>
+                          <p className="truncate text-sm text-[#5A6472]">{r.goal || 'Brand video'}</p>
                         </div>
                         <StatusChip status={r.status} />
                       </Link>
@@ -329,15 +325,12 @@ export default function Home() {
         </main>
       </section>
 
-      {/* Marketing — the product-launch-video-generator story (dark stage) */}
-      <TrustBar />
-      <HowItWorks />
-      <Differentiators />
-      {/* THE showpiece: parallax drifting columns of the real Luceo films. */}
-      <ParallaxColumns />
-      <UseCases />
+      {/* Proof — real videos the pipeline produced. */}
+      <Examples />
+      {/* Built on Luceo Studio's launch films. */}
       <LuceoShowcase />
-      <ClosingCTA />
+      {/* Closing CTA — deep-navy band, scrolls back to the composer. */}
+      <ReadyToCreate />
       <SiteFooter />
 
       <AuthGate

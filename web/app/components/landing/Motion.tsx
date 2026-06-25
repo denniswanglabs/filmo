@@ -234,8 +234,8 @@ export function Parallax({
 // windows + depth. Driven by the page's overall scroll progress.
 // ---------------------------------------------------------------------------
 
-/** A single abstract UI window drawn in inline SVG — tuned for the DARK stage:
- *  faint light-glass body + brighter Coinbase-blue accents that read on charcoal. */
+/** A single abstract UI window drawn in inline SVG — tuned for the LIGHT stage:
+ *  white card body + soft shadow + light-blue accents that read on white. */
 function WindowCard({
   variant,
 }: {
@@ -245,9 +245,12 @@ function WindowCard({
     <svg viewBox="0 0 220 150" className="h-full w-full" aria-hidden="true">
       <defs>
         <linearGradient id={`win-${variant}`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0.015" />
+          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="1" />
+          <stop offset="100%" stopColor="#F5F8FF" stopOpacity="1" />
         </linearGradient>
+        <filter id={`win-shadow-${variant}`} x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="6" stdDeviation="8" floodColor="#1E3A78" floodOpacity="0.12" />
+        </filter>
       </defs>
       {/* window body */}
       <rect
@@ -257,50 +260,51 @@ function WindowCard({
         height="148"
         rx="14"
         fill={`url(#win-${variant})`}
-        stroke="#FFFFFF"
-        strokeOpacity="0.10"
+        stroke="#D4E2FB"
+        strokeOpacity="1"
         strokeWidth="1"
+        filter={`url(#win-shadow-${variant})`}
       />
       {/* title bar */}
-      <rect x="1" y="1" width="218" height="26" rx="14" fill="#FFFFFF" fillOpacity="0.04" />
-      <circle cx="18" cy="14" r="3" fill="#0052FF" fillOpacity="0.7" />
-      <circle cx="30" cy="14" r="3" fill="#FFFFFF" fillOpacity="0.18" />
-      <circle cx="42" cy="14" r="3" fill="#FFFFFF" fillOpacity="0.18" />
+      <rect x="1" y="1" width="218" height="26" rx="14" fill="#E8F0FF" fillOpacity="0.7" />
+      <circle cx="18" cy="14" r="3" fill="#3B82F6" fillOpacity="0.9" />
+      <circle cx="30" cy="14" r="3" fill="#3B82F6" fillOpacity="0.25" />
+      <circle cx="42" cy="14" r="3" fill="#3B82F6" fillOpacity="0.25" />
 
       {variant === 'dashboard' && (
         <>
-          <rect x="16" y="40" width="56" height="32" rx="6" fill="#0052FF" fillOpacity="0.30" />
-          <rect x="82" y="40" width="56" height="32" rx="6" fill="#FFFFFF" fillOpacity="0.06" />
-          <rect x="148" y="40" width="56" height="32" rx="6" fill="#FFFFFF" fillOpacity="0.06" />
-          <rect x="16" y="84" width="120" height="14" rx="5" fill="#FFFFFF" fillOpacity="0.07" />
-          <rect x="16" y="106" width="92" height="14" rx="5" fill="#FFFFFF" fillOpacity="0.05" />
-          <rect x="148" y="84" width="56" height="36" rx="6" fill="#0052FF" fillOpacity="0.30" />
+          <rect x="16" y="40" width="56" height="32" rx="6" fill="#3B82F6" fillOpacity="0.22" />
+          <rect x="82" y="40" width="56" height="32" rx="6" fill="#E8F0FF" fillOpacity="1" />
+          <rect x="148" y="40" width="56" height="32" rx="6" fill="#E8F0FF" fillOpacity="1" />
+          <rect x="16" y="84" width="120" height="14" rx="5" fill="#DCE9FF" fillOpacity="1" />
+          <rect x="16" y="106" width="92" height="14" rx="5" fill="#DCE9FF" fillOpacity="0.7" />
+          <rect x="148" y="84" width="56" height="36" rx="6" fill="#3B82F6" fillOpacity="0.22" />
         </>
       )}
       {variant === 'chart' && (
         <>
-          <line x1="20" y1="64" x2="204" y2="64" stroke="#FFFFFF" strokeOpacity="0.07" strokeWidth="1" />
-          <line x1="20" y1="92" x2="204" y2="92" stroke="#FFFFFF" strokeOpacity="0.07" strokeWidth="1" />
+          <line x1="20" y1="64" x2="204" y2="64" stroke="#D4E2FB" strokeOpacity="1" strokeWidth="1" />
+          <line x1="20" y1="92" x2="204" y2="92" stroke="#D4E2FB" strokeOpacity="1" strokeWidth="1" />
           <path
             d="M 24 112 L 64 96 L 104 102 L 144 70 L 184 48"
             fill="none"
-            stroke="#0052FF"
-            strokeOpacity="0.85"
+            stroke="#3B82F6"
+            strokeOpacity="0.95"
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          <circle cx="184" cy="48" r="3.5" fill="#0052FF" fillOpacity="1" />
+          <circle cx="184" cy="48" r="3.5" fill="#3B82F6" fillOpacity="1" />
         </>
       )}
       {variant === 'list' && (
         <>
-          <rect x="16" y="40" width="14" height="14" rx="4" fill="#0052FF" fillOpacity="0.45" />
-          <rect x="38" y="42" width="120" height="10" rx="5" fill="#FFFFFF" fillOpacity="0.07" />
-          <rect x="16" y="66" width="14" height="14" rx="4" fill="#0052FF" fillOpacity="0.45" />
-          <rect x="38" y="68" width="150" height="10" rx="5" fill="#FFFFFF" fillOpacity="0.07" />
-          <rect x="16" y="92" width="14" height="14" rx="4" fill="#0052FF" fillOpacity="0.45" />
-          <rect x="38" y="94" width="100" height="10" rx="5" fill="#FFFFFF" fillOpacity="0.07" />
+          <rect x="16" y="40" width="14" height="14" rx="4" fill="#3B82F6" fillOpacity="0.55" />
+          <rect x="38" y="42" width="120" height="10" rx="5" fill="#DCE9FF" fillOpacity="1" />
+          <rect x="16" y="66" width="14" height="14" rx="4" fill="#3B82F6" fillOpacity="0.55" />
+          <rect x="38" y="68" width="150" height="10" rx="5" fill="#DCE9FF" fillOpacity="1" />
+          <rect x="16" y="92" width="14" height="14" rx="4" fill="#3B82F6" fillOpacity="0.55" />
+          <rect x="38" y="94" width="100" height="10" rx="5" fill="#DCE9FF" fillOpacity="1" />
         </>
       )}
     </svg>
@@ -401,56 +405,19 @@ export function SlidingPanel({
 }
 
 // ---------------------------------------------------------------------------
-// ScrubbedHero — scroll-scrubbed pinned hero. The child (the real composer
-// card + headline) is pinned via position:sticky inside a tall stage, and
-// scrubs in (scale + lift) then SETTLES as you scroll the first viewport.
-// The composer stays fully functional — this only wraps it in a transform.
-// Reduced motion / SSR: the stage collapses to auto height (CSS) and the child
-// renders untransformed in normal flow.
-//
-// Usage:
-//   <ScrubbedHero>
-//     <form>…the real composer…</form>
-//   </ScrubbedHero>
+// ScrubbedHero — static hero wrapper. The hero (headline + REAL composer) now
+// renders fully visible at full opacity on first paint, with no pin, no scrub,
+// no scale-in, and no dim. Kept as a thin pass-through so page.tsx doesn't have
+// to change its markup; it just renders the children in normal flow.
 // ---------------------------------------------------------------------------
 interface ScrubbedHeroProps {
   children: ReactNode
-  /** classes for the sticky inner wrapper (where content centers). */
+  /** classes for the hero wrapper. */
   className?: string
 }
 
 export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
-  const enabled = useMotionEnabled()
-  const ref = useRef<HTMLDivElement>(null)
-  // Progress across the tall stage: 0 at entry, 1 when the stage is scrolled out.
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ['start start', 'end start'],
-  })
-  // Scrub IN over the first ~35% (scale up + rise + fade), then hold settled.
-  const scaleRaw = useTransform(scrollYProgress, [0, 0.35], [0.92, 1])
-  const yRaw = useTransform(scrollYProgress, [0, 0.35], [48, 0])
-  const opacityRaw = useTransform(scrollYProgress, [0, 0.12], [0.4, 1])
-  const scale = useSpring(scaleRaw, { stiffness: 140, damping: 28, mass: 0.4 })
-  const y = useSpring(yRaw, { stiffness: 140, damping: 28, mass: 0.4 })
-
-  if (!enabled) {
-    // No pin, no transform — content sits in normal flow.
-    return <div className={className}>{children}</div>
-  }
-
-  return (
-    <div ref={ref} className="hero-scrub-stage">
-      <div className="sticky top-0 flex min-h-screen items-center justify-center">
-        <motion.div
-          className={className}
-          style={{ scale, y, opacity: opacityRaw, willChange: 'transform, opacity' }}
-        >
-          {children}
-        </motion.div>
-      </div>
-    </div>
-  )
+  return <div className={className}>{children}</div>
 }
 
 // ---------------------------------------------------------------------------

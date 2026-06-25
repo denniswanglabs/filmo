@@ -37,13 +37,13 @@ export default function HowItWorks() {
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
+          <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
             How it works
           </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#F2F4F7] sm:text-4xl">
+          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
             From a link to a launch video.
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-slate-400">
+          <p className="mx-auto mt-3 max-w-xl text-[#5A6472]">
             No brief, no timeline, no editor. Paste your URL and Filmo does the rest.
           </p>
         </Reveal>
@@ -57,13 +57,13 @@ export default function HowItWorks() {
             <RevealItem
               as="li"
               key={step.n}
-              className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_24px_60px_-30px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/5 transition hover:border-white/20"
+              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:border-[#B9D2F8]"
             >
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-amber/15 text-sm font-semibold text-[#6F9BFF]">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-amber-soft text-sm font-semibold text-[#2563EB]">
                 {step.n}
               </span>
-              <h3 className="mt-4 font-semibold tracking-tight text-[#F2F4F7]">{step.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-400">{step.body}</p>
+              <h3 className="mt-4 font-semibold tracking-tight text-[#0E1320]">{step.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#5A6472]">{step.body}</p>
             </RevealItem>
           ))}
         </RevealGroup>

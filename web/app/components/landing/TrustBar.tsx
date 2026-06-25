@@ -75,19 +75,19 @@ export default function TrustBar() {
       {/* Blue glass top edge — first panel to slide over the hero stage. */}
       <span aria-hidden="true" className="panel__edge" />
       <Reveal className="mx-auto flex max-w-5xl flex-col items-center gap-7 text-center lg:flex-row lg:justify-between lg:text-left">
-        <p className="max-w-xs text-sm font-medium text-slate-400">
+        <p className="max-w-xs text-sm font-medium text-[#5A6472]">
           Grounded in your real product — and built on a serious stack
         </p>
 
         <ul className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6">
           {ITEMS.map((item) => (
             <li key={item.label} className="flex items-center gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber/15 text-[#6F9BFF]">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber-soft text-[#2563EB]">
                 <span className="h-5 w-5">{item.glyph}</span>
               </span>
               <span className="text-left">
-                <span className="block text-sm font-semibold text-[#F2F4F7]">{item.label}</span>
-                <span className="block text-xs text-slate-500">{item.sub}</span>
+                <span className="block text-sm font-semibold text-[#0E1320]">{item.label}</span>
+                <span className="block text-xs text-[#5A6472]">{item.sub}</span>
               </span>
             </li>
           ))}

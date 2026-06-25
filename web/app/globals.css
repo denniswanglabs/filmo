@@ -15,26 +15,27 @@ body {
 }
 
 /* -------------------------------------------------------------------------
-   Landing-only DARK STAGE (Hera-style). Scoped to `.landing-dark`; it does
-   NOT touch /login, /runs/[id], or the AuthGate — those stay light. The wrapper
-   paints its own charcoal background over the white <body>.
+   Landing-only LIGHT STAGE (white + light-blue). Scoped to `.landing-dark`
+   (legacy class name kept so we don't have to touch every component); it does
+   NOT touch /login, /runs/[id], or the AuthGate — those stay light too. The
+   wrapper paints a clean white base over the <body>.
    ------------------------------------------------------------------------- */
 .landing-dark {
-  background: #0b0c0e;
-  color: #f2f4f7;
+  background: #ffffff;
+  color: #0e1320;
 }
 
-/* Dark dotted texture behind the hero stage — light dots on charcoal. */
+/* Faint blue dotted texture behind the hero stage — soft blue dots on white. */
 .surface-dots-dark {
-  background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(59, 130, 246, 0.08) 1px, transparent 1px);
   background-size: 22px 22px;
 }
 
-/* Soft blue aura that grounds the dark hero (static; no layout cost). */
+/* Soft light-blue aura that grounds the light hero (static; no layout cost). */
 .stage-aura {
   background:
-    radial-gradient(60% 55% at 50% -5%, rgba(0, 82, 255, 0.22) 0%, transparent 70%),
-    radial-gradient(45% 45% at 85% 25%, rgba(0, 82, 255, 0.1) 0%, transparent 70%);
+    radial-gradient(60% 55% at 50% -5%, rgba(79, 141, 247, 0.20) 0%, transparent 70%),
+    radial-gradient(45% 45% at 85% 25%, rgba(79, 141, 247, 0.12) 0%, transparent 70%);
 }
 
 /* Edge masks so the parallax columns fade out top & bottom into the stage. */
@@ -77,22 +78,22 @@ body {
   margin-top: -28px;
   /* Push content down past the overlap so nothing hides under the prior panel. */
   padding-top: 28px;
-  /* Soft shadow on the top edge sells the "covering" depth. */
-  box-shadow: 0 -24px 60px -28px rgba(0, 0, 0, 0.7);
+  /* Soft shadow on the top edge sells the "covering" depth (light theme). */
+  box-shadow: 0 -24px 60px -34px rgba(30, 58, 120, 0.18);
   isolation: isolate;
 }
 
-/* Darker stage surface. */
+/* Base white stage surface. */
 .panel--dark {
-  background: #0b0c0e;
+  background: #ffffff;
 }
 
-/* Lighter "panel" surface — the alternating step that makes the stack read. */
+/* Very-light-blue tinted "panel" surface — the alternating step that reads. */
 .panel--lit {
-  background: #15171b;
+  background: #f5f8ff;
 }
 
-/* Coinbase-blue glass top edge — our signature on the rounded lip. */
+/* Light-blue glass top edge — our signature on the rounded lip. */
 .panel__edge {
   position: absolute;
   inset-inline: 0;
@@ -103,30 +104,12 @@ body {
   background: linear-gradient(
     to right,
     transparent 0%,
-    rgba(0, 82, 255, 0.55) 28%,
-    rgba(120, 160, 255, 0.7) 50%,
-    rgba(0, 82, 255, 0.55) 72%,
+    rgba(59, 130, 246, 0.45) 28%,
+    rgba(79, 141, 247, 0.7) 50%,
+    rgba(59, 130, 246, 0.45) 72%,
     transparent 100%
   );
   pointer-events: none;
 }
 
-/* The hero scrub stage needs height to scroll through while the card pins. */
-.hero-scrub-stage {
-  /* Extra scroll length below the pinned hero so the scrub has runway. */
-  height: 160vh;
-}
-
-@media (max-width: 640px) {
-  /* On small screens the scrub runway is gentler so the page isn't too long. */
-  .hero-scrub-stage {
-    height: 120vh;
-  }
-}
-
-/* Reduced motion: no pin runway, panels still stack (pure layout, no transforms). */
-@media (prefers-reduced-motion: reduce) {
-  .hero-scrub-stage {
-    height: auto;
-  }
-}
+/* Reduced motion: panels still stack (pure layout, no transforms). */

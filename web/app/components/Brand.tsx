@@ -25,16 +25,22 @@ export function Wordmark({
 }) {
   return (
     <span className={`inline-flex items-center gap-1.5 font-semibold tracking-tight ${className}`}>
-      {/* Canonical Walk Studio mark: cursor/arrow in a light-coral tile with ruler ticks */}
-      {/* Soft organic mark — abstract, no tile/border (Filmo/Walk Studio) */}
-      <svg aria-hidden viewBox="14 13 56 56" className="h-6 w-6 shrink-0">
+      {/* Soft organic mark — abstract, no tile/border (Filmo). Blue dot sits
+          centered against the rounded blob; sized to match the enlarged word. */}
+      <svg aria-hidden viewBox="14 13 56 56" className="h-7 w-7 shrink-0">
         <path
           fillRule="evenodd"
-          fill="#0052FF"
+          fill="#3B82F6"
           d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"
         />
       </svg>
-      <span className={tone === 'light' ? 'text-[#F2F4F7]' : 'text-ink'}>Filmo</span>
+      {/* Enlarged "Filmo" wordmark — explicit size so it reads large in the nav,
+          and stays balanced wherever Wordmark is reused (/login, /runs TopBar). */}
+      <span
+        className={`text-[1.6rem] leading-none ${tone === 'light' ? 'text-[#0E1320]' : 'text-ink'}`}
+      >
+        Filmo
+      </span>
     </span>
   )
 }
