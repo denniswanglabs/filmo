@@ -391,5 +391,201 @@ class TestAllowHostViaPolicySet(unittest.TestCase):
             self.assertFalse(cs._nemoclaw_allow_host("app.notion.so"))
 
 
+class TestPreflightSkipsRecoverWhenHealthy(unittest.TestCase):
+    """FIX 1 (snappiness): _nemoclaw_preflight must check `status` FIRST and call
+    `recover` ONLY when the gateway is not already healthy/Ready. A warm gateway
+    skips the ~180s recover entirely, so the cold capture is fast."""
+
+    def test_preflight_does_not_call_recover_when_status_healthy(self):
+        """Status already healthy + Phase: Ready -> recover is NEVER invoked."""
+        calls = []
+
+        def fake_exec(args, **kw):
+            calls.append(list(args))
+            if args and args[0] == "status":
+                return mock.Mock(returncode=0, stdout="Phase: Ready\n", stderr="")
+            # If recover (or anything else) is called, record it; the assertion
+            # below proves it must not happen on the healthy path.
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(cs, "_nemoclaw_exec", side_effect=fake_exec), \
+             mock.patch.object(cs, "_nemoclaw_chromium_ready", return_value=True), \
+             mock.patch.object(cs, "_nemoclaw_allow_host", return_value=True):
+            self.assertTrue(cs._nemoclaw_preflight("docs.stripe.com"))
+        verbs = [c[0] for c in calls if c]
+        self.assertIn("status", verbs)
+        self.assertNotIn("recover", verbs)  # the whole point of FIX 1
+
+    def test_preflight_calls_recover_when_status_not_ready_then_rechecks(self):
+        """Unhealthy gateway -> recover IS called, then status is re-checked.
+        Here status flips Ready after recover, so preflight ultimately succeeds."""
+        status_results = ["Phase: Pending\n", "Phase: Ready\n"]
+        calls = []
+
+        def fake_exec(args, **kw):
+            calls.append(list(args))
+            if args and args[0] == "status":
+                return mock.Mock(returncode=0, stdout=status_results.pop(0), stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(cs, "_nemoclaw_exec", side_effect=fake_exec), \
+             mock.patch.object(cs, "_nemoclaw_chromium_ready", return_value=True), \
+             mock.patch.object(cs, "_nemoclaw_allow_host", return_value=True):
+            self.assertTrue(cs._nemoclaw_preflight("docs.stripe.com"))
+        verbs = [c[0] for c in calls if c]
+        self.assertIn("recover", verbs)        # unhealthy -> recover ran
+        self.assertEqual(verbs.count("status"), 2)  # pre + post-recover re-check
+
+    def test_status_ready_helper_strips_ansi(self):
+        """The status gate must see Phase: Ready even when colorized."""
+        colored = mock.Mock(returncode=0,
+                            stdout="\x1b[2mPhase:\x1b[0m Ready\n", stderr="")
+        with mock.patch.object(cs, "_nemoclaw_exec", return_value=colored):
+            self.assertTrue(cs._nemoclaw_status_ready())
+        pending = mock.Mock(returncode=0, stdout="Phase: Pending", stderr="")
+        with mock.patch.object(cs, "_nemoclaw_exec", return_value=pending):
+            self.assertFalse(cs._nemoclaw_status_ready())
+
+
+class TestRedirectChainAllowlisting(unittest.TestCase):
+    """FIX 2 (bulletproofing arbitrary URLs): a cross-apex top-level redirect
+    (notion.so 30x -> notion.com) must allowlist BOTH apexes, or Playwright dies
+    ERR_TUNNEL_CONNECTION_FAILED. The chain is resolved FROM THE HOST (no egress
+    restriction) via curl -sIL, then every host in the chain (+ apex + *.apex) is
+    injected into the policy alongside the original host + curated assets."""
+
+    # A realistic curl GET chain (-D - headers + -w effective URL sentinel):
+    # www.notion.so 301 -> https://www.notion.com/ 200. The resolver GETs (not
+    # HEADs) because notion only emits the cross-apex 301 on GET.
+    CURL_CHAIN = (
+        "HTTP/2 301\r\n"
+        "location: https://www.notion.com/\r\n"
+        "\r\n"
+        "HTTP/2 200\r\n"
+        "content-type: text/html\r\n"
+        "\r\n"
+        "\n%s https://www.notion.com/\n" % cs._NC_EFFECTIVE_MARK
+    )
+
+    def test_redirect_chain_hosts_parses_every_host(self):
+        ok = mock.Mock(returncode=0, stdout=self.CURL_CHAIN, stderr="")
+        with mock.patch.object(cs, "_nemoclaw_resolve_exec", return_value=ok):
+            hosts = cs._nemoclaw_redirect_chain_hosts("https://www.notion.so/")
+        # original host + Location: host + effective-URL host all present
+        self.assertIn("www.notion.so", hosts)
+        self.assertIn("www.notion.com", hosts)
+
+    def test_redirect_chain_uses_get_not_head(self):
+        """The resolver must GET (notion's cross-apex 301 only fires on GET); a
+        HEAD-only (-I) probe returns 200 and hides the hop."""
+        captured = {"argv": None}
+
+        def fake_exec(argv, **kw):
+            captured["argv"] = argv
+            return mock.Mock(returncode=0, stdout=self.CURL_CHAIN, stderr="")
+
+        with mock.patch.object(cs, "_nemoclaw_resolve_exec", side_effect=fake_exec):
+            cs._nemoclaw_redirect_chain_hosts("https://www.notion.so/")
+        argv = captured["argv"]
+        self.assertIsNotNone(argv)
+        self.assertNotIn("-I", argv)       # never a standalone HEAD flag
+        self.assertNotIn("-sIL", argv)     # never the HEAD-following form
+        # follows the full chain: a curl flag token containing L but NOT I (HEAD)
+        self.assertTrue(
+            any(a.startswith("-") and "L" in a and "I" not in a for a in argv),
+            "redirect resolver must follow redirects (-L) without HEAD (-I)")
+        self.assertIn("--max-time", argv)
+
+    def test_redirect_chain_picks_up_effective_url_host_only(self):
+        """Even if intermediate Location headers are absent (e.g. a meta/JS-style
+        hop curl resolved into the effective URL), the final effective-URL host
+        is still allowlisted."""
+        out = (
+            "HTTP/2 200\r\n"
+            "content-type: text/html\r\n"
+            "\r\n"
+            "\n%s https://www.notion.com/product\n" % cs._NC_EFFECTIVE_MARK
+        )
+        ok = mock.Mock(returncode=0, stdout=out, stderr="")
+        with mock.patch.object(cs, "_nemoclaw_resolve_exec", return_value=ok):
+            hosts = cs._nemoclaw_redirect_chain_hosts("https://www.notion.so/")
+        self.assertIn("www.notion.com", hosts)
+
+    def test_redirect_chain_falls_back_to_original_host_on_failure(self):
+        fail = mock.Mock(returncode=6, stdout="", stderr="could not resolve")
+        with mock.patch.object(cs, "_nemoclaw_resolve_exec", return_value=fail):
+            hosts = cs._nemoclaw_redirect_chain_hosts("https://www.notion.so/")
+        self.assertEqual(hosts, ["www.notion.so"])  # never blocks the capture
+
+    def test_redirect_chain_falls_back_on_timeout_exception(self):
+        with mock.patch.object(cs, "_nemoclaw_resolve_exec",
+                               side_effect=Exception("timeout")):
+            hosts = cs._nemoclaw_redirect_chain_hosts("https://notion.so/")
+        self.assertEqual(hosts, ["notion.so"])
+
+    def test_policy_set_injects_both_notion_so_and_notion_com_with_apexes(self):
+        """The headline FIX-2 contract: resolving notion.so -> notion.com injects
+        BOTH notion.so AND notion.com (+ each apex) into the applied policy."""
+        os.environ["NEMOCLAW_EGRESS_MODE"] = "policy-set"
+        self.addCleanup(os.environ.pop, "NEMOCLAW_EGRESS_MODE", None)
+        # curl GET chain: notion.so -> www.notion.com (cross-apex)
+        chain = (
+            "HTTP/2 301\r\n"
+            "location: https://www.notion.com/\r\n"
+            "\r\n"
+            "HTTP/2 200\r\n"
+            "\r\n"
+            "\n%s https://www.notion.com/\n" % cs._NC_EFFECTIVE_MARK
+        )
+        probe = [False, True]  # blocked, then open after policy set
+
+        def fake_allowed(host, **kw):
+            return probe.pop(0)
+
+        applied = {"body": None}
+
+        def fake_os(args, **kw):
+            if args and args[0] == "policy" and args[1] == "get":
+                return mock.Mock(returncode=0,
+                                 stdout="Version: 36\n---\n"
+                                 + TestInjectHostsIntoDemoTargets.SAMPLE, stderr="")
+            if args and args[0] == "policy" and args[1] == "set":
+                i = args.index("--policy")
+                with open(args[i + 1], encoding="utf-8") as fh:
+                    applied["body"] = fh.read()
+                return mock.Mock(returncode=0, stdout="loaded", stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        curl_ok = mock.Mock(returncode=0, stdout=chain, stderr="")
+        with mock.patch.object(cs, "_nemoclaw_host_allowed", side_effect=fake_allowed), \
+             mock.patch.object(cs, "_nemoclaw_resolve_exec", return_value=curl_ok), \
+             mock.patch.object(cs, "_openshell_exec", side_effect=fake_os):
+            self.assertTrue(
+                cs._nemoclaw_allow_host("notion.so", url="https://notion.so/"))
+        body = applied["body"]
+        self.assertIsNotNone(body)
+        # BOTH apexes injected (the cross-domain redirect target is allowlisted)
+        self.assertIn("host: 'notion.so'", body)
+        self.assertIn("host: 'notion.com'", body)
+        # the redirect's subdomain host + its *.apex wildcard too
+        self.assertIn("host: 'www.notion.com'", body)
+        self.assertIn("host: '*.notion.com'", body)
+        # security story preserved: no open egress, no raw-tunnel shape
+        self.assertNotIn("tls: skip", body)
+        self.assertNotIn("host: '*'", body)
+        self.assertNotIn("0.0.0.0", body)
+
+    def test_allowlist_hosts_for_expands_extra_hosts(self):
+        """The pure host-list builder expands EVERY seed (target + redirect
+        chain) to host + apex + *.apex, plus the curated asset CDNs."""
+        hosts = cs._nemoclaw_allowlist_hosts_for("notion.so", "www.notion.com")
+        self.assertIn("notion.so", hosts)
+        self.assertIn("notion.com", hosts)
+        self.assertIn("www.notion.com", hosts)
+        self.assertIn("*.notion.com", hosts)
+        for h in cs._NEMOCLAW_ASSET_HOSTS:
+            self.assertIn(h, hosts)
+
+
 if __name__ == "__main__":
     unittest.main()

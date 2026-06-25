@@ -2054,12 +2054,15 @@ def _nemoclaw_host_allowed(host: str, *, timeout: int = 60) -> bool:
     return r.returncode == 0 and "NC_HOST_OK" in (r.stdout or "")
 
 
-def _nemoclaw_allowlist_hosts_for(host: str) -> List[str]:
-    """The set of hosts to allowlist for a capture of `host`: the target, its
-    apex, a `*.apex` subdomain wildcard, plus the curated asset CDNs. Mirrors the
-    security story of _nemoclaw_policy_yaml — target + curated assets, NOT open
-    egress."""
-    host = (host or "").strip().lower()
+def _nemoclaw_allowlist_hosts_for(host, *extra_hosts) -> List[str]:
+    """The set of hosts to allowlist for a capture of `host` (plus any
+    `extra_hosts`, e.g. cross-domain redirect targets — FIX 2): each seed host,
+    its apex, a `*.apex` subdomain wildcard, plus the curated asset CDNs. Mirrors
+    the security story of _nemoclaw_policy_yaml — targets + curated assets, NOT
+    open egress.
+
+    `host` may be a single host string; `extra_hosts` are additional host
+    strings (each expanded to apex + *.apex the same way)."""
     out: List[str] = []
 
     def _add(h: str) -> None:
@@ -2067,17 +2070,117 @@ def _nemoclaw_allowlist_hosts_for(host: str) -> List[str]:
         if h and h not in out:
             out.append(h)
 
-    _add(host)
-    apex = _host_apex(host)
-    if apex:
-        _add(apex)
-        _add("*." + apex)
+    seeds: List[str] = [host]
+    seeds.extend(extra_hosts)
+    for seed in seeds:
+        seed = (seed or "").strip().lower()
+        if not seed:
+            continue
+        _add(seed)
+        apex = _host_apex(seed)
+        if apex:
+            _add(apex)
+            _add("*." + apex)
     for h in _NEMOCLAW_ASSET_HOSTS:
         _add(h)
     return out
 
 
-def _nemoclaw_policy_set_egress(host: str, *, timeout: int = 120) -> bool:
+def _nemoclaw_resolve_exec(argv: List[str], *, timeout: int) -> subprocess.CompletedProcess:
+    """Run a command on the LOCAL host (where this orchestrator runs), NOT inside
+    the sandbox. The host has unrestricted egress, so it can follow an arbitrary
+    URL's redirect chain to discover every domain the page touches. Single
+    mockable seam for the FIX-2 redirect probe. Never raises on non-zero exit."""
+    return subprocess.run(argv, capture_output=True, text=True,
+                          timeout=timeout, check=False)
+
+
+# A realistic desktop-browser UA so sites that branch on UA (and redirect
+# bots elsewhere) return the SAME redirect chain a real Chromium capture hits.
+_NEMOCLAW_RESOLVE_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+
+# Sentinel curl prints (via -w) the FINAL effective URL after following the
+# whole chain. We GET (not HEAD): notion's cross-apex hop (www.notion.so ->
+# www.notion.com) fires only on GET — a HEAD returns 200 and hides it.
+_NC_EFFECTIVE_MARK = "__NC_EFFECTIVE_URL__"
+
+
+def _nemoclaw_redirect_chain_hosts(url: str, *, timeout: int = 25) -> List[str]:
+    """FIX 2: resolve `url`'s top-level redirect chain FROM THE HOST (which has no
+    egress restriction) and return EVERY host in that chain — the final effective
+    URL's host plus every intermediate `Location:` host. This catches cross-apex
+    redirects (e.g. notion.so 30x -> www.notion.com) that the sandbox's allowlist
+    would otherwise miss, killing Playwright with ERR_TUNNEL_CONNECTION_FAILED.
+
+    Runs a GET with `-L` (follow the FULL chain a real navigation hits), dumping
+    each response's headers (`-D -`) and the final effective URL (`-w`), with a
+    realistic desktop UA and `--max-time`. Parses the host out of the original
+    URL, every `Location:` header (absolute or relative), AND the effective URL.
+    We GET rather than HEAD because some sites (notion) only emit the cross-apex
+    301 on GET — HEAD returns 200 and hides the hop. On ANY failure/timeout,
+    returns just the original URL's host so the caller never blocks the capture
+    (best-effort widening, never a gate)."""
+    orig_host = (urlparse(url).hostname or "").strip().lower()
+    fallback = [orig_host] if orig_host else []
+    if not orig_host:
+        return fallback
+    # GET, discard body, dump headers to stdout, print final effective URL.
+    argv = ["curl", "-sL", "-o", os.devnull, "-D", "-",
+            "--max-time", str(int(timeout)), "-A", _NEMOCLAW_RESOLVE_UA,
+            "-w", "\n%s %%{url_effective}\n" % _NC_EFFECTIVE_MARK, url]
+    try:
+        r = _nemoclaw_resolve_exec(argv, timeout=timeout + 10)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] redirect resolve raised: %s\n" % e)
+        return fallback
+    if r.returncode != 0:
+        sys.stderr.write(
+            "[capture/nemoclaw] redirect resolve failed (rc=%s); using original "
+            "host only.\n" % r.returncode)
+        return fallback
+    out: List[str] = []
+
+    def _add(h: str) -> None:
+        h = (h or "").strip().lower()
+        if h and h not in out:
+            out.append(h)
+
+    _add(orig_host)
+    # Parse every Location: header in the -L chain (curl prints each response's
+    # headers in order) plus the final effective URL from the -w sentinel.
+    current = url
+    for line in (r.stdout or "").splitlines():
+        s = line.strip()
+        if s.startswith(_NC_EFFECTIVE_MARK):
+            eff = s[len(_NC_EFFECTIVE_MARK):].strip()
+            h = (urlparse(eff).hostname or "").strip().lower()
+            if h:
+                _add(h)
+            continue
+        if not s.lower().startswith("location:"):
+            continue
+        loc = s.split(":", 1)[1].strip()
+        if not loc:
+            continue
+        # Location may be absolute (https://notion.com/...) or relative (/x).
+        # urljoin against the current URL resolves both; only a scheme/host
+        # change yields a new host to allowlist.
+        try:
+            nxt = urljoin(current, loc)
+        except Exception:
+            continue
+        h = (urlparse(nxt).hostname or "").strip().lower()
+        if h:
+            _add(h)
+        current = nxt
+    return out
+
+
+def _nemoclaw_policy_set_egress(host: str, *, url: Optional[str] = None,
+                                timeout: int = 120) -> bool:
     """Reprogram the LIVE sandbox egress proxy to allow `host` (+ apex + curated
     assets), via the OpenShell-native FULL-REPLACE path:
 
@@ -2090,10 +2193,24 @@ def _nemoclaw_policy_set_egress(host: str, *, timeout: int = 120) -> bool:
     0.0.44), a `policy set` full-replace actually reprograms the live egress
     proxy — verified: a non-allowlisted host goes 000 -> 200 after this call.
 
+    FIX 2: when `url` is given, the URL's full redirect chain is resolved from the
+    host FIRST and EVERY host in the chain (+ each one's apex + *.apex) is
+    allowlisted alongside the original host — so cross-apex top-level redirects
+    (notion.so -> notion.com) don't die with ERR_TUNNEL_CONNECTION_FAILED. If the
+    resolve fails/times out we fall back to the original host only.
+
     Returns True ONLY if the post-apply curl re-probe shows egress actually
-    opened. PRESERVES the security story: only the target + curated asset hosts
-    are merged into demo-targets, never open egress; every other preset and the
-    full policy body are preserved byte-for-byte from the live `get --full`."""
+    opened. PRESERVES the security story: only the target + redirect-chain +
+    curated asset hosts are merged into demo-targets, never open egress; every
+    other preset and the full policy body are preserved byte-for-byte from the
+    live `get --full`."""
+    # 0. Resolve the redirect chain FROM THE HOST (no egress restriction) so
+    #    every domain the top-level navigation touches is allowlisted (FIX 2).
+    if url:
+        chain_hosts = _nemoclaw_redirect_chain_hosts(url)
+    else:
+        chain_hosts = [host]
+    seed_hosts = _nemoclaw_allowlist_hosts_for(host, *chain_hosts)
     # 1. Capture the LIVE policy (must preserve the version + every preset;
     #    `policy set` REPLACES, so we round-trip the exact live document).
     try:
@@ -2110,9 +2227,9 @@ def _nemoclaw_policy_set_egress(host: str, *, timeout: int = 120) -> bool:
     # `policy get --full` prints a header block then `---` then the YAML body.
     raw = g.stdout or ""
     body = raw.split("\n---\n", 1)[1] if "\n---\n" in raw else raw
-    # 2. Inject the target + curated asset hosts into demo-targets.
+    # 2. Inject the target + redirect-chain + curated asset hosts into demo-targets.
     try:
-        edited = _nemoclaw_inject_hosts(body, _nemoclaw_allowlist_hosts_for(host))
+        edited = _nemoclaw_inject_hosts(body, seed_hosts)
     except ValueError as e:
         sys.stderr.write("[capture/nemoclaw] policy inject failed: %s\n" % e)
         return False
@@ -2175,22 +2292,25 @@ def _nemoclaw_policy_add_egress(host: str, *, timeout: int = 120) -> bool:
             pass
 
 
-def _nemoclaw_allow_host(host: str, *, timeout: int = 120) -> bool:
+def _nemoclaw_allow_host(host: str, *, url: Optional[str] = None,
+                         timeout: int = 120) -> bool:
     """Dynamic egress-allowlisting: ensure `host` is reachable from the sandbox.
 
     If `host` is already reachable, no policy change is made. Otherwise, depending
     on NEMOCLAW_EGRESS_MODE:
       - "policy-set" (default): reprogram the LIVE egress proxy via
-        `openshell policy get --full` -> inject host into demo-targets ->
-        `openshell policy set --wait`. This is the path that ACTUALLY opens
-        egress for an arbitrary customer URL at runtime (verified 000 -> 200).
+        `openshell policy get --full` -> inject host (+ FIX-2 redirect chain when
+        `url` is given) into demo-targets -> `openshell policy set --wait`. This
+        is the path that ACTUALLY opens egress for an arbitrary customer URL at
+        runtime (verified 000 -> 200).
       - "policy-add": legacy `nemoclaw policy-add` (version-only on 0.0.44; fails
         closed via the re-probe).
       - "off": no runtime policy change (only pre-allowlisted hosts capturable).
 
     Returns True ONLY when a real curl reachability re-probe confirms the egress
     CONNECT tunnel for `host` is open. PRESERVES the security story: only the
-    target + apex + curated asset CDNs are allowlisted, never open egress."""
+    target + redirect chain + apex + curated asset CDNs are allowlisted, never
+    open egress."""
     host = (host or "").strip().lower()
     if not host:
         return False
@@ -2207,7 +2327,7 @@ def _nemoclaw_allow_host(host: str, *, timeout: int = 120) -> bool:
     if mode == "policy-add":
         return _nemoclaw_policy_add_egress(host, timeout=timeout)
     # default + any unknown value: the working full-replace path.
-    return _nemoclaw_policy_set_egress(host, timeout=timeout)
+    return _nemoclaw_policy_set_egress(host, url=url, timeout=timeout)
 
 
 def _nemoclaw_install_chromium() -> bool:
@@ -2249,31 +2369,48 @@ def _nemoclaw_chromium_ready(*, timeout: int = 60) -> bool:
     return r.returncode == 0 and "NC_BROWSER_OK" in (r.stdout or "")
 
 
-def _nemoclaw_preflight(host: str) -> bool:
-    """Preflight per the handoff: recover (idempotent) -> status healthy + Phase:
-    Ready -> chromium present (install once if missing) -> dynamic-allowlist the
-    target host. Returns True only if every step passes. Any failure => False so
-    capture_url falls back to native."""
-    # 1. recover (idempotent; takes NO --timeout flag) — brings the gateway up
-    #    after a Docker restart. A non-zero exit here is non-fatal: a healthy
-    #    gateway makes recover a no-op that can still report odd status.
+def _nemoclaw_status_ready(*, timeout: int = 90) -> bool:
+    """True iff `nemoclaw <sandbox> status` reports the gateway healthy AND
+    `Phase: Ready`. The single gate used to decide whether the expensive
+    `recover` step is even needed (FIX 1: skip recover when already healthy).
+    Conservative: any error/odd status => False (the caller then recovers)."""
     try:
-        _nemoclaw_exec(["recover"], timeout=180)
-    except Exception as e:
-        sys.stderr.write("[capture/nemoclaw] recover raised: %s\n" % e)
-        # fall through — status is the real gate.
-    # 2. status: require gateway healthy AND Phase: Ready.
-    try:
-        st = _nemoclaw_exec(["status"], timeout=90)
+        st = _nemoclaw_exec(["status"], timeout=timeout)
     except Exception as e:
         sys.stderr.write("[capture/nemoclaw] status raised: %s\n" % e)
         return False
     status_out = _strip_ansi((st.stdout or "") + (st.stderr or ""))
-    if "Phase: Ready" not in status_out:
-        sys.stderr.write(
-            "[capture/nemoclaw] sandbox not Ready (status rc=%s); "
-            "falling back to native.\n" % st.returncode)
-        return False
+    return "Phase: Ready" in status_out
+
+
+def _nemoclaw_preflight(host: str, url: Optional[str] = None) -> bool:
+    """Preflight per the handoff: status healthy + Phase: Ready (recover ONLY if
+    not healthy) -> chromium present (install once if missing) -> dynamic-
+    allowlist the target host (+ FIX-2 redirect chain when `url` is given).
+    Returns True only if every step passes. Any failure => False so capture_url
+    falls back to native.
+
+    FIX 1 (snappiness): the previous order ran `recover` UNCONDITIONALLY first,
+    which hangs ~180s on an already-healthy gateway and stalled the first cold
+    capture ~3 minutes. Now status is checked FIRST; `recover` runs ONLY when the
+    gateway is not already healthy / not Ready. A warm gateway skips recover
+    entirely, so the cold capture is fast."""
+    # 1. status FIRST: if already healthy + Ready, SKIP recover (the slow path).
+    if not _nemoclaw_status_ready():
+        # Not healthy — recover (idempotent; takes NO --timeout flag) brings the
+        # gateway up after a Docker restart. A non-zero exit here is non-fatal;
+        # the post-recover status re-check is the real gate.
+        try:
+            _nemoclaw_exec(["recover"], timeout=180)
+        except Exception as e:
+            sys.stderr.write("[capture/nemoclaw] recover raised: %s\n" % e)
+            # fall through — status is the real gate.
+        # 2. re-check status: require gateway healthy AND Phase: Ready.
+        if not _nemoclaw_status_ready():
+            sys.stderr.write(
+                "[capture/nemoclaw] sandbox not Ready after recover; "
+                "falling back to native.\n")
+            return False
     # 3. chromium reachability one-shot; install once if missing.
     if not _nemoclaw_chromium_ready():
         if not _nemoclaw_install_chromium():
@@ -2281,8 +2418,8 @@ def _nemoclaw_preflight(host: str) -> bool:
                 "[capture/nemoclaw] Chromium unavailable and install failed; "
                 "falling back to native.\n")
             return False
-    # 4. dynamic egress-allowlist the target host (TASK 2).
-    if not _nemoclaw_allow_host(host):
+    # 4. dynamic egress-allowlist the target host + its redirect chain (TASK 2).
+    if not _nemoclaw_allow_host(host, url=url):
         sys.stderr.write(
             "[capture/nemoclaw] could not allowlist host %r; "
             "falling back to native.\n" % host)
@@ -2403,7 +2540,7 @@ def _capture_via_nemoclaw(url: str, out_dir: str,
     if not host:
         return None
 
-    if not _nemoclaw_preflight(host):
+    if not _nemoclaw_preflight(host, url):
         return None
 
     sandbox_png = "/tmp/cap-01.png"
