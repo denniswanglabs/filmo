@@ -9,6 +9,7 @@ must turn each into a VALID, non-degraded, 6-dimension Read -- without touching
 the shared validate_planner.extract_json (planner regression guard).
 """
 import os
+import signal
 import sys
 import unittest
 
@@ -89,6 +90,28 @@ SINGLE_QUOTED_VALUE = (
     "}"
 )
 
+# CAPTURED FROM THE LIVE FREE TIER (real /tmp/cr_raw/raw_08): the model forgot the
+# closing '}' on the LAST dimension object, so it runs straight into the ']' that
+# closes the dimensions array. The regex chain cannot recover a missing brace; the
+# tolerant parser closes the object when it meets the array terminator.
+MISSING_BRACE = _wrap(_dims_json('"clean"')).replace(
+    '"fix text"}\n  ]', '"fix text"\n  ]'
+)
+
+# CAPTURED FROM THE LIVE FREE TIER (real /tmp/cr_raw/raw_10): a stray '"key":'
+# leaves a double-colon (`"key": "rank": 2`) in a priority_fix. The tolerant parser
+# drops the orphaned ': 2' and keeps the usable {fix, maps_to}.
+STRAY_COLON = (
+    "{\n"
+    '  "url": "https://stripe.com",\n'
+    '  "verdict": "feature-led hero, thin proof",\n'
+    '  "dimensions": ' + _dims_json('"clean"') + ",\n"
+    '  "priority_fixes": [{"key": "rank": 2, "fix": "add a real proof beat", '
+    '"maps_to": "proof"}],\n'
+    '  "headline_fix": "Grow your revenue with one integration"\n'
+    "}"
+)
+
 
 class RepairsToValidRead(unittest.TestCase):
     """Each malformation must repair into a Read that PASSES validate_read with
@@ -129,6 +152,15 @@ class RepairsToValidRead(unittest.TestCase):
         self.assertIn("Get started", cta["finding"])
         self.assertIn("Sign up with Google", cta["finding"])
 
+    def test_missing_closing_brace_on_last_dimension(self):
+        # raw_08 family: the tolerant fallback closes the unclosed object at the ']'.
+        self._assert_repairs(MISSING_BRACE)
+
+    def test_stray_colon_in_priority_fix(self):
+        # raw_10 family: `"key": "rank": 2` must still yield a usable priority_fix.
+        read = self._assert_repairs(STRAY_COLON)
+        self.assertEqual(read["priority_fixes"][0]["fix"], "add a real proof beat")
+
 
 class RepairPreservesValidJson(unittest.TestCase):
     """Well-formed JSON must pass straight through the repair path unchanged."""
@@ -168,6 +200,41 @@ class AnalyzeReadRecoversInsteadOfDegrading(unittest.TestCase):
         self.assertEqual(analyze.validate_read(r), [])
         self.assertFalse(r.get("degraded"), "recovered Read should not be degraded")
         self.assertEqual(len(r["dimensions"]), 6)
+
+
+class TolerantParserTerminates(unittest.TestCase):
+    """The tolerant fallback builds objects from arbitrary bytes; a non-advancing
+    branch would hang the entire pipeline (not just degrade it). Every loop has a
+    progress guarantee -- pin it so a future edit that drops the guard fails loudly
+    here instead of hanging a live Read."""
+
+    ADVERSARIAL = [
+        "",                        # empty
+        "{",                       # lone open brace
+        "}{][",                    # closers first
+        '{"k":',                   # value missing at EOF
+        '{"a": "b" "c" "d"}',      # missing commas / stray fragments
+        '{"a": "b", "c": "d"',     # unterminated object
+        "[" * 80,                  # unbalanced nesting (shallow enough to not recurse-error)
+        '{"k": ' * 80,             # repeated value-missing
+        '"' * 400,                 # only quotes
+        "::::,,,,}}}]]]",          # only delimiters
+    ]
+
+    def test_never_hangs_on_adversarial_input(self):
+        if not hasattr(signal, "SIGALRM"):
+            self.skipTest("SIGALRM unavailable on this platform")
+        old = signal.signal(signal.SIGALRM,
+                            lambda *_: (_ for _ in ()).throw(TimeoutError("parser hung")))
+        try:
+            for bad in self.ADVERSARIAL:
+                signal.alarm(5)
+                try:
+                    analyze._tolerant_parse(bad)  # must RETURN; value is irrelevant
+                finally:
+                    signal.alarm(0)
+        finally:
+            signal.signal(signal.SIGALRM, old)
 
 
 if __name__ == "__main__":

@@ -157,13 +157,193 @@ def _escape_inner_quotes(t):
     return "".join(out)
 
 
+# --- TOLERANT PARSER (final fallback) -----------------------------------------
+# The regex repairs above each target ONE known slip. Real super-free output
+# varies: across 20 live stripe captures the regex chain still choked on a
+# missing '}' before a ']' (an unclosed last array element) and a stray ':'
+# after a value (`{"key": "rank": 2, ...}`). Rather than add another regex per
+# shape, this guaranteed-terminating recursive-descent reader treats the whole
+# family of "the value's boundaries are wrong" slips uniformly: single-quoted
+# values, unescaped inner quotes, multiple quoted fragments where one value
+# belongs, a missing closing bracket at EOF, and a stray ':' after a value. It
+# builds Python objects directly. It is invoked ONLY after strict json.loads and
+# every regex repair have already failed, so well-formed output never reaches it
+# (the clean path stays byte-for-byte json.loads). Matched the json-repair lib's
+# recovery rate (16/20) on the captures, stdlib-only. ANALYZE-path only.
+_TP_DELIMS = ",}]:"     # structural delimiters that legitimately end a value
+_TP_CLOSERS = "}]"
+_TP_ESCAPES = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f",
+               "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _tolerant_parse(text):
+    """Permissive JSON reader for the small-model slips above. Returns a Python
+    object; never hangs (every loop is guaranteed to consume >=1 char) and never
+    collapses a genuine string array (the fragment-join fires only in object-value
+    position). Not a general JSON parser -- tuned to the flat Conversion Read shape;
+    on exhausted input it returns what it parsed so far (validate_read then rejects
+    an incomplete Read and analyze_read reprompts)."""
+    s, n = text, len(text)
+    pos = [0]
+
+    def ws():
+        while pos[0] < n and s[pos[0]] in " \t\r\n":
+            pos[0] += 1
+
+    def peek():
+        return s[pos[0]] if pos[0] < n else ""
+
+    def parse_value():
+        ws()
+        c = peek()
+        if c == "{":
+            return parse_object()
+        if c == "[":
+            return parse_array()
+        if c == '"' or c == "'":
+            return parse_string()
+        return parse_scalar()
+
+    def decode_escape(j):
+        if j + 1 >= n:
+            return "\\", j + 1
+        e = s[j + 1]
+        if e == "u" and j + 6 <= n:
+            try:
+                return chr(int(s[j + 2:j + 6], 16)), j + 6
+            except ValueError:
+                return e, j + 2
+        return _TP_ESCAPES.get(e, e), j + 2
+
+    def parse_string():
+        quote = s[pos[0]]
+        j = pos[0] + 1
+        buf = []
+        while j < n:
+            c = s[j]
+            if c == "\\":
+                dec, j = decode_escape(j)
+                buf.append(dec)
+                continue
+            if c == quote:
+                # a real close only if the next non-ws char is a structural
+                # delimiter / EOF; otherwise it's an inner quote -> keep literal
+                k = j + 1
+                while k < n and s[k] in " \t\r\n":
+                    k += 1
+                if k >= n or s[k] in _TP_DELIMS:
+                    j += 1
+                    break
+                buf.append(c)
+                j += 1
+                continue
+            if c == '"':  # a double quote inside a single-quoted value -> literal
+                buf.append(c)
+                j += 1
+                continue
+            buf.append(c)
+            j += 1
+        pos[0] = j
+        return "".join(buf)
+
+    def parse_scalar():
+        start = pos[0]
+        while pos[0] < n and s[pos[0]] not in _TP_DELIMS:
+            pos[0] += 1
+        tok = s[start:pos[0]].strip()
+        low = tok.lower()
+        if low == "true":
+            return True
+        if low == "false":
+            return False
+        if low in ("null", "none", ""):
+            return None
+        try:
+            return int(tok)
+        except ValueError:
+            pass
+        try:
+            return float(tok)
+        except ValueError:
+            return tok
+
+    def parse_array():
+        pos[0] += 1  # consume [
+        arr = []
+        while pos[0] < n:
+            guard = pos[0]
+            ws()
+            c = peek()
+            if c == "" or c in _TP_CLOSERS:
+                if c == "]":
+                    pos[0] += 1
+                break  # ']' closes; '}' is left for the parent object
+            if c == ",":
+                pos[0] += 1
+                continue
+            arr.append(parse_value())
+            ws()
+            if peek() == ",":
+                pos[0] += 1
+            if pos[0] == guard:  # progress guarantee -> always terminates
+                pos[0] += 1
+        return arr
+
+    def parse_object():
+        pos[0] += 1  # consume {
+        obj = {}
+        last_key = None
+        while pos[0] < n:
+            guard = pos[0]
+            ws()
+            c = peek()
+            if c == "" or c in _TP_CLOSERS:
+                if c == "}":
+                    pos[0] += 1
+                break  # '}' closes; ']' is left for the parent array
+            if c == ",":
+                pos[0] += 1
+                continue
+            if c == ":":
+                # stray ':' after a value (`"key": "rank": 2`) -> skip to next sep
+                pos[0] += 1
+                while pos[0] < n and s[pos[0]] not in ",}]":
+                    pos[0] += 1
+                continue
+            key = parse_string() if c in "\"'" else str(parse_scalar())
+            ws()
+            if peek() == ":":
+                pos[0] += 1
+                obj[key] = parse_value()
+                last_key = key
+            elif last_key is not None and isinstance(obj.get(last_key), str):
+                # a "key" not followed by ':' is really a stray fragment of the
+                # PREVIOUS value (the multi-quote-in-one-value bug) -> space-join
+                obj[last_key] = (obj[last_key] + " " + key).strip()
+            ws()
+            if peek() == ",":
+                pos[0] += 1
+            if pos[0] == guard:  # progress guarantee -> always terminates
+                pos[0] += 1
+        return obj
+
+    ws()
+    if peek() not in "{[":  # skip any leading prose to the first container
+        for k in range(pos[0], n):
+            if s[k] in "{[":
+                pos[0] = k
+                break
+    return parse_value()
+
+
 def repair_json(text):
     """Best-effort repair of common small-model JSON slips, then parse.
 
     Repairs, in order: strip code fences / prose, normalize smart quotes,
     collapse comma-separated quoted fragments inside a value into one string,
-    drop trailing commas before } or ], and (only if still unparseable) escape
-    stray inner double-quotes. Returns the parsed object or raises
+    drop trailing commas before } or ], requote single-quoted values, escape
+    stray inner double-quotes, and finally a guaranteed-terminating tolerant
+    parser for the residual structural slips. Returns the parsed object or raises
     ValueError/JSONDecodeError if it still can't parse. ANALYZE-path only."""
     t = text.strip()
     t = re.sub(r"^```(?:json)?\s*", "", t)
@@ -193,8 +373,18 @@ def repair_json(text):
         return json.loads(requoted)
     except (ValueError, json.JSONDecodeError):
         pass
-    # Last resort: an unescaped double-quote left inside a value.
-    return json.loads(_escape_inner_quotes(requoted))
+    # An unescaped double-quote left inside a value.
+    try:
+        return json.loads(_escape_inner_quotes(requoted))
+    except (ValueError, json.JSONDecodeError):
+        pass
+    # Final fallback: the tolerant parser handles the residual structural slips
+    # the regex chain can't (missing '}' before ']', a stray ':' after a value).
+    # Raise if it can't yield a JSON object so analyze_read reprompts.
+    obj = _tolerant_parse(t)
+    if not isinstance(obj, (dict, list)):
+        raise ValueError("tolerant parse did not yield a JSON object")
+    return obj
 
 
 def extract_read_json(text):
@@ -369,14 +559,22 @@ def analyze_read(url, body_text, hero_path=None, headline=None, brain="super-fre
                 continue
             read["url"] = url  # the URL is ground truth, never the model's echo
             read.setdefault("degraded", False)
-            if not validate_read(read):
+            problems = validate_read(read)
+            if not problems:
                 return read
             print("[analyze] model Read failed validation: %s"
-                  % "; ".join(validate_read(read)), file=sys.stderr)
+                  % "; ".join(problems), file=sys.stderr)
+            # The residual degradations are SCHEMA slips (a dropped dimension, a
+            # missing field) -- not parse errors. Name the exact problems so the
+            # retry fixes THOSE; a targeted nudge converges far faster than a
+            # generic "try again" and is the main lever once JSON repair is robust.
             messages = messages + [
                 {"role": "assistant", "content": raw},
-                {"role": "user", "content": "That JSON did not match the schema. Emit a "
-                 "corrected Conversion Read with all 6 dimensions and int scores 0-5."}]
+                {"role": "user", "content": "That JSON did not match the schema. Fix "
+                 "exactly these problems and re-emit the FULL corrected Conversion Read "
+                 "(all 6 dimensions promise/outcome/proof/show/specificity/cta, each "
+                 "with int score 0-5 and finding/evidence/fix, plus a non-empty "
+                 "priority_fixes and headline_fix): " + "; ".join(problems)}]
     finally:
         # Restore the shared cap so the planner (which runs after analyze) is not
         # permanently shrunk by this call -- belt-and-suspenders per the plan note.

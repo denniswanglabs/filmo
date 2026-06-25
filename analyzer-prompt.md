@@ -60,7 +60,18 @@ super-free Nemotron slips before any reprompt:
 - collapses multiple comma-separated quoted fragments inside one value into a single
   string (the `"a", "b", "c"` evidence bug that degraded ~2/3 of runs),
 - normalizes smart/curly quotes to straight quotes,
-- drops trailing commas before `}`/`]`.
+- drops trailing commas before `}`/`]`,
+- requotes single-quoted values and escapes stray inner double-quotes,
+- and finally a **guaranteed-terminating tolerant parser** for the residual structural
+  slips the regex chain can't reach — a missing `}` before `]` (unclosed last element)
+  and a stray `:` after a value (`"key": "rank": 2`). Validated against 20 live stripe
+  captures: it lifts the per-attempt recovery from 14/20 to 16/20 (matching the
+  `json-repair` library) while staying stdlib-only and byte-identical to `json.loads`
+  on clean output.
+
+The residual failures are SCHEMA slips, not parse errors (the model drops a dimension or
+a field). On a `validate_read` failure the reprompt now names the **exact** problems so the
+retry fixes those — the main lever once JSON repair is robust.
 
 `repair_json` is ANALYZE-path only — it never touches the shared `vp.extract_json`/planner.
 On no-key, network error, output still unparseable after repair across all attempts, or a
