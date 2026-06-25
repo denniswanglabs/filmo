@@ -37,3 +37,82 @@ export async function createBuild(input: {
 
   return { runId, runKey }
 }
+
+// ─────────────────────────────── Developer mode ───────────────────────────────
+// Key-gated "see the machinery" access for hackathon judges. A signed-in account
+// pairs a secret DEV_MODE_KEY (validated SERVER-SIDE only) and gets a row in the
+// `developers` table — `developer = true` unlocks /inside/[runId] forever for that
+// account. The key never leaves the server: it is compared to process.env.DEV_MODE_KEY
+// and is NEVER returned, logged, or shipped to the browser.
+
+/**
+ * Validate a dev-mode key (server-only) and, on match, set the developer flag for the
+ * given signed-in user. Idempotent: re-pairing the same account is a no-op success.
+ * Returns only `{ ok }` — never the key or the env value.
+ */
+export async function pairDeveloper(input: { key: string; userId: string }): Promise<{ ok: boolean }> {
+  const expected = process.env.DEV_MODE_KEY
+  // Reject if the server has no key configured, or the supplied key doesn't match.
+  // Constant-ish compare; we intentionally do not branch-log the comparison.
+  if (!expected || !input.key || input.key !== expected) return { ok: false }
+  if (!input.userId) return { ok: false }
+
+  const db = adminClient()
+  // Upsert-by-hand (read → insert-or-noop) so re-pairing is safe and we never throw on
+  // a duplicate. The admin key bypasses RLS, so this writes for any signed-in account.
+  const { data: existing } = await db.database
+    .from('developers')
+    .select('user_id')
+    .eq('user_id', input.userId)
+    .maybeSingle()
+
+  if (!existing) {
+    const { error } = await db.database
+      .from('developers')
+      .insert([{ user_id: input.userId, developer: true, source: 'dev_mode_key' }])
+    if (error) throw new Error('developers.insert: ' + JSON.stringify(error))
+  }
+  return { ok: true }
+}
+
+/** Read back the developer flag for a user. Used to gate /inside/[runId]. */
+export async function isDeveloper(userId: string | null | undefined): Promise<boolean> {
+  if (!userId) return false
+  const db = adminClient()
+  const { data } = await db.database
+    .from('developers')
+    .select('developer')
+    .eq('user_id', userId)
+    .maybeSingle()
+  return !!(data && (data as { developer?: boolean }).developer)
+}
+
+/**
+ * Admin-client fetch of a run + its run_events, so a developer can view ANY run
+ * (including the canonical featured run they don't own). Returns null if not found.
+ * Bypasses RLS by design — only reachable behind the isDeveloper() gate in /inside.
+ */
+export async function readInsideRun(runId: string): Promise<{
+  run: Record<string, unknown>
+  events: Record<string, unknown>[]
+} | null> {
+  if (!runId) return null
+  const db = adminClient()
+  const { data: run } = await db.database
+    .from('runs')
+    .select()
+    .eq('id', runId)
+    .maybeSingle()
+  if (!run) return null
+
+  const { data: events } = await db.database
+    .from('run_events')
+    .select()
+    .eq('run_id', runId)
+    .order('seq', { ascending: true })
+
+  return {
+    run: run as Record<string, unknown>,
+    events: (events as Record<string, unknown>[]) ?? [],
+  }
+}
