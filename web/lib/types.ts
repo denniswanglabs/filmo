@@ -56,7 +56,7 @@ export function formatMargin(margin: number | null | undefined): string {
 
 export const STATUS_STYLES: Record<string, string> = {
   queued: 'bg-slate-100 text-slate-600 border-slate-200',
-  running: 'bg-amber-50 text-amber border-amber/30',
+  running: 'bg-blue-50 text-amber border-amber/30',
   delivered: 'bg-nemo/10 text-nemo border-nemo/30',
   failed: 'bg-red-50 text-red-600 border-red-200',
 }

@@ -7,6 +7,13 @@ import { useAuth } from '../lib/auth'
 import { createBuild } from './actions'
 import { TopBar, StatusChip } from './components/Brand'
 import { AuthGate } from './components/AuthGate'
+import TrustBar from './components/landing/TrustBar'
+import HowItWorks from './components/landing/HowItWorks'
+import Differentiators from './components/landing/Differentiators'
+import UseCases from './components/landing/UseCases'
+import LuceoShowcase from './components/landing/LuceoShowcase'
+import ClosingCTA from './components/landing/ClosingCTA'
+import SiteFooter from './components/landing/SiteFooter'
 import { BRAINS, type Run } from '../lib/types'
 
 // Composer state stashed across the Google OAuth round-trip so the prompt survives
@@ -137,18 +144,19 @@ export default function Home() {
   return (
     <>
       <TopBar />
-      <main className="mx-auto max-w-3xl px-5 pb-24 pt-12">
+      <section id="start" className="surface-dots border-b border-black/5">
+      <main className="mx-auto max-w-3xl px-5 pb-16 pt-14 sm:pt-20">
         {/* Hero */}
         <div className="mb-8 text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
-            URL in → finished video out
+            AI product launch video generator
           </span>
-          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
-            Make a brand video from a link.
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
+            Launch your product with a video that sells it.
           </h1>
-          <p className="mx-auto mt-3 max-w-xl text-slate-500">
-            Paste a company URL and tell Walk Studio what to show. It plans the cut, prices the job,
-            produces it, and ships a finished MP4.
+          <p className="mx-auto mt-4 max-w-xl text-lg text-slate-500">
+            Paste your URL. Walk Studio reads your real product, diagnoses how it converts, and
+            ships a finished launch video — planned, priced, and produced on autopilot.
           </p>
         </div>
 
@@ -175,6 +183,7 @@ export default function Home() {
             <div className="flex items-center rounded-lg border border-black/10 transition focus-within:border-amber">
               <span className="select-none pl-3.5 pr-1 text-slate-400">https://</span>
               <input
+                id="hero-url"
                 value={url.replace(/^https?:\/\//, '')}
                 onChange={(e) => setUrl('https://' + e.target.value.replace(/^https?:\/\//, ''))}
                 placeholder="acme.com"
@@ -282,6 +291,16 @@ export default function Home() {
           </section>
         )}
       </main>
+      </section>
+
+      {/* Marketing — the product-launch-video-generator story */}
+      <TrustBar />
+      <HowItWorks />
+      <Differentiators />
+      <UseCases />
+      <LuceoShowcase />
+      <ClosingCTA />
+      <SiteFooter />
 
       <AuthGate
         open={gateOpen}

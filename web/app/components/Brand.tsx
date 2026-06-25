@@ -20,9 +20,9 @@ export function Wordmark({ className = '' }: { className?: string }) {
     <span className={`inline-flex items-center gap-2 font-semibold tracking-tight ${className}`}>
       {/* Canonical Walk Studio mark: cursor/arrow in a light-coral tile with ruler ticks */}
       <svg aria-hidden viewBox="0 0 84 84" className="h-7 w-7 shrink-0">
-        <rect x="0" y="0" width="84" height="84" rx="22" fill="#FFF1EE" />
-        <rect x="1" y="1" width="82" height="82" rx="21" fill="none" stroke="#F0BFB3" strokeWidth="1.5" />
-        <g fill="#EAB6A9">
+        <rect x="0" y="0" width="84" height="84" rx="22" fill="#E6EEFF" />
+        <rect x="1" y="1" width="82" height="82" rx="21" fill="none" stroke="#B3C9FF" strokeWidth="1.5" />
+        <g fill="#99B8FF">
           <rect x="10" y="17" width="5.5" height="8" rx="2.75" />
           <rect x="10" y="38" width="5.5" height="8" rx="2.75" />
           <rect x="10" y="59" width="5.5" height="8" rx="2.75" />
@@ -32,7 +32,7 @@ export function Wordmark({ className = '' }: { className?: string }) {
         </g>
         <path
           d="M32 20 L32 64 L42.8 53.4 L50.4 68.2 L57.6 64.6 L50 49.8 L62.8 49.8 Z"
-          fill="#D6351C" stroke="#D6351C" strokeWidth="1.4" strokeLinejoin="round"
+          fill="#0052FF" stroke="#0052FF" strokeWidth="1.4" strokeLinejoin="round"
         />
       </svg>
       <span className="text-ink">
