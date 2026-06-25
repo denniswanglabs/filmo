@@ -166,8 +166,11 @@ class TestDynamicPolicyFile(unittest.TestCase):
             self.assertNotIn("policy-add", call.args[0])
 
     def test_allow_host_applies_policy_when_not_reachable(self):
-        """If not reachable: write+apply policy, then re-probe; True iff egress
-        opened. Verify policy-add --from-file --yes is invoked with a real file."""
+        """LEGACY policy-add mode: if not reachable, write+apply policy, then
+        re-probe; True iff egress opened. Verify policy-add --from-file --yes is
+        invoked with a real file."""
+        os.environ["NEMOCLAW_EGRESS_MODE"] = "policy-add"
+        self.addCleanup(os.environ.pop, "NEMOCLAW_EGRESS_MODE", None)
         probe_results = [False, True]  # first probe fails, post-add probe passes
 
         def fake_allowed(host, **kw):
@@ -196,6 +199,8 @@ class TestDynamicPolicyFile(unittest.TestCase):
         self.assertFalse(os.path.exists(applied["file"]))
 
     def test_allow_host_false_when_policy_add_fails(self):
+        os.environ["NEMOCLAW_EGRESS_MODE"] = "policy-add"
+        self.addCleanup(os.environ.pop, "NEMOCLAW_EGRESS_MODE", None)
         with mock.patch.object(cs, "_nemoclaw_host_allowed", return_value=False), \
              mock.patch.object(cs, "_nemoclaw_exec",
                                return_value=mock.Mock(returncode=1, stdout="",
@@ -232,6 +237,158 @@ class TestCapturePythonAndShquote(unittest.TestCase):
         self.assertTrue(q.startswith("'") and q.endswith("'"))
         # POSIX-correct escaped single quote sequence
         self.assertIn("'\\''", q)
+
+
+class TestInjectHostsIntoDemoTargets(unittest.TestCase):
+    """Pure string-level injection of allowed hosts into the live policy's
+    `demo-targets` preset (the only preset whose `access: full` shape the live
+    egress proxy actually honours after a `policy set` full-replace)."""
+
+    SAMPLE = (
+        "version: 1\n"
+        "network_policies:\n"
+        "  demo-targets:\n"
+        "    name: demo-targets\n"
+        "    endpoints:\n"
+        "    - host: docs.stripe.com\n"
+        "      port: 443\n"
+        "      access: full\n"
+        "    binaries:\n"
+        "    - path: /**\n"
+        "  other:\n"
+        "    name: other\n"
+        "    endpoints:\n"
+        "    - host: example.org\n"
+        "      port: 443\n"
+        "      access: full\n"
+    )
+
+    def test_injects_hosts_at_top_of_demo_targets_endpoints(self):
+        out = cs._nemoclaw_inject_hosts(self.SAMPLE, ["app.notion.so", "notion.so"])
+        # new hosts appear inside demo-targets (single-quoted), before existing
+        self.assertIn("host: 'app.notion.so'", out)
+        self.assertIn("host: 'notion.so'", out)
+        di = out.index("demo-targets:")
+        oi = out.index("other:")
+        # both injected hosts land inside the demo-targets block (before "other:")
+        self.assertLess(out.index("host: 'app.notion.so'"), oi)
+        self.assertGreater(out.index("host: 'app.notion.so'"), di)
+        # the pre-existing stripe endpoint is preserved
+        self.assertIn("host: docs.stripe.com", out)
+        # the OTHER preset is untouched
+        self.assertIn("host: example.org", out)
+
+    def test_wildcard_host_is_quoted_not_alias(self):
+        """A *.apex wildcard must be single-quoted; bare '*' is a YAML alias and
+        the gateway rejects it ('did not find ... alias')."""
+        out = cs._nemoclaw_inject_hosts(self.SAMPLE, ["*.notion.so"])
+        self.assertIn("host: '*.notion.so'", out)
+        # never the bare/alias form
+        self.assertNotIn("host: *.notion.so", out)
+
+    def test_uses_working_shape_no_tls_skip(self):
+        out = cs._nemoclaw_inject_hosts(self.SAMPLE, ["example.com"])
+        # injected entries use access: full and NEVER tls: skip (the live proxy
+        # only honours the demo-targets full-terminate shape)
+        self.assertIn("host: 'example.com'\n      port: 443\n      access: full", out)
+        self.assertNotIn("tls: skip", out)
+
+    def test_skips_hosts_already_present(self):
+        out = cs._nemoclaw_inject_hosts(self.SAMPLE, ["docs.stripe.com"])
+        # no duplicate stripe endpoint (existing unquoted entry counts)
+        self.assertEqual(out.count("docs.stripe.com"), 1)
+
+    def test_raises_when_no_demo_targets_preset(self):
+        with self.assertRaises(ValueError):
+            cs._nemoclaw_inject_hosts("version: 1\nnetwork_policies:\n  x:\n    name: x\n", ["a.com"])
+
+
+class TestAllowHostViaPolicySet(unittest.TestCase):
+    """The reworked _nemoclaw_allow_host: when a host is blocked it fetches the
+    LIVE policy via `openshell policy get --full`, injects the target + curated
+    asset hosts into demo-targets, applies via `openshell policy set --wait`,
+    then re-probes. Only `policy set` (full replace) reprograms the live proxy;
+    `policy-add`/`policy update` do not."""
+
+    def setUp(self):
+        os.environ["NEMOCLAW_EGRESS_MODE"] = "policy-set"
+
+    def tearDown(self):
+        os.environ.pop("NEMOCLAW_EGRESS_MODE", None)
+
+    def test_skips_when_already_reachable(self):
+        with mock.patch.object(cs, "_nemoclaw_host_allowed", return_value=True), \
+             mock.patch.object(cs, "_openshell_exec") as m_os:
+            self.assertTrue(cs._nemoclaw_allow_host("docs.stripe.com"))
+        m_os.assert_not_called()
+
+    def test_policy_set_path_applies_and_reprobes(self):
+        probe = [False, True]  # blocked, then open after policy set
+
+        def fake_allowed(host, **kw):
+            return probe.pop(0)
+
+        live = TestInjectHostsIntoDemoTargets.SAMPLE
+        applied = {"policy_path": None}
+
+        def fake_os(args, **kw):
+            if args and args[0] == "policy" and args[1] == "get":
+                return mock.Mock(returncode=0,
+                                 stdout="Version: 36\n---\n" + live, stderr="")
+            if args and args[0] == "policy" and args[1] == "set":
+                # locate --policy <path> and verify it contains the target
+                i = args.index("--policy")
+                applied["policy_path"] = args[i + 1]
+                with open(args[i + 1], encoding="utf-8") as fh:
+                    body = fh.read()
+                self.assertIn("notion.so", body)
+                self.assertNotIn("tls: skip", body)
+                return mock.Mock(returncode=0,
+                                 stdout="Policy version 40 loaded (active version: 40)",
+                                 stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(cs, "_nemoclaw_host_allowed", side_effect=fake_allowed), \
+             mock.patch.object(cs, "_openshell_exec", side_effect=fake_os):
+            self.assertTrue(cs._nemoclaw_allow_host("app.notion.so"))
+        self.assertIsNotNone(applied["policy_path"])
+        self.assertFalse(os.path.exists(applied["policy_path"]))  # temp cleaned up
+
+    def test_false_when_policy_set_fails(self):
+        live = TestInjectHostsIntoDemoTargets.SAMPLE
+
+        def fake_os(args, **kw):
+            if args and args[1] == "get":
+                return mock.Mock(returncode=0, stdout="---\n" + live, stderr="")
+            if args and args[1] == "set":
+                return mock.Mock(returncode=1, stdout="", stderr="denied")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(cs, "_nemoclaw_host_allowed", return_value=False), \
+             mock.patch.object(cs, "_openshell_exec", side_effect=fake_os):
+            self.assertFalse(cs._nemoclaw_allow_host("app.notion.so"))
+
+    def test_false_when_policy_get_fails(self):
+        def fake_os(args, **kw):
+            return mock.Mock(returncode=1, stdout="", stderr="no sandbox")
+
+        with mock.patch.object(cs, "_nemoclaw_host_allowed", return_value=False), \
+             mock.patch.object(cs, "_openshell_exec", side_effect=fake_os):
+            self.assertFalse(cs._nemoclaw_allow_host("app.notion.so"))
+
+    def test_re_probe_gates_success_even_if_set_reports_ok(self):
+        """policy set returns rc=0 but egress still blocked -> overall False
+        (the safety gate: we only claim success when curl actually opens)."""
+        live = TestInjectHostsIntoDemoTargets.SAMPLE
+
+        def fake_os(args, **kw):
+            if args[1] == "get":
+                return mock.Mock(returncode=0, stdout="---\n" + live, stderr="")
+            return mock.Mock(returncode=0, stdout="loaded", stderr="")
+
+        with mock.patch.object(cs, "_nemoclaw_host_allowed", return_value=False), \
+             mock.patch.object(cs, "_openshell_exec", side_effect=fake_os):
+            self.assertFalse(cs._nemoclaw_allow_host("app.notion.so"))
 
 
 if __name__ == "__main__":

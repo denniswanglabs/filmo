@@ -1852,6 +1852,16 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
 # Sandbox carrying the playwright-cdn + demo-targets policies (handoff §"Use the").
 _NEMOCLAW_SANDBOX = os.environ.get("NEMOCLAW_SANDBOX", "walk-ultra")
 _NEMOCLAW_BIN = os.environ.get("NEMOCLAW_BIN", "nemoclaw")
+# Lower-level OpenShell CLI (the gateway-native binary under nemoclaw). The
+# `nemoclaw policy-add` wrapper bumps the policy version but does NOT reprogram
+# the LIVE egress proxy; `openshell policy set <sandbox> --policy <file>` (a full
+# REPLACE) does. So runtime egress-allowlisting goes through openshell directly.
+_NEMOCLAW_OPENSHELL_BIN = os.environ.get("NEMOCLAW_OPENSHELL_BIN", "openshell")
+# Egress-allowlist strategy. "policy-set" (default) does the working full-replace
+# via openshell; "policy-add" keeps the legacy nemoclaw wrapper (version-only,
+# does not reprogram the live proxy on OpenShell 0.0.44); "off" disables runtime
+# egress changes (only already-allowed hosts are capturable in-sandbox).
+_NEMOCLAW_EGRESS_MODE = os.environ.get("NEMOCLAW_EGRESS_MODE", "policy-set").strip().lower()
 # Browser cache dir inside the sandbox (Playwright lands chromium-1223 here).
 _NEMOCLAW_BROWSERS_PATH = "/tmp/.cache/ms-playwright"
 _NEMOCLAW_CHROMIUM_DIR = _NEMOCLAW_BROWSERS_PATH + "/chromium-1223"
@@ -1903,6 +1913,16 @@ def _nemoclaw_exec_sh(one_line: str, *, timeout: int) -> subprocess.CompletedPro
         ["exec", "--timeout", str(timeout), "--", "bash", "-lc", one_line],
         timeout=timeout + 30,
     )
+
+
+def _openshell_exec(args: List[str], *, timeout: int) -> subprocess.CompletedProcess:
+    """Run an `openshell <args>` command (gateway resolved from stored metadata).
+    Single mockable seam for all OpenShell policy I/O. The sandbox NAME is passed
+    by callers as a positional arg where the subcommand expects it. Never raises
+    on non-zero exit — callers inspect returncode/stdout/stderr."""
+    cmd = [_NEMOCLAW_OPENSHELL_BIN] + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          timeout=timeout, check=False)
 
 
 def _host_apex(host: str) -> Optional[str]:
@@ -1959,6 +1979,63 @@ def _nemoclaw_policy_yaml(host: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+# Marker for the demo-targets preset's endpoints list inside the live policy
+# YAML. The live policy is emitted with 2-space indent per level (preset key at
+# 2 spaces, its fields at 4, list items at 4 + "- "), matching `policy get
+# --full` output. We inject new endpoints immediately AFTER this line.
+_DEMO_TARGETS_ENDPOINTS_MARKER = (
+    "  demo-targets:\n    name: demo-targets\n    endpoints:\n")
+
+
+def _nemoclaw_inject_hosts(policy_yaml: str, hosts: List[str]) -> str:
+    """Return `policy_yaml` with each host in `hosts` added to the `demo-targets`
+    preset's endpoints (the proven working shape: `access: full`, NO `tls: skip`
+    — the live egress proxy only honours that preset's full-terminate entries
+    after a `policy set` full-replace). Hosts already present are skipped (no
+    duplicates). Pure string transform so it is unit-testable without a sandbox.
+
+    Raises ValueError if the policy has no demo-targets endpoints block (so the
+    caller fails closed to native rather than applying a broken replace)."""
+    start = policy_yaml.find(_DEMO_TARGETS_ENDPOINTS_MARKER)
+    if start < 0:
+        raise ValueError("live policy has no demo-targets endpoints block")
+    # The demo-targets endpoints span from the marker up to the next sibling key
+    # ("  <name>:\n", a preset at the same 2-space indent) — typically the next
+    # preset or this preset's own "binaries:" / "name:". We only dedup within
+    # this block: hosts present in OTHER presets (e.g. demo_dynamic) do NOT count
+    # as honoured, because the live proxy only enforces demo-targets after a
+    # `policy set` full-replace. So a host in demo_dynamic alone must still be
+    # injected here.
+    block_start = start + len(_DEMO_TARGETS_ENDPOINTS_MARKER)
+    rest = policy_yaml[block_start:]
+    # Next sibling key at 2-space indent ("  word:") ends the demo-targets block.
+    m = _nc_re.search(r"\n  \S[^\n]*:\n", rest)
+    block_end = block_start + (m.start() + 1 if m else len(rest))
+    demo_block = policy_yaml[block_start:block_end]
+
+    new_entries: List[str] = []
+    queued: set = set()
+    for raw in hosts:
+        h = (raw or "").strip().lower()
+        if not h or h in queued:
+            continue
+        # Skip only if already an endpoint WITHIN demo-targets (quoted or not).
+        if ("host: %s\n" % h) in demo_block or ("host: '%s'\n" % h) in demo_block \
+                or ('host: "%s"\n' % h) in demo_block:
+            continue
+        # ALWAYS single-quote the host value. A bare value starting with '*'
+        # (the *.apex wildcard) is otherwise parsed as a YAML alias and rejected
+        # ("did not find expected alphabetic or numeric character ... alias").
+        # Quoting matches how `policy get --full` itself emits special hosts.
+        new_entries.append(
+            "    - host: '%s'\n      port: 443\n      access: full\n" % h)
+        queued.add(h)
+    if not new_entries:
+        return policy_yaml
+    return (policy_yaml[:block_start] + "".join(new_entries)
+            + policy_yaml[block_start:])
+
+
 def _nemoclaw_host_allowed(host: str, *, timeout: int = 60) -> bool:
     """True if `host` (or its apex) is already reachable from the sandbox: a
     cheap DNS/connect probe via curl. A reachable host needs no policy change.
@@ -1977,39 +2054,102 @@ def _nemoclaw_host_allowed(host: str, *, timeout: int = 60) -> bool:
     return r.returncode == 0 and "NC_HOST_OK" in (r.stdout or "")
 
 
-def _nemoclaw_allow_host(host: str, *, timeout: int = 120) -> bool:
-    """Dynamic egress-allowlisting: ensure `host` is reachable from the sandbox.
-    If it is not already allowed, write a minimal policy preset (target + apex +
-    curated asset CDNs only) and apply it via `policy-add --from-file --yes`.
-
-    Returns True if the host ends up reachable (already-allowed OR newly added),
-    False on any failure. PRESERVES the security story — only the target +
-    curated assets are added, never open egress. The final return is gated on a
-    real curl reachability re-probe, so we ONLY claim success when the egress
-    CONNECT tunnel for `host` actually opens.
-
-    KNOWN LIMITATION (OpenShell 0.0.44 on the walk-ultra box): `policy-add`
-    registers the preset and bumps the policy version (visible in `status`), but
-    the LIVE egress proxy's CONNECT allowlist is provisioned at sandbox creation
-    from `demo-targets` and is NOT hot-reloaded by a runtime `policy-add` (even
-    `recover` does not reprogram it). Verified: after adding `www.notion.so` and
-    seeing "Policy version loaded", the CONNECT tunnel still 403s. So a customer
-    URL whose host is NOT already in `demo-targets` is correctly detected as
-    unreachable by the re-probe -> _nemoclaw_allow_host returns False -> preflight
-    falls back to native capture (which renders the full page fine). To make an
-    arbitrary host capturable INSIDE the sandbox today it must be baked into
-    `demo-targets` at provisioning, or the box upgraded to an OpenShell build
-    that hot-reloads egress. This code is the correct, forward-compatible API
-    call: on a hot-reloading build it Just Works; on this build it fails safe.
-
-    Exotic third-party asset hosts a page references (analytics, chat widgets,
-    video CDNs) are likewise not allowlisted and fail closed; the page still
-    renders from its own host + the curated CDNs."""
+def _nemoclaw_allowlist_hosts_for(host: str) -> List[str]:
+    """The set of hosts to allowlist for a capture of `host`: the target, its
+    apex, a `*.apex` subdomain wildcard, plus the curated asset CDNs. Mirrors the
+    security story of _nemoclaw_policy_yaml — target + curated assets, NOT open
+    egress."""
     host = (host or "").strip().lower()
-    if not host:
+    out: List[str] = []
+
+    def _add(h: str) -> None:
+        h = (h or "").strip().lower()
+        if h and h not in out:
+            out.append(h)
+
+    _add(host)
+    apex = _host_apex(host)
+    if apex:
+        _add(apex)
+        _add("*." + apex)
+    for h in _NEMOCLAW_ASSET_HOSTS:
+        _add(h)
+    return out
+
+
+def _nemoclaw_policy_set_egress(host: str, *, timeout: int = 120) -> bool:
+    """Reprogram the LIVE sandbox egress proxy to allow `host` (+ apex + curated
+    assets), via the OpenShell-native FULL-REPLACE path:
+
+        openshell policy get --full <sandbox>     (capture the live policy)
+        -> inject the hosts into the demo-targets preset (proven shape)
+        -> openshell policy set <sandbox> --policy <edited.yaml> --wait
+
+    Unlike `nemoclaw policy-add` / `openshell policy update` (which only bump the
+    policy VERSION but leave the running CONNECT proxy unchanged on OpenShell
+    0.0.44), a `policy set` full-replace actually reprograms the live egress
+    proxy — verified: a non-allowlisted host goes 000 -> 200 after this call.
+
+    Returns True ONLY if the post-apply curl re-probe shows egress actually
+    opened. PRESERVES the security story: only the target + curated asset hosts
+    are merged into demo-targets, never open egress; every other preset and the
+    full policy body are preserved byte-for-byte from the live `get --full`."""
+    # 1. Capture the LIVE policy (must preserve the version + every preset;
+    #    `policy set` REPLACES, so we round-trip the exact live document).
+    try:
+        g = _openshell_exec(
+            ["policy", "get", "--full", _NEMOCLAW_SANDBOX], timeout=timeout)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] openshell policy get raised: %s\n" % e)
         return False
-    if _nemoclaw_host_allowed(host):
-        return True
+    if g.returncode != 0:
+        sys.stderr.write(
+            "[capture/nemoclaw] openshell policy get failed (rc=%s): %s\n"
+            % (g.returncode, (g.stderr or g.stdout or "")[-400:]))
+        return False
+    # `policy get --full` prints a header block then `---` then the YAML body.
+    raw = g.stdout or ""
+    body = raw.split("\n---\n", 1)[1] if "\n---\n" in raw else raw
+    # 2. Inject the target + curated asset hosts into demo-targets.
+    try:
+        edited = _nemoclaw_inject_hosts(body, _nemoclaw_allowlist_hosts_for(host))
+    except ValueError as e:
+        sys.stderr.write("[capture/nemoclaw] policy inject failed: %s\n" % e)
+        return False
+    # 3. Apply via full-replace and wait for the gateway to load it.
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=".yaml", prefix="nemoclaw-livepolicy-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(edited)
+        try:
+            r = _openshell_exec(
+                ["policy", "set", _NEMOCLAW_SANDBOX, "--policy", path,
+                 "--wait", "--timeout", "50"], timeout=timeout)
+        except Exception as e:
+            sys.stderr.write("[capture/nemoclaw] openshell policy set raised: %s\n" % e)
+            return False
+        if r.returncode != 0:
+            sys.stderr.write(
+                "[capture/nemoclaw] openshell policy set failed (rc=%s): %s\n"
+                % (r.returncode, (r.stderr or r.stdout or "")[-400:]))
+            return False
+        # 4. Re-probe: only claim success when the egress tunnel actually opens.
+        return _nemoclaw_host_allowed(host)
+    finally:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
+def _nemoclaw_policy_add_egress(host: str, *, timeout: int = 120) -> bool:
+    """LEGACY egress path (NEMOCLAW_EGRESS_MODE=policy-add). Writes a minimal
+    preset and applies it via `nemoclaw policy-add --from-file --yes`. KNOWN to
+    bump the policy version WITHOUT reprogramming the live CONNECT proxy on
+    OpenShell 0.0.44 — kept only for parity/diagnostics. The re-probe gate makes
+    it fail closed (returns False) on that build, so preflight falls back to
+    native. Prefer `policy-set` (the default), which actually reprograms egress."""
     yaml_doc = _nemoclaw_policy_yaml(host)
     import tempfile
     fd, path = tempfile.mkstemp(suffix=".yaml", prefix="nemoclaw-policy-")
@@ -2027,13 +2167,47 @@ def _nemoclaw_allow_host(host: str, *, timeout: int = 120) -> bool:
                 "[capture/nemoclaw] policy-add failed (rc=%s): %s\n"
                 % (r.returncode, (r.stderr or r.stdout or "")[-400:]))
             return False
-        # Re-probe so we only claim success when egress actually opened.
         return _nemoclaw_host_allowed(host)
     finally:
         try:
             os.remove(path)
         except Exception:
             pass
+
+
+def _nemoclaw_allow_host(host: str, *, timeout: int = 120) -> bool:
+    """Dynamic egress-allowlisting: ensure `host` is reachable from the sandbox.
+
+    If `host` is already reachable, no policy change is made. Otherwise, depending
+    on NEMOCLAW_EGRESS_MODE:
+      - "policy-set" (default): reprogram the LIVE egress proxy via
+        `openshell policy get --full` -> inject host into demo-targets ->
+        `openshell policy set --wait`. This is the path that ACTUALLY opens
+        egress for an arbitrary customer URL at runtime (verified 000 -> 200).
+      - "policy-add": legacy `nemoclaw policy-add` (version-only on 0.0.44; fails
+        closed via the re-probe).
+      - "off": no runtime policy change (only pre-allowlisted hosts capturable).
+
+    Returns True ONLY when a real curl reachability re-probe confirms the egress
+    CONNECT tunnel for `host` is open. PRESERVES the security story: only the
+    target + apex + curated asset CDNs are allowlisted, never open egress."""
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    if _nemoclaw_host_allowed(host):
+        return True
+    # Read the mode at call time so it is runtime-overridable (and testable).
+    mode = (os.environ.get("NEMOCLAW_EGRESS_MODE", _NEMOCLAW_EGRESS_MODE)
+            or "").strip().lower()
+    if mode == "off":
+        sys.stderr.write(
+            "[capture/nemoclaw] NEMOCLAW_EGRESS_MODE=off; host %r not "
+            "pre-allowlisted -> native fallback.\n" % host)
+        return False
+    if mode == "policy-add":
+        return _nemoclaw_policy_add_egress(host, timeout=timeout)
+    # default + any unknown value: the working full-replace path.
+    return _nemoclaw_policy_set_egress(host, timeout=timeout)
 
 
 def _nemoclaw_install_chromium() -> bool:
