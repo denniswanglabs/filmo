@@ -11,25 +11,40 @@ interface AuthUser {
 interface AuthState {
   user: AuthUser | null
   loading: boolean
-  refresh: () => Promise<void>
+  /** True when a shared demo account is configured (NEXT_PUBLIC_DEMO_*). */
+  demoAvailable: boolean
+  /** Re-read the session; returns the current user (or null). */
+  refresh: () => Promise<AuthUser | null>
   signOut: () => Promise<void>
+  /** Redirect to Google. The browser leaves the page and returns to `redirectTo`. */
+  signInWithGoogle: (redirectTo?: string) => Promise<void>
+  /** One-tap sign-in with the shared demo account (no redirect). */
+  signInDemo: () => Promise<{ user?: AuthUser; error?: string }>
 }
+
+const DEMO_EMAIL = process.env.NEXT_PUBLIC_DEMO_EMAIL
+const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD
 
 const AuthContext = createContext<AuthState>({
   user: null,
   loading: true,
-  refresh: async () => {},
+  demoAvailable: false,
+  refresh: async () => null,
   signOut: async () => {},
+  signInWithGoogle: async () => {},
+  signInDemo: async () => ({ error: 'not ready' }),
 })
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<AuthUser | null> => {
     const { data, error } = await insforge.auth.getCurrentUser()
-    setUser(error ? null : ((data?.user as AuthUser) ?? null))
+    const u = error ? null : ((data?.user as AuthUser) ?? null)
+    setUser(u)
     setLoading(false)
+    return u
   }, [])
 
   const signOut = useCallback(async () => {
@@ -37,25 +52,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null)
   }, [])
 
+  const signInWithGoogle = useCallback(async (redirectTo?: string) => {
+    const dest =
+      redirectTo ?? (typeof window !== 'undefined' ? window.location.origin + '/' : '/')
+    // SPA flow: the SDK builds the PKCE challenge and redirects the browser to Google.
+    // On return to `dest`, the SDK auto-exchanges `insforge_code` for a session.
+    await insforge.auth.signInWithOAuth('google', {
+      redirectTo: dest,
+      additionalParams: { prompt: 'select_account' },
+    })
+  }, [])
+
+  const signInDemo = useCallback(async (): Promise<{ user?: AuthUser; error?: string }> => {
+    if (!DEMO_EMAIL || !DEMO_PASSWORD) return { error: 'Demo account not configured' }
+    const r = await insforge.auth.signInWithPassword({ email: DEMO_EMAIL, password: DEMO_PASSWORD })
+    if (r.error) return { error: r.error.message || 'Demo sign-in failed' }
+    const u = await refresh()
+    return u ? { user: u } : { error: 'Demo sign-in failed' }
+  }, [refresh])
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const { data, error } = await insforge.auth.getCurrentUser()
-      let u = error ? null : ((data?.user as AuthUser) ?? null)
-      // Demo mode: if nobody is signed in, auto-sign-in the shared demo account so
-      // visitors (judges) land straight in the composer — no sign-up friction. The
-      // login page stays available for real accounts.
-      const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL
-      const demoPw = process.env.NEXT_PUBLIC_DEMO_PASSWORD
-      if (!u && demoEmail && demoPw) {
-        const r = await insforge.auth.signInWithPassword({ email: demoEmail, password: demoPw })
-        if (!r.error) {
-          const re = await insforge.auth.getCurrentUser()
-          u = re.error ? null : ((re.data?.user as AuthUser) ?? null)
+      // If we just came back from an OAuth redirect, the SDK constructor kicked off the
+      // `insforge_code` exchange. Wait for it to finish so getCurrentUser sees the session.
+      const pending = (insforge.auth as unknown as { authCallbackHandled?: Promise<unknown> })
+        .authCallbackHandled
+      if (pending) {
+        try {
+          await pending
+        } catch {
+          /* exchange failures are non-fatal; we fall through to getCurrentUser */
         }
       }
+      const { data, error } = await insforge.auth.getCurrentUser()
       if (cancelled) return
-      setUser(u)
+      setUser(error ? null : ((data?.user as AuthUser) ?? null))
       setLoading(false)
     })()
     return () => {
@@ -64,7 +96,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, loading, refresh, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        demoAvailable: !!(DEMO_EMAIL && DEMO_PASSWORD),
+        refresh,
+        signOut,
+        signInWithGoogle,
+        signInDemo,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

@@ -1,12 +1,24 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { insforge } from '../lib/insforge'
 import { useAuth } from '../lib/auth'
 import { createBuild } from './actions'
 import { TopBar, StatusChip } from './components/Brand'
+import { AuthGate } from './components/AuthGate'
 import { BRAINS, type Run } from '../lib/types'
+
+// Composer state stashed across the Google OAuth round-trip so the prompt survives
+// the redirect and the build resumes automatically on return.
+const PENDING_KEY = 'ws_pending_build'
+
+interface PendingBuild {
+  url: string
+  goal: string
+  quality: 'standard' | 'premium'
+  brain: string
+}
 
 export default function Home() {
   const router = useRouter()
@@ -19,6 +31,9 @@ export default function Home() {
   const [brain, setBrain] = useState<string>('super-free')
   const [building, setBuilding] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Sign-in gate (opens when a logged-out visitor hits Build)
+  const [gateOpen, setGateOpen] = useState(false)
 
   // Recents
   const [runs, setRuns] = useState<Run[] | null>(null)
@@ -34,40 +49,87 @@ export default function Home() {
     if (!error) setRuns((data as Run[]) ?? [])
   }, [])
 
-  // Gate on auth.
-  useEffect(() => {
-    if (!loading && !user) router.replace('/login')
-  }, [loading, user, router])
-
   useEffect(() => {
     if (user) void loadRuns()
   }, [user, loadRuns])
 
-  async function onBuild(e: React.FormEvent) {
-    e.preventDefault()
-    if (!user) return
-    setError(null)
-    setBuilding(true)
+  // Kick off a build and navigate to its run page.
+  const runBuild = useCallback(
+    async (userId: string, p: PendingBuild) => {
+      setError(null)
+      setBuilding(true)
+      try {
+        const { runId } = await createBuild({
+          userId,
+          url: p.url.trim(),
+          goal: p.goal.trim() || undefined,
+          quality: p.quality,
+          brain: p.brain,
+          mode: 'mock',
+        })
+        router.push(`/runs/${runId}`)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        setBuilding(false)
+      }
+    },
+    [router],
+  )
+
+  const currentPending = useCallback(
+    (): PendingBuild => ({ url, goal, quality, brain }),
+    [url, goal, quality, brain],
+  )
+
+  function stashPending() {
     try {
-      const { runId } = await createBuild({
-        userId: user.id,
-        url: url.trim(),
-        goal: goal.trim() || undefined,
-        quality,
-        brain,
-        mode: 'mock',
-      })
-      router.push(`/runs/${runId}`)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setBuilding(false)
+      sessionStorage.setItem(PENDING_KEY, JSON.stringify(currentPending()))
+    } catch {
+      /* sessionStorage unavailable (private mode) — Google return just won't auto-resume */
     }
   }
 
-  if (loading || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>
-    )
+  // Resume a build after returning from the Google OAuth redirect. Runs once auth
+  // resolves: restores the typed prompt, and auto-builds if the user came back signed in.
+  const resumedRef = useRef(false)
+  useEffect(() => {
+    if (loading || resumedRef.current) return
+    let raw: string | null = null
+    try {
+      raw = sessionStorage.getItem(PENDING_KEY)
+    } catch {
+      /* ignore */
+    }
+    if (!raw) return
+    resumedRef.current = true
+    try {
+      sessionStorage.removeItem(PENDING_KEY)
+    } catch {
+      /* ignore */
+    }
+    let p: PendingBuild
+    try {
+      p = JSON.parse(raw)
+    } catch {
+      return
+    }
+    // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
+    setUrl(p.url ?? '')
+    setGoal(p.goal ?? '')
+    setQuality(p.quality ?? 'standard')
+    setBrain(p.brain ?? 'super-free')
+    if (user) void runBuild(user.id, p)
+  }, [loading, user, runBuild])
+
+  function onBuild(e: React.FormEvent) {
+    e.preventDefault()
+    if (user) {
+      void runBuild(user.id, currentPending())
+    } else {
+      // Logged out: stash the prompt and open the Gmail gate.
+      stashPending()
+      setGateOpen(true)
+    }
   }
 
   const canBuild = url.trim().length > 3 && !building
@@ -171,50 +233,65 @@ export default function Home() {
           >
             {building ? 'Starting build…' : 'Build'}
           </button>
+          {!user && !loading && (
+            <p className="mt-3 text-center text-xs text-slate-400">
+              You&rsquo;ll sign in with Google to start — your prompt is saved.
+            </p>
+          )}
         </form>
 
-        {/* Recents */}
-        <section className="mt-12">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Recents</h2>
-            <button
-              onClick={() => void loadRuns()}
-              className="text-sm text-slate-400 transition hover:text-ink"
-            >
-              Refresh
-            </button>
-          </div>
-
-          {runs == null ? (
-            <p className="text-sm text-slate-400">Loading runs…</p>
-          ) : runs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-black/10 px-5 py-10 text-center text-sm text-slate-400">
-              No builds yet. Your first one will show up here.
+        {/* Recents — only meaningful once signed in. */}
+        {user && (
+          <section className="mt-12">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+                Recents
+              </h2>
+              <button
+                onClick={() => void loadRuns()}
+                className="text-sm text-slate-400 transition hover:text-ink"
+              >
+                Refresh
+              </button>
             </div>
-          ) : (
-            <ul className="space-y-2">
-              {runs.map((r) => (
-                <li key={r.id}>
-                  <Link
-                    href={`/runs/${r.id}`}
-                    className="flex items-center justify-between gap-4 rounded-xl border border-black/5 bg-white px-4 py-3 transition hover:border-black/10 hover:shadow-sm"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-ink">
-                        {r.brand || r.company_url}
-                      </p>
-                      <p className="truncate text-sm text-slate-400">
-                        {r.goal || 'Brand video'}
-                      </p>
-                    </div>
-                    <StatusChip status={r.status} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+
+            {runs == null ? (
+              <p className="text-sm text-slate-400">Loading runs…</p>
+            ) : runs.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-black/10 px-5 py-10 text-center text-sm text-slate-400">
+                No builds yet. Your first one will show up here.
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {runs.map((r) => (
+                  <li key={r.id}>
+                    <Link
+                      href={`/runs/${r.id}`}
+                      className="flex items-center justify-between gap-4 rounded-xl border border-black/5 bg-white px-4 py-3 transition hover:border-black/10 hover:shadow-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-ink">{r.brand || r.company_url}</p>
+                        <p className="truncate text-sm text-slate-400">{r.goal || 'Brand video'}</p>
+                      </div>
+                      <StatusChip status={r.status} />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
       </main>
+
+      <AuthGate
+        open={gateOpen}
+        onClose={() => setGateOpen(false)}
+        onBeforeRedirect={stashPending}
+        onSignedIn={(u) => {
+          setGateOpen(false)
+          void runBuild(u.id, currentPending())
+        }}
+      />
     </>
   )
 }
