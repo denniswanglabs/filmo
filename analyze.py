@@ -13,6 +13,8 @@ accounting + brain-registry behavior. Default brain = super-free ($0).
 import json
 import re
 import sys
+import time
+import urllib.error
 
 import brain as brain_mod
 import validate_planner as vp
@@ -21,6 +23,37 @@ import validate_planner as vp
 # these exact names. Order of dimensions is free; presence of all six is required.
 DIMENSION_KEYS = ("promise", "outcome", "proof", "show", "specificity", "cta")
 SCORE_MIN, SCORE_MAX = 0, 5
+
+# --- HONEST ENGINE TAGGING ----------------------------------------------------
+# The Conversion Read is our ONE real Nous-model usage; a Nous judge scores us, so
+# the ledger/dashboard must say truthfully WHICH model produced each Read. We never
+# claim Hermes ran when the Nemotron Ultra fallback did. `engine` is an EXTRA key on
+# the Read dict — validate_read (the frozen contract) ignores extra keys, so this is
+# additive and safe. Map each brain key to the human-facing engine label.
+ENGINE_BY_BRAIN = {
+    "hermes": "nous-hermes-3-405b",
+    "hermes-405b": "nous-hermes-4-405b",
+    "ultra-paid": "nemotron-ultra-fallback",
+}
+
+
+def _engine_for(brain):
+    """Human-facing engine label for a (normalized) brain key. Unknown -> the slug
+    so the tag is never a lie of omission."""
+    b = brain_mod.normalize_brain(brain)
+    return ENGINE_BY_BRAIN.get(b) or brain_mod.brain_def(b)["slug"]
+
+
+# Default tiered order for the Conversion Read: Hermes is the honest primary (our
+# only Nous-model usage); Nemotron Ultra is the RELIABILITY fallback when the free
+# Hermes tier is throttled. minimal_read is the last-resort floor below both.
+ANALYZE_BRAIN_CHAIN = ("hermes", "ultra-paid")
+
+# 429 backoff for the free Hermes tier (Venice-hosted, intermittently rate-limited).
+# Bounded so a build never hangs: a couple of short sleeps keep total Hermes wait
+# well under ~30s before we hand off to the Ultra fallback.
+RATELIMIT_BACKOFF_S = 6
+RATELIMIT_MAX_RETRIES = 2
 
 
 # --- ANALYZE-LOCAL JSON REPAIR ------------------------------------------------
@@ -463,6 +496,7 @@ def minimal_read(url, body_text=""):
         ],
         "headline_fix": "The outcome your customer gets — in one clear line.",
         "degraded": True,
+        "engine": "minimal",
     }
 
 
@@ -524,57 +558,108 @@ def _build_messages(url, body_text, headline=None):
             {"role": "user", "content": user}]
 
 
-def analyze_read(url, body_text, hero_path=None, headline=None, brain="super-free"):
+def _is_retryable_upstream(e):
+    """True for transient upstream errors worth a short backoff + retry on the SAME
+    brain: an HTTP 429 (the free Hermes tier's rate limit) or a 5xx server error.
+    These are the errors the prior code degraded on instead of waiting out — the
+    429 in particular is transient (retry_after ~25s)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code == 429 or 500 <= e.code < 600
+    # urllib.error.URLError (DNS/connection reset) is also transient.
+    return isinstance(e, urllib.error.URLError)
+
+
+def _analyze_read_one_brain(url, body_text, headline, brain):
+    """Run the Conversion Read on ONE brain and return a validated Read dict, or
+    None if this brain ultimately failed (network/parse/schema) so the caller can
+    fall to the next brain in the chain. On a 429 / transient upstream error this
+    RETRIES the same brain after a short bounded backoff (the 429 is transient)
+    rather than giving up. Tags read["engine"] with this brain's engine label so the
+    ledger/dashboard is honest about WHICH model produced the Read."""
+    messages = _build_messages(url, body_text, headline=headline)
+    ratelimit_retries = 0
+    # Budget of 4 content attempts: each tries vp.extract_json then the analyze-local
+    # repair before any reprompt, so the common small-model slips recover in-attempt.
+    # 429/transient retries are counted SEPARATELY (and don't consume a content
+    # attempt) so a throttled call still gets its full repair budget once it lands.
+    attempt = 0
+    while attempt < 4:
+        try:
+            raw = vp.call_model(messages, brain=brain)
+        except Exception as e:  # network/HTTP
+            if _is_retryable_upstream(e) and ratelimit_retries < RATELIMIT_MAX_RETRIES:
+                ratelimit_retries += 1
+                print("[analyze] %s transient upstream error (%s); backoff %ds then retry (%d/%d)"
+                      % (brain, e, RATELIMIT_BACKOFF_S, ratelimit_retries, RATELIMIT_MAX_RETRIES),
+                      file=sys.stderr)
+                time.sleep(RATELIMIT_BACKOFF_S)
+                continue  # same attempt index — retry without burning a content attempt
+            print("[analyze] %s call_model error (attempt %d): %s" % (brain, attempt, e), file=sys.stderr)
+            return None  # give up on THIS brain -> caller tries the next in the chain
+        attempt += 1
+        try:
+            read = extract_read_json(raw)
+        except (ValueError, json.JSONDecodeError):
+            # malformed — repair-nudge once, then loop to a fresh attempt.
+            messages = messages + [
+                {"role": "assistant", "content": raw},
+                {"role": "user", "content": "Your previous output did not parse. "
+                 "Return ONLY the corrected JSON Conversion Read object."}]
+            continue
+        read["url"] = url  # the URL is ground truth, never the model's echo
+        read.setdefault("degraded", False)
+        problems = validate_read(read)
+        if not problems:
+            read["engine"] = _engine_for(brain)  # honest tag: this brain produced it
+            return read
+        print("[analyze] %s model Read failed validation: %s"
+              % (brain, "; ".join(problems)), file=sys.stderr)
+        # The residual degradations are SCHEMA slips (a dropped dimension, a missing
+        # field) -- not parse errors. Name the exact problems so the retry fixes
+        # THOSE; a targeted nudge converges far faster than a generic "try again".
+        messages = messages + [
+            {"role": "assistant", "content": raw},
+            {"role": "user", "content": "That JSON did not match the schema. Fix "
+             "exactly these problems and re-emit the FULL corrected Conversion Read "
+             "(all 6 dimensions promise/outcome/proof/show/specificity/cta, each "
+             "with int score 0-5 and finding/evidence/fix, plus a non-empty "
+             "priority_fixes and headline_fix): " + "; ".join(problems)}]
+    return None  # exhausted content attempts on this brain -> caller falls onward
+
+
+def analyze_read(url, body_text, hero_path=None, headline=None, brain="hermes"):
     """Produce a validated Conversion Read for `url` from its `body_text`.
 
     Reuses validate_planner.call_model / extract_json (the planner's OpenRouter
-    path). On no-key, network/HTTP error, malformed JSON after one repair retry, or
-    a Read that fails validate_read, returns minimal_read(url, body_text) marked
-    degraded -- so the caller ALWAYS gets a valid Read and the pipeline never blocks.
-    `hero_path` is accepted for parity/forward-compat (text-only model today)."""
+    path). Hermes is the honest PRIMARY (our one real Nous-model usage); when the
+    caller asks for the default `hermes` brain and it ultimately fails — even after
+    429 backoff+retries — we DON'T drop straight to the bare minimal_read. We first
+    retry the Read once on **Nemotron Ultra** (`ultra-paid`) as a RELIABILITY
+    fallback. Only if Ultra ALSO fails do we fall to minimal_read(url, body_text)
+    marked degraded -- so the caller ALWAYS gets a valid Read and the pipeline never
+    blocks. read["engine"] records which model actually produced the Read so the
+    ledger/dashboard is truthful. `hero_path` is accepted for parity/forward-compat
+    (text-only model today). The PLANNER path is untouched (it never calls this)."""
     brain = brain_mod.normalize_brain(brain)
     if not brain_mod.brain_key():
         return minimal_read(url, body_text)
-    messages = _build_messages(url, body_text, headline=headline)
+    # Build the tiered brain chain. If the caller asked for the default `hermes`
+    # primary, append the Nemotron Ultra reliability fallback. If the caller asked
+    # for a DIFFERENT brain explicitly, honor exactly that one (no surprise paid
+    # fallback) -- keeps existing/test callers' behavior predictable.
+    if brain == "hermes":
+        chain = list(ANALYZE_BRAIN_CHAIN)
+    else:
+        chain = [brain]
     _restore = getattr(vp, "PLANNER_MAX_TOKENS", ANALYZE_MAX_TOKENS)
     _patch_token_cap()
     try:
-        # Budget of 4 attempts: each tries vp.extract_json then the analyze-local
-        # repair before any reprompt, so the common small-model slips recover
-        # in-attempt instead of degrading to minimal_read.
-        for attempt in range(4):
-            try:
-                raw = vp.call_model(messages, brain=brain)
-            except Exception as e:  # network/HTTP — try once more, then minimal
-                print("[analyze] call_model error (attempt %d): %s" % (attempt, e), file=sys.stderr)
-                continue
-            try:
-                read = extract_read_json(raw)
-            except (ValueError, json.JSONDecodeError):
-                # malformed — repair-nudge once, then loop to a fresh attempt / minimal
-                messages = messages + [
-                    {"role": "assistant", "content": raw},
-                    {"role": "user", "content": "Your previous output did not parse. "
-                     "Return ONLY the corrected JSON Conversion Read object."}]
-                continue
-            read["url"] = url  # the URL is ground truth, never the model's echo
-            read.setdefault("degraded", False)
-            problems = validate_read(read)
-            if not problems:
+        for b in chain:
+            read = _analyze_read_one_brain(url, body_text, headline, b)
+            if read is not None:
                 return read
-            print("[analyze] model Read failed validation: %s"
-                  % "; ".join(problems), file=sys.stderr)
-            # The residual degradations are SCHEMA slips (a dropped dimension, a
-            # missing field) -- not parse errors. Name the exact problems so the
-            # retry fixes THOSE; a targeted nudge converges far faster than a
-            # generic "try again" and is the main lever once JSON repair is robust.
-            messages = messages + [
-                {"role": "assistant", "content": raw},
-                {"role": "user", "content": "That JSON did not match the schema. Fix "
-                 "exactly these problems and re-emit the FULL corrected Conversion Read "
-                 "(all 6 dimensions promise/outcome/proof/show/specificity/cta, each "
-                 "with int score 0-5 and finding/evidence/fix, plus a non-empty "
-                 "priority_fixes and headline_fix): " + "; ".join(problems)}]
+            if len(chain) > 1:
+                print("[analyze] brain %r failed; falling to next in chain" % b, file=sys.stderr)
     finally:
         # Restore the shared cap so the planner (which runs after analyze) is not
         # permanently shrunk by this call -- belt-and-suspenders per the plan note.

@@ -48,6 +48,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "runs")
 BRANDING = os.path.join(HERE, "branding")
 
+# Conversion Read runs on Nous Hermes; planning stays on Nemotron.
+# The ANALYZE (Conversion Read) brain is chosen INDEPENDENTLY of the planner brain
+# so the operator's planner selection (Nemotron, the sponsor showcase) never drags
+# the page diagnosis off Hermes. Override with ANALYZE_BRAIN env if ever needed.
+ANALYZE_BRAIN = os.environ.get("ANALYZE_BRAIN", "hermes")
+
 # VO-DRIVEN ENGINE flag (the blank-scenes fix). When ON (default for the dashboard
 # build path), the PICTURE is produced by the VO-driven <Timeline> engine
 # (align_vo -> build_timeline -> style_fill.build_props -> Remotion render) which
@@ -234,7 +240,7 @@ def _brand_facts(url, run_dir):
         return {"wordmark": "", "tagline": "", "features": []}
 
 
-def _maybe_conversion_read(url, run_dir, brain="super-free",
+def _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN,
                            read_pass_fn=None, analyze_fn=None):
     """Run the ANALYZE stage and return the Conversion Read dict, or None when the
     flag is OFF. Persists runs/<id>/conversion_read.json on success. Best-effort:
@@ -412,7 +418,10 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
             led.event("info", "analyzing %s — reading the page and diagnosing how it "
                       "converts before planning the video" % url)
             led.write(led_path)
-            conversion_read = _maybe_conversion_read(url, run_dir, brain=brain)
+            # Conversion Read runs on Nous Hermes; planning stays on Nemotron.
+            # Deliberately pass ANALYZE_BRAIN, NOT the planner `brain`, so the page
+            # diagnosis stays on Hermes regardless of which Nemotron the operator picked.
+            conversion_read = _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN)
             if conversion_read is not None:
                 led.data["conversion_read"] = conversion_read
                 scored = ", ".join("%s %d" % (d.get("key"), d.get("score", 0))

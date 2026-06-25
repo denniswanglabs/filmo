@@ -102,6 +102,84 @@ class AnalyzeRead(unittest.TestCase):
         self.assertEqual(r["url"], "https://other.com")  # model's url is overwritten
 
 
+class TieredFallbackAndEngineTag(unittest.TestCase):
+    """The Conversion Read keeps Hermes as the honest primary but stays RELIABLE:
+    429s on the free Hermes tier are retried after a short backoff, and if Hermes
+    ultimately fails we fall to Nemotron Ultra BEFORE the bare minimal_read. Every
+    Read is tagged read["engine"] with the model that actually produced it."""
+
+    def setUp(self):
+        self._orig_call = analyze.vp.call_model
+        self._orig_key = analyze.brain_mod.brain_key
+        self._orig_sleep = analyze.time.sleep
+        analyze.brain_mod.brain_key = lambda: "k"
+        analyze.time.sleep = lambda s: self._slept.append(s)  # never really wait
+        self._slept = []
+
+    def tearDown(self):
+        analyze.vp.call_model = self._orig_call
+        analyze.brain_mod.brain_key = self._orig_key
+        analyze.time.sleep = self._orig_sleep
+
+    def _good_json(self):
+        dims = [{"key": k, "score": 2, "finding": "f", "evidence": "e", "fix": "x"}
+                for k in analyze.DIMENSION_KEYS]
+        return analyze.json.dumps({
+            "url": "https://acme.com", "verdict": "v", "dimensions": dims,
+            "priority_fixes": [{"rank": 1, "fix": "add proof", "maps_to": "proof"}],
+            "headline_fix": "Ship 10x faster"})
+
+    def _http_429(self):
+        import urllib.error
+        return urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
+
+    def test_hermes_success_tags_hermes_engine(self):
+        analyze.vp.call_model = lambda messages, brain=None, meta=None: self._good_json()
+        r = analyze.analyze_read("https://acme.com", "copy")
+        self.assertFalse(r.get("degraded"))
+        self.assertEqual(r["engine"], "nous-hermes-3-405b")
+
+    def test_429_then_success_retries_same_brain_no_fallback(self):
+        calls = {"n": 0}
+
+        def call(messages, brain=None, meta=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise self._http_429()
+            self.assertEqual(brain, "hermes")  # retried the SAME brain, not Ultra
+            return self._good_json()
+
+        analyze.vp.call_model = call
+        r = analyze.analyze_read("https://acme.com", "copy")
+        self.assertEqual(r["engine"], "nous-hermes-3-405b")  # Hermes still produced it
+        self.assertEqual(len(self._slept), 1)  # backed off once
+
+    def test_hermes_exhausted_falls_to_ultra(self):
+        seen = []
+
+        def call(messages, brain=None, meta=None):
+            seen.append(brain)
+            if brain == "hermes":
+                raise self._http_429()  # never recovers within backoff budget
+            return self._good_json()    # Ultra succeeds
+
+        analyze.vp.call_model = call
+        r = analyze.analyze_read("https://acme.com", "copy")
+        self.assertFalse(r.get("degraded"))
+        self.assertEqual(r["engine"], "nemotron-ultra-fallback")
+        self.assertIn("ultra-paid", seen)  # the fallback brain was actually called
+
+    def test_both_fail_falls_to_minimal_tagged(self):
+        analyze.vp.call_model = lambda messages, brain=None, meta=None: "I cannot help."
+        r = analyze.analyze_read("https://acme.com", "copy")
+        self.assertTrue(r["degraded"])
+        self.assertEqual(r["engine"], "minimal")
+
+    def test_minimal_read_is_tagged_minimal(self):
+        r = analyze.minimal_read("https://acme.com", "copy")
+        self.assertEqual(r["engine"], "minimal")
+
+
 class AnalyzerPromptDoc(unittest.TestCase):
     def test_doc_exists_and_lists_all_dimensions(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

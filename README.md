@@ -4,7 +4,8 @@
 
 Give Filmo a product **URL + a goal**. It reads your real product, diagnoses how the page fails to convert, then plans, prices, pays, and produces a finished **1080p launch video** — autonomously, end to end.
 
-[![NVIDIA Nemotron](https://img.shields.io/badge/Brain-NVIDIA%20Nemotron-76B900?logo=nvidia&logoColor=white)](https://build.nvidia.com)
+[![NVIDIA Nemotron](https://img.shields.io/badge/Planner-NVIDIA%20Nemotron-76B900?logo=nvidia&logoColor=white)](https://build.nvidia.com)
+[![Nous Hermes](https://img.shields.io/badge/Conversion%20Read-Nous%20Hermes%203%20405B-7C3AED)](https://nousresearch.com)
 [![Stripe](https://img.shields.io/badge/Payments-Stripe-635BFF?logo=stripe&logoColor=white)](https://stripe.com)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![Remotion](https://img.shields.io/badge/Video-Remotion-0B84F3?logo=remotion&logoColor=white)](https://remotion.dev)
@@ -41,7 +42,7 @@ You give Filmo a URL and a goal. From there the agent runs a seven-stage pipelin
 
 ```mermaid
 flowchart LR
-    A[URL + Goal] --> B[ANALYZE<br/>Conversion Read]
+    A[URL + Goal] --> B[ANALYZE<br/>Conversion Read · Nous Hermes]
     B --> C[PLAN<br/>Nemotron planner]
     C --> D[PRICE<br/>cost-plus]
     D --> E[PAY<br/>Stripe test mode]
@@ -52,7 +53,7 @@ flowchart LR
     E -. self-declines<br/>over-budget spend .-> E1[Stripe Issuing<br/>no human]
 ```
 
-- **ANALYZE — the Conversion Read.** Filmo reads the page copy and asks Nemotron to score it across **six dimensions**: promise, outcome, proof, show, specificity, and CTA. The result (`conversion_read.json`) is the diagnosis — and it directly **seeds the plan**: the headline fix becomes the opening title, each weak dimension becomes a scene.
+- **ANALYZE — the Conversion Read.** Filmo reads the page copy and asks **Nous Hermes 3 405B** (the primary) to score it across **six dimensions**: promise, outcome, proof, show, specificity, and CTA. The result (`conversion_read.json`) is the diagnosis — and it directly **seeds the plan**: the headline fix becomes the opening title, each weak dimension becomes a scene. The free Hermes tier is occasionally rate-limited, so the Read is made **reliable** with a tiered fallback: short 429 backoff+retry on Hermes, then **Nemotron Ultra as a reliability fallback**, then a deterministic minimal read as the floor. Each Read records which model produced it (`engine`: `nous-hermes-3-405b` / `nous-hermes-4-405b` / `nemotron-ultra-fallback` / `minimal`) so the dashboard never claims Hermes ran when the fallback did.
 - **PLAN.** The Nemotron planner turns the goal plus the diagnosis into a **strict scene-plan JSON**. One planner owns the whole storyboard, so the cut is coherent rather than stitched from disconnected sub-agents.
 - **PRICE.** Cost-plus pricing from the plan's projected cost.
 - **PAY.** Stripe (test mode). When a run would exceed budget, **the agent declines its own spend** via Stripe Issuing — no human approves or blocks it (see below).
@@ -66,13 +67,13 @@ flowchart LR
 Filmo is built squarely on the hackathon's three sponsors.
 
 ### NVIDIA Nemotron
-Nemotron is the brain. It performs the **Conversion Read** (scoring the page), writes the **scene plan**, and drives the agent's reasoning — served via OpenRouter across three tiers (`super-free` 120B as default, `ultra-paid` 550B, `super-paid`). Capture runs in the **NemoClaw / OpenShell sandbox**, letting the agent safely screenshot **any URL** (proven on nvidia.com, python.org, notion.com).
+Nemotron is the **storyboard planner** — it writes the **scene plan** and drives the agent's build reasoning, served via OpenRouter across three tiers (`super-free` 120B as default, `ultra-paid` 550B, `super-paid`). Capture runs in the **NemoClaw / OpenShell sandbox**, letting the agent safely screenshot **any URL** (proven on nvidia.com, python.org, notion.com).
 
 ### Stripe
 Stripe handles autonomous pricing and payment in test mode. The signature moment: when a planned run goes over budget, the agent's card **declines its own purchase** through **Stripe Issuing** — a real authorization decline, decided and enforced without a human in the loop. Spend governance is part of the agent, not a manual gate.
 
 ### Nous / Hermes
-The whole system is framed as a single autonomous agent: it perceives (reads the product), decides (diagnoses and plans), acts (pays and produces), and delivers — the Hermes agent thesis, applied to a job people actually pay for.
+**Nous Hermes 3 405B runs the Conversion Read** — the page diagnosis that scores all six dimensions and produces `conversion_read.json`, served via OpenRouter (`hermes`, $0 free tier; `hermes-405b` Hermes 4 available as a paid upgrade). Hermes is the honest **primary**; because the free tier is intermittently rate-limited (HTTP 429), the Read backs off and retries Hermes, then falls back to **Nemotron Ultra** for reliability (tagged `nemotron-ultra-fallback` so we never misattribute it to Hermes), then to a deterministic minimal read as the floor. And the whole system is framed as a single autonomous agent: it perceives (reads the product), decides (diagnoses and plans), acts (pays and produces), and delivers — the Hermes agent thesis, applied to a job people actually pay for.
 
 ---
 
@@ -104,7 +105,7 @@ flowchart TD
     end
 
     subgraph Agent
-        BR[brain.py<br/>Nemotron via OpenRouter<br/>3 tiers]
+        BR[brain.py<br/>Nemotron planner + Nous Hermes read<br/>via OpenRouter]
         NC[NemoClaw / OpenShell<br/>in-sandbox capture]
         RM[Remotion<br/>studio/ titles + motion graphics]
         ST[Stripe<br/>pricing + Issuing decline]
@@ -130,7 +131,8 @@ flowchart TD
 
 | Layer | Technology |
 | --- | --- |
-| Brain / reasoning | NVIDIA Nemotron (via OpenRouter) — `super-free` 120B default, `ultra-paid` 550B |
+| Storyboard planner | NVIDIA Nemotron (via OpenRouter) — `super-free` 120B default, `ultra-paid` 550B |
+| Conversion Read (page diagnosis) | Nous Hermes 3 405B primary (via OpenRouter, `hermes` free tier; `hermes-405b` Hermes 4 paid upgrade), with Nemotron Ultra as reliability fallback (`engine` field records which ran) |
 | Frontend | Next.js (Vercel), Google sign-in via InsForge OAuth |
 | Async worker | Railway (Docker) polling InsForge |
 | Backend / data | InsForge (Postgres tables + `walk-videos` storage bucket) |
@@ -152,7 +154,7 @@ flowchart TD
 ### Environment keys
 Secrets are **not** stored in the repo. They live in:
 - `~/.hermes/.env` — `STRIPE_SECRET_KEY` (Stripe sandbox, Issuing enabled), `INSFORGE_URL`, `INSFORGE_API_KEY`
-- `~/.zshrc` — `OPENROUTER_API_KEY` (Nemotron); run `source ~/.zshrc` before any command that needs it
+- `~/.zshrc` — `OPENROUTER_API_KEY` (routes both the Nemotron planner and the Nous Hermes Conversion Read); run `source ~/.zshrc` before any command that needs it
 
 (Values are never printed here. Verify presence by length, not value.)
 

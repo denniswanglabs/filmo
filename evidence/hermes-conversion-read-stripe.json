@@ -1,0 +1,68 @@
+{
+  "url": "https://stripe.com/",
+  "verdict": "Strong foundation but needs sharper outcome focus and demo-driven proof",
+  "dimensions": [
+    {
+      "key": "promise",
+      "score": 4,
+      "finding": "Clear value proposition but could be more specific about target audience",
+      "evidence": "Financial infrastructure to grow your revenue. Accept payments, offer financial services, and implement custom revenue models",
+      "fix": "Add 'for businesses of all sizes' to headline to immediately define audience"
+    },
+    {
+      "key": "outcome",
+      "score": 3,
+      "finding": "Focuses on features over customer outcomes",
+      "evidence": "Accept payments, offer financial services, and implement custom revenue models",
+      "fix": "Reframe features as outcomes: 'Increase global sales by accepting 135+ payment methods'"
+    },
+    {
+      "key": "proof",
+      "score": 4,
+      "finding": "Strong social proof with logos and metrics, but lacks visual demonstration",
+      "evidence": "50% of Fortune 100 companies have used Stripe; $1.9T in payments volume processed",
+      "fix": "Add short demo videos showing Stripe in action for different business types"
+    },
+    {
+      "key": "show",
+      "score": 2,
+      "finding": "Heavy on text, light on product demonstration",
+      "evidence": "Page relies primarily on text descriptions and statistics",
+      "fix": "Incorporate product screenshots and workflow animations to show how Stripe works"
+    },
+    {
+      "key": "specificity",
+      "score": 4,
+      "finding": "Uses some concrete numbers but could be more specific about benefits",
+      "evidence": "135+ currencies and payment methods supported; 99.999% historical uptime",
+      "fix": "Quantify benefits: 'Reduce payment processing time by 50%' instead of 'optimize payments'"
+    },
+    {
+      "key": "cta",
+      "score": 4,
+      "finding": "Clear primary CTA but secondary options create distraction",
+      "evidence": "Start now; Contact sales; Get started; Sign up with Google",
+      "fix": "Consolidate to one primary CTA: 'Start growing your revenue with Stripe'"
+    }
+  ],
+  "priority_fixes": [
+    {
+      "rank": 1,
+      "fix": "Add product demo videos showing Stripe in action for different business scenarios",
+      "maps_to": "Show me how it works"
+    },
+    {
+      "rank": 2,
+      "fix": "Reframe feature descriptions as specific customer outcomes with quantifiable benefits",
+      "maps_to": "What's in it for me?"
+    },
+    {
+      "rank": 3,
+      "fix": "Streamline CTAs to focus on single primary action: starting with Stripe",
+      "maps_to": "Make it easy to begin"
+    }
+  ],
+  "headline_fix": "Grow your business globally with Stripe's all-in-one financial infrastructure",
+  "degraded": false,
+  "engine": "nous-hermes-4-405b"
+}
