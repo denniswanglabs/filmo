@@ -31,7 +31,9 @@ const STEPS: readonly Step[] = [
 
 export default function HowItWorks() {
   return (
-    <section id="how" className="bg-[#0b0c0e] px-5 py-20 sm:py-24">
+    <section id="how" className="panel panel--dark px-5 py-20 sm:py-24">
+      {/* Blue glass top edge — our signature on the rounded panel lip. */}
+      <span aria-hidden="true" className="panel__edge" />
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">

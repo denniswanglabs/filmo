@@ -16,7 +16,7 @@ import LuceoShowcase from './components/landing/LuceoShowcase'
 import ParallaxColumns from './components/landing/ParallaxColumns'
 import ClosingCTA from './components/landing/ClosingCTA'
 import SiteFooter from './components/landing/SiteFooter'
-import { ParallaxWindows } from './components/landing/Motion'
+import { ParallaxWindows, ScrubbedHero } from './components/landing/Motion'
 import { BRAINS, type Run } from '../lib/types'
 
 // Composer state stashed across the Google OAuth round-trip so the prompt survives
@@ -174,25 +174,30 @@ export default function Home() {
             (z-0, pointer-events none), never covers the headline or form. */}
         <ParallaxWindows />
         <main className="relative z-10 mx-auto max-w-3xl px-5 pb-20 pt-28 sm:pt-36">
-          {/* Hero */}
-          <div className="mb-8 text-center">
-            <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
-              Your Product Launch AI Agent
-            </span>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight text-[#F2F4F7] sm:text-5xl">
-              Launch your product with a video that sells it.
-            </h1>
-            <p className="mx-auto mt-4 max-w-xl text-lg text-slate-400">
-              Paste your URL. Filmo reads your real product, diagnoses how it converts, and
-              ships a finished launch video — planned, priced, and produced on autopilot.
-            </p>
-          </div>
+          {/* Scroll-scrubbed pinned hero: the headline + REAL composer scrub in
+              (scale/lift) and settle, pinned across the first viewport. The form
+              stays fully functional — ScrubbedHero only wraps it in a transform.
+              Reduced motion / SSR: renders untransformed in normal flow. */}
+          <ScrubbedHero className="w-full">
+            {/* Hero */}
+            <div className="mb-8 text-center">
+              <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
+                Your Product Launch AI Agent
+              </span>
+              <h1 className="mt-4 text-4xl font-semibold tracking-tight text-[#F2F4F7] sm:text-5xl">
+                Launch your product with a video that sells it.
+              </h1>
+              <p className="mx-auto mt-4 max-w-xl text-lg text-slate-400">
+                Paste your URL. Filmo reads your real product, diagnoses how it converts, and
+                ships a finished launch video — planned, priced, and produced on autopilot.
+              </p>
+            </div>
 
-          {/* Composer card — dark glass */}
-          <form
-            onSubmit={onBuild}
-            className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)] ring-1 ring-inset ring-white/5 backdrop-blur-xl"
-          >
+            {/* Composer card — dark glass */}
+            <form
+              onSubmit={onBuild}
+              className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)] ring-1 ring-inset ring-white/5 backdrop-blur-xl"
+            >
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-slate-200">
                 What should the video show?
@@ -270,12 +275,13 @@ export default function Home() {
             >
               {building ? 'Starting build…' : 'Build'}
             </button>
-            {!user && !loading && (
-              <p className="mt-3 text-center text-xs text-slate-500">
-                You&rsquo;ll sign in with Google to start — your prompt is saved.
-              </p>
-            )}
-          </form>
+              {!user && !loading && (
+                <p className="mt-3 text-center text-xs text-slate-500">
+                  You&rsquo;ll sign in with Google to start — your prompt is saved.
+                </p>
+              )}
+            </form>
+          </ScrubbedHero>
 
           {/* Recents — only meaningful once signed in. */}
           {user && (

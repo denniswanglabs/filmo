@@ -167,8 +167,19 @@ export default function ParallaxColumns() {
   const colB = columnFilms(1)
   const colC = columnFilms(2)
 
+  // Pinned-CTA action: smooth-scroll to the full Luceo examples section (#examples).
+  function jumpToExamples() {
+    if (typeof document === 'undefined') return
+    document.getElementById('examples')?.scrollIntoView({ behavior: 'smooth' })
+  }
+
   return (
-    <section ref={ref} className="relative overflow-hidden px-5 py-24 sm:py-28">
+    <section
+      ref={ref}
+      className="panel panel--dark relative px-5 py-24 sm:py-28"
+    >
+      {/* Blue glass top edge — our signature on the rounded panel lip. */}
+      <span aria-hidden="true" className="panel__edge" />
       {/* Header */}
       <Reveal className="relative z-10 mx-auto mb-14 max-w-xl text-center">
         <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">
@@ -182,32 +193,56 @@ export default function ParallaxColumns() {
         </p>
       </Reveal>
 
-      {/* Drifting columns. Fade-masked top & bottom so they bleed into the stage. */}
-      <div
-        aria-hidden={!enabled ? undefined : undefined}
-        className="mask-fade-y relative mx-auto grid max-h-[78vh] max-w-5xl grid-cols-2 gap-5 overflow-hidden lg:grid-cols-3"
-      >
-        {enabled ? (
-          <>
-            <DriftColumn films={colA} y={yA} />
-            <DriftColumn films={colB} y={yB} />
-            <DriftColumn films={colC} y={yC} className="hidden lg:flex" />
-          </>
-        ) : (
-          // Reduced motion / SSR: a calm static grid of the four films, no drift.
-          <>
-            <DriftColumn films={FILMS.slice(0, 2)} y={0} />
-            <DriftColumn films={FILMS.slice(2, 4)} y={0} />
-            <DriftColumn films={[FILMS[0], FILMS[3]]} y={0} className="hidden lg:flex" />
-          </>
-        )}
-      </div>
+      {/* Stage: the columns clip themselves (inner overflow-hidden); the CTA is a
+          sticky-centered sibling that PINS to the viewport center while the
+          columns drift past it (Hera's centered "Browse templates" affordance,
+          in our copy). The section root is NOT overflow-hidden so sticky works. */}
+      <div className="relative mx-auto max-w-5xl">
+        {/* Drifting columns. Fade-masked top & bottom so they bleed into the stage. */}
+        <div className="mask-fade-y relative grid max-h-[78vh] grid-cols-2 gap-5 overflow-hidden lg:grid-cols-3">
+          {enabled ? (
+            <>
+              <DriftColumn films={colA} y={yA} />
+              <DriftColumn films={colB} y={yB} />
+              <DriftColumn films={colC} y={yC} className="hidden lg:flex" />
+            </>
+          ) : (
+            // Reduced motion / SSR: a calm static grid of the four films, no drift.
+            <>
+              <DriftColumn films={FILMS.slice(0, 2)} y={0} />
+              <DriftColumn films={FILMS.slice(2, 4)} y={0} />
+              <DriftColumn films={[FILMS[0], FILMS[3]]} y={0} className="hidden lg:flex" />
+            </>
+          )}
+        </div>
 
-      {/* Centered overlay pill — Hera's "Browse templates" affordance, in our copy. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-16 z-10 flex justify-center">
-        <span className="pointer-events-auto rounded-full border border-white/12 bg-[#0b0c0e]/70 px-5 py-2.5 text-sm font-medium text-slate-200 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.8)] backdrop-blur-xl">
-          Every cut, grounded in a real product
-        </span>
+        {/* Pinned center CTA. Lives in the stage so its sticky span is the column
+            scroll; pointer-events:none lets hover reach the cards behind it, and
+            the pill itself re-enables clicks. Smooth-scrolls to #examples. */}
+        <div className="pointer-events-none absolute inset-0 z-20 flex justify-center">
+          <div className="sticky top-1/2 -translate-y-1/2">
+            <button
+              type="button"
+              onClick={jumpToExamples}
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#0052FF]/40 bg-[#0b0c0e]/75 px-5 py-2.5 text-sm font-medium text-slate-100 shadow-[0_12px_40px_-16px_rgba(0,82,255,0.6)] backdrop-blur-xl transition hover:border-[#0052FF]/70 hover:bg-[#0b0c0e]/90"
+            >
+              See every example
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14" />
+                <path d="M13 6l6 6-6 6" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   )

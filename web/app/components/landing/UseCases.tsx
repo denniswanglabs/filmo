@@ -72,7 +72,9 @@ const USE_CASES: UseCase[] = [
 
 export default function UseCases() {
   return (
-    <section className="bg-[#0b0c0e] px-5 py-20 sm:py-24">
+    <section className="panel panel--lit px-5 py-20 sm:py-24">
+      {/* Blue glass top edge — our signature on the rounded panel lip. */}
+      <span aria-hidden="true" className="panel__edge" />
       <div className="mx-auto max-w-5xl">
         <Reveal className="mx-auto max-w-xl text-center">
           <span className="inline-block rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-xs font-medium text-[#6F9BFF]">

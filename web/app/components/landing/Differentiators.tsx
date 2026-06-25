@@ -93,7 +93,9 @@ const FEATURES: Feature[] = [
 
 export default function Differentiators() {
   return (
-    <section className="border-y border-white/5 bg-[#111316] px-5 py-20 sm:py-24">
+    <section className="panel panel--lit px-5 py-20 sm:py-24">
+      {/* Blue glass top edge — our signature on the rounded panel lip. */}
+      <span aria-hidden="true" className="panel__edge" />
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">

@@ -54,3 +54,79 @@ body {
     transparent 100%
   );
 }
+
+/* -------------------------------------------------------------------------
+   LAYERED SLIDING PANELS (Hera-inspired, Filmo's own character).
+   Each marketing section becomes a full-bleed, rounded-top panel that slides
+   up and OVERLAPS the one above it — so the whole page reads as a stack of
+   surfaces transforming past each other as you scroll. Our touch vs. Hera:
+   a Coinbase-blue glass top edge + a deliberate soft top shadow.
+
+   - `.panel` provides the rounded top, the upward overlap (negative margin),
+     and the top shadow that makes it visibly cover the previous panel.
+   - `.panel--dark` / `.panel--lit` alternate the surface (charcoal ↔ lighter).
+   - `.panel__edge` is the blue glass highlight line riding the rounded top.
+   The overlap (margin/padding) is layout — it's static and identical on the
+   server and client, so it works with and without JS / reduced motion.
+   ------------------------------------------------------------------------- */
+.panel {
+  position: relative;
+  border-top-left-radius: 28px;
+  border-top-right-radius: 28px;
+  /* Pull each panel up over the previous one so the rounded top covers it. */
+  margin-top: -28px;
+  /* Push content down past the overlap so nothing hides under the prior panel. */
+  padding-top: 28px;
+  /* Soft shadow on the top edge sells the "covering" depth. */
+  box-shadow: 0 -24px 60px -28px rgba(0, 0, 0, 0.7);
+  isolation: isolate;
+}
+
+/* Darker stage surface. */
+.panel--dark {
+  background: #0b0c0e;
+}
+
+/* Lighter "panel" surface — the alternating step that makes the stack read. */
+.panel--lit {
+  background: #15171b;
+}
+
+/* Coinbase-blue glass top edge — our signature on the rounded lip. */
+.panel__edge {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  border-top-left-radius: 28px;
+  border-top-right-radius: 28px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(0, 82, 255, 0.55) 28%,
+    rgba(120, 160, 255, 0.7) 50%,
+    rgba(0, 82, 255, 0.55) 72%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* The hero scrub stage needs height to scroll through while the card pins. */
+.hero-scrub-stage {
+  /* Extra scroll length below the pinned hero so the scrub has runway. */
+  height: 160vh;
+}
+
+@media (max-width: 640px) {
+  /* On small screens the scrub runway is gentler so the page isn't too long. */
+  .hero-scrub-stage {
+    height: 120vh;
+  }
+}
+
+/* Reduced motion: no pin runway, panels still stack (pure layout, no transforms). */
+@media (prefers-reduced-motion: reduce) {
+  .hero-scrub-stage {
+    height: auto;
+  }
+}

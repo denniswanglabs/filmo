@@ -71,7 +71,9 @@ const ITEMS: StackItem[] = [
 
 export default function TrustBar() {
   return (
-    <section className="border-b border-white/5 bg-[#111316] px-5 py-12 sm:py-14">
+    <section className="panel panel--lit px-5 py-12 sm:py-14">
+      {/* Blue glass top edge — first panel to slide over the hero stage. */}
+      <span aria-hidden="true" className="panel__edge" />
       <Reveal className="mx-auto flex max-w-5xl flex-col items-center gap-7 text-center lg:flex-row lg:justify-between lg:text-left">
         <p className="max-w-xs text-sm font-medium text-slate-400">
           Grounded in your real product — and built on a serious stack

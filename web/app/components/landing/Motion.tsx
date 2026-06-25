@@ -15,6 +15,7 @@ import {
   motion,
   useReducedMotion,
   useScroll,
+  useSpring,
   useTransform,
   type MotionValue,
 } from 'framer-motion'
@@ -333,6 +334,144 @@ function FloatingWindow({
     >
       <WindowCard variant={variant} />
     </motion.div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SlidingPanel — a full-bleed, rounded-top surface that slides up and OVERLAPS
+// the section above it as it enters the viewport (Hera's stacking transform,
+// Filmo's character). The overlap itself is pure CSS layout (`.panel`, set by
+// the caller); this component adds the *motion*: the panel lifts a few px and
+// fades in as it crosses into view, so the cover reads as a deliberate slide.
+// Transform/opacity only. Reduced motion / SSR render the rest state (already
+// stacked via CSS) with no transforms.
+// ---------------------------------------------------------------------------
+interface SlidingPanelProps {
+  children: ReactNode
+  /** classes for the <section> (surface + .panel + spacing). */
+  className?: string
+  /** anchor id passed through to the section. */
+  id?: string
+  /** how far (px) the panel rises as it slides in. Default 40. */
+  lift?: number
+  /** show the blue glass top edge. Default true. */
+  edge?: boolean
+}
+
+export function SlidingPanel({
+  children,
+  className = '',
+  id,
+  lift = 40,
+  edge = true,
+}: SlidingPanelProps) {
+  const enabled = useMotionEnabled()
+  const ref = useRef<HTMLElement>(null)
+  // Track the panel's entrance: from just-below-the-fold until its top reaches
+  // the top of the viewport. We only use the entering half for the slide.
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'start start'],
+  })
+  const yRaw = useTransform(scrollYProgress, [0, 1], [lift, 0])
+  const opacityRaw = useTransform(scrollYProgress, [0, 0.6], [0.55, 1])
+  // Spring-smooth the slide so it settles (our easing, not a hard scrub).
+  const y = useSpring(yRaw, { stiffness: 120, damping: 26, mass: 0.4 })
+
+  if (!enabled) {
+    return (
+      <section ref={ref} id={id} className={className}>
+        {edge && <span aria-hidden="true" className="panel__edge" />}
+        {children}
+      </section>
+    )
+  }
+
+  return (
+    <motion.section
+      ref={ref}
+      id={id}
+      className={className}
+      style={{ y, opacity: opacityRaw, willChange: 'transform, opacity' }}
+    >
+      {edge && <span aria-hidden="true" className="panel__edge" />}
+      {children}
+    </motion.section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ScrubbedHero — scroll-scrubbed pinned hero. The child (the real composer
+// card + headline) is pinned via position:sticky inside a tall stage, and
+// scrubs in (scale + lift) then SETTLES as you scroll the first viewport.
+// The composer stays fully functional — this only wraps it in a transform.
+// Reduced motion / SSR: the stage collapses to auto height (CSS) and the child
+// renders untransformed in normal flow.
+//
+// Usage:
+//   <ScrubbedHero>
+//     <form>…the real composer…</form>
+//   </ScrubbedHero>
+// ---------------------------------------------------------------------------
+interface ScrubbedHeroProps {
+  children: ReactNode
+  /** classes for the sticky inner wrapper (where content centers). */
+  className?: string
+}
+
+export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
+  const enabled = useMotionEnabled()
+  const ref = useRef<HTMLDivElement>(null)
+  // Progress across the tall stage: 0 at entry, 1 when the stage is scrolled out.
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start start', 'end start'],
+  })
+  // Scrub IN over the first ~35% (scale up + rise + fade), then hold settled.
+  const scaleRaw = useTransform(scrollYProgress, [0, 0.35], [0.92, 1])
+  const yRaw = useTransform(scrollYProgress, [0, 0.35], [48, 0])
+  const opacityRaw = useTransform(scrollYProgress, [0, 0.12], [0.4, 1])
+  const scale = useSpring(scaleRaw, { stiffness: 140, damping: 28, mass: 0.4 })
+  const y = useSpring(yRaw, { stiffness: 140, damping: 28, mass: 0.4 })
+
+  if (!enabled) {
+    // No pin, no transform — content sits in normal flow.
+    return <div className={className}>{children}</div>
+  }
+
+  return (
+    <div ref={ref} className="hero-scrub-stage">
+      <div className="sticky top-0 flex min-h-screen items-center justify-center">
+        <motion.div
+          className={className}
+          style={{ scale, y, opacity: opacityRaw, willChange: 'transform, opacity' }}
+        >
+          {children}
+        </motion.div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PinnedCenter — pins a centered element (e.g. an "Examples" CTA) while the
+// surrounding content drifts past it. Pure position:sticky; no transforms, so
+// it works identically with reduced motion. Place it as a sibling overlay
+// inside a tall `relative` section; it sticks to the vertical center of the
+// viewport for the section's scroll span.
+// ---------------------------------------------------------------------------
+interface PinnedCenterProps {
+  children: ReactNode
+  className?: string
+}
+
+export function PinnedCenter({ children, className = '' }: PinnedCenterProps) {
+  return (
+    <div
+      className={`pointer-events-none sticky top-1/2 z-20 flex -translate-y-1/2 justify-center ${className}`}
+    >
+      {children}
+    </div>
   )
 }
 
