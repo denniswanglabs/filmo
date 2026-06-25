@@ -1835,6 +1835,473 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
     return manifest
 
 
+# ---------------------------------------------------------------------------
+# NemoClaw sandbox capture backend (CAPTURE_BACKEND=nemoclaw)
+#
+# The on-camera NVIDIA flourish: the site is captured by Playwright running
+# INSIDE the NemoClaw / OpenShell sandbox (Nemotron, NVIDIA), not on the host.
+# This is feature-flagged and ALWAYS falls back to native in-process capture on
+# ANY failure — the sandbox is a flourish, never a hard dependency. The exact
+# working exec invocations come from walk-studio-hosted/.handoff-nemoclaw.md
+# (proven capturing nvidia.com). See that file for the why behind each flag.
+#
+# Default CAPTURE_BACKEND=native is byte-identical to today's behaviour: none of
+# this code runs unless CAPTURE_BACKEND=="nemoclaw" is set explicitly.
+# ---------------------------------------------------------------------------
+
+# Sandbox carrying the playwright-cdn + demo-targets policies (handoff §"Use the").
+_NEMOCLAW_SANDBOX = os.environ.get("NEMOCLAW_SANDBOX", "walk-ultra")
+_NEMOCLAW_BIN = os.environ.get("NEMOCLAW_BIN", "nemoclaw")
+# Browser cache dir inside the sandbox (Playwright lands chromium-1223 here).
+_NEMOCLAW_BROWSERS_PATH = "/tmp/.cache/ms-playwright"
+_NEMOCLAW_CHROMIUM_DIR = _NEMOCLAW_BROWSERS_PATH + "/chromium-1223"
+# Sandbox viewport (matches the handoff's proven capture line). The native
+# backend uses a 1600x1000@2x retina shot; the sandbox path keeps a 1440x900
+# logical viewport (the handoff-verified geometry) but records the SAME
+# width/height contract so downstream framing is identical in shape.
+_NEMOCLAW_VW, _NEMOCLAW_VH = 1440, 900
+
+# Curated ubiquitous asset hosts allowlisted alongside the target so arbitrary
+# customer pages can pull their fonts/CDN assets and render. This is the whole
+# security story: we allow the target + these few asset CDNs, NOT open egress.
+_NEMOCLAW_ASSET_HOSTS = (
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "cdnjs.cloudflare.com",
+    "cdn.jsdelivr.net",
+    "unpkg.com",
+    "images.unsplash.com",
+)
+
+
+import re as _nc_re
+
+# nemoclaw status colorizes labels (e.g. "\x1b[2mPhase:\x1b[0m Ready"), so a
+# literal "Phase: Ready" substring never matches the raw bytes. Strip ANSI SGR
+# sequences before any text match on CLI output.
+_ANSI_RE = _nc_re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s or "")
+
+
+def _nemoclaw_exec(args: List[str], *, timeout: int) -> subprocess.CompletedProcess:
+    """Run a `nemoclaw <sandbox> ...` subcommand. Single mockable seam for all
+    sandbox I/O. `args` is the subcommand + its args (sandbox name is prepended).
+    Never raises on a non-zero exit — callers inspect returncode/stdout."""
+    cmd = [_NEMOCLAW_BIN, _NEMOCLAW_SANDBOX] + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          timeout=timeout, check=False)
+
+
+def _nemoclaw_exec_sh(one_line: str, *, timeout: int) -> subprocess.CompletedProcess:
+    """Run a shell pipeline inside the sandbox. NemoClaw `exec` execs argv
+    directly (no shell), so shell pipelines MUST be wrapped in `bash -lc`
+    (handoff's load-bearing correction). `one_line` must be a single line."""
+    return _nemoclaw_exec(
+        ["exec", "--timeout", str(timeout), "--", "bash", "-lc", one_line],
+        timeout=timeout + 30,
+    )
+
+
+def _host_apex(host: str) -> Optional[str]:
+    """Best-effort apex (last two labels) of a host, or None if host is an apex
+    already / a bare label. `app.notion.so` -> `notion.so`; `notion.so` -> None."""
+    if not host:
+        return None
+    labels = host.split(".")
+    if len(labels) <= 2:
+        return None
+    return ".".join(labels[-2:])
+
+
+def _nemoclaw_policy_yaml(host: str) -> str:
+    """Build a minimal policy-preset YAML allowing ONLY `host` (+ its apex +
+    a `*.apex` wildcard so subdomain assets resolve) plus the curated asset
+    CDNs. Each host is an `access: full` endpoint WITHOUT `tls: skip` — exactly
+    the shape the working `demo-targets` preset uses (the proxy TLS-terminates,
+    which is why the capture launches Chromium with `--ignore-certificate-errors`
+    + `ignore_https_errors=True`). The `tls: skip` raw-tunnel shape was rejected
+    by the live proxy as "Policy unchanged"; this shape loads as a new policy
+    version. This is NOT open egress: only the target + curated assets are listed.
+
+    Pure string builder so it is unit-testable without a sandbox."""
+    host = (host or "").strip().lower()
+    seen: List[str] = []
+
+    def _add(h: str) -> None:
+        h = (h or "").strip().lower()
+        if h and h not in seen:
+            seen.append(h)
+
+    _add(host)
+    apex = _host_apex(host)
+    if apex:
+        _add(apex)
+        _add("*." + apex)
+    for h in _NEMOCLAW_ASSET_HOSTS:
+        _add(h)
+
+    lines = [
+        "preset:",
+        "  name: demo-dynamic",
+        '  description: "Walk Studio per-job dynamic capture target + curated asset CDNs"',
+        "network_policies:",
+        "  demo_dynamic:",
+        "    name: demo_dynamic",
+        "    endpoints:",
+    ]
+    for h in seen:
+        lines.append('      - host: "%s"' % h)
+        lines.append("        port: 443")
+        lines.append("        access: full")
+    return "\n".join(lines) + "\n"
+
+
+def _nemoclaw_host_allowed(host: str, *, timeout: int = 60) -> bool:
+    """True if `host` (or its apex) is already reachable from the sandbox: a
+    cheap DNS/connect probe via curl. A reachable host needs no policy change.
+    Conservative: any probe failure returns False (we then add the policy)."""
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    # -I head request; --max-time bounds it. Exit 0 means the egress proxy let
+    # the CONNECT through (even a 4xx/5xx HTTP status is exit 0 for curl -I).
+    probe = ("curl -sS -o /dev/null --max-time 12 -I "
+             "'https://%s/' && echo NC_HOST_OK" % host.replace("'", ""))
+    try:
+        r = _nemoclaw_exec_sh(probe, timeout=timeout)
+    except Exception:
+        return False
+    return r.returncode == 0 and "NC_HOST_OK" in (r.stdout or "")
+
+
+def _nemoclaw_allow_host(host: str, *, timeout: int = 120) -> bool:
+    """Dynamic egress-allowlisting: ensure `host` is reachable from the sandbox.
+    If it is not already allowed, write a minimal policy preset (target + apex +
+    curated asset CDNs only) and apply it via `policy-add --from-file --yes`.
+
+    Returns True if the host ends up reachable (already-allowed OR newly added),
+    False on any failure. PRESERVES the security story — only the target +
+    curated assets are added, never open egress. The final return is gated on a
+    real curl reachability re-probe, so we ONLY claim success when the egress
+    CONNECT tunnel for `host` actually opens.
+
+    KNOWN LIMITATION (OpenShell 0.0.44 on the walk-ultra box): `policy-add`
+    registers the preset and bumps the policy version (visible in `status`), but
+    the LIVE egress proxy's CONNECT allowlist is provisioned at sandbox creation
+    from `demo-targets` and is NOT hot-reloaded by a runtime `policy-add` (even
+    `recover` does not reprogram it). Verified: after adding `www.notion.so` and
+    seeing "Policy version loaded", the CONNECT tunnel still 403s. So a customer
+    URL whose host is NOT already in `demo-targets` is correctly detected as
+    unreachable by the re-probe -> _nemoclaw_allow_host returns False -> preflight
+    falls back to native capture (which renders the full page fine). To make an
+    arbitrary host capturable INSIDE the sandbox today it must be baked into
+    `demo-targets` at provisioning, or the box upgraded to an OpenShell build
+    that hot-reloads egress. This code is the correct, forward-compatible API
+    call: on a hot-reloading build it Just Works; on this build it fails safe.
+
+    Exotic third-party asset hosts a page references (analytics, chat widgets,
+    video CDNs) are likewise not allowlisted and fail closed; the page still
+    renders from its own host + the curated CDNs."""
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    if _nemoclaw_host_allowed(host):
+        return True
+    yaml_doc = _nemoclaw_policy_yaml(host)
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=".yaml", prefix="nemoclaw-policy-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(yaml_doc)
+        try:
+            r = _nemoclaw_exec(["policy-add", "--from-file", path, "--yes"],
+                               timeout=timeout)
+        except Exception as e:
+            sys.stderr.write("[capture/nemoclaw] policy-add raised: %s\n" % e)
+            return False
+        if r.returncode != 0:
+            sys.stderr.write(
+                "[capture/nemoclaw] policy-add failed (rc=%s): %s\n"
+                % (r.returncode, (r.stderr or r.stdout or "")[-400:]))
+            return False
+        # Re-probe so we only claim success when egress actually opened.
+        return _nemoclaw_host_allowed(host)
+    finally:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
+def _nemoclaw_install_chromium() -> bool:
+    """One-time (per sandbox lifetime) Chromium install per the handoff steps
+    1-2: venv Playwright, then Playwright 1.60.0 via npm into the policy-
+    allowlisted /sandbox/explainer-agent, then `playwright install chromium`.
+    Returns True if chromium-1223 exists afterwards."""
+    sys.stderr.write("[capture/nemoclaw] installing Playwright + Chromium "
+                     "in sandbox (one-time)...\n")
+    steps = [
+        ("python3 -m venv /sandbox/.venv; /sandbox/.venv/bin/pip install "
+         "--quiet --upgrade pip; /sandbox/.venv/bin/pip install playwright", 300),
+        ("cd /sandbox/explainer-agent && npm install --no-save "
+         "playwright@1.60.0 playwright-core@1.60.0", 300),
+        ("cd /sandbox/explainer-agent && ./node_modules/.bin/playwright "
+         "install chromium", 560),
+    ]
+    for one_line, t in steps:
+        try:
+            r = _nemoclaw_exec_sh(one_line, timeout=t)
+        except Exception as e:
+            sys.stderr.write("[capture/nemoclaw] install step raised: %s\n" % e)
+            return False
+        if r.returncode != 0:
+            sys.stderr.write(
+                "[capture/nemoclaw] install step failed (rc=%s): %s\n"
+                % (r.returncode, (r.stderr or r.stdout or "")[-400:]))
+            return False
+    return _nemoclaw_chromium_ready()
+
+
+def _nemoclaw_chromium_ready(*, timeout: int = 60) -> bool:
+    """Reachability one-shot: chromium-1223 present in the sandbox cache."""
+    try:
+        r = _nemoclaw_exec_sh("ls %s && echo NC_BROWSER_OK" % _NEMOCLAW_CHROMIUM_DIR,
+                              timeout=timeout)
+    except Exception:
+        return False
+    return r.returncode == 0 and "NC_BROWSER_OK" in (r.stdout or "")
+
+
+def _nemoclaw_preflight(host: str) -> bool:
+    """Preflight per the handoff: recover (idempotent) -> status healthy + Phase:
+    Ready -> chromium present (install once if missing) -> dynamic-allowlist the
+    target host. Returns True only if every step passes. Any failure => False so
+    capture_url falls back to native."""
+    # 1. recover (idempotent; takes NO --timeout flag) — brings the gateway up
+    #    after a Docker restart. A non-zero exit here is non-fatal: a healthy
+    #    gateway makes recover a no-op that can still report odd status.
+    try:
+        _nemoclaw_exec(["recover"], timeout=180)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] recover raised: %s\n" % e)
+        # fall through — status is the real gate.
+    # 2. status: require gateway healthy AND Phase: Ready.
+    try:
+        st = _nemoclaw_exec(["status"], timeout=90)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] status raised: %s\n" % e)
+        return False
+    status_out = _strip_ansi((st.stdout or "") + (st.stderr or ""))
+    if "Phase: Ready" not in status_out:
+        sys.stderr.write(
+            "[capture/nemoclaw] sandbox not Ready (status rc=%s); "
+            "falling back to native.\n" % st.returncode)
+        return False
+    # 3. chromium reachability one-shot; install once if missing.
+    if not _nemoclaw_chromium_ready():
+        if not _nemoclaw_install_chromium():
+            sys.stderr.write(
+                "[capture/nemoclaw] Chromium unavailable and install failed; "
+                "falling back to native.\n")
+            return False
+    # 4. dynamic egress-allowlist the target host (TASK 2).
+    if not _nemoclaw_allow_host(host):
+        sys.stderr.write(
+            "[capture/nemoclaw] could not allowlist host %r; "
+            "falling back to native.\n" % host)
+        return False
+    return True
+
+
+# Sentinels the capture exec prints so we can parse status/title/body out of
+# stdout deterministically.
+_NC_OK = "CAPTURE_OK"
+_NC_BODY_BEGIN = "NC_BODY_BEGIN"
+_NC_BODY_END = "NC_BODY_END"
+
+
+def _nemoclaw_capture_python(url: str, shot_path: str) -> str:
+    """Build the single-line python -c body run inside the sandbox venv. Matches
+    the handoff's proven step-3 capture line (cert + netlink flags), and ALSO
+    base64-prints the page's inner_text('body') between sentinels so the
+    Conversion Read gets real page copy without a second navigation."""
+    # JSON-encode literals so quoting is safe inside the nested python source.
+    url_lit = json.dumps(url)
+    shot_lit = json.dumps(shot_path)
+    # A real multi-line python script (NOT semicolon-joined) so the try/except
+    # for body-text extraction is valid. _shquote wraps the whole thing for the
+    # outer `bash -lc`. Body text is base64'd between sentinels so it survives
+    # newlines/quotes through stdout.
+    lines = [
+        "import base64",
+        "from playwright.sync_api import sync_playwright",
+        "p = sync_playwright().start()",
+        "b = p.chromium.launch(args=['--ignore-certificate-errors', "
+        "'--enable-features=NetworkService,NetworkServiceInProcess'])",
+        "ctx = b.new_context(viewport={'width': %d, 'height': %d}, "
+        "ignore_https_errors=True)" % (_NEMOCLAW_VW, _NEMOCLAW_VH),
+        "pg = ctx.new_page()",
+        "r = pg.goto(%s, wait_until='domcontentloaded', timeout=60000)" % url_lit,
+        "print('STATUS', r.status if r else 'NONE', 'TITLE', repr(pg.title()))",
+        "pg.wait_for_timeout(3500)",
+        "pg.screenshot(path=%s, full_page=False)" % shot_lit,
+        "bt = ''",
+        "try:",
+        "    bt = pg.inner_text('body') or ''",
+        "except Exception:",
+        "    bt = ''",
+        "print('%s' + base64.b64encode(bt[:4000].encode('utf-8', 'replace'))"
+        ".decode() + '%s')" % (_NC_BODY_BEGIN, _NC_BODY_END),
+        "b.close()",
+        "p.stop()",
+        "print('%s')" % _NC_OK,
+    ]
+    return "\n".join(lines)
+
+
+def _nemoclaw_capture_command(url: str, shot_path: str) -> str:
+    """Build the NEWLINE-FREE single-line bash command run inside the sandbox.
+
+    NemoClaw's gRPC `exec` rejects any argv element containing a newline/CR. The
+    capture python source is naturally multi-line (a try/except for body text),
+    so we base64-encode it and run `python -c "import base64;exec(...)"` — the
+    b64 blob carries no newlines, so the whole `bash -lc` argument is one line.
+    PLAYWRIGHT_BROWSERS_PATH points the venv Playwright at the shared browser
+    cache (handoff step 3)."""
+    import base64 as _b64
+    src = _nemoclaw_capture_python(url, shot_path)
+    b64 = _b64.b64encode(src.encode("utf-8")).decode("ascii")
+    return (
+        "export PLAYWRIGHT_BROWSERS_PATH=%s; "
+        "/sandbox/.venv/bin/python -c "
+        "'import base64;exec(base64.b64decode(\"%s\").decode())'"
+        % (_NEMOCLAW_BROWSERS_PATH, b64)
+    )
+
+
+def _nemoclaw_pull_png(sandbox_path: str, dest_path: str, *, timeout: int = 90) -> bool:
+    """Base64-pull a PNG out of the sandbox to `dest_path` on the host (handoff
+    step 4 — the reliable path; no share mount). Returns True if a non-trivial
+    file lands on disk."""
+    try:
+        r = _nemoclaw_exec_sh("base64 %s" % json.dumps(sandbox_path), timeout=timeout)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] base64 pull raised: %s\n" % e)
+        return False
+    if r.returncode != 0 or not (r.stdout or "").strip():
+        sys.stderr.write(
+            "[capture/nemoclaw] base64 pull failed (rc=%s)\n" % r.returncode)
+        return False
+    import base64 as _b64
+    try:
+        raw = _b64.b64decode("".join((r.stdout or "").split()))
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] base64 decode failed: %s\n" % e)
+        return False
+    if len(raw) < 3000 or raw[:8] != b"\x89PNG\r\n\x1a\n":
+        sys.stderr.write("[capture/nemoclaw] pulled bytes are not a PNG "
+                         "(%d bytes)\n" % len(raw))
+        return False
+    with open(dest_path, "wb") as fh:
+        fh.write(raw)
+    return True
+
+
+def _capture_via_nemoclaw(url: str, out_dir: str,
+                          max_shots: int) -> Optional[Dict[str, Any]]:
+    """Capture `url` with Playwright running INSIDE the NemoClaw sandbox.
+
+    Returns a manifest dict with the SAME shape as _capture_inproc (so the
+    Conversion Read + render are identical), or None on ANY failure (caller then
+    falls back to native). Best-effort, never raises: the sandbox is the
+    on-camera flourish, not a hard dependency.
+
+    Captures the homepage only (max 1 shot). The native backend's multi-route /
+    scrolled-2nd-shot logic stays host-side; for the sandbox flourish a single
+    real hero shot + real body_text is the contract that matters downstream.
+    """
+    url = _norm_url(url)
+    os.makedirs(out_dir, exist_ok=True)
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return None
+
+    if not _nemoclaw_preflight(host):
+        return None
+
+    sandbox_png = "/tmp/cap-01.png"
+    one_line = _nemoclaw_capture_command(url, sandbox_png)
+    try:
+        r = _nemoclaw_exec_sh(one_line, timeout=180)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] capture exec raised: %s\n" % e)
+        return None
+    out = (r.stdout or "")
+    if _NC_OK not in out:
+        sys.stderr.write(
+            "[capture/nemoclaw] capture did not print CAPTURE_OK (rc=%s): %s\n"
+            % (r.returncode, (r.stderr or out or "")[-400:]))
+        return None
+
+    # Pull the PNG back to out_dir/shot-01.png and validate it.
+    shot_name = "shot-01.png"
+    shot_path = os.path.join(out_dir, shot_name)
+    if not _nemoclaw_pull_png(sandbox_png, shot_path):
+        return None
+    if _is_near_empty_png(shot_path):
+        sys.stderr.write("[capture/nemoclaw] pulled PNG is near-empty; "
+                         "falling back to native.\n")
+        try:
+            os.remove(shot_path)
+        except Exception:
+            pass
+        return None
+
+    # Parse STATUS/TITLE + the base64 body text out of stdout.
+    title = ""
+    for line in out.splitlines():
+        if line.startswith("STATUS ") and "TITLE " in line:
+            try:
+                title = eval(line.split("TITLE ", 1)[1].strip())  # repr() literal
+            except Exception:
+                title = ""
+            break
+    body_text = ""
+    if _NC_BODY_BEGIN in out and _NC_BODY_END in out:
+        try:
+            enc = out.split(_NC_BODY_BEGIN, 1)[1].split(_NC_BODY_END, 1)[0]
+            import base64 as _b64
+            body_text = _b64.b64decode(enc.strip().encode()).decode("utf-8", "replace")
+        except Exception:
+            body_text = ""
+
+    size = os.path.getsize(shot_path)
+    rec: Dict[str, Any] = {
+        "index": 1, "file": shot_name, "path": shot_path,
+        "url": url, "label": "home", "title": title or "",
+        "width": _NEMOCLAW_VW, "height": _NEMOCLAW_VH,
+        "bytes": size,
+        "backend": "nemoclaw",
+    }
+    _attach_read_text(rec, title=title, body_text=body_text)
+
+    manifest = {"url": url, "count": 1, "shots": [rec], "ok": True,
+                "backend": "nemoclaw"}
+    with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2)
+    return manifest
+
+
+def _shquote(s: str) -> str:
+    """Minimal single-quote shell quoting for embedding a python -c body inside
+    the outer `bash -lc '<one line>'` exec. Wraps in single quotes and escapes
+    embedded single quotes the POSIX way ('\\'')."""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
 def _attach_read_text(rec, title="", body_text=""):
     """Attach the read-pass fields (title already on rec; body_text capped at 4000)
     to a shot record. Pure + idempotent; used by the hero shot so read_pass.read_pass
@@ -1854,6 +2321,19 @@ def capture_url(url: str, out_dir: str, max_shots: int = 2) -> Dict[str, Any]:
     """
     url = _norm_url(url)
     os.makedirs(out_dir, exist_ok=True)
+
+    # CAPTURE_BACKEND switch (feature-flagged; default "native" is byte-identical
+    # to today's behaviour). Only when explicitly set to "nemoclaw" do we attempt
+    # the sandbox flourish; if the preflight or capture fails for ANY reason it
+    # returns None and we fall through to the unchanged native path. The sandbox
+    # is the on-camera NVIDIA flourish, NEVER a hard dependency.
+    if os.environ.get("CAPTURE_BACKEND") == "nemoclaw":
+        nc = _capture_via_nemoclaw(url, out_dir, max_shots)
+        if nc is not None:
+            return nc
+        sys.stderr.write(
+            "[capture] CAPTURE_BACKEND=nemoclaw preflight/capture failed; "
+            "falling back to native capture.\n")
 
     if _have_playwright():
         return _capture_inproc(url, out_dir, max_shots)
