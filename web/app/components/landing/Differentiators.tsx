@@ -98,13 +98,13 @@ export default function Differentiators() {
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
-            Why Walk Studio
+            Why Filmo
           </span>
           <h2 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
             Not another random-pixel generator.
           </h2>
           <p className="mx-auto mt-3 text-slate-500">
-            Most AI video tools hallucinate footage. Walk Studio is grounded in
+            Most AI video tools hallucinate footage. Filmo is grounded in
             your actual product — so the video is true, on-brand, and editable.
           </p>
         </Reveal>

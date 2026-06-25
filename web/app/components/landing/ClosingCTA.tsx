@@ -23,7 +23,7 @@ export default function ClosingCTA() {
             Paste your URL. Get the video that sells it.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-slate-500">
-            Walk Studio reads your product, plans the cut, prices the job, and ships a finished MP4.
+            Filmo reads your product, plans the cut, prices the job, and ships a finished MP4.
           </p>
           <button
             type="button"

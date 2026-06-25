@@ -3,8 +3,9 @@ import './globals.css'
 import { AuthProvider } from '../lib/auth'
 
 export const metadata: Metadata = {
-  title: 'Walk Studio',
-  description: 'URL in, finished brand video out. Plan, price, produce, ship — on autopilot.',
+  title: 'Filmo — Your Product Launch AI Agent',
+  description:
+    'Your product launch AI agent. Paste a URL — Filmo reads your product, plans the cut, prices the job, and ships a finished launch video.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

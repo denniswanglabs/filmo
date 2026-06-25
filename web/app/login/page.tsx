@@ -114,7 +114,7 @@ export default function LoginPage() {
                 </h1>
                 <p className="mt-1 text-sm text-slate-500">
                   {mode === 'signin'
-                    ? 'Welcome back to Walk Studio.'
+                    ? 'Welcome back to Filmo.'
                     : 'Start turning URLs into finished videos.'}
                 </p>
               </div>

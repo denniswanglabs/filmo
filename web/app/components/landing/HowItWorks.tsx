@@ -10,7 +10,7 @@ const STEPS: readonly Step[] = [
   {
     n: 1,
     title: 'Read your page',
-    body: 'Walk Studio opens your real product and runs a Conversion Read — scoring promise, proof, specificity, and CTA.',
+    body: 'Filmo opens your real product and runs a Conversion Read — scoring promise, proof, specificity, and CTA.',
   },
   {
     n: 2,
@@ -42,7 +42,7 @@ export default function HowItWorks() {
             From a link to a launch video.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-slate-500">
-            No brief, no timeline, no editor. Paste your URL and Walk Studio does the rest.
+            No brief, no timeline, no editor. Paste your URL and Filmo does the rest.
           </p>
         </Reveal>
 

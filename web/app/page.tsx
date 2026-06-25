@@ -156,13 +156,13 @@ export default function Home() {
         {/* Hero */}
         <div className="mb-8 text-center">
           <span className="inline-block rounded-full border border-amber/20 bg-amber/5 px-3 py-1 text-xs font-medium text-amber">
-            AI product launch video generator
+            Your Product Launch AI Agent
           </span>
           <h1 className="mt-4 text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
             Launch your product with a video that sells it.
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-lg text-slate-500">
-            Paste your URL. Walk Studio reads your real product, diagnoses how it converts, and
+            Paste your URL. Filmo reads your real product, diagnoses how it converts, and
             ships a finished launch video — planned, priced, and produced on autopilot.
           </p>
         </div>

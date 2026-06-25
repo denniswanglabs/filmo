@@ -146,7 +146,7 @@ export function AuthGate({
           Sign in to start your build
         </h2>
         <p className="mx-auto mt-1.5 max-w-[19rem] text-center text-sm text-slate-500">
-          Your prompt is ready. Sign in and Walk Studio picks up right where you left off.
+          Your prompt is ready. Sign in and Filmo picks up right where you left off.
         </p>
 
         {/* Google — the hero */}

@@ -121,7 +121,7 @@ export default function LuceoShowcase() {
             Built on Luceo Studio&rsquo;s launch films.
           </h2>
           <p className="mx-auto mt-3 text-slate-500">
-            Walk Studio takes its cues from the curated film library of Luceo Studio — a real
+            Filmo takes its cues from the curated film library of Luceo Studio — a real
             launch-film studio. Every generated cut inherits that craft: deliberate pacing, kinetic
             typography, and a studio&rsquo;s eye for making a product feel inevitable.
           </p>
