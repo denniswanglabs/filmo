@@ -242,7 +242,13 @@ def _brand_facts(url, run_dir):
         brand_path = _resolve_brand_theme(url, run_dir)
         with open(brand_path) as f:
             theme = json.load(f)
-        return _facts_from_theme(theme)
+        facts = _facts_from_theme(theme)
+        # Carry the palette + display font for the reading-stage activity events
+        # (additive — the planner facts block only reads wordmark/tagline/features).
+        pal = theme.get("palette") or {}
+        facts["palette"] = {k: pal[k] for k in ("accent", "navy", "bg", "text") if pal.get(k)}
+        facts["font"] = ((theme.get("fonts") or {}).get("fontPrimary") or "").split(",")[0].strip()
+        return facts
     except Exception:
         return {"wordmark": "", "tagline": "", "features": []}
 
@@ -456,10 +462,26 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         # while the cards correctly showed 3D printing / CNC / sheet metal). Empty
         # facts => no facts block => planning is unchanged (graceful).
         company_facts = _brand_facts(url, run_dir)
+        # Granular reading-stage activity — surface the SPECIFIC things the agent is
+        # learning so the long read/plan step never looks frozen.
+        _pal = company_facts.get("palette") or {}
+        if _pal:
+            led.event("info", "read the brand palette — %s"
+                      % ", ".join("%s %s" % (k, v) for k, v in _pal.items()))
+            led.write(led_path)
+        if company_facts.get("font"):
+            led.event("info", "matched the brand typeface: %s" % company_facts["font"])
+            led.write(led_path)
+        if company_facts.get("tagline"):
+            led.event("info", "understood the product — %s" % str(company_facts["tagline"])[:140])
+            led.write(led_path)
         if any(company_facts.get(k) for k in ("wordmark", "tagline", "features")):
-            led.event("info", "grounded planner in real brand facts: %s — %d features"
-                      % (company_facts.get("wordmark") or "(no wordmark)",
-                         len(company_facts.get("features") or [])))
+            _feats = company_facts.get("features") or []
+            _names = ", ".join(
+                str(f.get("label") or f.get("title") or f) if isinstance(f, dict) else str(f)
+                for f in _feats[:4])
+            led.event("info", "found %d real product features%s"
+                      % (len(_feats), (": " + _names) if _names else ""))
             led.write(led_path)
 
         # Thread QUALITY into the planner so the storyboard's SCENE TYPES match the
