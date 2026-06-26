@@ -42,17 +42,6 @@ export default function FloatingNav() {
     document.getElementById('hero-url')?.focus()
   }
 
-  function jumpToExamples() {
-    if (typeof document === 'undefined') return
-    const el = document.getElementById('examples')
-    if (!el) {
-      // Not on the landing — route home with the hash; the gallery lives there.
-      router.push('/#examples')
-      return
-    }
-    el.scrollIntoView({ behavior: 'smooth' })
-  }
-
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-3 sm:top-4">
       <nav
@@ -67,9 +56,9 @@ export default function FloatingNav() {
           <Wordmark tone="dark" inkClassName="text-[#0E1320]" />
         </Link>
 
-        {/* Center links — "How it works" routes to its own page; "Examples"
-            jumps to the landing's gallery (works from any page via /#examples).
-            Hidden on small screens. */}
+        {/* Center links — "How it works" routes to its own page. The "Examples"
+            tab was removed: the gallery still lives on the landing, visitors just
+            scroll to it. Hidden on small screens. */}
         <div className="hidden items-center gap-1 text-sm sm:flex">
           <button
             type="button"
@@ -77,13 +66,6 @@ export default function FloatingNav() {
             className="rounded-full px-3 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
           >
             How it works
-          </button>
-          <button
-            type="button"
-            onClick={jumpToExamples}
-            className="rounded-full px-3 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
-          >
-            Examples
           </button>
         </div>
 

@@ -17,9 +17,6 @@ export default function SiteFooter() {
             <Link href="/how-it-works" className="text-[#5A6472] transition hover:text-[#0E1320]">
               How it works
             </Link>
-            <Link href="/#examples" className="text-[#5A6472] transition hover:text-[#0E1320]">
-              Examples
-            </Link>
             <Link href="/login" className="text-[#5A6472] transition hover:text-[#0E1320]">
               Sign in
             </Link>

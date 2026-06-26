@@ -58,10 +58,11 @@ export default function HowItWorks({ showBadge = true }: { showBadge?: boolean }
           as="ol"
           className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4"
         >
-          {STEPS.map((step) => (
+          {STEPS.map((step, i) => (
             <RevealItem
               as="li"
               key={step.n}
+              index={i}
               className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:border-[#B9D2F8]"
             >
               <span className="grid h-9 w-9 place-items-center rounded-full bg-amber-soft text-sm font-semibold text-[#2563EB]">

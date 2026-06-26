@@ -239,12 +239,11 @@ export default function Examples() {
       {/* Blue glass top edge — our signature on the rounded panel lip. */}
       <span aria-hidden="true" className="panel__edge" />
       <div className="mx-auto max-w-5xl">
-        {/* Section header */}
+        {/* Section header — the redundant "Explore & remix" eyebrow pill (and the
+            nav "Examples" tab) were removed; the page now flows straight into the
+            gallery as you scroll. */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
-            Explore &amp; remix
-          </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
+          <h2 className="text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
             Explore what it&rsquo;s made.
           </h2>
           <p className="mx-auto mt-3 text-[#5A6472]">
@@ -260,8 +259,8 @@ export default function Examples() {
 
         {/* Uniform packed wall — equal-size tiles, flush (no gaps). */}
         <RevealGroup className="mt-8 grid grid-cols-2 gap-0 overflow-hidden rounded-3xl border border-[#D4E2FB] shadow-[0_30px_80px_-40px_rgba(30,58,120,0.32)] sm:grid-cols-3">
-          {CARDS.map((card) => (
-            <RevealItem key={card.slug} className="block">
+          {CARDS.map((card, i) => (
+            <RevealItem key={card.slug} index={i} className="block">
               <GalleryCard card={card} />
             </RevealItem>
           ))}

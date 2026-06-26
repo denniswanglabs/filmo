@@ -97,48 +97,22 @@ interface RevealGroupProps {
   as?: 'div' | 'ul' | 'ol' | 'section'
 }
 
-const groupVariants = (stagger: number, delayChildren: number) => ({
-  hidden: {},
-  show: {
-    transition: { staggerChildren: stagger, delayChildren },
-  },
-})
-
-const itemVariants = (y: number, duration: number) => ({
-  hidden: { opacity: 0, y },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: { duration, ease: EASE_OUT },
-  },
-})
-
+// RevealGroup is now a plain layout wrapper. Each RevealItem self-triggers its
+// own `whileInView` entrance (with an index-based stagger delay) rather than
+// relying on variant propagation from the group — which silently failed to reach
+// ol/li children, leaving steps blank. The group keeps its `stagger`/
+// `delayChildren` props for API compatibility, but the cascade is now driven by
+// each item's `index` prop.
 export function RevealGroup({
   children,
-  stagger = 0.08,
-  delayChildren = 0,
+  // stagger/delayChildren retained for back-compat; cascade is per-item now.
+  stagger: _stagger = 0.08,
+  delayChildren: _delayChildren = 0,
   className,
   as = 'div',
 }: RevealGroupProps) {
-  const enabled = useMotionEnabled()
-  const MotionTag = motion[as]
-
-  if (!enabled) {
-    const Tag = as
-    return <Tag className={className}>{children}</Tag>
-  }
-
-  return (
-    <MotionTag
-      className={className}
-      variants={groupVariants(stagger, delayChildren)}
-      initial="hidden"
-      whileInView="show"
-      viewport={{ once: true, margin: '-80px' }}
-    >
-      {children}
-    </MotionTag>
-  )
+  const Tag = as
+  return <Tag className={className}>{children}</Tag>
 }
 
 interface RevealItemProps {
@@ -147,6 +121,11 @@ interface RevealItemProps {
   duration?: number
   className?: string
   as?: 'div' | 'li' | 'figure'
+  /** stagger position — drives a per-item entrance delay so a group of items
+   *  cascades in. Defaults to 0 (no extra delay). */
+  index?: number
+  /** delay-per-index (s). Default 0.08, matching RevealGroup's stagger. */
+  stagger?: number
 }
 
 export function RevealItem({
@@ -155,6 +134,8 @@ export function RevealItem({
   duration = 0.5,
   className,
   as = 'div',
+  index = 0,
+  stagger = 0.08,
 }: RevealItemProps) {
   const enabled = useMotionEnabled()
   const MotionTag = motion[as]
@@ -164,10 +145,17 @@ export function RevealItem({
     return <Tag className={className}>{children}</Tag>
   }
 
+  // Self-contained entrance: each item owns its own `whileInView` so it always
+  // animates to the visible state, even when variant propagation from a parent
+  // RevealGroup doesn't reach it (e.g. ol/li groups). The `index`-based delay
+  // preserves the staggered cascade. `viewport.once` keeps it a one-shot reveal.
   return (
     <MotionTag
       className={className}
-      variants={itemVariants(y, duration)}
+      initial={{ opacity: 0, y }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-80px' }}
+      transition={{ duration, delay: index * stagger, ease: EASE_OUT }}
       style={{ willChange: 'transform, opacity' }}
     >
       {children}
