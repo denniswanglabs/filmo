@@ -280,13 +280,19 @@ export function ChatPanel({ brand, onSend, busy, renderSignal, onOpenAdvanced, d
         ) : null}
       </div>
 
-      {/* MESSAGE STREAM */}
+      {/* MESSAGE STREAM — an independent, fully-clipped scroll region. minHeight:0
+          lets it shrink inside the flex column so the input below always keeps its
+          space; overflow:hidden on the cross axis + position:relative keep its
+          content strictly inside this box (no bleed into the input region below). */}
       <div
         ref={scrollRef}
         style={{
           flex: 1,
           minHeight: 0,
+          position: "relative",
+          zIndex: 1,
           overflowY: "auto",
+          overflowX: "hidden",
           overscrollBehavior: "contain",
           padding: "16px 15px",
           display: "flex",
@@ -332,8 +338,22 @@ export function ChatPanel({ brand, onSend, busy, renderSignal, onOpenAdvanced, d
         ) : null}
       </div>
 
-      {/* INPUT */}
-      <div style={{ flex: "0 0 auto", padding: "12px 14px 14px", borderTop: "1px solid var(--line)" }}>
+      {/* INPUT — kept as a solid, self-contained region pinned to the bottom of
+          the rail. A SOLID background + an explicit z-index above the scrolling
+          message stream (and any sibling inspector content) guarantees nothing —
+          an overscrolling bubble, a slider thumb's overflow glow, an absolutely
+          positioned control — can ever render over the chat box. `position:
+          relative` establishes the stacking context the z-index needs. */}
+      <div
+        style={{
+          flex: "0 0 auto",
+          position: "relative",
+          zIndex: 3,
+          background: "var(--panel)",
+          padding: "12px 14px 14px",
+          borderTop: "1px solid var(--line)",
+        }}
+      >
         <div
           style={{
             display: "flex",

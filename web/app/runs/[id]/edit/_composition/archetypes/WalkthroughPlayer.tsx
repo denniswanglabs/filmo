@@ -67,10 +67,18 @@ import {
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
 
-// Resolve a public-relative logo path via staticFile; http/leading-slash pass
-// through. ABSENT theme.logoSrc => corner mark degrades to the wordmark.
-const resolveLogo = (path: string): string =>
-  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
+// Resolve a public-relative logo path. http/leading-slash pass through. When a
+// `resolve` (the Timeline assetBaseUrl seam) is passed, public-relative names
+// resolve against the hosted bucket so the EDITOR PREVIEW shows the real logo
+// (matches how the walkthrough clip itself already resolves via resolveSrc);
+// absent it falls back to staticFile (the studio render path). ABSENT
+// theme.logoSrc => corner mark degrades to the wordmark.
+const resolveLogo = (path: string, resolve?: (p: string) => string): string =>
+  path.startsWith("http") || path.startsWith("/")
+    ? path
+    : resolve
+      ? resolve(path)
+      : staticFile(path);
 
 // Parse a short numeric KPI out of a string for the counter-roll chip. Returns
 // the prefix (e.g. "$"), the numeric target, and the suffix (e.g. "+", "M", "%")
@@ -742,7 +750,7 @@ export const WalkthroughPlayer: React.FC<{
         >
           {logoSrc ? (
             <Img
-              src={resolveLogo(logoSrc)}
+              src={resolveLogo(logoSrc, resolveSrc)}
               style={{ height: "100%", width: "auto", objectFit: "contain", display: "block", opacity: 0.9 }}
             />
           ) : (

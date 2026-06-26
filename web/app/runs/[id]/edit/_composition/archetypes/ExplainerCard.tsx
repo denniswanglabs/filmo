@@ -18,18 +18,27 @@ import { ease, reveal, interpClamp, alphaHex, actNum, actLabel, splitToLines, st
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
 
-// Resolve a public-relative logo path via staticFile; http/leading-slash pass
-// through. ABSENT theme.logoSrc => corner mark degrades to the wordmark.
-const resolveLogo = (path: string): string =>
-  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
+// Resolve a public-relative logo path. http/leading-slash pass through. When a
+// `resolve` (the Timeline assetBaseUrl seam) is passed, public-relative names
+// resolve against the hosted bucket so the EDITOR PREVIEW shows the real logo
+// (matches how screenshots/VO/music/walkthrough already resolve); absent it
+// falls back to staticFile (the studio render path). ABSENT theme.logoSrc =>
+// corner mark degrades to the wordmark.
+const resolveLogo = (path: string, resolve?: (p: string) => string): string =>
+  path.startsWith("http") || path.startsWith("/")
+    ? path
+    : resolve
+      ? resolve(path)
+      : staticFile(path);
 
 // Persistent corner brand mark (spec §4) — bottom-right, low-key. Real logo
 // <Img> when present, else wordmark text; nothing when neither exists.
-const CornerMark: React.FC<{ theme: Theme; opacity: number; sceneId?: string }> = ({
-  theme,
-  opacity,
-  sceneId,
-}) => {
+const CornerMark: React.FC<{
+  theme: Theme;
+  opacity: number;
+  sceneId?: string;
+  resolveSrc?: (p: string) => string;
+}> = ({ theme, opacity, sceneId, resolveSrc }) => {
   const logoSrc = (theme.logoSrc ?? "").trim();
   const wordmark = (theme.wordmark ?? "").trim();
   if (!logoSrc && !wordmark) return null;
@@ -50,7 +59,7 @@ const CornerMark: React.FC<{ theme: Theme; opacity: number; sceneId?: string }> 
     >
       {logoSrc ? (
         <Img
-          src={resolveLogo(logoSrc)}
+          src={resolveLogo(logoSrc, resolveSrc)}
           style={{ height: "100%", width: "auto", objectFit: "contain", display: "block", opacity: 0.9 }}
         />
       ) : (
@@ -79,7 +88,10 @@ export const ExplainerCard: React.FC<{
   actIndex?: number;
   // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
   sceneId?: string;
-}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId }) => {
+  // OPTIONAL: the Timeline assetBaseUrl seam, so the brand logo resolves from the
+  // hosted bucket in the editor preview (absent in the studio render → staticFile).
+  resolveSrc?: (path: string) => string;
+}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId, resolveSrc }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -353,7 +365,7 @@ export const ExplainerCard: React.FC<{
         ) : null}
       </div>
 
-      <CornerMark theme={theme} opacity={ease(frame, kickerAt + 6, kickerAt + 22, 0, 0.65)} sceneId={sceneId} />
+      <CornerMark theme={theme} opacity={ease(frame, kickerAt + 6, kickerAt + 22, 0, 0.65)} sceneId={sceneId} resolveSrc={resolveSrc} />
     </AbsoluteFill>
   );
 };

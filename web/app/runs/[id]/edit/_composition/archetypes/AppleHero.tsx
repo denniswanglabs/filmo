@@ -31,10 +31,18 @@ import {
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
 
-// Resolve a public-relative logo path via staticFile; http/leading-slash pass
-// through. ABSENT theme.logoSrc => the lockup/corner mark degrades to wordmark.
-const resolveLogo = (path: string): string =>
-  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
+// Resolve a public-relative logo path. http/leading-slash pass through. When a
+// `resolve` (the Timeline assetBaseUrl seam) is passed, public-relative names
+// resolve against the hosted bucket so the EDITOR PREVIEW shows the real logo
+// (matches how screenshots/VO/music/walkthrough already resolve); absent it
+// falls back to staticFile (the studio render path). ABSENT theme.logoSrc =>
+// the lockup/corner mark degrades to wordmark.
+const resolveLogo = (path: string, resolve?: (p: string) => string): string =>
+  path.startsWith("http") || path.startsWith("/")
+    ? path
+    : resolve
+      ? resolve(path)
+      : staticFile(path);
 
 // Split a title around its punch word so the punch word can be accent-colored.
 const splitPunch = (title: string, punch?: string) => {
@@ -52,7 +60,10 @@ export const AppleHero: React.FC<{
   actIndex?: number;
   // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
   sceneId?: string;
-}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId }) => {
+  // OPTIONAL: the Timeline assetBaseUrl seam, so the brand logo resolves from the
+  // hosted bucket in the editor preview (absent in the studio render → staticFile).
+  resolveSrc?: (path: string) => string;
+}> = ({ data, cues, theme, durationInFrames, actIndex = -1, sceneId, resolveSrc }) => {
   const frame = useCurrentFrame();
 
   // OPTIONAL geometry overrides (data.geo). `data.geo?.KEY ?? LITERAL` so when geo
@@ -152,7 +163,7 @@ export const AppleHero: React.FC<{
             }}
           >
             <Img
-              src={resolveLogo((theme.logoSrc ?? "").trim())}
+              src={resolveLogo((theme.logoSrc ?? "").trim(), resolveSrc)}
               style={{ height: "100%", width: "auto", objectFit: "contain", display: "block" }}
             />
           </div>

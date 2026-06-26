@@ -119,19 +119,19 @@ const SceneBody: React.FC<{
   const dur = scene.out_frame - scene.in_frame;
   const cues = rebaseCues(scene.cues, scene.in_frame);
   if (scene.archetype === "card-ui") {
-    return <CardUi data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} />;
+    return <CardUi data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} resolveSrc={resolveAsset} />;
   }
   if (scene.archetype === "explainer-card") {
-    return <ExplainerCard data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} />;
+    return <ExplainerCard data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} resolveSrc={resolveAsset} />;
   }
   if (scene.archetype === "apple-hero") {
-    return <AppleHero data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} />;
+    return <AppleHero data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} resolveSrc={resolveAsset} />;
   }
   if (scene.archetype === "apple-registry") {
-    return <AppleRegistry data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} />;
+    return <AppleRegistry data={scene.data} cues={cues} theme={theme} durationInFrames={dur} actIndex={actIndex} sceneId={scene.id} resolveSrc={resolveAsset} />;
   }
   if (scene.archetype === "apple-statement") {
-    return <AppleStatement data={scene.data} cues={cues} theme={theme} durationInFrames={dur} sceneId={scene.id} />;
+    return <AppleStatement data={scene.data} cues={cues} theme={theme} durationInFrames={dur} sceneId={scene.id} resolveSrc={resolveAsset} />;
   }
   if (scene.archetype === "apple-screenshot") {
     return (

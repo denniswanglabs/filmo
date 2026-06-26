@@ -455,46 +455,21 @@ interface PinnedHeroProps {
 }
 
 export function PinnedHero({ title, body, className = '', decoration, id }: PinnedHeroProps) {
-  const enabled = useMotionEnabled()
-  const ref = useRef<HTMLElement>(null)
-  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] })
-  // Scroll-driven intro across a ~2-screen pin. The page is "captured": scrolling
-  // the first screen shrinks the big title to its settled size while the body
-  // (subtitle + composer) snaps in SOLID. From there every value is LOCKED
-  // (useTransform clamps at its output edges) — no fade, no shrink — so the hero
-  // stays solid through the held second screen and then scrolls off as one unit
-  // when the pin releases. The box never "diminishes".
-  const titleScale = useTransform(scrollYProgress, [0, 0.72], [2.0, 1])
-  const titleY = useTransform(scrollYProgress, [0, 0.72], ['20vh', '0vh'])
-  // Reveal spans MOST of the pin (continuous as you scroll, minimal dead hold).
-  // The body snaps in solid right as the title finishes settling, then is clamped
-  // at opacity 1 for the short held remainder so the box and title stay on screen
-  // TOGETHER and scroll off TOGETHER when the pin releases — the box never vanishes
-  // independently of the title.
-  const bodyOpacity = useTransform(scrollYProgress, [0.6, 0.72], [0, 1])
-
-  if (!enabled) {
-    return (
-      <section ref={ref} id={id} className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-32">
-        {decoration}
-        <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
-          {title}
-          {body}
-        </div>
-      </section>
-    )
-  }
-
+  // STATIC, normal-flow hero — intentionally NO scroll pin and NO scroll-tied
+  // opacity/scale. Earlier scroll-reveal versions coupled the composer box's
+  // opacity to scroll progress, which made the box FADE on scroll. That is gone:
+  // the title and the composer box are always fully solid and simply scroll off
+  // with the page like any section. The box never fades, ever. (The title still
+  // carries its own one-shot on-mount reveal via VerticalCutReveal in `title`.)
   return (
-    <section ref={ref} id={id} className="relative h-[150vh]">
-      <div className="surface-dots-dark sticky top-0 flex h-screen items-center overflow-hidden border-b border-[#D4E2FB]/60">
-        {decoration}
-        <div className={`relative z-10 mx-auto w-full px-5 text-center ${className}`}>
-          <motion.div style={{ scale: titleScale, y: titleY, transformOrigin: 'center center', willChange: 'transform' }}>
-            {title}
-          </motion.div>
-          <motion.div style={{ opacity: bodyOpacity, willChange: 'opacity' }}>{body}</motion.div>
-        </div>
+    <section
+      id={id}
+      className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-28 sm:pt-32"
+    >
+      {decoration}
+      <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
+        {title}
+        {body}
       </div>
     </section>
   )

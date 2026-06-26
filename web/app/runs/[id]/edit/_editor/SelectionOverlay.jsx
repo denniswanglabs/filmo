@@ -88,16 +88,35 @@ export function usePreviewSelection(stageRef, { onPick, onHover, onActivate, ena
     };
 
     // Double-click: enter inline-edit on a text element (App ignores non-text).
+    //
+    // ALWAYS swallow the dblclick's default action inside the preview. The live
+    // <Player> renders the composition as real DOM (brand logo <img>, a captured
+    // page-URL in the device chrome, selectable title text). A native double-click
+    // would (a) select text and (b) — crucially — let a follow-on image/text DRAG
+    // drop onto the document and NAVIGATE the browser to that asset/URL ("jumps to
+    // a different page"). We preventDefault + clear the selection so a double-click
+    // can ONLY ever open the inline editor and NEVER leak to a browser navigation.
     const handleDouble = (e) => {
-      const el = pickEl(e.target, stage);
-      if (!el) return;
       e.preventDefault();
       e.stopPropagation();
+      try {
+        window.getSelection?.()?.removeAllRanges();
+      } catch {}
+      const el = pickEl(e.target, stage);
+      if (!el) return; // empty canvas: nothing to edit, but nav is already blocked
       onActivateRef.current?.({
         sceneId: el.getAttribute("data-scene-id"),
         field: el.getAttribute("data-field"),
         el,
       });
+    };
+
+    // Belt-and-braces: kill drag-to-navigate inside the preview. Dragging a brand
+    // logo <img> (or a text run double-click selected) and dropping it on the page
+    // makes the browser navigate to the image src / selected URL. The editor never
+    // wants a drag here, so cancel it at the source.
+    const handleDragStart = (e) => {
+      if (stage.contains(e.target)) e.preventDefault();
     };
 
     const handleMove = (e) => {
@@ -118,11 +137,13 @@ export function usePreviewSelection(stageRef, { onPick, onHover, onActivate, ena
     stage.addEventListener("dblclick", handleDouble, true);
     stage.addEventListener("pointermove", handleMove, true);
     stage.addEventListener("pointerleave", handleLeave, true);
+    stage.addEventListener("dragstart", handleDragStart, true);
     return () => {
       stage.removeEventListener("click", handleClick, true);
       stage.removeEventListener("dblclick", handleDouble, true);
       stage.removeEventListener("pointermove", handleMove, true);
       stage.removeEventListener("pointerleave", handleLeave, true);
+      stage.removeEventListener("dragstart", handleDragStart, true);
     };
   }, [stageRef, enabled]);
 }

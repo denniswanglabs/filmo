@@ -156,6 +156,22 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     }
   }, []);
 
+  // Seek the Player from the timeline track (click / scrub-drag). The track passes
+  // a target frame; we clamp, pause, seek, and reflect it in `frame` so the playhead
+  // + PlayerControls + inline overlays all track the new position live.
+  const seekToFrame = useCallback(
+    (f) => {
+      const target = Math.max(0, Math.min(dur - 1, Math.round(f)));
+      const pl = playerRef.current;
+      if (pl) {
+        pl.pause();
+        pl.seekTo(target);
+      }
+      setFrame(target);
+    },
+    [dur]
+  );
+
   const beginInlineEdit = useCallback(({ sceneId, field }) => {
     const key = TEXT_KEY_FOR_FIELD[field];
     if (!key) return;
@@ -579,7 +595,7 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
                   frame {Math.round(frame)} / {dur}
                 </span>
               </div>
-              <TimelineTrack props={props} activeIdx={activeIdx} onSelect={selectScene} currentFrame={frame} total={dur} fps={fps} />
+              <TimelineTrack props={props} activeIdx={activeIdx} onSelect={selectScene} onSeek={seekToFrame} currentFrame={frame} total={dur} fps={fps} />
             </section>
           ) : null}
         </main>
