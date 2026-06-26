@@ -2295,11 +2295,15 @@ def _mine_stat_from_title(title):
     from the real filled title. Returns None for bare/small numbers (e.g. "10 minutes")."""
     if not title:
         return None
-    m = _TITLE_STAT_RE.search(title)
+    # Normalize honest word-forms so site numbers like "50-plus" / "92 percent" mine
+    # like their symbolic forms "50+" / "92%". The DIGITS stay verbatim — no invention.
+    norm = re.sub(r"(?<![A-Za-z0-9])(\d[\d,\.]*)\s*[- ]?\s*plus\b", r"\1+", title, flags=re.I)
+    norm = re.sub(r"(?<![A-Za-z0-9])(\d[\d,\.]*)\s+percent\b", r"\1%", norm, flags=re.I)
+    m = _TITLE_STAT_RE.search(norm)
     if not m:
         return None
     value = m.group(0).strip()
-    label = (title[:m.start()] + " " + title[m.end():])
+    label = (norm[:m.start()] + " " + norm[m.end():])
     label = re.sub(r"\s{2,}", " ", label).strip(" —-·,:").strip()
     # Keep the label a TIGHT phrase for a hero stat: cut at the first clause break
     # and cap at ~5 words ("The standard deal: for 7% with uncapped..." -> "The
