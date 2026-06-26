@@ -48,7 +48,11 @@ for s in (p.get("scenes") or []):
     s.pop("audio", None)
     d = s.get("data") or {}
     for k in list(d.keys()):
-        if any(x in k.lower() for x in ("imagesrc", "screenshot", "logo", "imgsrc")):
+        # Strip un-resolvable-locally asset PATHS (logoSrc/imageSrc/etc.) but NOT
+        # entityLogos — those are self-contained data URIs that render fine locally.
+        if k == "entityLogos":
+            continue
+        if any(x in k.lower() for x in ("imagesrc", "screenshot", "logosrc", "imgsrc", "videosrc")):
             d[k] = ""
 json.dump(p, open(props_path, "w"))
 

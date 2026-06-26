@@ -4002,6 +4002,22 @@ def run_pipeline(plan_path: str, brand_path: str, style_name: str, out_dir: str,
     # _stage_audio stages them into studio/public/. No-op when nothing was captured.
     wire_captured_assets(plan, out_dir)
     props = build_props(timeline, plan, brand, style_name)
+
+    # BUILD-TIME LOGO STAGING — split-mosaic / logo-wall cards show a grid of REAL
+    # company names (data.featureEntities). Fetch each entity's real brand mark and
+    # stage it as a self-contained data URI on data.entityLogos[i] (index-aligned)
+    # so the headless Remotion worker render needs ZERO render-time network. The
+    # finalized treatment + featureEntities exist only HERE, on props["scenes"]
+    # (build_props -> _shape_cards writes them), and props.json is written below, so
+    # this is the correct (and only) point that sees the final scenes before they
+    # persist. Best-effort: a fetch failure degrades each tile to "" (the name) and
+    # NEVER fails a render. Scenes without a logo treatment are untouched.
+    try:
+        import entity_logos
+        entity_logos.attach_entity_logos(props.get("scenes"))
+    except Exception as e:
+        print("[style_fill] entity logo staging skipped: %s" % e, file=sys.stderr)
+
     _stage_audio(props, out_dir)
     props_path = os.path.join(out_dir, "props.json")
     with open(props_path, "w", encoding="utf-8") as fh:

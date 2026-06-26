@@ -524,63 +524,71 @@ const TreatmentSplitMosaic: React.FC<{
 
       <div
         style={{
-          background: "#0B0F1A",
+          background: theme.bg,
           borderRadius: 24,
-          padding: 32,
+          padding: 28,
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr)",
           gap: 14,
           alignContent: "center",
           minHeight: 280,
+          border: `1px solid ${theme.border}`,
         }}
       >
         {entities.map((entity, i) => {
           const tileAt = gridAt + i * 10;
           const tileOpacity = ease(frame, tileAt, tileAt + 14, 0, 1);
           const tileY = ease(frame, tileAt, tileAt + 14, 12, 0);
-          const isPerson = looksLikePerson(entity);
+          const logo = (data.entityLogos ?? [])[i];
           return (
             <div
               key={`${i}-${entity}`}
               style={{
                 opacity: tileOpacity,
                 transform: `translateY(${tileY}px)`,
-                background: "#161B2E",
+                background: theme.bgCard,
                 borderRadius: 12,
-                border: "1px solid #1E2B45",
-                padding: "12px 10px",
+                border: `1px solid ${theme.border}`,
+                boxShadow: "0 2px 10px rgba(20,40,80,0.06)",
+                padding: "14px 10px",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 8,
-                minHeight: 72,
+                minHeight: 84,
               }}
             >
-              {isPerson ? (
+              {logo ? (
+                <Img
+                  src={logo}
+                  style={{ width: 42, height: 42, objectFit: "contain", borderRadius: 8 }}
+                />
+              ) : (
                 <div
                   style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: "50%",
-                    background: "#1E3A5F",
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: theme.accent,
+                    color: "#FFFFFF",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
+                    fontSize: 17,
+                    fontWeight: 800,
+                    fontFamily: theme.fontDisplay,
                     flexShrink: 0,
                   }}
                 >
-                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="8" r="4" stroke="#BFD8FF" strokeWidth="1.5" fill="none"/>
-                    <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="#BFD8FF" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
-                  </svg>
+                  {(entity || "?").trim().charAt(0).toUpperCase()}
                 </div>
-              ) : null}
+              )}
               <span
                 style={{
-                  fontSize: isPerson ? 13 : 14,
+                  fontSize: 13,
                   fontWeight: 600,
-                  color: "#CBD5E1",
+                  color: theme.text,
                   textAlign: "center",
                   lineHeight: 1.3,
                   letterSpacing: 0.2,
