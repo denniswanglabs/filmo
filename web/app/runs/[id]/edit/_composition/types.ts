@@ -75,7 +75,10 @@ export interface SceneData {
     | "icon-headline"
     | "big-number"
     | "logo-wall"
-    | "feature-list";
+    | "feature-list"
+    | "metric-row";
+  // metric-row: 3-4 small real stats shown as a horizontal strip.
+  metrics?: Array<{ value: string; label: string }>;
   // Curated icon name rendered as inline SVG inside the card tile.
   // Set: rocket, spark, shield, chart, users, bolt, globe, dollar, layers,
   //      sparkles, target, clock. Unknown / missing → falls back to "spark".

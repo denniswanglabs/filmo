@@ -740,6 +740,158 @@ const TreatmentSplitStat: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT — metric-row (text left + a strip of 3-4 small real stats right)
+// Sibling of split-stat. THEME-TOKEN ONLY (adapts per brand — light/orange on
+// YC, etc.). The right panel is a horizontal flex row of up to 4 stat cards;
+// each card staggers in. Caller guarantees >= 3 validated numeric metrics.
+// ---------------------------------------------------------------------------
+const TreatmentMetricRow: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  subOpacity: number;
+  subY: number;
+  titleText: string;
+  titleLines: string[];
+  subText: string;
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, subOpacity, subY,
+  titleText, titleLines, subText, sceneId,
+}) => {
+  const statAt = cueAt(cues, "subtitle-in", subAt + 4);
+  // Caller guarantees a non-empty validated metric list (selection guard runs first).
+  const metrics = (data.metrics ?? []).slice(0, 4);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 140,
+        right: 60,
+        top: 120,
+        bottom: 100,
+        display: "grid",
+        gridTemplateColumns: "0.92fr 1.08fr",
+        gap: 48,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={72}
+          sceneId={sceneId}
+        />
+        {subText ? (
+          <div
+            data-scene-id={sceneId}
+            data-field="subtitle"
+            style={{ opacity: subOpacity, transform: `translateY(${subY}px)`, fontSize: 28, fontWeight: 400, color: theme.textMuted, maxWidth: 680 }}
+          >
+            {subText}
+          </div>
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          gap: 16,
+          alignItems: "stretch",
+          justifyContent: "flex-end",
+        }}
+      >
+        {metrics.map((metric, i) => {
+          const cardAt = statAt + i * 6;
+          const cardOpacity = ease(frame, cardAt, cardAt + 14, 0, 1);
+          const cardY = ease(frame, cardAt, cardAt + 14, 18, 0);
+          return (
+            <div
+              key={`${i}-${metric.value}`}
+              style={{
+                opacity: cardOpacity,
+                transform: `translateY(${cardY}px)`,
+                background: theme.bgCard,
+                borderRadius: 16,
+                border: `1px solid ${theme.border}`,
+                boxShadow: "0 6px 24px rgba(20,40,80,0.07)",
+                padding: "26px 18px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                flex: 1,
+                minWidth: 0,
+                minHeight: 168,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 54,
+                  fontWeight: 900,
+                  color: theme.accent,
+                  letterSpacing: -2.5,
+                  lineHeight: 1,
+                  fontFamily: theme.fontDisplay,
+                  textAlign: "center",
+                }}
+              >
+                {metric.value}
+              </span>
+              {metric.label ? (
+                <span
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                    letterSpacing: 0.4,
+                    textTransform: "uppercase",
+                    textAlign: "center",
+                    lineHeight: 1.3,
+                    fontFamily: theme.fontDisplay,
+                  }}
+                >
+                  {metric.label}
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // TREATMENT D — icon-headline (centered, FULL-WIDTH) — THE FALLBACK
 //
 // This is also the degrade target for the two-column treatments. It is a
@@ -1466,6 +1618,26 @@ export const ExplainerCard: React.FC<{
         />
       ) : treatment === "split-stat" ? (
         <TreatmentSplitStat
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          subOpacity={subOpacity}
+          subY={subY}
+          titleText={titleText}
+          titleLines={titleLines}
+          subText={subText}
+          sceneId={sceneId}
+        />
+      ) : treatment === "metric-row" ? (
+        <TreatmentMetricRow
           data={data}
           theme={theme}
           frame={frame}

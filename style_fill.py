@@ -2398,6 +2398,33 @@ def _assign_treatment_from_filled_copy(
     #    big-number ONLY when the title is JUST a number (nothing for the left).
     #    icon-headline is the honest floor (no stat/entities). Never fabricate.
     icon = str(d.get("icon") or "").strip()
+
+    # 3a) metric-row: a strip of 3-4 REAL small stats (value + label). Selected
+    #     BEFORE the single-stat treatments. HONESTY GUARD: keep only metrics whose
+    #     `value` carries a real number (same miner as the title stat); drop the rest.
+    #     If fewer than 3 survive, do NOT select metric-row -- fall through to the
+    #     stat/entity/floor logic below (never a half-empty strip).
+    raw_metrics = d.get("metrics")
+    valid_metrics: List[Dict[str, Any]] = []
+    if isinstance(raw_metrics, list):
+        for m in raw_metrics:
+            if not isinstance(m, dict):
+                continue
+            value = str(m.get("value") or "").strip()
+            if value and _TITLE_STAT_RE.search(value):
+                valid_metrics.append({
+                    "value": _decode(value),
+                    "label": _decode(str(m.get("label") or "").strip()),
+                })
+    if len(valid_metrics) >= 3:
+        out["treatment"] = "metric-row"
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out["metrics"] = valid_metrics[:4]
+        out["patternReason"] = "metric-row: %d real metrics" % len(out["metrics"])
+        return
+
     use_stat = stat if (has_real_stat and isinstance(stat, dict)) else (mined_stat or None)
     mined_only = bool(mined_stat) and not has_real_stat
     mined_label = (mined_stat.get("label") or "").strip() if mined_stat else ""

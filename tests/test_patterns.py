@@ -36,5 +36,23 @@ class TestAssemblerLegibility(unittest.TestCase):
         self.assertIn("no real", out.get("patternReason", "").lower())
 
 
+class TestMetricRow(unittest.TestCase):
+    def _shape(self, data):
+        out = dict(data); scene = {"data": dict(data)}
+        style_fill._assign_treatment_from_filled_copy(out, scene, {"wordmark": "X"})
+        return out
+
+    def test_three_real_metrics_select_metric_row(self):
+        out = self._shape({"title": "By the numbers",
+                           "metrics": [{"value": "150M+", "label": "users"},
+                                       {"value": "$9.9B", "label": "revenue"},
+                                       {"value": "7M+", "label": "listings"}]})
+        self.assertEqual(out.get("treatment"), "metric-row")
+
+    def test_fewer_than_three_metrics_does_not_select_metric_row(self):
+        out = self._shape({"title": "Just one", "metrics": [{"value": "1", "label": "x"}]})
+        self.assertNotEqual(out.get("treatment"), "metric-row")
+
+
 if __name__ == "__main__":
     unittest.main()
