@@ -132,6 +132,91 @@ function ActorBadge({ actor }: { actor: string }) {
   )
 }
 
+// Chat avatar for the build conversation. `user` = the person who requested the
+// build; `agent` = the Filmo producer agent (soft blue blob mark, no emoji).
+function ChatAvatar({ who }: { who: 'user' | 'agent' }) {
+  if (who === 'user') {
+    return (
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-400">
+        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden>
+          <circle cx="12" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M5.5 19.5a6.5 6.5 0 0113 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+      </span>
+    )
+  }
+  return (
+    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#3B82F6]/35 bg-[#3B82F6]/10">
+      <svg viewBox="14 13 56 56" className="h-4 w-4" aria-hidden>
+        <path fillRule="evenodd" fill="#3B82F6" d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z" />
+      </svg>
+    </span>
+  )
+}
+
+// The build activity log as a CHAT thread. First bubble = the user's prompt (the
+// run's goal + emphasis); subsequent bubbles = the agent's steps (run_events, in
+// chronological order). Mirrors the editor chat-panel vocabulary so the build and
+// the edit loop feel like one continuous conversation.
+function BuildChat({ run, events }: { run: Run; events: RunEvent[] }) {
+  // Chronological (oldest first) so the thread reads top-to-bottom like a chat.
+  const ordered = [...events].sort((a, b) => a.seq - b.seq)
+  const newestSeq = ordered.length ? ordered[ordered.length - 1].seq : -1
+
+  // The user's opening request, assembled from the run's own fields.
+  const prompt =
+    (run.goal || 'A brand video') +
+    (run.emphasis ? ` — emphasis: ${run.emphasis}` : '') +
+    (run.company_url ? `\n${run.company_url}` : '')
+
+  return (
+    <div className="max-h-80 space-y-3 overflow-y-auto overscroll-contain pr-1">
+      {/* User prompt bubble (right-aligned, blue) */}
+      <div className="flex flex-row-reverse items-start gap-2.5">
+        <ChatAvatar who="user" />
+        <div className="max-w-[82%] whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-[#3B82F6] px-3.5 py-2 text-sm text-white shadow-sm">
+          {prompt}
+        </div>
+      </div>
+
+      {ordered.length === 0 ? (
+        <div className="flex items-start gap-2.5">
+          <ChatAvatar who="agent" />
+          <div className="max-w-[82%] rounded-2xl rounded-tl-sm border border-black/5 bg-white px-3.5 py-2 text-sm text-slate-500 shadow-sm">
+            Warming up — I&apos;ll start reading your product in a moment.
+          </div>
+        </div>
+      ) : (
+        ordered.map((e) => {
+          const isNewest = e.seq === newestSeq
+          return (
+            <div key={e.id} className="flex items-start gap-2.5">
+              <ChatAvatar who="agent" />
+              <div
+                className={`max-w-[82%] rounded-2xl rounded-tl-sm border px-3.5 py-2 text-sm text-ink shadow-sm transition ${
+                  isNewest ? 'border-amber/30 bg-amber/[0.06]' : 'border-black/5 bg-white'
+                }`}
+              >
+                <div className="mb-1 flex items-center gap-2">
+                  <ActorBadge actor={e.actor} />
+                  <span className="text-[11px] text-slate-300">
+                    {new Date(e.created_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
+                  </span>
+                </div>
+                {e.msg}
+              </div>
+            </div>
+          )
+        })
+      )}
+    </div>
+  )
+}
+
 // Pay affordance — shown only when the human-pays flow has parked the build at
 // 'awaiting_payment' AND a Stripe TEST checkout URL is on the run. Opens Stripe's
 // hosted test checkout in a new tab; once the human pays (test card 4242), the
@@ -238,39 +323,17 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
           ))}
         </ol>
 
-        {/* Live activity — surfaced inside the building view so the user sees motion */}
+        {/* Live activity — rendered as a CHAT conversation (same vocabulary as the
+            editor's chat panel): the user's prompt is the first bubble, the agent's
+            steps are assistant messages flowing below. Reuses run_events as-is. */}
         <div className="mt-6 border-t border-black/5 pt-5">
-          <div className="mb-2.5 flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Live activity</h3>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Conversation</h3>
             <span className="text-[11px] text-slate-300">
-              {recent.length > 0 ? `${recent.length} steps · scroll for history` : 'updates every few seconds'}
+              {recent.length > 0 ? `${recent.length} steps · live` : 'updates every few seconds'}
             </span>
           </div>
-          {recent.length === 0 ? (
-            <p className="text-sm text-slate-400">Warming up — first actions will appear here.</p>
-          ) : (
-            // Scrollable so the full run history stays reachable (newest pinned on top).
-            <ul className="max-h-72 space-y-1.5 overflow-y-auto overscroll-contain pr-1">
-              {recent.map((e, i) => (
-                <li
-                  key={e.id}
-                  className={`flex items-start gap-3 rounded-lg px-3 py-2 transition ${
-                    i === 0 ? 'border border-amber/30 bg-amber/[0.06]' : 'border border-transparent'
-                  }`}
-                >
-                  <ActorBadge actor={e.actor} />
-                  <span className="flex-1 text-sm text-ink">{e.msg}</span>
-                  <span className="shrink-0 text-xs text-slate-300">
-                    {new Date(e.created_at).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
-                    })}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <BuildChat run={run} events={events} />
         </div>
       </div>
 

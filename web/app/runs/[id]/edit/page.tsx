@@ -4,13 +4,13 @@
 // ported @remotion/player live-preview editor wired to those props. Inspector edits
 // mutate props state -> the <Player> re-renders live; Save writes props_edited via
 // the saveEditedProps server action. (Export/rerender + VO/music editing = Phase 3.)
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { insforge } from '../../../../lib/insforge'
 import { useAuth } from '../../../../lib/auth'
 import { TopBar } from '../../../components/Brand'
-import { saveEditedProps, requestReRender } from '../../../actions'
+import { saveEditedProps, requestReRender, editViaChat } from '../../../actions'
 import type { Run } from '../../../../lib/types'
 import { Editor } from './_editor/Editor'
 
@@ -25,6 +25,11 @@ export default function EditRunPage() {
 
   const [run, setRun] = useState<Run | null>(null)
   const [notFound, setNotFound] = useState(false)
+  // Bumps whenever a NEW edited_url lands (a chat/Export re-render finished). The
+  // Editor passes this to the chat panel so a pending "applying…" bubble resolves
+  // to "Done — updated preview on the right."
+  const [editedRenderSignal, setEditedRenderSignal] = useState(0)
+  const lastEditedUrl = useRef<string | null | undefined>(undefined)
 
   useEffect(() => {
     if (loading || !user || !runId) return
@@ -43,11 +48,37 @@ export default function EditRunPage() {
         setNotFound(true)
         return
       }
-      setRun(data as Run)
+      const r = data as Run
+      lastEditedUrl.current = r.edited_url ?? null
+      setRun(r)
     })()
     return () => {
       cancelled = true
     }
+  }, [loading, user, runId])
+
+  // Poll runs.edited_url so a chat-driven (or Export) re-render surfaces here
+  // without a manual refresh. When the URL flips from null -> a value (or changes),
+  // bump editedRenderSignal so the chat panel resolves its pending bubble.
+  useEffect(() => {
+    if (loading || !user || !runId) return
+    const t = setInterval(async () => {
+      const { data } = await insforge.database
+        .from('runs')
+        .select('edited_url')
+        .eq('id', runId)
+        .maybeSingle()
+      const url = (data as { edited_url?: string | null } | null)?.edited_url ?? null
+      if (lastEditedUrl.current === undefined) {
+        lastEditedUrl.current = url
+        return
+      }
+      if (url && url !== lastEditedUrl.current) {
+        lastEditedUrl.current = url
+        setEditedRenderSignal((n) => n + 1)
+      }
+    }, 3000)
+    return () => clearInterval(t)
   }, [loading, user, runId])
 
   // Prefer a saved edit (props_edited) over the clean props so re-opening the editor
@@ -107,6 +138,17 @@ export default function EditRunPage() {
       const saved = await saveEditedProps({ runId: run.id, userId: user.id, props })
       if (saved.ok === false) return saved
       return requestReRender({ runId: run.id, userId: user.id })
+    },
+    [run, user]
+  )
+
+  // Chat edit = natural-language request -> editViaChat server action (LLM
+  // transforms props, saves props_edited, enqueues a re-render). The action's
+  // result drives the chat bubbles; the edited_url poll above resolves the loop.
+  const handleChatEdit = useCallback(
+    async (message: string) => {
+      if (!run || !user) return { ok: false, kind: 'error' as const, message: 'Not ready.' }
+      return editViaChat({ runId: run.id, userId: user.id, message })
     },
     [run, user]
   )
@@ -174,6 +216,8 @@ export default function EditRunPage() {
       musicAssetName={run.run_key ? `music-${run.run_key}.mp3` : undefined}
       onSave={handleSave}
       onExport={handleExport}
+      onChatEdit={handleChatEdit}
+      editedRenderSignal={editedRenderSignal}
       onBack={handleBack}
     />
   )
