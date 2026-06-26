@@ -2301,6 +2301,11 @@ def _mine_stat_from_title(title):
     value = m.group(0).strip()
     label = (title[:m.start()] + " " + title[m.end():])
     label = re.sub(r"\s{2,}", " ", label).strip(" —-·,:").strip()
+    # Keep the label a TIGHT phrase for a hero stat: cut at the first clause break
+    # and cap at ~5 words ("The standard deal: for 7% with uncapped..." -> "The
+    # standard deal").
+    label = re.split(r"[:—;(]| - ", label)[0].strip()
+    label = " ".join(label.split()[:5])
     return {"value": value, "label": label}
 
 

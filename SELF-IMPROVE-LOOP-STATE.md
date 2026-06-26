@@ -48,7 +48,16 @@ A worker redeploy is ~5-7 min, so DO NOT deploy per iteration. Iterate locally:
 - Last hosted YC gen (pre-fix) `1ba4208c…`: all cards `icon-headline` (the bug). Delivered video at `~/Desktop/filmo-videos/yc-nemotron-hosted-v1.mp4`.
 - Known gaps to attack: (a) STAT extraction (icon-stat/split-stat never fire — no structured number source); (b) only 4 card treatments — need NEW layout types (charts, comparison, timeline, logo-wall, big-number, quote); (c) visual polish on the non-card scenes; (d) reliable real-data extraction in the conversion read.
 
+## Loop infra built
+- `loop_plan.py <url> <goal> <run-id>` — analyze+plan only (Nemotron), writes plan.json (stops before the local edge-tts/whisper VO hang).
+- `loop_measure.py <run-id>` — stub VO alignment + style_fill(do_align=False) + strip audio/screenshots → props.json with treatments (fast, no hang). Then render: `cd studio && remotion render src/index.ts Timeline ../runs/<id>/final.mp4 --props=../runs/<id>/props.json`.
+- LOCAL full `build_runner` HANGS on VO synth (edge-tts/whisper absent locally) — use the two scripts above for fast loop iteration; the hosted worker has VO and renders fully.
+
 ## Iteration Log
-| # | Lever changed | Hypothesis | Rubric before→after | Kept? | Notes |
-|---|---|---|---|---|---|
-| 0 | (baseline) | — | TBD | — | validate the just-shipped mosaic fix on a fresh YC gen |
+| # | Lever | Change | Result on YC | Kept |
+|---|---|---|---|---|
+| baseline | — | — | all 4 cards icon-headline (bare) | — |
+| 1 | harness (style_fill) | treatment assignment runs AFTER copy is filled (`_assign_treatment_from_filled_copy`) | entities now visible to miner | ✓ (commit 9fc491b) |
+| 2 | harness (style_fill) | `_mine_stat_from_title` → big-number for real title stats ($600B+, 3,000+) | 2 big-number stat cards | ✓ (15991f2) |
+| 3 | brain (planner-prompt) + harness | planner variety + entity scenes (companies); entity miner cleanup | $500K big-number + Airbnb/Stripe/Dropbox/DoorDash split-mosaic + icon-headlines = matches target screenshot | ✓ (66178c3) |
+| 4 | harness (style_fill) | trim big-number labels to a tight phrase | cleaner hero stats | in progress |
