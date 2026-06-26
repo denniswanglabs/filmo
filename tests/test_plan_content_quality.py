@@ -60,3 +60,9 @@ class TestContentQuality(unittest.TestCase):
         issues = plan_schema.validate_plan_content_quality(p, {"wordmark": "cat"})
         self.assertTrue(any("proof" in i.lower() for i in issues),
                         f"Expected a proof-arc issue but got: {issues}")
+
+
+class TestContentReplanWiring(unittest.TestCase):
+    def test_validator_is_importable_from_plan_job(self):
+        import plan_job
+        self.assertTrue(hasattr(plan_job, "validate_plan_content_quality"))
