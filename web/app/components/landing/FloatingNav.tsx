@@ -45,21 +45,21 @@ export default function FloatingNav() {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-3 sm:top-4">
       <nav
-        className={`pointer-events-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-full border px-3 py-2 pl-4 transition-all duration-300 ${
+        className={`pointer-events-auto grid w-full max-w-3xl grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-full border px-4 py-2 transition-all duration-300 ${
           scrolled
             ? 'border-[#D4E2FB] bg-white/85 shadow-[0_12px_40px_-16px_rgba(30,58,120,0.22)] backdrop-blur-xl'
             : 'border-[#E2ECFB] bg-white/70 backdrop-blur-md'
         }`}
       >
         {/* Wordmark (left) */}
-        <Link href="/" className="shrink-0 text-base">
+        <Link href="/" className="col-start-1 shrink-0 justify-self-start text-base">
           <Wordmark tone="dark" inkClassName="text-[#0E1320]" />
         </Link>
 
         {/* Center links — "How it works" routes to its own page. The "Examples"
             tab was removed: the gallery still lives on the landing, visitors just
             scroll to it. Hidden on small screens. */}
-        <div className="hidden items-center gap-1 text-sm sm:flex">
+        <div className="col-start-2 hidden items-center gap-1 justify-self-center text-sm sm:flex">
           <button
             type="button"
             onClick={() => router.push('/how-it-works')}
@@ -70,7 +70,7 @@ export default function FloatingNav() {
         </div>
 
         {/* Auth + CTA (right) */}
-        <div className="flex shrink-0 items-center gap-2 text-sm">
+        <div className="col-start-3 flex shrink-0 items-center justify-self-end gap-2 text-sm">
           {loading ? (
             <span className="inline-block h-7 w-20 animate-pulse rounded-full bg-[#EAF1FF]" />
           ) : user ? (
