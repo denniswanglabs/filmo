@@ -885,6 +885,157 @@ const TreatmentMetricRow: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT — device-frame (text left + a REAL product screenshot in a clean
+// browser frame, right). Sibling of split-stat. THEME-TOKEN ONLY so the frame
+// chrome reads clean on any brand (white/orange YC, etc.). The frame is a
+// rounded card: a top bar with 3 small dots, then the screenshot filling the
+// body. Caller guarantees a non-empty real `imageSrc` (selection guard first).
+// STUDIO: resolves the screenshot via staticFile (resolveLogo) — no resolveSrc seam.
+// ---------------------------------------------------------------------------
+const TreatmentDeviceFrame: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  subOpacity: number;
+  subY: number;
+  titleText: string;
+  titleLines: string[];
+  subText: string;
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, subOpacity, subY,
+  titleText, titleLines, subText, sceneId,
+}) => {
+  const shotAt = cueAt(cues, "subtitle-in", subAt + 4);
+  const shotOpacity = ease(frame, shotAt, shotAt + 20, 0, 1);
+  const shotY = ease(frame, shotAt, shotAt + 20, 24, 0);
+  const shotScale = ease(frame, shotAt, shotAt + 24, 0.96, 1);
+  // Caller guarantees a non-empty captured screenshot path (selection guard runs first).
+  const imageSrc = (data.imageSrc ?? "").trim();
+  const src = imageSrc.startsWith("http") || imageSrc.startsWith("/") ? imageSrc : staticFile(imageSrc);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 140,
+        right: 60,
+        top: 120,
+        bottom: 100,
+        display: "grid",
+        gridTemplateColumns: "0.82fr 1.18fr",
+        gap: 48,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={72}
+          sceneId={sceneId}
+        />
+        {subText ? (
+          <div
+            data-scene-id={sceneId}
+            data-field="subtitle"
+            style={{ opacity: subOpacity, transform: `translateY(${subY}px)`, fontSize: 28, fontWeight: 400, color: theme.textMuted, maxWidth: 680 }}
+          >
+            {subText}
+          </div>
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          opacity: shotOpacity,
+          transform: `translateY(${shotY}px) scale(${shotScale})`,
+          transformOrigin: "center",
+          background: theme.bgCard,
+          borderRadius: 18,
+          border: `1px solid ${theme.border}`,
+          boxShadow: "0 24px 64px rgba(20,40,80,0.16), 0 4px 14px rgba(20,40,80,0.08)",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: "100%",
+        }}
+      >
+        {/* Browser chrome bar: 3 dots, left-aligned. */}
+        <div
+          style={{
+            height: 40,
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            padding: "0 18px",
+            background: theme.bgCard,
+            borderBottom: `1px solid ${theme.border}`,
+            flexShrink: 0,
+          }}
+        >
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                background: theme.border,
+                border: `1px solid ${theme.textMuted}`,
+                opacity: 0.55,
+              }}
+            />
+          ))}
+          <div
+            style={{
+              flex: 1,
+              marginLeft: 12,
+              height: 22,
+              borderRadius: 7,
+              background: theme.bg,
+              border: `1px solid ${theme.border}`,
+            }}
+          />
+        </div>
+        {/* Screenshot body. */}
+        <div style={{ background: theme.bg, display: "flex", minHeight: 0 }}>
+          <Img
+            src={src}
+            style={{ width: "100%", height: "auto", display: "block", objectFit: "cover", objectPosition: "top" }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // TREATMENT D — icon-headline (centered, FULL-WIDTH) — THE FALLBACK
 //
 // This is also the degrade target for the two-column treatments. It is a
@@ -1502,6 +1653,7 @@ export const ExplainerCard: React.FC<{
   // -------------------------------------------------------------------------
   const hasEntities = (data.featureEntities ?? []).filter((e) => (e ?? "").trim()).length > 0;
   const hasStat = !!(data.stat?.value ?? "").trim();
+  const hasShot = !!(data.imageSrc ?? "").trim();
 
   let treatment = data.treatment;
   if ((treatment === "split-mosaic" || treatment === "logo-wall") && !hasEntities) treatment = "icon-headline";
@@ -1509,6 +1661,9 @@ export const ExplainerCard: React.FC<{
   // feature-list needs SOMETHING to list — entities or a subtitle to split into
   // rows. With neither, drop to the centered fallback (never an empty list card).
   else if (treatment === "feature-list" && !hasEntities && !subText.trim()) treatment = "icon-headline";
+  // device-frame needs a real captured screenshot — with none, drop to the
+  // centered fallback (never an empty browser frame).
+  else if (treatment === "device-frame" && !hasShot) treatment = "icon-headline";
 
   return (
     <AbsoluteFill
@@ -1627,6 +1782,26 @@ export const ExplainerCard: React.FC<{
         />
       ) : treatment === "metric-row" ? (
         <TreatmentMetricRow
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          subOpacity={subOpacity}
+          subY={subY}
+          titleText={titleText}
+          titleLines={titleLines}
+          subText={subText}
+          sceneId={sceneId}
+        />
+      ) : treatment === "device-frame" ? (
+        <TreatmentDeviceFrame
           data={data}
           theme={theme}
           frame={frame}

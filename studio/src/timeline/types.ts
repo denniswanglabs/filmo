@@ -76,9 +76,13 @@ export interface SceneData {
     | "big-number"
     | "logo-wall"
     | "feature-list"
-    | "metric-row";
+    | "metric-row"
+    | "device-frame";
   // metric-row: 3-4 small real stats shown as a horizontal strip.
   metrics?: Array<{ value: string; label: string }>;
+  // device-frame: text-left / a REAL captured product screenshot (reuses the
+  // existing `imageSrc` field below) wrapped in a clean browser frame on the
+  // RIGHT. Selected only for a product beat that carries a real screenshot.
   // Curated icon name rendered as inline SVG inside the card tile.
   // Set: rocket, spark, shield, chart, users, bolt, globe, dollar, layers,
   //      sparkles, target, clock. Unknown / missing → falls back to "spark".

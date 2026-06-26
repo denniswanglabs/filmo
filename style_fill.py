@@ -2399,6 +2399,27 @@ def _assign_treatment_from_filled_copy(
     #    icon-headline is the honest floor (no stat/entities). Never fabricate.
     icon = str(d.get("icon") or "").strip()
 
+    # 3z) device-frame: text-left / a REAL captured product screenshot wrapped in a
+    #     clean browser frame on the RIGHT. HONESTY GUARD: select ONLY when the scene
+    #     carries a real captured screenshot (`imageSrc` non-empty) AND it is a product
+    #     beat (`kind == "product"` or the planner pre-emitted treatment="device-frame").
+    #     Never select without a real screenshot -- without one there is nothing honest
+    #     to show in the frame, so we fall through to the stat/entity/floor logic.
+    image_src = str(d.get("imageSrc") or "").strip()
+    is_product_beat = (
+        str(d.get("kind") or "").strip().lower() == "product"
+        or str(d.get("treatment") or "").strip() == "device-frame"
+    )
+    if image_src and is_product_beat:
+        out["treatment"] = "device-frame"
+        out["imageSrc"] = image_src
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out["patternReason"] = "device-frame: real product screenshot"
+        return
+
     # 3a) metric-row: a strip of 3-4 REAL small stats (value + label). Selected
     #     BEFORE the single-stat treatments. HONESTY GUARD: keep only metrics whose
     #     `value` carries a real number (same miner as the title stat); drop the rest.

@@ -54,5 +54,33 @@ class TestMetricRow(unittest.TestCase):
         self.assertNotEqual(out.get("treatment"), "metric-row")
 
 
+class TestDeviceFrame(unittest.TestCase):
+    def _shape(self, data):
+        out = dict(data); scene = {"data": dict(data)}
+        style_fill._assign_treatment_from_filled_copy(out, scene, {"wordmark": "Stripe"})
+        return out
+
+    def test_product_screenshot_selects_device_frame(self):
+        # A real captured screenshot on a product beat -> device-frame.
+        out = self._shape({"title": "See it in action",
+                           "imageSrc": "shot-g7-stripe-screenshot-home.png",
+                           "kind": "product"})
+        self.assertEqual(out.get("treatment"), "device-frame")
+        self.assertEqual(out.get("imageSrc"), "shot-g7-stripe-screenshot-home.png")
+        self.assertIn("screenshot", out.get("patternReason", "").lower())
+
+    def test_pre_emitted_device_frame_treatment_selects(self):
+        # Planner may pre-emit treatment="device-frame" alongside a real screenshot.
+        out = self._shape({"title": "The dashboard",
+                           "imageSrc": "shot-g7-stripe-screenshot-home.png",
+                           "treatment": "device-frame"})
+        self.assertEqual(out.get("treatment"), "device-frame")
+
+    def test_no_screenshot_does_not_select_device_frame(self):
+        # No captured screenshot -> never device-frame (honest floor applies).
+        out = self._shape({"title": "See it in action", "kind": "product"})
+        self.assertNotEqual(out.get("treatment"), "device-frame")
+
+
 if __name__ == "__main__":
     unittest.main()
