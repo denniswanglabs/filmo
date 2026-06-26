@@ -1106,5 +1106,52 @@ class TestShortEyebrow(unittest.TestCase):
                              f"{label!r} -> {out!r} contains a bare connector")
 
 
+class TestCrossSceneDedup(unittest.TestCase):
+    def test_duplicate_subtitle_dropped_on_later_scene(self):
+        scenes = [
+            {"id": "a", "archetype": "ln-card",
+             "data": {"title": "Join the batch", "subtitle": "A new model for funding startups."}},
+            {"id": "b", "archetype": "ln-card",
+             "data": {"title": "Read founders' words", "subtitle": "A new model for funding startups."}},
+        ]
+        out = style_fill._dedupe_cross_scene_secondary(scenes)
+        self.assertEqual(out[0]["data"]["subtitle"], "A new model for funding startups.")
+        self.assertEqual(out[1]["data"]["subtitle"], "")  # later duplicate dropped
+
+    def test_hero_title_never_blanked_even_if_duplicated(self):
+        scenes = [
+            {"id": "a", "archetype": "ln-card", "data": {"title": "Same Title"}},
+            {"id": "b", "archetype": "ln-card", "data": {"title": "Same Title"}},
+        ]
+        out = style_fill._dedupe_cross_scene_secondary(scenes)
+        self.assertEqual(out[1]["data"]["title"], "Same Title")  # hero left intact
+
+    def test_duplicate_bullets_removed_across_scenes(self):
+        scenes = [
+            {"id": "a", "archetype": "ln-card", "data": {"bullets": ["Fast payouts", "Fraud tools"]}},
+            {"id": "b", "archetype": "ln-card", "data": {"bullets": ["Fraud tools", "Recurring billing"]}},
+        ]
+        out = style_fill._dedupe_cross_scene_secondary(scenes)
+        self.assertEqual(out[1]["data"]["bullets"], ["Recurring billing"])  # shared bullet gone
+
+    def test_short_shared_words_not_nuked(self):
+        scenes = [
+            {"id": "a", "archetype": "ln-card", "data": {"kicker": "YC"}},
+            {"id": "b", "archetype": "ln-card", "data": {"kicker": "YC"}},
+        ]
+        out = style_fill._dedupe_cross_scene_secondary(scenes)
+        # single short token (< 2 words) is not treated as a dedupable phrase
+        self.assertEqual(out[1]["data"]["kicker"], "YC")
+
+    def test_clean_input_unchanged(self):
+        scenes = [
+            {"id": "a", "archetype": "ln-card", "data": {"subtitle": "Accept payments worldwide."}},
+            {"id": "b", "archetype": "ln-card", "data": {"subtitle": "Stop fraud before it starts."}},
+        ]
+        out = style_fill._dedupe_cross_scene_secondary(scenes)
+        self.assertEqual(out[0]["data"]["subtitle"], "Accept payments worldwide.")
+        self.assertEqual(out[1]["data"]["subtitle"], "Stop fraud before it starts.")
+
+
 if __name__ == "__main__":
     unittest.main()

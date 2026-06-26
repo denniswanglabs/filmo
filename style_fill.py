@@ -981,6 +981,53 @@ def _is_fragment_subtitle(text: str) -> bool:
     return False
 
 
+# Secondary on-screen fields that must never repeat across scenes. Hero fields
+# (title, headline) are deliberately EXCLUDED — blanking a hero line is worse than
+# a rare repeat; the shapers + plan-time validator handle hero dedup upstream.
+_DEDUPE_SECONDARY_FIELDS = ("subtitle", "kicker", "eyebrow", "supporting", "punchWord", "caption")
+
+
+def _norm_phrase(s: str) -> str:
+    """Lowercased, whitespace-collapsed, punctuation-trimmed key for dedup."""
+    return " ".join((s or "").lower().split()).strip(" .!?·•|-—–")
+
+
+def _dedupe_cross_scene_secondary(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Deterministic backstop: drop any SECONDARY string or bullet that already
+    appeared (normalized) on an earlier scene. Only phrases of >= 2 words are
+    treated as dedupable (so shared short tokens like a kicker 'YC' survive).
+    Mutates + returns `scenes`."""
+    seen: set = set()
+    for sc in scenes:
+        data = sc.get("data") or {}
+        for field in _DEDUPE_SECONDARY_FIELDS:
+            val = data.get(field)
+            if not isinstance(val, str) or not val.strip():
+                continue
+            key = _norm_phrase(val)
+            if len(key.split()) < 2:
+                continue  # never dedup a single short token
+            if key in seen:
+                data[field] = ""
+            else:
+                seen.add(key)
+        bullets = data.get("bullets")
+        if isinstance(bullets, list):
+            kept = []
+            for b in bullets:
+                if not isinstance(b, str) or not b.strip():
+                    continue
+                key = _norm_phrase(b)
+                if key and key in seen:
+                    continue
+                if len(key.split()) >= 2:
+                    seen.add(key)
+                kept.append(b)
+            data["bullets"] = kept
+        sc["data"] = data
+    return scenes
+
+
 def _clean_complete_headline(text: str, limit: int = 72) -> str:
     """Return a clean, COMPLETE headline derived from `text`, or "" if nothing usable.
 
@@ -3580,6 +3627,7 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
             scene_obj["audio"] = {"src": audio["src"]}
         scenes.append(scene_obj)
 
+    scenes = _dedupe_cross_scene_secondary(scenes)
     return {
         "fps": timeline.get("fps", 30),
         "total_frames": timeline.get("total_frames", 0),
