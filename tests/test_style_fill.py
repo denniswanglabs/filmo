@@ -1174,8 +1174,9 @@ class TestExplainerReinforce(unittest.TestCase):
         # subtitle is a distinct second-sentence detail, NOT the brand tagline
         self.assertNotEqual(out["subtitle"].strip().lower(),
                             (brand.get("tagline") or "").strip().lower())
-        self.assertTrue(out["subtitle"] == "" or "currenc" in out["subtitle"].lower()
-                        or out["subtitle"] != out["title"])
+        # POSITIVE assertion: subtitle must be non-empty and carry the beat detail
+        self.assertTrue(out["subtitle"], "subtitle should be a non-empty beat-derived detail")
+        self.assertIn("currenc", out["subtitle"].lower())
 
     def test_two_cards_get_distinct_subtitles_via_shared_used_list(self):
         brand = _brand()
@@ -1184,9 +1185,12 @@ class TestExplainerReinforce(unittest.TestCase):
             self._scene("f1", "Accept payments. Settle in 135 currencies fast.", 0, used), brand)
         b = style_fill._shape_explainer(
             self._scene("f2", "Stop fraud. Block bad charges before they post.", 1, used), brand)
-        if a["subtitle"] and b["subtitle"]:
-            self.assertNotEqual(style_fill._norm_phrase(a["subtitle"]),
-                                style_fill._norm_phrase(b["subtitle"]))
+        # Both subtitles must be non-empty (beat detail must survive)
+        self.assertTrue(a["subtitle"], "first card subtitle must be non-empty")
+        self.assertTrue(b["subtitle"], "second card subtitle must be non-empty")
+        # And they must be distinct
+        self.assertNotEqual(style_fill._norm_phrase(a["subtitle"]),
+                            style_fill._norm_phrase(b["subtitle"]))
 
 
 if __name__ == "__main__":

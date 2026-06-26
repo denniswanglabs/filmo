@@ -2334,18 +2334,13 @@ def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, 
     # NOT the shared brand tagline (which produced the repeated-subtitle bug). Empty is
     # fine: a card with just the key phrase reads clean ("reinforce" model).
     used_supporting = d.get("_used_supporting")
+    used_supporting = used_supporting if isinstance(used_supporting, list) else None
     subtitle = d.get("subtitle")
     if subtitle is None:
         subtitle = _supporting_line(title, d.get("_text") or "", brief, brand,
                                     used=used_supporting)
     if _is_fragment_subtitle(subtitle):
         subtitle = ""
-    if subtitle and isinstance(used_supporting, list):
-        key = subtitle.strip().lower()
-        if key in {u.strip().lower() for u in used_supporting}:
-            subtitle = ""
-        else:
-            used_supporting.append(subtitle)
 
     # Reinforce model: feature cards show the key phrase + one detail, NO bullets.
     bullets: List[str] = []
