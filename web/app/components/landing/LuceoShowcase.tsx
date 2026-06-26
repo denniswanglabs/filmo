@@ -143,7 +143,7 @@ export default function LuceoShowcase() {
         {/* Attribution */}
         <p className="mt-10 text-center text-sm text-[#5A6472]">
           <a
-            href="https://www.youtube.com/@luceo-studio"
+            href="https://luceostudio.com"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 font-medium text-[#2563EB] hover:underline"
