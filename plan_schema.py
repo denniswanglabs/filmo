@@ -9,6 +9,8 @@ spending a single (mock or real) cycle on it.
 Returns a list of human-readable problems; an empty list means the plan is valid.
 """
 
+import re
+
 ALLOWED_TYPES = {"title", "cinematic", "walkthrough", "motion_graphic", "screenshot"}
 CINEMATIC_MODELS = {"seedance_2_0", "gpt_image_2", "nano_banana_flash", "nano_banana_2"}
 
@@ -120,7 +122,6 @@ def resolve_vo_beats(plan):
 
 def _split_sentences(text):
     """Naive, dependency-free sentence splitter for the legacy script fallback."""
-    import re
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
     return [p.strip() for p in parts if p.strip()]
 
@@ -248,17 +249,6 @@ def validate_plan(plan, *, strict_durations=False):
     return problems
 
 
-import re as _re
-
-# Generic buzzwords that signal an abstract, proof-free arc.
-_BUZZWORDS = {
-    "powerful", "seamless", "innovative", "revolutionary", "revolutionize",
-    "next generation", "next-generation", "cutting edge", "cutting-edge",
-    "world class", "world-class", "game changing", "game-changing", "robust",
-    "synergy", "best in class", "best-in-class",
-}
-
-
 def _norm(s):
     return " ".join((s or "").lower().split()).strip(" .!?·•|-—–")
 
@@ -267,16 +257,16 @@ def _has_proof_token(text, facts):
     """A beat earns 'proof' if it carries a number/unit, or names a real entity
     from company facts (wordmark / a feature label)."""
     low = (text or "").lower()
-    if _re.search(r"\d", low) or "%" in low or "$" in low:
+    if re.search(r"\d", low) or "%" in low or "$" in low:
         return True
     wm = _norm(facts.get("wordmark", "")) if facts else ""
-    if wm and wm in low:
+    if wm and re.search(rf"\b{re.escape(wm)}\b", low):
         # a bare wordmark-only line is not proof; require some other content too
         if len(low.split()) > 2:
             return True
     for f in (facts or {}).get("features", []) or []:
         label = _norm(f.get("title") if isinstance(f, dict) else f)
-        if label and len(label.split()) >= 2 and label in low:
+        if label and len(label.split()) >= 2 and re.search(rf"\b{re.escape(label)}\b", low):
             return True
     return False
 

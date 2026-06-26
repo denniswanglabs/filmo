@@ -49,3 +49,14 @@ class TestContentQuality(unittest.TestCase):
         ])
         issues = plan_schema.validate_plan_content_quality(p, {"wordmark": "Stripe"})
         self.assertEqual(issues, [])
+
+    def test_wordmark_substring_not_proof(self):
+        # Wordmark "cat" appearing only as part of a larger word ("cats", "category",
+        # "vacation") must NOT count as proof — the match must be word-boundary anchored.
+        p = _plan([
+            {"scene_id": "a", "text": "We love cats here and adopt many cats today."},
+            {"scene_id": "b", "text": "Our cats live in many categories of vacation spots."},
+        ])
+        issues = plan_schema.validate_plan_content_quality(p, {"wordmark": "cat"})
+        self.assertTrue(any("proof" in i.lower() for i in issues),
+                        f"Expected a proof-arc issue but got: {issues}")
