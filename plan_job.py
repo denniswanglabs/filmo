@@ -342,6 +342,21 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # beats and the headline_fix opens the video, even if the LLM/template dropped
     # them. No-op when conversion_read is None (flag off) -> behavior unchanged.
     plan = seed_plan_with_read(plan, conversion_read)
+    # VERIFIED-KNOWLEDGE ENRICH (two-pass, runs BEFORE treatment assignment): a focused
+    # Nemotron call surfaces THIS brand's REAL notable stats + named customers/products
+    # (which the planner knows but doesn't reliably echo from generic scraped copy),
+    # then HONESTLY seeds the feature beats so style_fill derives data-rich titles
+    # (split-stat / split-mosaic) instead of bare icon-headlines. Unknown/small brand ->
+    # empty enrich -> seeds NOTHING -> honest icon-headline floor (never fabricates).
+    try:
+        enrich = enrich_brand_knowledge(_resolved_brand, company_url, brain)
+        if enrich.get("stats") or enrich.get("entities"):
+            print("[planner] verified-knowledge enrich brand=%r stats=%d entities=%d"
+                  % (_resolved_brand, len(enrich.get("stats") or []),
+                     len(enrich.get("entities") or [])), file=sys.stderr)
+        plan = _seed_feature_beats_from_enrichment(plan, enrich)
+    except Exception as e:  # never let enrichment break a build
+        print("[planner] verified-knowledge enrich skipped (%s)" % e, file=sys.stderr)
     # Card-treatment RULES GUARD + HONESTY GUARD (runs for BOTH the LLM and template
     # paths, while `_company_facts` is still on job so it can verify real data): for
     # each motion_graphic/explainer-card scene, keep a valid LLM-picked treatment whose
@@ -671,6 +686,229 @@ def _mine_named_entities(text, exclude=()):
             seen.add(key)
             out.append(cand)
     return out
+
+
+# --- VERIFIED-KNOWLEDGE ENRICH (two-pass) ----------------------------------
+# THE PROBLEM THIS SOLVES: the hosted pipeline grounds the planner in the brand's
+# REAL (but generic) scraped homepage copy, so feature cards collapse to bare
+# icon-headlines — even for famous brands whose notable stats / named customers the
+# model plainly knows but does NOT reliably surface from generic marketing copy.
+#
+# THE FIX (honest enrichment, NOT fabrication): a FOCUSED Nemotron call that returns
+# ONLY the brand's most notable REAL stats + REAL named customers/products, which we
+# then deterministically SEED into the feature beats so style_fill derives data-rich
+# titles (split-stat / split-mosaic) instead of bare icon-headlines. The honesty guard
+# is absolute: an UNKNOWN/small brand returns EMPTY arrays -> we seed nothing -> the
+# pipeline honestly degrades to icon-headline (no invented numbers or names, ever).
+
+_ENRICH_SYSTEM = (
+    "You are a careful fact-checker for a video producer. You know real companies. "
+    "Return ONLY strict JSON describing the SPECIFIC company you are given — its most "
+    "notable REAL metrics and its REAL named customers/products/portfolio companies.\n\n"
+    "HONESTY IS ABSOLUTE. Use ONLY facts you are confident are TRUE for THIS EXACT "
+    "company. NEVER fabricate a number or a name. If you do not know real, specific, "
+    "verifiable metrics or named entities for this exact company (e.g. it is small, "
+    "obscure, or unfamiliar to you), return EMPTY arrays. An empty answer is CORRECT "
+    "and expected for most companies. Do NOT pad with generic marketing claims, "
+    "round guesses, or made-up customer names.\n\n"
+    "Output schema (JSON only, no prose, no markdown fence):\n"
+    "{\n"
+    '  "stats": [{"value": "<metric e.g. $500K, $800B+, 135+, 99.99%>", '
+    '"label": "<2-4 words: what it measures>"}],\n'
+    '  "entities": ["<real named customer/product/portfolio company>", ...]\n'
+    "}\n\n"
+    "Rules:\n"
+    "- stats: the 2-3 MOST notable REAL metrics. Each `value` MUST contain a number "
+    "(currency, %, x, a big suffix like B/M/K, or a trailing +). `label` is a tight "
+    "phrase, no sentence.\n"
+    "- entities: 4-6 REAL named customers, products, or portfolio companies OF THIS "
+    "company. Proper nouns only (e.g. \"Airbnb\", \"Stripe\"), no generic words.\n"
+    "- Confident only. When unsure -> empty array for that field."
+)
+
+
+def enrich_brand_knowledge(name, url, brain):
+    """FOCUSED Nemotron call -> the brand's verified-knowledge REAL stats + entities.
+
+    Returns {"stats": [{"value","label"}, ...], "entities": [str, ...]} using ONLY
+    facts the model is confident are TRUE for THIS exact company (honesty guard in the
+    prompt). On ANY error, refusal, or empty/garbled response -> {"stats": [],
+    "entities": []} so the caller seeds NOTHING and the pipeline honestly degrades.
+
+    Reuses the SAME OpenRouter call path as the planner (vp.call_model + vp.extract_json)
+    so it runs on the same brain/keys (planner brain = ultra-paid Nemotron). Never raises.
+    """
+    empty = {"stats": [], "entities": []}
+    name = str(name or "").strip()
+    url = str(url or "").strip()
+    if not name and not url:
+        return empty
+    user = (
+        "Company name: %s\n"
+        "Company URL: %s\n\n"
+        "Return the strict JSON object (stats + entities) for THIS exact company. "
+        "If you are not confident in real specific facts for it, return empty arrays."
+        % (name or "(unknown)", url or "(unknown)")
+    )
+    messages = [{"role": "system", "content": _ENRICH_SYSTEM},
+                {"role": "user", "content": user}]
+    try:
+        raw = vp.call_model(messages, brain=brain)
+        obj = vp.extract_json(raw)
+    except Exception:
+        return empty
+    if not isinstance(obj, dict):
+        return empty
+    # --- Parse stats robustly: keep only well-formed {value,label} with a real number.
+    stats = []
+    seen_stat = set()
+    for s in (obj.get("stats") or []):
+        if not isinstance(s, dict):
+            continue
+        value = str(s.get("value") or "").strip()
+        label = str(s.get("label") or "").strip()
+        if not value or not _STAT_NUMBER_RE.search(value):
+            continue  # a stat with no number is not a stat
+        key = value.lower()
+        if key in seen_stat:
+            continue
+        seen_stat.add(key)
+        # Tight label: cap at ~4 words so it threads cleanly into a card title.
+        label = " ".join(label.split()[:4])
+        stats.append({"value": value, "label": label})
+        if len(stats) >= 3:
+            break
+    # --- Parse entities robustly: proper-noun-ish, de-duped, non-generic.
+    entities = []
+    seen_ent = set()
+    for e in (obj.get("entities") or []):
+        cand = str(e or "").strip()
+        if not cand:
+            continue
+        key = cand.lower()
+        # Reject generic words (the same stop-list the entity miner trusts) and dups.
+        if key in _ENTITY_STOP or key in seen_ent:
+            continue
+        # Must read as a proper noun (leading capital / digit), single or double token.
+        if not re.match(r"^[A-Z0-9][A-Za-z0-9.\-]*(?:\s[A-Z0-9][A-Za-z0-9.\-]*)?$", cand):
+            continue
+        seen_ent.add(key)
+        entities.append(cand)
+        if len(entities) >= 6:
+            break
+    return {"stats": stats, "entities": entities}
+
+
+# Detect whether a feature beat ALREADY carries a real number / entity list so the
+# seeder never CLOBBERS data the planner already produced (and never double-seeds).
+def _beat_already_has_stat(scene, beat_text):
+    """True when this feature scene's brief / VO beat text already carries an impressive
+    number (so seeding a stat over it would clobber real planner data)."""
+    d = scene.get("data") if isinstance(scene.get("data"), dict) else {}
+    if isinstance(d.get("stat"), dict) and str(d["stat"].get("value") or "").strip():
+        return True
+    from style_fill import _TITLE_STAT_RE  # the SAME stat regex the title miner uses
+    corpus = " ".join(str(x or "") for x in (
+        scene.get("brief"), beat_text, d.get("title"), d.get("_text")))
+    return bool(_TITLE_STAT_RE.search(corpus))
+
+
+def _beat_already_has_entities(scene, beat_text):
+    """True when this feature scene already carries >= 3 named entities (structured or
+    mineable from its brief / VO beat text), so the seeder won't override it."""
+    d = scene.get("data") if isinstance(scene.get("data"), dict) else {}
+    ents = d.get("featureEntities")
+    if isinstance(ents, list) and len([e for e in ents if str(e or "").strip()]) >= 3:
+        return True
+    corpus = " ".join(str(x or "") for x in (scene.get("brief"), beat_text, d.get("title")))
+    return len(_mine_named_entities(corpus)) >= 3
+
+
+def _seed_feature_beats_from_enrichment(plan, enrich):
+    """Deterministically + HONESTLY seed feature (motion_graphic) beats with the brand's
+    verified-knowledge stats/entities so style_fill derives data-rich card TITLES.
+
+    HOW THE TITLE IS DRIVEN (verified against style_fill): a feature card's title is
+    derived by `_shape_explainer` from `data._text` (the threaded VO beat text) FIRST,
+    then the scene `brief`. The VO beat text is threaded onto the scene by
+    build_timeline._derive_text, which prefers the VO BEAT TEXT (matched by scene_id)
+    over the brief. So to make a beat render a stat / entity-list we set BOTH the
+    scene's `brief` AND the matching voiceover beat's `text` to carry the fact — the
+    beat text wins downstream, and the brief is the fallback when no beat is matched.
+
+    HONESTY / NO-OVERRIDE rules (absolute):
+      - Empty enrich (unknown brand) -> seed NOTHING (the honest icon-headline floor).
+      - NEVER touch a beat that already carries a real stat / entity list.
+      - Seed at most: ONE entity-list beat (needs >= 3 real entities) + up to TWO stat
+        beats (one per available real stat), and never more beats than already exist.
+      - Every seeded fact is a REAL value the enrich pass returned verbatim — no
+        invented numbers or names.
+
+    Mutates + returns `plan`. No-op on falsy / empty enrich. Never raises."""
+    if not isinstance(enrich, dict):
+        return plan
+    stats = [s for s in (enrich.get("stats") or [])
+             if isinstance(s, dict) and str(s.get("value") or "").strip()]
+    entities = [str(e).strip() for e in (enrich.get("entities") or []) if str(e or "").strip()]
+    if not stats and len(entities) < 3:
+        return plan  # nothing honest to seed
+
+    scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
+    feature_scenes = [s for s in scenes if s.get("type") == "motion_graphic"]
+    if not feature_scenes:
+        return plan
+
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+        vo["beats"] = beats
+        plan["voiceover"] = vo
+    beat_by_id = {b.get("scene_id"): b for b in beats if isinstance(b, dict)}
+
+    def _beat_text_for(sid):
+        b = beat_by_id.get(sid)
+        return str(b.get("text") or "").strip() if isinstance(b, dict) else ""
+
+    def _seed_scene(scene, text):
+        """Set BOTH the scene brief and its matching VO beat text to `text` so the
+        downstream title derivation (beat text first, brief fallback) carries the fact."""
+        sid = scene.get("id")
+        scene["brief"] = text
+        b = beat_by_id.get(sid)
+        if isinstance(b, dict):
+            b["text"] = text
+        else:
+            b = {"scene_id": sid, "text": text}
+            beats.append(b)
+            beat_by_id[sid] = b
+
+    # Track which scenes are already data-rich (don't touch) and which are seeded now.
+    consumed = set()
+    for s in feature_scenes:
+        bt = _beat_text_for(s.get("id"))
+        if _beat_already_has_stat(s, bt) or _beat_already_has_entities(s, bt):
+            consumed.add(id(s))
+
+    # 1) ENTITY-LIST beat (>= 3 real entities) — exactly one, on a still-generic beat.
+    if len(entities) >= 3:
+        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        if target is not None:
+            _seed_scene(target, ", ".join(entities[:6]))
+            consumed.add(id(target))
+
+    # 2) STAT beats — up to TWO (one per available real stat), each on a generic beat.
+    for stat in stats[:2]:
+        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        if target is None:
+            break  # don't exceed the existing feature-beat count
+        value = str(stat.get("value") or "").strip()
+        label = str(stat.get("label") or "").strip()
+        seed_text = ("%s %s" % (value, label)).strip() if label else value
+        _seed_scene(target, seed_text)
+        consumed.add(id(target))
+
+    return plan
 
 
 def _assign_card_treatments(plan):

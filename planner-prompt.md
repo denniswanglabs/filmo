@@ -250,10 +250,17 @@ VOICEOVER RULES:
   combined valuation", "3,000+ alumni", "99.99% uptime", "135+ currencies"), or (b) be the ONE
   entity-LIST scene (>= 3 real product/customer/portfolio names as a comma list in the title).
   A beat that is just a generic value-prop with NO number and NO named entities is a FAILURE —
-  it renders as a bare card. Ground EACH beat in concrete real data you know about THIS specific
-  company (real metrics, product names, customer names, percentages, prices). Aim for a SPREAD
-  across your 2-3 beats: at least one number-stat beat AND the entity-list beat when the brand
-  has both. Honesty absolute — only REAL numbers/names, never invented.
+  it renders as a bare card. DO NOT limit yourself to the scraped homepage copy — it is OFTEN
+  GENERIC marketing with no concrete numbers/names. ENRICH each beat from your VERIFIED KNOWLEDGE
+  of THIS specific company: its real, well-known METRICS and its named CUSTOMERS / PRODUCTS /
+  PORTFOLIO. Examples (use the ones that apply to the actual company): Y Combinator -> "$500K
+  standard deal", "$800B+ combined valuation of funded companies", and the list "Airbnb, Stripe,
+  Coinbase, Dropbox, DoorDash"; Stripe -> "135+ currencies", "99.99% uptime", and the list
+  "Billing, Connect, Radar, Issuing". Aim for a SPREAD across your 2-3 beats: at least one
+  number-stat beat AND the entity-list beat when the company has both.
+  HONESTY ABSOLUTE: use ONLY facts you genuinely KNOW are TRUE for this EXACT company. If you do
+  not know real specific metrics/names for it (a small or unfamiliar company), DO NOT guess —
+  fall back to an honest generic beat (icon-headline). Never fabricate a number or a name.
 - CARD TREATMENT — CHOOSE A LAYOUT FOR EACH "motion_graphic" FEATURE BEAT (emit it in that
   scene's "data"): a bare feature card (title + a short line) leaves the right side empty. So
   for EACH "motion_graphic" scene, pick ONE "treatment" from the REAL data you have and emit
