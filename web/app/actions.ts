@@ -153,6 +153,37 @@ const EDITABLE_TOP_KEYS = new Set(['scenes', 'theme', 'total_frames', 'music_pat
 
 type ChatProps = { scenes?: unknown[] } & Record<string, unknown>
 
+// Defensive timeline guard. The chat model is *asked* to shift later scenes (and
+// total_frames) when one scene is resized, but nothing enforced it — a missed shift
+// would overlap scenes or leave gaps and silently ship a broken render. This re-lays
+// scenes end-to-end in their existing order, preserving each scene's (possibly newly
+// edited) DURATION, and recomputes total_frames. It is a no-op when the timeline is
+// already contiguous, so correct LLM output and non-timing edits pass through untouched.
+// Safe because scenes carry no absolute internal frame refs — archetype animation is
+// relative to each scene's own [in_frame,out_frame] window.
+function normalizeTimeline(props: ChatProps): ChatProps {
+  const scenes = Array.isArray(props.scenes) ? props.scenes : []
+  if (scenes.length === 0) return props
+  const first = scenes[0] as Record<string, unknown>
+  let cursor = Number(first.in_frame)
+  if (!Number.isFinite(cursor) || cursor < 0) cursor = 0
+  let changed = false
+  const relaid = scenes.map((s) => {
+    const sc = s as Record<string, unknown>
+    const inF = Number(sc.in_frame)
+    const outF = Number(sc.out_frame)
+    let dur = Number.isFinite(inF) && Number.isFinite(outF) ? outF - inF : 0
+    if (!Number.isFinite(dur) || dur < 1) dur = 1 // never a zero/negative-length scene
+    const newIn = cursor
+    const newOut = cursor + dur
+    if (newIn !== inF || newOut !== outF) changed = true
+    cursor = newOut
+    return { ...sc, in_frame: newIn, out_frame: newOut }
+  })
+  if (!changed && Number(props.total_frames) === cursor) return props
+  return { ...props, scenes: relaid, total_frames: cursor }
+}
+
 // Validate the LLM output is a structurally-sound props object: an object with a
 // non-empty scenes array whose every scene keeps an id + numeric frame bounds.
 // Returns the SANITIZED props (merged onto the original so untouched keys survive)
@@ -190,7 +221,9 @@ function sanitizeProps(original: ChatProps, candidate: unknown): ChatProps | nul
     if (k === 'scenes') continue
     if (k in c && c[k] != null) out[k] = c[k]
   }
-  return out
+  // Guarantee a contiguous, non-overlapping timeline even if the model botched the
+  // frame arithmetic on a timing edit. No-op for clean/non-timing output.
+  return normalizeTimeline(out)
 }
 
 // A compact view of the props we hand the model: scene id/archetype/timing +
