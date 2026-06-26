@@ -890,15 +890,22 @@ def _seed_feature_beats_from_enrichment(plan, enrich):
         if _beat_already_has_stat(s, bt) or _beat_already_has_entities(s, bt):
             consumed.add(id(s))
 
-    # 1) ENTITY-LIST beat (>= 3 real entities) — exactly one, on a still-generic beat.
+    # 1) ENTITY-LIST — exactly ONE mosaic total (variety). If a mosaic beat already
+    #    exists (the LLM made one), REUSE it (replace its list with the richer verified
+    #    one) instead of adding a 2nd; else seed a still-generic beat.
     if len(entities) >= 3:
-        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        existing_mosaic = next(
+            (s for s in feature_scenes
+             if _beat_already_has_entities(s, _beat_text_for(s.get("id")))), None)
+        target = existing_mosaic or next(
+            (s for s in feature_scenes if id(s) not in consumed), None)
         if target is not None:
             _seed_scene(target, ", ".join(entities[:6]))
             consumed.add(id(target))
 
-    # 2) STAT beats — up to TWO (one per available real stat), each on a generic beat.
-    for stat in stats[:2]:
+    # 2) STAT beats — fill the REMAINING generic beats with DISTINCT stats (we prefer a
+    #    spread of stats over repeated mosaics).
+    for stat in stats[:3]:
         target = next((s for s in feature_scenes if id(s) not in consumed), None)
         if target is None:
             break  # don't exceed the existing feature-beat count
