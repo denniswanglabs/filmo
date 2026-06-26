@@ -127,6 +127,87 @@ _QUALITY_PROMPT = {
     ),
 }
 
+# --- House style (Luceo Studio signature) ----------------------------------
+# Distilled from Dennis's published Luceo Studio films (research/CURATED-DESIGN-
+# LIBRARY.md): the kinetic-light flagship arc + pacing budgets + imperative-couplet
+# VO rhythm. Injected into the planner SYSTEM_PROMPT so EVERY plan is biased toward
+# the studio's signature instead of a generic SaaS template. Craft = the studio's;
+# palette = always the customer's own brand. Toggle off with HERMES_HOUSE_STYLE=0.
+_HOUSE_STYLE = (
+    "\n\nHOUSE STYLE (Luceo Studio signature — bias every plan toward this):\n"
+    "This studio has a recognizable signature distilled from its published films "
+    "(Orinovate, iKala, Webduino, Kuli, TapPay). Shape the plan to match it:\n"
+    "- ARC: cold-open brand title -> 3 to 4 punchy feature beats (ONE hero statement + "
+    "ONE concrete product element per beat) -> a closing CTA title naming the real next "
+    "step. Exactly ONE big idea per scene — never two.\n"
+    "- PACING: no scene longer than 9s; 4 to 7 content beats; every beat earns its hold. "
+    "Kinetic and readable — fast but never rushed.\n"
+    "- VO RHYTHM (kinetic typography): prefer tight IMPERATIVE COUPLETS built from the "
+    "product's REAL verb-objects, like the studio's films (\"Clock in. / Cash out.\", "
+    "\"One screen. / Whole crew.\", \"Book the stay. / Skip the guesswork.\"). Lead with "
+    "a verb, name the real thing, land the payoff. When a beat needs two ideas, split it "
+    "SETUP -> PAYOFF across two short sentences — never one breathless run-on.\n"
+    "- DISPLAY TEXT: hero titles are short and bold; accent the single punch word or "
+    "number; NO trailing period on the on-screen title text itself.\n"
+    "- SUBSTANCE: one real, NAMED feature per beat; concrete nouns and real-looking "
+    "specific numbers over buzzwords (\"powerful\", \"seamless\", \"next-generation\")."
+)
+
+# --- House templates (per-genre look selection) -----------------------------
+# Maps the target company's detected genre -> the Luceo named template whose arc best
+# fits it (research/CURATED-DESIGN-LIBRARY.md §2). The look is RENDERED by style_fill;
+# only `orinovate-kinetic-light` has a wired render theme today, so selection is CLAMPED
+# to _WIRED_TEMPLATES to avoid a plan/render mismatch (don't tell the model to plan a
+# dark aurora-glass arc the renderer can't produce). To activate a new template: wire its
+# theme in style_fill.py, add it to _WIRED_TEMPLATES, and it auto-selects for its genres.
+_HOUSE_TEMPLATES = {
+    "dev-tool":    "orinovate-kinetic-light",
+    "services":    "orinovate-kinetic-light",
+    "media":       "orinovate-kinetic-light",
+    "marketplace": "orinovate-kinetic-light",
+    "ecommerce":   "apple-style",      # product-as-hero (render theme not wired yet)
+    "fintech":     "zelios-aurora",    # premium aurora+glass (render theme not wired yet)
+    "social":      "zelios-aurora",    # consumer-facing, cinematic (not wired yet)
+}
+_DEFAULT_TEMPLATE = "orinovate-kinetic-light"
+# Only templates whose style_fill render theme exists may actually be selected.
+_WIRED_TEMPLATES = {"orinovate-kinetic-light"}
+
+
+def pick_house_style(genre):
+    """Pick the Luceo named template for a company's genre, clamped to wired themes.
+
+    Returns a template name from _HOUSE_TEMPLATES, but only if its render theme is
+    wired in style_fill (else falls back to the wired default) so the plan never
+    describes a look the renderer can't produce. Returns the default for None/unknown."""
+    want = _HOUSE_TEMPLATES.get((genre or "").strip().lower(), _DEFAULT_TEMPLATE)
+    return want if want in _WIRED_TEMPLATES else _DEFAULT_TEMPLATE
+
+
+def _fewshot_block(quality):
+    """One of Dennis's curated plans as a few-shot DEMONSTRATION, so the small model
+    learns scene-count, imperative-couplet beat rhythm, and CTA phrasing by example.
+
+    Standard-shape exemplar only (a premium plan looks different, so it would mislead a
+    premium build). Returns "" if disabled or the file is missing. Toggle: HERMES_FEWSHOT=0."""
+    if os.environ.get("HERMES_FEWSHOT", "1") == "0":
+        return ""
+    if _normalize_quality(quality) != "standard":
+        return ""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "exemplars", "orinovate-kinetic.plan.json")
+    try:
+        with open(path) as f:
+            ex = f.read().strip()
+    except OSError:
+        return ""
+    return (
+        "\n\nEXAMPLE — a Luceo Studio plan in the studio's signature. Match its shape: the "
+        "scene count and arc (title -> screenshots -> walkthrough -> motion_graphic -> CTA "
+        "title), the tight imperative-couplet beats, and the CTA that names the real next "
+        "step. Do NOT copy its company, its features, or its wording — produce the SAME "
+        "CRAFT for the brief's REAL company and its REAL features:\n" + ex)
+
 
 def _normalize_quality(quality):
     q = str(quality or "").strip().lower()
@@ -608,12 +689,20 @@ def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
     # the dev-tool default so the historical SaaS prompt is byte-unchanged for SaaS.
     genre = detect_genre(company_url, company_facts)
     genre_hint = genre_hint_text(genre)
-    # Quality guidance goes LAST so its scene-type constraint overrides any style
-    # text that mentions cinematic/seedance (e.g. the cinematic style preset). The
-    # genre hint goes between style and quality (it's audience/value guidance, not a
-    # scene-type rule, so it must not override the quality scene-type constraint).
-    system = (vp.SYSTEM_PROMPT + (_STYLE_PROMPT.get(style) or "") + genre_hint
-              + (_QUALITY_PROMPT.get(_normalize_quality(quality)) or ""))
+    # HOUSE STYLE: bias the plan toward Dennis's Luceo Studio signature (kinetic-light
+    # arc + imperative-couplet VO), and pick the named template that best fits this
+    # company's genre (clamped to wired render themes). Recorded in meta for the
+    # render side. Toggle the whole bias off with HERMES_HOUSE_STYLE=0.
+    house_block = "" if os.environ.get("HERMES_HOUSE_STYLE", "1") == "0" else _HOUSE_STYLE
+    house_template = pick_house_style(genre)
+    meta["house_template"] = house_template
+    meta["house_style"] = bool(house_block)
+    # Order: SYSTEM contract -> house-style craft -> pacing style -> genre audience hint
+    # -> quality scene-type rule (LAST so it overrides any cinematic mention) -> few-shot
+    # example (a demonstration of the house style, appended after the rules).
+    system = (vp.SYSTEM_PROMPT + house_block + (_STYLE_PROMPT.get(style) or "") + genre_hint
+              + (_QUALITY_PROMPT.get(_normalize_quality(quality)) or "")
+              + _fewshot_block(quality))
     # Ground the brain in the REAL brand facts so the VO + briefs describe the actual
     # product, not an invented one. The block is appended to the USER prompt (after
     # the brief) and is "" when no facts were resolved — in which case the user prompt

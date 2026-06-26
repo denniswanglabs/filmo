@@ -102,3 +102,6 @@ runs/
 # vendored skill mirrors
 skills/
 skills-lock.json
+
+# bundled BGM source tracks (staged into studio/public at render; needed on the worker)
+!assets/music/*.mp3

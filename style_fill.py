@@ -3217,11 +3217,15 @@ _KINETIC_LIGHT_DEFAULTS = {
 # The picks come from Dennis's owned, attribution-free Pixabay set. Per
 # VIDEO-OVERHAUL-SPEC §4 the Stripe/fintech default is the TapPay promo track
 # (51.5s, confident-modern-clean, no loop seam over the ~32-40s arc).
+# Repo-relative so the tracks resolve on the Railway worker too (the old absolute
+# /Users/dennis/... paths existed only on the dev machine → silent video in prod).
+# These mp3s are bundled (git-tracked via the !assets/music exception in .gitignore).
+_MUSIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "music")
 _MUSIC_TRACKS = {
     # confident, modern, clean — fintech / payments / SaaS (the spec default)
-    "fintech": "/Users/dennis/Desktop/Projects/Demos/tappay-promo/public/music.mp3",
+    "fintech": os.path.join(_MUSIC_DIR, "fintech.mp3"),
     # calm / modern, longer bed — generic fallback for non-fintech brands
-    "calm":    "/Users/dennis/Desktop/Projects/Demos/kuli-promo/public/music.mp3",
+    "calm":    os.path.join(_MUSIC_DIR, "calm.mp3"),
 }
 # The default track when nothing brand-specific is known. The spec recommends the
 # TapPay/fintech cut for Stripe and as a safe modern-clean default for all brands.

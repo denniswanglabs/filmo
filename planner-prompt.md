@@ -62,6 +62,18 @@ beats as a fallback), but the planner MUST emit `beats`.
   carry `model: null` (rendered by Remotion, no Higgsfield spend).
 - **`temperature` is set low (0.2)** in the API call — planning is structured extraction, not
   creative writing; low temp improves schema adherence.
+- **HOUSE STYLE (Luceo Studio signature).** A distilled house-style block (`plan_job._HOUSE_STYLE`)
+  is injected into the SYSTEM prompt right after the base contract, biasing every plan toward the
+  studio's signature: the kinetic-light arc (cold-open title → 3-4 single-idea feature beats → CTA
+  title naming the real next step), pacing budgets (no scene > 9s, 4-7 beats), and imperative-couplet
+  VO rhythm ("Clock in. / Cash out."). It is craft guidance only — palette stays the customer's brand,
+  and the QUALITY block still goes LAST so scene-type rules win. Toggle off with `HERMES_HOUSE_STYLE=0`.
+  A few-shot DEMONSTRATION (`plan_job._fewshot_block`, `exemplars/orinovate-kinetic.plan.json`) is
+  appended for STANDARD builds so the small model learns scene-count + beat rhythm by example
+  (guarded: standard-only, `HERMES_FEWSHOT=0` disables). `pick_house_style(genre)` records the named
+  template best fitting the company's genre in `meta.house_template` for the render side — clamped to
+  templates with a wired `style_fill` theme (only `orinovate-kinetic-light` today; add Zelios/Apple by
+  wiring their themes + adding to `_WIRED_TEMPLATES`).
 - **One repair retry path** is documented below for the harness: if `json.loads` fails, send
   the malformed text back with a one-line "return only valid JSON, fix the parse error"
   instruction. No expensive loop.
