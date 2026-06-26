@@ -25,6 +25,16 @@ body {
   color: #0e1320;
 }
 
+/* Smooth-scroll anchor targets clear the fixed floating nav (~64px pill + a
+   little breathing room) so #examples / #start don't tuck under it on a jump.
+   scroll-margin-top is the modern offset for scrollIntoView; we deliberately do
+   NOT set scroll-behavior here so the JS scrollIntoView({behavior:'smooth'})
+   stays in control (no conflicting global smooth-scroll). */
+#start,
+#examples {
+  scroll-margin-top: 96px;
+}
+
 /* Faint blue dotted texture behind the hero stage — soft blue dots on white. */
 .surface-dots-dark {
   background-image: radial-gradient(rgba(59, 130, 246, 0.08) 1px, transparent 1px);

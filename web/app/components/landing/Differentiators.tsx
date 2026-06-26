@@ -78,17 +78,6 @@ const FEATURES: Feature[] = [
       </svg>
     ),
   },
-  {
-    title: 'Built on NVIDIA Nemotron',
-    body: 'One planner reasons over the whole storyboard, so the cut is coherent end to end.',
-    // Chip — the model.
-    icon: (
-      <svg {...iconProps} aria-hidden="true">
-        <rect x="7" y="7" width="10" height="10" rx="1.6" />
-        <path d="M10 3.5v3.5M14 3.5v3.5M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5" />
-      </svg>
-    ),
-  },
 ]
 
 export default function Differentiators() {

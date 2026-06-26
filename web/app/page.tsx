@@ -11,6 +11,7 @@ import FloatingNav from './components/landing/FloatingNav'
 import Examples from './components/landing/Examples'
 import LuceoShowcase from './components/landing/LuceoShowcase'
 import ReadyToCreate from './components/landing/ReadyToCreate'
+import PoweredBy from './components/landing/PoweredBy'
 import SiteFooter from './components/landing/SiteFooter'
 import { ParallaxWindows, ScrubbedHero } from './components/landing/Motion'
 import { BRAINS, type Run } from '../lib/types'
@@ -278,6 +279,12 @@ export default function Home() {
               )}
             </form>
           </ScrubbedHero>
+
+          {/* Sponsor credit — Hermes Hackathon (Nous Research × NVIDIA × Stripe).
+              Sits directly under the composer as a small trust strip. */}
+          <div className="mt-8">
+            <PoweredBy />
+          </div>
 
           {/* Recents — only meaningful once signed in. */}
           {user && (

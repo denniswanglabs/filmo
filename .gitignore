@@ -37,12 +37,13 @@ __pycache__/
 *.m4a
 *.aac
 # generated run artifacts (keep small ledger.json refs — see below)
-runs/*/clips/
-runs/**/*.mp4
-runs/**/*.mp3
-runs/**/*.wav
-runs/**/*.png
-runs/**/*.jpg
+# anchored to repo root so it does NOT swallow web/app/runs/ (the editor route)
+/runs/*/clips/
+/runs/**/*.mp4
+/runs/**/*.mp3
+/runs/**/*.wav
+/runs/**/*.png
+/runs/**/*.jpg
 # evidence/ holds large render stills + clips — keep only small refs
 evidence/**/*.png
 evidence/**/*.jpg
@@ -81,13 +82,27 @@ tmp/
 
 # transient orchestration handoff notes (not product code)
 .handoff-*.md
+HANDOFF*.md
+OVERNIGHT*.md
+
+# scratch / experiments / AI-tool working dirs (not product code)
+experiments/
+.agents/
+.augment/
+.kilocode/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.windsurf/
 
 # per-run capture fixtures (regenerated each build; not source)
 studio/public/shot-*.png
 studio/public/brand-logo-*.svg
 
 # generated run artifacts (dashboard reads from disk; not versioned)
-runs/
+# anchored to repo root so it does NOT swallow web/app/runs/ (the editor route)
+/runs/
 
 # cloud build (added on hosted-saas)
 web/node_modules/

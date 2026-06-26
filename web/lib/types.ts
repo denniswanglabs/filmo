@@ -22,7 +22,15 @@ export interface Run {
   margin: number | null
   plan: unknown
   selection: unknown
+  props?: unknown
+  // Editor-saved props (in-browser edits), distinct from the clean worker-generated
+  // `props`. Written by the saveEditedProps server action; lets the editor offer a
+  // "revert to original" and keeps the original render-ready props intact.
+  props_edited?: unknown
   final_url: string | null
+  // The re-rendered ("Edited") video URL, produced by an editor Export → `rerender`
+  // job. Kept separate from final_url so the original delivered cut is never lost.
+  edited_url?: string | null
   created_at: string
   updated_at: string | null
 }

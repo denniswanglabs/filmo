@@ -29,7 +29,10 @@ const STEPS: readonly Step[] = [
   },
 ]
 
-export default function HowItWorks() {
+// `showBadge` lets the embedding page suppress the redundant "How it works" pill
+// when the page header already shows one (the dedicated /how-it-works page).
+// Defaults true so the standalone landing usage keeps its label.
+export default function HowItWorks({ showBadge = true }: { showBadge?: boolean }) {
   return (
     <section id="how" className="panel panel--dark px-5 py-20 sm:py-24">
       {/* Blue glass top edge — our signature on the rounded panel lip. */}
@@ -37,11 +40,13 @@ export default function HowItWorks() {
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
-            How it works
-          </span>
+          {showBadge && (
+            <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
+              How it works
+            </span>
+          )}
           <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
-            From a link to a launch video.
+            Four steps, fully autonomous.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-[#5A6472]">
             No brief, no timeline, no editor. Paste your URL and Filmo does the rest.

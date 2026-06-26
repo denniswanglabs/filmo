@@ -1,15 +1,12 @@
-// /how-it-works — the marketing + explainer story, moved off the minimal landing.
-// Renders the same sections (the Conversion Read explainer, how-it-works steps,
-// differentiators, use cases, parallax columns, closing CTA) on the white +
-// light-blue stage, with the floating nav and footer. Nothing was lost — it just
-// lives here now. The landing stays video-forward.
+// /how-it-works — a focused, scannable explainer (not the whole marketing story).
+// Three tight beats: the hero header, the numbered how-it-works steps (the point),
+// and ONE condensed "why Filmo" credibility block — then the closing CTA. The
+// heavier showpieces (TrustBar, ParallaxColumns, UseCases) live on the landing /
+// remain available as shared components; they're just not stacked here anymore.
 
 import FloatingNav from '../components/landing/FloatingNav'
-import TrustBar from '../components/landing/TrustBar'
 import HowItWorks from '../components/landing/HowItWorks'
 import Differentiators from '../components/landing/Differentiators'
-import ParallaxColumns from '../components/landing/ParallaxColumns'
-import UseCases from '../components/landing/UseCases'
 import ClosingCTA from '../components/landing/ClosingCTA'
 import SiteFooter from '../components/landing/SiteFooter'
 
@@ -41,13 +38,11 @@ export default function HowItWorksPage() {
         </div>
       </header>
 
-      {/* The full explainer + marketing story, moved off the landing. */}
-      <TrustBar />
-      <HowItWorks />
+      {/* The point: the numbered pipeline steps. Badge suppressed — the page
+          header above already shows the "How it works" pill. */}
+      <HowItWorks showBadge={false} />
+      {/* ONE credibility beat — why Filmo, not a random-pixel generator. */}
       <Differentiators />
-      {/* THE showpiece: parallax drifting columns of the real Luceo films. */}
-      <ParallaxColumns />
-      <UseCases />
       <ClosingCTA />
       <SiteFooter />
     </div>

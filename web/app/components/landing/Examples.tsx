@@ -31,6 +31,15 @@ interface Card {
   height: string
 }
 
+// Resting-state brand logos (Simple Icons, CC0) keyed by brand. The logo is the
+// poster at rest; the video fades in over it on hover. `tint` is a very subtle
+// brand-tinted wash behind the mark so the white tiles don't read flat.
+const BRAND: Record<string, { logo: string; tint: string }> = {
+  Notion: { logo: '/examples/logos/notion.svg', tint: '#F6F8FC' },
+  Linear: { logo: '/examples/logos/linear.svg', tint: '#F2F3FD' },
+  Stripe: { logo: '/examples/logos/stripe.svg', tint: '#F2F1FF' },
+}
+
 // Six tiles drawn from the three real cuts — all identical size in a packed wall.
 const CARDS: readonly Card[] = [
   {
@@ -108,12 +117,31 @@ function GalleryCard({ card }: { card: Card }) {
     el.currentTime = 0
   }
 
+  const brand = BRAND[card.brand]
+
   return (
     <figure
       onMouseEnter={play}
       onMouseLeave={reset}
-      className="group relative block aspect-video w-full overflow-hidden bg-[#F5F8FF]"
+      className="group relative block aspect-video w-full overflow-hidden bg-white"
     >
+      {/* Resting state: brand logo centered on a clean, faintly brand-tinted tile. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 grid place-items-center"
+        style={{ backgroundColor: brand?.tint ?? '#F6F8FC' }}
+      >
+        {brand && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={brand.logo}
+            alt=""
+            className="w-[40%] max-w-[160px] object-contain opacity-90"
+          />
+        )}
+      </div>
+
+      {/* Hover state: the video fades in OVER the logo and plays. */}
       <video
         ref={videoRef}
         src={card.src}
@@ -122,13 +150,13 @@ function GalleryCard({ card }: { card: Card }) {
         loop
         playsInline
         preload="none"
-        className="absolute inset-0 h-full w-full bg-[#F5F8FF] object-cover"
+        className="absolute inset-0 h-full w-full bg-[#F5F8FF] object-cover opacity-0 transition-opacity duration-500 group-hover:opacity-100"
       />
 
-      {/* Readability scrim along the bottom for the label. */}
+      {/* Readability scrim along the bottom for the label — only over the playing video. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-[#0E1320]/55 via-[#0E1320]/10 to-transparent"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-[#0E1320]/55 via-[#0E1320]/10 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100"
       />
 
       {/* Center play chip — fades out on hover. */}
@@ -143,11 +171,16 @@ function GalleryCard({ card }: { card: Card }) {
         </span>
       </div>
 
-      {/* Brand label — bottom-left, always visible. */}
+      {/* Brand label — bottom-left, always visible. Dark over the resting logo
+          tile, switches to white once the video fades in on hover. */}
       <figcaption className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4 sm:p-5">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-white drop-shadow-sm sm:text-base">{card.brand}</p>
-          <p className="mt-0.5 truncate text-xs text-white/80 sm:text-sm">{card.descriptor}</p>
+          <p className="text-sm font-semibold text-[#0E1320] transition-colors duration-500 group-hover:text-white group-hover:drop-shadow-sm sm:text-base">
+            {card.brand}
+          </p>
+          <p className="mt-0.5 truncate text-xs text-[#5A6472] transition-colors duration-500 group-hover:text-white/80 sm:text-sm">
+            {card.descriptor}
+          </p>
         </div>
         {/* "Remix" affordance — slides up on hover. */}
         <span className="shrink-0 translate-y-2 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#2563EB] opacity-0 shadow-sm backdrop-blur-sm transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">

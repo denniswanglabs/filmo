@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Wordmark } from '../Brand'
+import PoweredBy from './PoweredBy'
 
 // Slim, honest footer: wordmark + tagline on the left, three real in-page anchors
 // on the right, copyright underneath. No fake social links or marketing pages.
@@ -24,7 +25,13 @@ export default function SiteFooter() {
             </Link>
           </nav>
         </div>
-        <p className="mt-8 text-xs text-[#8A94A6]">
+
+        {/* App-wide sponsor credit — Hermes Hackathon (Nous Research × NVIDIA × Stripe). */}
+        <div className="mt-8 border-t border-[#D4E2FB] pt-6">
+          <PoweredBy compact />
+        </div>
+
+        <p className="mt-6 text-xs text-[#8A94A6]">
           © 2026 Filmo · Built for the Hermes Hackathon — Nous Research × NVIDIA × Stripe
         </p>
       </div>

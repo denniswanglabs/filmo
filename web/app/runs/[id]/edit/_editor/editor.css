@@ -1,0 +1,207 @@
+/* =====================================================================
+   FILMO EDITOR THEME — re-skin of the ported Walk Studio editor.
+   The ported components reference ~80 CSS variables (--accent, --glass,
+   --panel-2, …) that originally resolved to a CORAL + dark-tile palette in
+   the standalone studio's index.html :root. Here we keep the SAME variable
+   NAMES (so every component's inline `var(--x)` cascades unchanged) but
+   remap the VALUES to the FILMO light palette:
+     - accent  #3B82F6  (Filmo blue, was coral #D6351C)
+     - surfaces white / very-light-blue wells
+     - ink     #0E1320  (Filmo ink), borders light-blue #D4E2FB
+   Scoped to `.ws-editor-root` so it can never leak into the rest of the app
+   (the landing, /runs page chrome, TopBar) — only the editor surface is
+   themed. Only the VIDEO stage stays dark on purpose.
+   ===================================================================== */
+.ws-editor-root {
+  /* ---- light page / chrome surfaces ---- */
+  --bg:        #F5F8FF;   /* page canvas — Filmo's faint-blue page tone */
+  --bg-1:      #FFFFFF;   /* primary card / panel surface */
+  --bg-2:      #EEF4FF;   /* recessed control / hover wells (blue tint) */
+  --stage:     #0B0F1A;   /* the dark VIDEO stage backdrop (the one dark inversion) */
+
+  /* ---- panel / card / control surfaces ---- */
+  --glass:     #FFFFFF;
+  --glass-2:   #F2F6FF;
+  --panel:     #FFFFFF;
+  --panel-2:   #FFFFFF;
+  --panel-3:   #EAF1FF;
+  --chrome:    #FFFFFF;
+  --field:     #F5F8FF;
+  --field-2:   #EAF1FF;
+  --clip:      #FFFFFF;
+  --clip-2:    #F2F6FF;
+  --rail:      #F2F6FF;
+
+  /* ---- hairlines + borders (Filmo light-blue) ---- */
+  --line:      #D4E2FB;   /* standard Filmo hairline divider (light blue) */
+  --line-2:    #BBD2F7;   /* stronger control outline */
+  --line-soft: #E2ECFD;
+  --glass-edge: #D4E2FB;
+  --glass-edge-soft: rgba(255,255,255,.6);
+
+  /* ---- ink (Filmo) ---- */
+  --text:    #0E1320;   /* Filmo primary ink */
+  --text-2:  #38465C;   /* secondary */
+  --muted:   #64748B;   /* tertiary / labels */
+  --dim:     #94A3B8;   /* quietest / placeholder / ruler ticks */
+
+  /* ---- one confident FILMO BLUE accent, used SPARINGLY ---- */
+  --accent:      #3B82F6;   /* PRIMARY ACCENT — Filmo blue (was coral) */
+  --accent-soft: #60A5FA;   /* lighter blue */
+  --accent-deep: #2563EB;   /* deeper blue (pressed / borders) */
+  --accent-ink:  #FFFFFF;   /* text/icon riding ON the blue fill */
+  --accent-glow: rgba(59,130,246,.22);
+  --accent-glow-strong: rgba(59,130,246,.32);
+  --accent-tint: rgba(59,130,246,.06);
+  --accent-tint-2: rgba(59,130,246,.12);
+  --accent-line: rgba(59,130,246,.55);
+  --accent-grad: linear-gradient(180deg, #4F8DF7, #3B82F6);
+  --accent-grad-soft: rgba(59,130,246,.06);
+
+  /* ---- reserved semantics ---- */
+  --pos:       #0E9F6E;
+  --neg:       #C01A2B;
+  --video-bg:  #0B0F1A;
+
+  /* ---- type system (Filmo / Hanken Grotesk) ---- */
+  --ui:     "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --serif:  "Newsreader", ui-serif, Georgia, "Times New Roman", serif;
+  --code:   ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* ---- radius scale ---- */
+  --r-ctl:  11px;
+  --r-card: 15px;
+  --r-lg:   18px;
+  --r-pill: 999px;
+
+  /* ---- motion ---- */
+  --ease:    cubic-bezier(.2,.7,.2,1);
+  --ease-out: cubic-bezier(.16,1,.3,1);
+
+  /* ---- soft neutral shadows (with a faint blue tint to match Filmo) ---- */
+  --shadow-card: 0 1px 2px rgba(14,19,32,.04), 0 8px 22px rgba(30,58,120,.07);
+  --shadow-pop:  0 2px 8px rgba(14,19,32,.10), 0 24px 60px rgba(30,58,120,.15);
+  --shadow-float: 0 1px 2px rgba(14,19,32,.05), 0 14px 34px rgba(30,58,120,.09);
+  --shadow-glow: 0 1px 2px rgba(14,19,32,.18), 0 6px 16px rgba(59,130,246,.30), inset 0 1px 0 rgba(255,255,255,.22);
+
+  /* The editor fills the page surface below the TopBar. */
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background:
+    radial-gradient(70% 60% at 92% -4%, rgba(59,130,246,.05), transparent 60%),
+    var(--bg);
+}
+
+/* ---- card surface utility (kept the .ws-glass class name so JSX cascades) ---- */
+.ws-editor-root .ws-glass {
+  background: var(--glass);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-float);
+}
+
+.ws-editor-root button,
+.ws-editor-root input,
+.ws-editor-root textarea,
+.ws-editor-root select { font-family: inherit; }
+.ws-editor-root button { cursor: pointer; }
+
+.ws-editor-root ::selection { background: var(--accent-tint-2); color: var(--text); }
+
+.ws-editor-root input::placeholder,
+.ws-editor-root textarea::placeholder { color: var(--dim); }
+.ws-editor-root .ws-input:focus-visible,
+.ws-editor-root .ws-textarea:focus-visible {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.ws-editor-root .ws-input,
+.ws-editor-root .ws-textarea {
+  transition: border-color .14s var(--ease), box-shadow .14s var(--ease), background .14s var(--ease);
+}
+.ws-editor-root .ws-input:hover:not(:focus-visible),
+.ws-editor-root .ws-textarea:hover:not(:focus-visible) { background: var(--field-2); border-color: var(--line-2); }
+
+.ws-editor-root .ws-backnav {
+  transition: background .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease), transform .1s var(--ease);
+}
+.ws-editor-root .ws-backnav:hover { background: var(--bg-2); border-color: var(--line-2); color: var(--text); transform: translateY(-1px); }
+
+/* ---- custom range slider (geometry sliders) ---- */
+.ws-editor-root input.ws-range {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 22px; background: transparent; cursor: pointer; margin: 0;
+}
+.ws-editor-root input.ws-range::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background:
+    linear-gradient(rgba(59,130,246,.62), rgba(59,130,246,.62)) 0/var(--pct,50%) 100% no-repeat,
+    var(--panel-3);
+}
+.ws-editor-root input.ws-range::-moz-range-track { height: 4px; border-radius: 999px; background: var(--panel-3); }
+.ws-editor-root input.ws-range::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--accent); }
+.ws-editor-root input.ws-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; margin-top: -5.5px; border-radius: 50%;
+  background: #fff; border: 1px solid var(--accent-deep);
+  box-shadow: 0 1px 3px rgba(14,19,32,.25), 0 0 0 0 var(--accent-glow);
+  transition: box-shadow .14s var(--ease), transform .12s var(--ease);
+}
+.ws-editor-root input.ws-range::-moz-range-thumb {
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #fff; border: 1px solid var(--accent-deep);
+  box-shadow: 0 1px 3px rgba(14,19,32,.25);
+}
+.ws-editor-root input.ws-range:hover::-webkit-slider-thumb { transform: scale(1.08); }
+.ws-editor-root input.ws-range:focus-visible { outline: none; }
+.ws-editor-root input.ws-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 1px 4px rgba(0,0,0,.4), 0 0 0 4px var(--accent-glow);
+}
+
+/* ---- native color input chrome reset (theme swatches) ---- */
+.ws-editor-root input[type="color"].ws-swatch {
+  -webkit-appearance: none; appearance: none; border: none; padding: 0; background: transparent; cursor: pointer;
+}
+.ws-editor-root input[type="color"].ws-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.ws-editor-root input[type="color"].ws-swatch::-webkit-color-swatch { border: none; border-radius: 7px; }
+
+/* ---- timeline scrub bar (the seek bar under the preview) ---- */
+.ws-editor-root input.ws-scrub {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 18px; background: transparent; cursor: pointer; margin: 0; display: block;
+}
+.ws-editor-root input.ws-scrub::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 999px;
+  background:
+    linear-gradient(90deg, var(--accent-deep), var(--accent)) 0/var(--pct,0%) 100% no-repeat,
+    var(--panel-3);
+}
+.ws-editor-root input.ws-scrub::-moz-range-track { height: 6px; border-radius: 999px; background: var(--panel-3); }
+.ws-editor-root input.ws-scrub::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
+.ws-editor-root input.ws-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; margin-top: -5px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(14,19,32,.3), 0 0 0 0 var(--accent-glow);
+  transition: box-shadow .14s var(--ease), transform .12s var(--ease);
+}
+.ws-editor-root input.ws-scrub::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(14,19,32,.3);
+}
+.ws-editor-root input.ws-scrub:hover::-webkit-slider-thumb { transform: scale(1.12); box-shadow: 0 2px 6px rgba(0,0,0,.45), 0 0 0 5px var(--accent-glow); }
+.ws-editor-root input.ws-scrub:focus-visible { outline: none; }
+.ws-editor-root input.ws-scrub:focus-visible::-webkit-slider-thumb { box-shadow: 0 2px 6px rgba(0,0,0,.45), 0 0 0 5px var(--accent-glow); }
+
+.ws-editor-root .ws-clip-thumb { transition: transform .2s var(--ease); }
+
+/* Keyframes used by spinner / pulse chips (global names; harmless if duplicated). */
+@keyframes ws-spin { to { transform: rotate(360deg); } }
+@keyframes ws-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-editor-root * { transition: none !important; animation: none !important; }
+}
