@@ -738,9 +738,17 @@ _NAV_SECTION_EXACT = frozenset((
 # Leading nav-action tokens: a string starting with one of these (followed by more
 # words) is an imperative nav link / breadcrumb action, never a brand headline.
 _NAV_LEADING_TOKENS = (
-    "find a ", "find an ", "shop ", "browse ", "explore ", "discover ",
+    "find a ", "find an ", "shop ", "browse ",
     "view all ", "see all ", "go to ", "visit the ", "back to ",
 )
+
+# Nouns that appear in "&"-joined nav section labels ("Knowledge & News",
+# "Press & Media"). The "&" rule only fires when BOTH sides are in this set,
+# preventing false matches on product feature phrases like "Billing & invoicing".
+_NAV_AMP_NOUNS = frozenset((
+    "news", "press", "media", "blog", "careers", "resources",
+    "community", "events", "knowledge", "about", "stories", "insights",
+))
 
 
 def _is_ui_label(text):
@@ -786,13 +794,16 @@ def _is_nav_segment(low):
         return True
     # Section-heading phrases that are site chrome, not product value props:
     #  - "<X> & <Y>" two-noun section labels ("Knowledge & News", "Press & Media")
-    #  - possessive editorial sections ("In Founders' Words", "In Their Words")
-    #  - directive nav blurbs ("Be in the room with ...", "Join the conversation")
-    if re.search(r"^\w+\s*&\s*\w+$", low):
+    #    Only fires when BOTH words are nav nouns — prevents matching product
+    #    feature phrases like "Billing & invoicing" or "Save & sync".
+    #  - possessive editorial sections ("In Founders’ Words", "In Their Words")
+    #  - distinctive directive nav blurbs ("Be in the room with ...", "Join the conversation")
+    m = re.match(r"^(\w+)\s*&\s*(\w+)$", low)
+    if m and m.group(1) in _NAV_AMP_NOUNS and m.group(2) in _NAV_AMP_NOUNS:
         return True
-    if low.startswith("in ") and ("words" in low or "'s" in low or "’s" in low):
+    if low.startswith("in ") and ("words" in low or "’s" in low or "’s" in low):
         return True
-    if low.startswith(("be in ", "join the ", "explore the ", "discover ")):
+    if low.startswith(("be in ", "join the ")):
         return True
     return False
 

@@ -401,6 +401,14 @@ class TestNavSectionFilter(unittest.TestCase):
         for feat in ["Recurring billing", "Built-in fraud protection", "Instant payouts"]:
             self.assertFalse(be._is_ui_label(feat), f"{feat!r} is a real feature")
 
+    def test_amp_features_are_not_ui_labels(self):
+        for feat in ["Billing & invoicing", "Save & sync", "Track & manage", "Fraud & risk"]:
+            self.assertFalse(be._is_ui_label(feat), f"{feat!r} is a real feature")
+
+    def test_discover_explore_features_are_not_ui_labels(self):
+        for feat in ["Discover insights", "Explore your data"]:
+            self.assertFalse(be._is_ui_label(feat), f"{feat!r} is a real feature")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
