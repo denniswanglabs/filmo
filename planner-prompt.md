@@ -270,11 +270,14 @@ VOICEOVER RULES:
   treatments — do NOT make them all the same. Aim for a SPREAD: one stat card, one
   entity/mosaic card, one headline card, when the real data supports it.
   ENTITY/MOSAIC SCENES: "featureEntities" are not only product features — they are ANY >= 3
-  REAL named entities this company is associated with: customers, portfolio/backed companies,
-  integrations, partners, or logos (e.g. Y Combinator -> "Airbnb","Stripe","Coinbase",
-  "Dropbox","DoorDash"; a SaaS -> its named customer logos). If this company has >= 3 such REAL
-  names, DEDICATE ONE feature beat to them: title like "Trusted by..." / "Backed companies" and
-  emit "split-mosaic" + featureEntities (the real names). Still honest — only REAL names.
+  REAL named entities this company is associated with: PRODUCTS/modules, customers, portfolio/
+  backed companies, integrations, partners, or logos (e.g. Stripe -> "Billing","Connect",
+  "Radar","Issuing"; Y Combinator -> "Airbnb","Stripe","Coinbase","Dropbox","DoorDash"). If this
+  company has >= 3 such REAL names, you MUST DEDICATE EXACTLY ONE feature beat to the LIST —
+  put the names as a comma list IN the scene title (e.g. "Billing, Connect, Radar, Issuing" or
+  "Airbnb, Stripe, Dropbox, DoorDash") so the mosaic renders. Do NOT spread those names across
+  separate one-each feature beats (that wastes the mosaic) — collect them into ONE list scene.
+  Still honest — only REAL names.
   STAT SCENES: when a feature's punch IS a single REAL number, put that number IN the scene
   title (e.g. "$600B+ combined valuation", "3,000+ alumni") so it renders as a big hero stat.
   CURATED ICON NAMES (pick the closest; unknown names safely default to "spark"): "rocket",

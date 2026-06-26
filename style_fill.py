@@ -2418,6 +2418,13 @@ def _assign_treatment_from_filled_copy(
             out["title"] = mined_label or str(out.get("title") or "")
             out["stat"] = {"value": _decode(str(use_stat.get("value") or "")), "label": ""}
         else:
+            # has_real_stat: the LLM stat goes on the RIGHT; strip any COMPETING number
+            # from the LEFT headline so it doesn't fight the stat panel ("Merchants see
+            # revenue lift, 99.9%" + stat 12% -> headline "Merchants see revenue lift").
+            ct = _TITLE_STAT_RE.sub("", str(out.get("title") or ""))
+            ct = re.sub(r"\s{2,}", " ", ct).strip(" ,—-·:").strip()
+            if ct:
+                out["title"] = ct
             out["stat"] = {
                 "value": _decode(str(use_stat.get("value") or "")),
                 "label": _decode(str(use_stat.get("label") or "")),
