@@ -108,7 +108,22 @@ def main():
     if earn_result.get("key_kind") == "live":
         print("\n❌ LIVE KEY DETECTED - STOPPING")
         sys.exit(1)
-    
+
+    # Step 4.5: simulate the customer paying the link with the 4242 test card.
+    # Closes the earn loop (link -> paid) with a REAL test-mode succeeded payment.
+    print("\n💸 STEP 4.5: Simulate customer payment (Stripe 4242 test card)")
+    pay_result = call_tool("simulate_payment", {
+        "plan_path": plan_path,
+        "price_cents": suggested_price_cents,
+        "payment_link_id": earn_result.get("earn", {}).get("payment_link_id"),
+    })
+    if pay_result.get("paid"):
+        print(f"   ✅ Paid ${(pay_result.get('amount_received_cents') or 0)/100:.2f} "
+              f"via {pay_result.get('card_brand')} ****{pay_result.get('card_last4')} "
+              f"(PaymentIntent {pay_result.get('payment_intent_id')}, test mode)")
+    else:
+        print(f"   ⚠️  payment not confirmed: {pay_result.get('status')} {pay_result.get('error','')}")
+
     # Step 5+6: Budget gate and produce each scene
     print("\n🎬 STEP 5+6: Budget Gate + Produce Scenes")
     

@@ -43,6 +43,7 @@ import orchestrator
 import plan_job
 import producer
 import stripe_earn
+import stripe_money
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "runs")
@@ -717,7 +718,35 @@ def _payment_gate(led, led_path, run_id, price_cents, currency, job, mode):
 
     simulate = os.environ.get("PRODUCER_SIMULATE_PAID") == "1"
     if simulate:
-        led.event("info", "PRODUCER_SIMULATE_PAID=1 — dev affordance: resolving payment as paid ($0)")
+        # Simulate the CUSTOMER paying the link with Stripe's 4242 test card. With a
+        # sk_test_/rk_test_ key this is a REAL test-mode succeeded PaymentIntent
+        # (visible in the Stripe test dashboard — no real money); with no key it
+        # degrades to a $0 simulated-paid block. A live key is refused inside settle.
+        try:
+            pay = stripe_money.StripeMoney(live=True).settle_payment(
+                int(price_cents or 0), currency,
+                {"run_id": str(run_id), "session_id": earn.get("session_id") or ""})
+        except Exception as e:
+            pay = {"paid": True, "simulated": True, "status": "succeeded", "error": str(e),
+                   "card_brand": "visa", "card_last4": "4242"}
+        if pay.get("paid"):
+            earn["status"] = "paid"
+            earn["payment_status"] = "paid"
+            earn["payment_intent_id"] = pay.get("payment_intent_id")
+            earn["charge_id"] = pay.get("charge_id")
+            earn["card_brand"] = pay.get("card_brand") or "visa"
+            earn["card_last4"] = pay.get("card_last4") or "4242"
+            earn["payment_simulated"] = bool(pay.get("simulated"))
+            led.set_earn(earn)
+            led.event("money", "customer paid $%.2f via %s ****%s — PaymentIntent %s (%s)" % (
+                (price_cents or 0) / 100.0, (earn["card_brand"]).title(), earn["card_last4"],
+                pay.get("payment_intent_id") or "succeeded",
+                "real test-mode payment, no settlement" if not pay.get("simulated") else "simulated $0"),
+                payment_intent_id=earn.get("payment_intent_id"))
+            led.write(led_path)
+            return earn
+        # settle did not confirm — fall through to the normal poll loop below.
+        led.event("info", "simulate-pay did not confirm (%s) — falling back to payment poll" % pay.get("status"))
 
     deadline = time.monotonic() + PAYMENT_TIMEOUT_S
     while True:

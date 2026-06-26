@@ -756,6 +756,67 @@ def tool_earn_stripe(args):
     }
 
 
+def tool_simulate_payment(args):
+    """REAL pipeline step: the customer PAYS the earn link with the 4242 test card.
+
+    Closes the earn loop (link -> paid) by confirming a Stripe TEST-MODE
+    PaymentIntent with the literal 4242 4242 4242 4242 Visa — a real *succeeded*
+    payment in the test dashboard, no real money. Call AFTER earn_stripe. With no
+    key it returns a faithful simulated `succeeded` block. A LIVE key is REFUSED
+    (confirming a card charge on a live key would move real money)."""
+    try:
+        import stripe_money
+    except Exception as e:
+        return {"ok": False, "error": "could not import stripe_money: %s" % e}
+
+    price_cents = int(args.get("price_cents") or 0)
+    currency = (args.get("currency") or "usd").strip() or "usd"
+    plan_path = (args.get("plan_path") or "").strip()
+    if plan_path and price_cents <= 0:
+        plan, _err = _load_plan(plan_path)
+        if isinstance(plan, dict):
+            job = plan.get("job", {})
+            currency = currency or job.get("currency", "usd")
+    if price_cents <= 0:
+        return {"ok": False, "error": "price_cents must be > 0 (the amount the customer pays, from earn_stripe/price_job)"}
+
+    key_info = stripe_money.detect_key()
+    if key_info.get("kind") == "live":
+        return {"ok": False, "key_kind": "live",
+                "error": "REFUSED: a LIVE Stripe key is present. simulate_payment is TEST "
+                         "MODE ONLY and will not confirm a live charge. Use a sk_test_/rk_test_ key."}
+
+    is_test_key = bool(key_info.get("present")) and key_info.get("kind") == "test"
+    money = stripe_money.StripeMoney(live=is_test_key)
+    meta = {"job": (args.get("job_goal") or "filmo-video")[:200]}
+    if args.get("payment_link_id"):
+        meta["payment_link_id"] = str(args.get("payment_link_id"))
+    try:
+        pay = money.settle_payment(price_cents, currency, meta)
+    except Exception as e:
+        return {"ok": False, "error": "simulate_payment failed: %s" % e}
+
+    return {
+        "ok": bool(pay.get("paid")),
+        "step": "simulate_payment",
+        "test_mode": True,
+        "live_api_used": bool(money.live),
+        "key_present": bool(key_info.get("present")),
+        "key_kind": key_info.get("kind"),
+        "paid": pay.get("paid"),
+        "status": pay.get("status"),
+        "amount_cents": price_cents,
+        "amount_received_cents": pay.get("amount_received_cents"),
+        "currency": pay.get("currency", currency),
+        "card_brand": pay.get("card_brand"),
+        "card_last4": pay.get("card_last4"),
+        "payment_intent_id": pay.get("payment_intent_id"),
+        "charge_id": pay.get("charge_id"),
+        "livemode": pay.get("livemode", False),
+        "payment": pay,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Tool registry (name -> (handler, schema))
 # --------------------------------------------------------------------------- #
@@ -952,6 +1013,31 @@ TOOLS = {
                     "job_goal": {"type": "string", "description": "Job goal (product name on the Stripe link)."},
                     "plan_path": {"type": "string", "description": "Optional: pull goal/currency from the plan."},
                     "live": {"type": "boolean", "description": "Use the real test-mode Stripe API. DEFAULT (omit): on when a sk_test_/rk_test_ key is present (creates a real buy.stripe.com/test_... link); off (simulated) when no key. Pass false to force simulated dev mode. A LIVE key is always refused regardless."},
+                },
+                "required": ["price_cents"],
+            },
+        },
+    },
+    "simulate_payment": {
+        "handler": tool_simulate_payment,
+        "schema": {
+            "name": "simulate_payment",
+            "description": (
+                "Simulate the CUSTOMER paying the earn link with Stripe's 4242 test "
+                "card — closes the earn loop (link -> paid). Confirms a TEST-MODE "
+                "PaymentIntent with the 4242 4242 4242 4242 Visa: a real *succeeded* "
+                "payment in the Stripe test dashboard, no real money. Call AFTER "
+                "earn_stripe, passing the same price_cents. With no key it returns a "
+                "simulated paid block; a LIVE key is REFUSED (test mode only)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "price_cents": {"type": "integer", "description": "Amount the customer pays in cents (same as earn_stripe)."},
+                    "currency": {"type": "string", "description": "Currency (default usd)."},
+                    "job_goal": {"type": "string", "description": "Optional job goal, recorded on the payment metadata."},
+                    "payment_link_id": {"type": "string", "description": "Optional earn payment_link id to tag the payment metadata."},
+                    "plan_path": {"type": "string", "description": "Optional: pull currency from the plan."},
                 },
                 "required": ["price_cents"],
             },
