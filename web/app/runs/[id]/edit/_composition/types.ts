@@ -86,6 +86,8 @@ export interface SceneData {
   // treatment tile grid (up to 6). Named separately from `entities` which is
   // the apple-registry object array — these are plain strings.
   featureEntities?: string[];
+  // real brand logos for split-mosaic/logo-wall tiles, index-aligned with featureEntities; data URIs staged at build time; '' = fallback to name
+  entityLogos?: string[];
 
   // apple-hero fields (product-as-hero lockup)
   // reuses kicker / title / punchWord / subtitle above. `product` is an
