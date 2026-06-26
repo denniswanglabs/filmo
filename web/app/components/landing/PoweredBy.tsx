@@ -60,24 +60,24 @@ export default function PoweredBy({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="rounded-2xl border border-[#D4E2FB] bg-white/70 px-6 py-5 ring-1 ring-inset ring-[#EAF1FF]">
-      <p className="mb-4 text-center text-xs font-medium uppercase tracking-[0.14em] text-[#8A94A6]">
+    <div className="rounded-2xl border border-[#D4E2FB] bg-white/70 px-8 py-7 ring-1 ring-inset ring-[#EAF1FF]">
+      <p className="mb-5 text-center text-sm font-medium uppercase tracking-[0.14em] text-[#8A94A6]">
         Powered by
       </p>
-      <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-5">
+      <div className="flex flex-wrap items-center justify-center gap-x-12 gap-y-6">
         {CREDITS.map((c) => (
-          <div key={c.label} className="inline-flex items-center gap-2.5">
+          <div key={c.label} className="inline-flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={c.src}
               alt={c.alt}
-              width={26}
-              height={26}
-              className="h-[26px] w-[26px] shrink-0 object-contain"
+              width={34}
+              height={34}
+              className="h-[34px] w-[34px] shrink-0 object-contain"
             />
             <span className="leading-tight">
-              <span className="block text-sm font-semibold text-[#0E1320]">{c.label}</span>
-              <span className="block text-xs text-[#5A6472]">{c.sub}</span>
+              <span className="block text-base font-semibold text-[#0E1320]">{c.label}</span>
+              <span className="block text-sm text-[#5A6472]">{c.sub}</span>
             </span>
           </div>
         ))}
