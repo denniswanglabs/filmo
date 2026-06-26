@@ -662,8 +662,9 @@ def _mine_named_entities(text, exclude=()):
             continue
         cand = m.group(1).strip()
         words = cand.split()
-        # "Dropbox founders" -> "Dropbox": drop a trailing generic second word
-        if len(words) == 2 and words[1].lower() in _ENTITY_STOP:
+        # "Dropbox founders"/"DoorDash Y" -> drop a trailing generic word OR a stray
+        # single-letter initial (e.g. the "Y" bleeding in from "Y Combinator").
+        if len(words) == 2 and (words[1].lower() in _ENTITY_STOP or len(words[1]) <= 1):
             cand = words[0]
         key = cand.lower()
         if len(cand) >= 2 and key not in ex and key not in _ENTITY_STOP and key not in seen:

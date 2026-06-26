@@ -266,6 +266,17 @@ VOICEOVER RULES:
   have no real number, use "icon-headline" instead. "featureEntities" MUST be REAL named features
   / integrations of THIS company — if you cannot name 3 real ones, do NOT use "split-mosaic".
   Better an honest icon + headline than a fabricated number. When in doubt -> "icon-headline".
+  LAYOUT VARIETY (this drives the "fancy" look): across your 2-3 feature beats, MIX the
+  treatments — do NOT make them all the same. Aim for a SPREAD: one stat card, one
+  entity/mosaic card, one headline card, when the real data supports it.
+  ENTITY/MOSAIC SCENES: "featureEntities" are not only product features — they are ANY >= 3
+  REAL named entities this company is associated with: customers, portfolio/backed companies,
+  integrations, partners, or logos (e.g. Y Combinator -> "Airbnb","Stripe","Coinbase",
+  "Dropbox","DoorDash"; a SaaS -> its named customer logos). If this company has >= 3 such REAL
+  names, DEDICATE ONE feature beat to them: title like "Trusted by..." / "Backed companies" and
+  emit "split-mosaic" + featureEntities (the real names). Still honest — only REAL names.
+  STAT SCENES: when a feature's punch IS a single REAL number, put that number IN the scene
+  title (e.g. "$600B+ combined valuation", "3,000+ alumni") so it renders as a big hero stat.
   CURATED ICON NAMES (pick the closest; unknown names safely default to "spark"): "rocket",
   "spark", "shield", "chart", "users", "bolt", "globe", "dollar", "layers", "sparkles",
   "target", "clock".
