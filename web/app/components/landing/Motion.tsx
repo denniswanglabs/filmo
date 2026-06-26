@@ -393,10 +393,13 @@ export function SlidingPanel({
 }
 
 // ---------------------------------------------------------------------------
-// ScrubbedHero — static hero wrapper. The hero (headline + REAL composer) now
-// renders fully visible at full opacity on first paint, with no pin, no scrub,
-// no scale-in, and no dim. Kept as a thin pass-through so page.tsx doesn't have
-// to change its markup; it just renders the children in normal flow.
+// ScrubbedHero — zoom-OUT / pull-back hero. At rest (top of page) the hero
+// (headline + REAL composer) renders full size and fully interactive. As the
+// visitor scrolls PAST the first viewport, it scales down, lifts, and dims —
+// the camera "pulling back" to hand off to the page below. Because the pull-back
+// is keyed to scrolling AWAY (offset start→ -start), the composer stays at
+// scale 1 and usable while you're actually at the top. Transform/opacity only,
+// GPU-composited. Reduced motion / SSR render the flat rest state (no transform).
 // ---------------------------------------------------------------------------
 interface ScrubbedHeroProps {
   children: ReactNode
@@ -405,7 +408,39 @@ interface ScrubbedHeroProps {
 }
 
 export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
-  return <div className={className}>{children}</div>
+  const enabled = useMotionEnabled()
+  const ref = useRef<HTMLDivElement>(null)
+  // 'start start' = hero top reaches the viewport top (rest, after the initial
+  // settle); 'end start' = hero bottom reaches the viewport top (fully scrolled
+  // past). We pull back across that exit span.
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start start', 'end start'],
+  })
+  const scaleRaw = useTransform(scrollYProgress, [0, 1], [1, 0.88])
+  const yRaw = useTransform(scrollYProgress, [0, 1], [0, -48])
+  const opacity = useTransform(scrollYProgress, [0, 0.7, 1], [1, 0.55, 0.2])
+  // Spring-smooth so the recede settles (our easing, not a hard 1:1 scrub).
+  const scale = useSpring(scaleRaw, { stiffness: 120, damping: 30, mass: 0.5 })
+  const y = useSpring(yRaw, { stiffness: 120, damping: 30, mass: 0.5 })
+
+  if (!enabled) {
+    return (
+      <div ref={ref} className={className}>
+        {children}
+      </div>
+    )
+  }
+
+  return (
+    <motion.div
+      ref={ref}
+      className={className}
+      style={{ scale, y, opacity, transformOrigin: 'center top', willChange: 'transform, opacity' }}
+    >
+      {children}
+    </motion.div>
+  )
 }
 
 // ---------------------------------------------------------------------------

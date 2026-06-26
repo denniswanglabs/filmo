@@ -379,12 +379,14 @@ export default function EditorDemo() {
           20% {
             transform: scale(0.78);
           }
-          /* drag right = bigger, in sync with the slider fill growing */
+          /* drag right = bigger, in sync with the slider fill growing. HOLD full
+             size through the beat-4 type (which finishes at ~88% of the loop) so
+             the heading never shrinks mid-typing — only reset AFTER typing lands. */
           42%,
-          82% {
+          88% {
             transform: scale(1.16);
           }
-          96%,
+          97%,
           100% {
             transform: scale(0.78);
           }
@@ -402,12 +404,13 @@ export default function EditorDemo() {
           48% {
             transform: scale(1);
           }
-          /* nudge in beat 3 (42–58) -> subtitle grows */
+          /* nudge in beat 3 (42–58) -> subtitle grows; hold through the type so the
+             whole preview stays steady until typing finishes (~88%). */
           58%,
-          82% {
+          88% {
             transform: scale(1.22);
           }
-          96%,
+          97%,
           100% {
             transform: scale(1);
           }
@@ -638,20 +641,31 @@ export default function EditorDemo() {
         /* Positions are MEASURED against the rendered editor (ed 896x538): the
            cursor's tip lands ON each control. Title knob top ~40.8%, subtitle knob
            ~49.2%, text field ~72.4%, Scene 2 block at left ~30.6%. */
+        /* The cursor ENTERS from the top-right corner (fades in) and EXITS to the
+           top-right corner (fades out) — it never rests mid-stage. The card is
+           overflow-hidden, so the corner anchor sits just inside the top-right. */
         .ed-cursor {
           position: absolute;
-          top: 40%;
-          left: 40%;
+          top: 5%;
+          left: 92%;
+          opacity: 0;
           z-index: 20;
           pointer-events: none;
           filter: drop-shadow(0 2px 4px rgba(14, 19, 32, 0.3));
           animation: ed-cursor 12s cubic-bezier(0.4, 0, 0.2, 1) infinite;
         }
         @keyframes ed-cursor {
-          /* settle over the stage */
+          /* enter from the top-right corner, fading in */
           0% {
-            top: 40%;
-            left: 40%;
+            top: 5%;
+            left: 92%;
+            opacity: 0;
+            transform: scale(1);
+          }
+          4% {
+            top: 5%;
+            left: 92%;
+            opacity: 1;
             transform: scale(1);
           }
           /* BEAT 1 — down to the timeline, onto Scene 2 (30.6%, 94.2%) */
@@ -713,16 +727,21 @@ export default function EditorDemo() {
           70% {
             transform: scale(1);
           }
-          /* hold at the field while the text swaps */
-          82% {
+          /* HOLD at the field, fully opaque, until the typing finishes (~88%) */
+          88% {
             top: 72%;
             left: 84%;
+            opacity: 1;
             transform: scale(1);
           }
-          /* BEAT 5 — ease back to the start */
+          /* BEAT 5 — exit back up to the top-right corner, fading out */
+          96% {
+            opacity: 0.35;
+          }
           100% {
-            top: 40%;
-            left: 40%;
+            top: 5%;
+            left: 92%;
+            opacity: 0;
             transform: scale(1);
           }
         }
@@ -814,10 +833,11 @@ export default function EditorDemo() {
           .ed-caret {
             opacity: 0;
           }
-          /* cursor parked on the Title-size knob (dragged position) */
+          /* cursor parked on the Title-size knob (dragged position), fully visible */
           .ed-cursor {
             top: 40%;
             left: 94%;
+            opacity: 1;
             transform: scale(1);
           }
           .ed-playhead {
