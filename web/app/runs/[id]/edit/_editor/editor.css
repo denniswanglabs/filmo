@@ -13,37 +13,45 @@
    themed. Only the VIDEO stage stays dark on purpose.
    ===================================================================== */
 .ws-editor-root {
-  /* ---- light page / chrome surfaces ---- */
-  --bg:        #F5F8FF;   /* page canvas — Filmo's faint-blue page tone */
+  /* ---- light page / chrome surfaces (MATCH THE LANDING) ----
+     The landing is white + ink + a SINGLE restrained blue accent. The editor
+     previously tinted every surface/well blue, which read "AI-generated /
+     over-blue". We now keep surfaces neutral white/near-white (landing's
+     #ffffff page + #f5f8ff faint tint, #F8FAFF input wells) and reserve blue
+     STRICTLY for the --accent (selection, primary CTA, playhead). */
+  --bg:        #FFFFFF;   /* page canvas — plain white, like the landing body */
   --bg-1:      #FFFFFF;   /* primary card / panel surface */
-  --bg-2:      #EEF4FF;   /* recessed control / hover wells (blue tint) */
+  --bg-2:      #F1F4F8;   /* recessed control / hover wells (neutral grey) */
   --stage:     #0B0F1A;   /* the dark VIDEO stage backdrop (the one dark inversion) */
 
-  /* ---- panel / card / control surfaces ---- */
+  /* ---- panel / card / control surfaces (neutral, landing-matched) ---- */
   --glass:     #FFFFFF;
-  --glass-2:   #F2F6FF;
+  --glass-2:   #F7F9FC;
   --panel:     #FFFFFF;
   --panel-2:   #FFFFFF;
-  --panel-3:   #EAF1FF;
+  --panel-3:   #EEF1F6;
   --chrome:    #FFFFFF;
-  --field:     #F5F8FF;
-  --field-2:   #EAF1FF;
+  --field:     #F8FAFF;   /* landing input well (#F8FAFF) */
+  --field-2:   #EEF1F6;
   --clip:      #FFFFFF;
-  --clip-2:    #F2F6FF;
-  --rail:      #F2F6FF;
+  --clip-2:    #F7F9FC;
+  --rail:      #F5F7FA;
 
-  /* ---- hairlines + borders (Filmo light-blue) ---- */
-  --line:      #D4E2FB;   /* standard Filmo hairline divider (light blue) */
-  --line-2:    #BBD2F7;   /* stronger control outline */
-  --line-soft: #E2ECFD;
-  --glass-edge: #D4E2FB;
+  /* ---- hairlines + borders ----
+     Standard divider = landing's soft #E6EAF0 neutral hairline; the slightly
+     bluer #D4E2FB (landing's amber-line) is kept only as the stronger outline,
+     used sparingly. This stops every border reading blue. */
+  --line:      #E6EAF0;   /* standard neutral hairline (landing-soft) */
+  --line-2:    #D4E2FB;   /* stronger control outline (landing amber-line) */
+  --line-soft: #EEF1F6;
+  --glass-edge: #E6EAF0;
   --glass-edge-soft: rgba(255,255,255,.6);
 
-  /* ---- ink (Filmo) ---- */
+  /* ---- ink (Filmo, landing-matched) ---- */
   --text:    #0E1320;   /* Filmo primary ink */
-  --text-2:  #38465C;   /* secondary */
-  --muted:   #64748B;   /* tertiary / labels */
-  --dim:     #94A3B8;   /* quietest / placeholder / ruler ticks */
+  --text-2:  #5A6472;   /* secondary (landing muted) */
+  --muted:   #5A6472;   /* tertiary / labels (landing muted) */
+  --dim:     #9AA6B8;   /* quietest / placeholder / ruler ticks (landing placeholder) */
 
   /* ---- one confident FILMO BLUE accent, used SPARINGLY ---- */
   --accent:      #3B82F6;   /* PRIMARY ACCENT — Filmo blue (was coral) */
@@ -78,21 +86,20 @@
   --ease:    cubic-bezier(.2,.7,.2,1);
   --ease-out: cubic-bezier(.16,1,.3,1);
 
-  /* ---- soft neutral shadows (with a faint blue tint to match Filmo) ---- */
-  --shadow-card: 0 1px 2px rgba(14,19,32,.04), 0 8px 22px rgba(30,58,120,.07);
-  --shadow-pop:  0 2px 8px rgba(14,19,32,.10), 0 24px 60px rgba(30,58,120,.15);
-  --shadow-float: 0 1px 2px rgba(14,19,32,.05), 0 14px 34px rgba(30,58,120,.09);
+  /* ---- soft NEUTRAL ink shadows (landing uses neutral depth, not blue glow) ---- */
+  --shadow-card: 0 1px 2px rgba(14,19,32,.04), 0 8px 22px rgba(14,19,32,.06);
+  --shadow-pop:  0 2px 8px rgba(14,19,32,.10), 0 24px 60px rgba(14,19,32,.12);
+  --shadow-float: 0 1px 2px rgba(14,19,32,.05), 0 14px 34px rgba(14,19,32,.08);
   --shadow-glow: 0 1px 2px rgba(14,19,32,.18), 0 6px 16px rgba(59,130,246,.30), inset 0 1px 0 rgba(255,255,255,.22);
 
-  /* The editor fills the page surface below the TopBar. */
+  /* The editor fills the page surface below the TopBar. Plain white canvas,
+     matching the landing body — no blue page wash. */
   color: var(--text);
   font-family: var(--ui);
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  background:
-    radial-gradient(70% 60% at 92% -4%, rgba(59,130,246,.05), transparent 60%),
-    var(--bg);
+  background: var(--bg);
 }
 
 /* ---- card surface utility (kept the .ws-glass class name so JSX cascades) ---- */

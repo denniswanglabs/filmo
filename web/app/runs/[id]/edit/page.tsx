@@ -149,7 +149,7 @@ export default function EditRunPage() {
                 Editor — {run.brand || run.company_url}
               </h1>
               <p className="mt-1 text-slate-500">{run.goal || 'Brand video'}</p>
-              <div className="mt-6 rounded-2xl border border-[#D4E2FB] bg-[#E8F0FF] px-5 py-8">
+              <div className="mt-6 rounded-2xl border border-[#E6EAF0] bg-[#F8FAFF] px-5 py-8">
                 <p className="text-sm font-semibold uppercase tracking-wide text-amber">Nothing to edit yet</p>
                 <p className="mt-2 text-ink">
                   No render props are saved for this run yet. New builds persist them

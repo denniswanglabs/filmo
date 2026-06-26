@@ -343,7 +343,7 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
               pointerEvents: "none",
               opacity: 0.6,
               backgroundImage:
-                "linear-gradient(rgba(59,130,246,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(59,130,246,.035) 1px, transparent 1px)",
+                "linear-gradient(rgba(20,23,28,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(20,23,28,.04) 1px, transparent 1px)",
               backgroundSize: "46px 46px",
               maskImage: "radial-gradient(820px 520px at 50% 34%, #000 0%, transparent 80%)",
               WebkitMaskImage: "radial-gradient(820px 520px at 50% 34%, #000 0%, transparent 80%)",

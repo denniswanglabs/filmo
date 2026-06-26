@@ -4,26 +4,12 @@
 // playhead tracks the Player's current frame, and a subtle time ruler runs above.
 //
 // Premium / Hera: heavily rounded clips, soft shadows, accent ring + glow on the
-// selected clip, smooth hover lift. NO emojis — archetype glyphs are SVG.
+// selected clip, smooth hover lift. The blocks are solid blue with a centered
+// "Scene N" label — they deliberately do NOT render scene screenshots.
 "use client";
 import React, { useMemo } from "react";
-import { Thumbnail } from "@remotion/player";
-import { Timeline as TimelineComp } from "../_composition/Timeline";
-import { Icon } from "./ui.jsx";
 
 const PRETTY = (a) => (a || "scene").replace(/-/g, " ");
-
-// A small SVG glyph per archetype family so each clip reads at a glance.
-function ClipGlyph({ archetype }) {
-  const a = archetype || "";
-  if (a.includes("screenshot") || a.includes("walkthrough") || a.includes("player"))
-    return <Icon.film style={{ width: 13, height: 13 }} />;
-  if (a.includes("hero") || a.includes("title") || a.includes("statement"))
-    return <Icon.type style={{ width: 13, height: 13 }} />;
-  if (a.includes("card") || a.includes("entit") || a.includes("list"))
-    return <Icon.list style={{ width: 13, height: 13 }} />;
-  return <Icon.film style={{ width: 13, height: 13 }} />;
-}
 
 // Format a frame count as m:ss (for the ruler ticks).
 const fmtTime = (frame, fps) => {
@@ -45,7 +31,6 @@ const sceneLabel = (s) =>
 
 export function TimelineTrack({ props, activeIdx, onSelect, currentFrame, total, fps }) {
   const scenes = props?.scenes || [];
-  const inputProps = useMemo(() => props || {}, [props]);
 
   // The track maps frame-space -> px using flex (the container is full-width); we
   // give each clip a flex-basis proportional to its duration so widths sum to 100%.
@@ -127,9 +112,6 @@ export function TimelineTrack({ props, activeIdx, onSelect, currentFrame, total,
                 scene={s}
                 idx={i}
                 active={i === activeIdx}
-                fps={fps}
-                total={totalDur}
-                inputProps={inputProps}
                 onSelect={onSelect}
               />
             );
@@ -171,17 +153,21 @@ export function TimelineTrack({ props, activeIdx, onSelect, currentFrame, total,
 }
 
 // A clip positioned by percentage of the track width (so it scales with the
-// container). It re-uses the absolute <Clip> renderer by translating % into a
-// nested 100%-relative box.
-function PctClip({ xPct, wPct, scene, idx, active, fps, total, inputProps, onSelect }) {
+// container). Per the editor spec, the timeline blocks are SOLID BLUE cards with
+// a centered "Scene N" label — they deliberately do NOT render the scene's
+// screenshot/thumbnail. The blue pops against the neutral-white editor chrome and
+// keeps the timeline reading as an at-a-glance scene order. Selection (accent ring
+// + lift) and hover behavior are preserved.
+//
+// Blue scale for the blocks (kept self-contained here so it stays blue even after
+// the surrounding chrome was neutralized to the landing palette):
+const CLIP_BLUE = "#3B82F6";        // base block fill (Filmo blue)
+const CLIP_BLUE_DEEP = "#2563EB";   // gradient bottom / active block
+const CLIP_BLUE_SOFT = "#60A5FA";   // gradient top on the active/hover block
+
+function PctClip({ xPct, wPct, scene, idx, active, onSelect }) {
   const [hover, setHover] = React.useState(false);
-  const dur = Math.max(0, (scene.out_frame || 0) - (scene.in_frame || 0));
-  const wide = wPct > 10; // heuristics on % since we don't measure px
-  const showThumb = wPct > 7;
-  const showMeta = wPct > 13;
-  // Clips with a thumbnail get a dark scrim over imagery → light text rides on it.
-  // Narrow placeholder clips are light cards on the off-white well → dark ink reads.
-  const onDark = showThumb;
+  const wide = wPct > 9; // enough room for the longer "Scene NN" label form
 
   return (
     <button
@@ -212,57 +198,32 @@ function PctClip({ xPct, wPct, scene, idx, active, fps, total, inputProps, onSel
           height: "100%",
           borderRadius: 13,
           overflow: "hidden",
-          background: "var(--clip)",
-          border: "1px solid " + (active ? "var(--accent-line)" : hover ? "var(--line-2)" : "var(--line)"),
+          // SOLID BLUE block. Active/hover lift to the brighter blue; resting
+          // blocks sit a touch deeper so the selected one reads as "lit".
+          background:
+            active || hover
+              ? `linear-gradient(160deg, ${CLIP_BLUE_SOFT}, ${CLIP_BLUE})`
+              : `linear-gradient(160deg, ${CLIP_BLUE}, ${CLIP_BLUE_DEEP})`,
+          border: "1px solid " + (active ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.18)"),
           boxShadow: active
-            ? "0 0 0 1px var(--accent-line), 0 6px 16px rgba(59,130,246,.20)"
+            ? `0 0 0 2px ${CLIP_BLUE_DEEP}, 0 6px 16px rgba(59,130,246,.35)`
             : hover
-            ? "0 2px 6px rgba(20,23,28,.08), 0 14px 30px rgba(20,23,28,.10)"
-            : "0 1px 2px rgba(20,23,28,.05), 0 6px 16px rgba(20,23,28,.07)",
+            ? "0 2px 6px rgba(20,23,28,.10), 0 14px 30px rgba(30,58,120,.18)"
+            : "0 1px 2px rgba(20,23,28,.06), 0 6px 16px rgba(30,58,120,.12)",
           transition: "box-shadow .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease)",
         }}
       >
-        {showThumb ? (
-          <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#000" }}>
-            <Thumbnail
-              component={TimelineComp}
-              inputProps={inputProps}
-              durationInFrames={Math.max(1, total)}
-              frameToDisplay={Math.min(total - 1, (scene.in_frame || 0) + 3)}
-              fps={fps}
-              compositionWidth={1920}
-              compositionHeight={1080}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              acknowledgeRemotionLicense
-            />
-          </div>
-        ) : (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background: active
-                ? "linear-gradient(160deg, var(--accent-tint-2), var(--accent-tint))"
-                : "linear-gradient(160deg, var(--clip-2), var(--clip))",
-            }}
-          />
-        )}
+        {/* subtle top sheen so the flat blue block has a little depth */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "linear-gradient(180deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 42%)",
+            pointerEvents: "none",
+          }}
+        />
 
-        {/* gradient scrim for legibility — only over thumbnail imagery, so the
-            footer labels read as light text on the darkened bottom edge */}
-        {showThumb ? (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(180deg, rgba(8,10,17,.05) 35%, rgba(8,10,17,.5) 72%, rgba(8,10,17,.9) 100%)",
-              pointerEvents: "none",
-            }}
-          />
-        ) : null}
-
-        {/* index chip */}
+        {/* index chip (kept, top-left) — white-on-translucent so it reads on blue */}
         <span
           style={{
             position: "absolute",
@@ -270,11 +231,9 @@ function PctClip({ xPct, wPct, scene, idx, active, fps, total, inputProps, onSel
             left: 6,
             fontSize: 9.5,
             fontWeight: 800,
-            color: active ? "var(--accent-ink)" : onDark ? "#cfd8e6" : "var(--muted)",
-            background: active ? "var(--accent)" : onDark ? "rgba(10,13,23,.72)" : "var(--bg-2)",
-            backdropFilter: "blur(6px)",
-            WebkitBackdropFilter: "blur(6px)",
-            border: "1px solid " + (active ? "transparent" : onDark ? "rgba(255,255,255,.12)" : "var(--line)"),
+            color: "#fff",
+            background: "rgba(255,255,255,.18)",
+            border: "1px solid rgba(255,255,255,.28)",
             borderRadius: 7,
             padding: "1px 5.5px",
             fontVariantNumeric: "tabular-nums",
@@ -285,57 +244,35 @@ function PctClip({ xPct, wPct, scene, idx, active, fps, total, inputProps, onSel
           {String(idx + 1).padStart(2, "0")}
         </span>
 
-        {/* label footer */}
+        {/* CENTERED "Scene N" label — the only text on the block, vertically and
+            horizontally centered. White ink rides on the blue fill. */}
         <div
           style={{
             position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            padding: wide ? "6px 8px 7px" : "5px 6px",
+            inset: 0,
             display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            minWidth: 0,
-            zIndex: 2,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 8px",
+            zIndex: 1,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
-            <span style={{ color: active ? "var(--accent)" : onDark ? "#aeb8ca" : "var(--muted)", flex: "0 0 auto", display: "flex" }}>
-              <ClipGlyph archetype={scene.archetype} />
-            </span>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: onDark ? (active ? "#fff" : "#dde3ee") : active ? "var(--accent-deep)" : "var(--text)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                minWidth: 0,
-                textShadow: onDark ? "0 1px 3px rgba(0,0,0,.7)" : "none",
-              }}
-            >
-              {showMeta ? sceneLabel(scene) : PRETTY(scene.archetype)}
-            </span>
-          </div>
-          {showMeta ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                fontSize: 9,
-                fontFamily: "var(--code)",
-                color: onDark ? (active ? "var(--accent-soft)" : "#9aa6b8") : active ? "var(--accent)" : "var(--dim)",
-                letterSpacing: 0.2,
-                textShadow: onDark ? "0 1px 2px rgba(0,0,0,.7)" : "none",
-              }}
-            >
-              <span style={{ textTransform: "uppercase" }}>{PRETTY(scene.archetype)}</span>
-              <span style={{ fontVariantNumeric: "tabular-nums" }}>{dur}f</span>
-            </div>
-          ) : null}
+          <span
+            style={{
+              fontSize: wide ? 13 : 11,
+              fontWeight: 700,
+              color: "#fff",
+              letterSpacing: 0.2,
+              textAlign: "center",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: "100%",
+              textShadow: "0 1px 2px rgba(8,10,17,.35)",
+            }}
+          >
+            {wide ? `Scene ${idx + 1}` : idx + 1}
+          </span>
         </div>
       </div>
     </button>
