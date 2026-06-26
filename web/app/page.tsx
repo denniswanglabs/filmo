@@ -10,6 +10,7 @@ import { AuthGate } from './components/AuthGate'
 import FloatingNav from './components/landing/FloatingNav'
 import Examples from './components/landing/Examples'
 import EditorDemo from './components/landing/EditorDemo'
+import PatternLookbook from './components/landing/PatternLookbook'
 import LuceoShowcase from './components/landing/LuceoShowcase'
 import ReadyToCreate from './components/landing/ReadyToCreate'
 import PoweredBy from './components/landing/PoweredBy'
@@ -348,6 +349,9 @@ export default function Home() {
       <Examples />
       {/* Product demo — a looping faux editor showing live text-size editing. */}
       <EditorDemo />
+      {/* The curation moat — the hand-curated pattern library, read straight as
+          one narrative beat with the Luceo films it's distilled from (below). */}
+      <PatternLookbook />
       {/* Built on Luceo Studio's launch films. */}
       <LuceoShowcase />
       {/* Closing CTA — deep-navy band, scrolls back to the composer. */}
