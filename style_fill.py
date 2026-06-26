@@ -79,8 +79,13 @@ ARCH_CARD = "card-ui"
 ARCH_EXPLAINER = "explainer-card"
 # Card-treatment vocabulary (SHARED DATA CONTRACT with the Remotion ExplainerCard
 # archetype). plan_job picks + honesty-guards these on scene["data"]; _shape_explainer
-# only carries the surviving fields into the rendered props.
-_CARD_TREATMENTS = {"icon-stat", "split-mosaic", "split-stat", "icon-headline"}
+# only carries the surviving fields into the rendered props. The last three are
+# DORMANT — the ExplainerCard renders them, but no selection logic emits them yet.
+_CARD_TREATMENTS = {
+    "icon-stat", "split-mosaic", "split-stat", "icon-headline",
+    # DORMANT — render + validate only; no selection logic emits these yet.
+    "big-number", "logo-wall", "feature-list",
+}
 # A produced walkthrough MP4 (Walk Agent capture) played INSIDE the branded studio
 # composition, so the clip inherits Walk Studio overlays + per-scene VO. Used for a
 # `walkthrough` role ONLY when a real clip exists; otherwise the role falls back to

@@ -61,11 +61,21 @@ export interface SceneData {
   bullets?: string[];
 
   // explainer-card RICH TREATMENT fields (feature-card-richness spec).
-  // `treatment` selects one of 4 layout variants. ABSENT / unknown → the
+  // `treatment` selects one of the layout variants. ABSENT / unknown → the
   // existing card renders exactly as before (backward-compat guaranteed).
-  // Degrade: split-mosaic w/o featureEntities, or split-stat/icon-stat w/o
-  // stat → archetype drops to the centered, full-width "icon-headline".
-  treatment?: "icon-stat" | "split-mosaic" | "split-stat" | "icon-headline";
+  // Degrade: split-mosaic/logo-wall w/o featureEntities, split-stat/icon-stat/
+  // big-number w/o stat, or feature-list w/o entities+subtitle → archetype drops
+  // to the centered, full-width "icon-headline".
+  // DORMANT: big-number / logo-wall / feature-list render + validate but NO
+  // selection logic emits them yet (the orchestrator wires selection later).
+  treatment?:
+    | "icon-stat"
+    | "split-mosaic"
+    | "split-stat"
+    | "icon-headline"
+    | "big-number"
+    | "logo-wall"
+    | "feature-list";
   // Curated icon name rendered as inline SVG inside the card tile.
   // Set: rocket, spark, shield, chart, users, bolt, globe, dollar, layers,
   //      sparkles, target, clock. Unknown / missing → falls back to "spark".

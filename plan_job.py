@@ -552,12 +552,23 @@ def seed_plan_with_read(plan, conversion_read):
 #   "split-stat"    a real number stat, no icon-worthy headline
 #   "split-mosaic"  >= 3 real named entities / integrations
 #   "icon-headline" icon + headline, NO number (the HONEST fallback)
+# DORMANT (registered-but-unselected) treatments — the Remotion ExplainerCard can
+# RENDER these, but NO selection logic emits them yet (no _assign_card_treatments /
+# _assign_treatment_from_filled_copy branch sets them). They are listed here ONLY so
+# validation/keep accepts them if/when the orchestrator wires selection later:
+#   "big-number"    ONE dominant stat, full-bleed (needs a real stat)
+#   "logo-wall"     a fuller branded-chip grid of entities (needs >= 3 entities)
+#   "feature-list"  a clean vertical "what you get" list (entities or subtitle)
 # The LLM picks one per scene from the REAL data it has (planner-prompt.md). This is
 # the deterministic RULES GUARD + HONESTY GUARD that runs after the LLM/template:
 #   1. fill in a treatment for any feature scene the LLM left bare, and
 #   2. STRIP any stat / featureEntities NOT backed by real captured brand data, then
 #      force "icon-headline" — NEVER invent a number or an entity (honesty rule).
-_CARD_TREATMENTS = {"icon-stat", "split-mosaic", "split-stat", "icon-headline"}
+_CARD_TREATMENTS = {
+    "icon-stat", "split-mosaic", "split-stat", "icon-headline",
+    # DORMANT — render + validate only; no selection logic emits these yet.
+    "big-number", "logo-wall", "feature-list",
+}
 
 # Curated generic icon names the LLM is told to pick from (the Remotion side defaults
 # any unknown icon name). Kept in sync with the list in planner-prompt.md. Used here

@@ -25,7 +25,13 @@ SELECTION_QUALITY = {"standard", "premium"}
 # archetype). These optional fields live on scene["data"] for motion_graphic /
 # explainer-card scenes. ALL optional: a scene that omits them is still valid (the
 # visual side renders a plain card). When present they must be well-shaped.
-CARD_TREATMENTS = {"icon-stat", "split-mosaic", "split-stat", "icon-headline"}
+# The last three (big-number / logo-wall / feature-list) are DORMANT — the
+# ExplainerCard renders them, but no selection logic emits them yet; they are
+# accepted here so validation passes if/when selection is wired later.
+CARD_TREATMENTS = {
+    "icon-stat", "split-mosaic", "split-stat", "icon-headline",
+    "big-number", "logo-wall", "feature-list",
+}
 
 
 def validate_scene_data(data):

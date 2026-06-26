@@ -16,13 +16,22 @@
 //   "split-mosaic"  — 2-col: text left + dark entity-tile grid right
 //   "split-stat"    — 2-col: text left + light stat panel right (rising bars)
 //   "icon-headline" — centered, FULL-WIDTH: kicker · SVG icon · headline (FALLBACK)
+//   "big-number"    — full-bleed: kicker · HUGE stat.value · label · title line
+//   "logo-wall"     — centered header + a fuller branded-chip grid of entities
+//   "feature-list"  — title + a clean vertical "what you get" check-row list
 //   absent/unknown  — ORIGINAL card (backward-compat, byte-identical behavior)
 //
+// NOTE (DORMANT): big-number / logo-wall / feature-list RENDER + are registered
+// in the treatment union + Python validation, but NO selection logic emits them
+// yet (the orchestrator wires selection later, one at a time, measured). Today
+// nothing sets data.treatment to these, so behavior is unchanged.
+//
 // DEGRADE-TO-CENTER GUARD (kills the right-side white-space bug): the two-column
-// treatments require their right-column data. When "split-mosaic" has no
-// featureEntities, or "split-stat"/"icon-stat" has no stat, we DROP to the
-// centered full-width "icon-headline" fallback instead of rendering a blank /
-// ghosted right half. The fallback is symmetric + centered so it FILLS WIDTH.
+// + data-driven treatments require their data. When "split-mosaic"/"logo-wall"
+// has no featureEntities, "split-stat"/"icon-stat"/"big-number" has no stat, or
+// "feature-list" has neither entities nor a subtitle, we DROP to the centered
+// full-width "icon-headline" fallback instead of rendering a blank / ghosted /
+// empty layout. The fallback is symmetric + centered so it FILLS WIDTH.
 import React from "react";
 import { AbsoluteFill, Img, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
@@ -823,6 +832,444 @@ const TreatmentIconHeadline: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT E — big-number (ONE dominant stat, full-bleed)
+//
+// For scenes whose PUNCH is the number (e.g. "$800B+"). Renders the kicker, then
+// a HUGE stat.value as the hero element (clamped 120-200px), the stat.label
+// beneath, and the `title` as a supporting line under that. Centered + symmetric
+// so it FILLS WIDTH (no right-side white space). Requires a real stat — the
+// degrade guard drops to "icon-headline" when no stat.
+// ---------------------------------------------------------------------------
+const TreatmentBigNumber: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  underline: number;
+  titleText: string;
+  sceneId?: string;
+}> = ({ data, theme, frame, fps, cues, kickerAt, titleAt, underline, titleText, sceneId }) => {
+  const statAt = titleAt - 6 < kickerAt ? kickerAt + 8 : titleAt - 6;
+  const labelAt = cueAt(cues, "subtitle-in", statAt + 14);
+  const titleLineAt = labelAt + 10;
+  // Hero number springs up with the kinetic-light damping; supporting lines ease.
+  const statSpring = spring({
+    frame: frame - statAt,
+    fps,
+    config: { damping: 16, stiffness: 150, mass: 0.8 },
+  });
+  const statOpacity = ease(frame, statAt, statAt + 16, 0, 1);
+  const statY = interpolate(statSpring, [0, 1], [40, 0]);
+  const statScale = interpolate(statSpring, [0, 1], [0.86, 1]);
+  const labelOpacity = ease(frame, labelAt, labelAt + 16, 0, 1);
+  const labelY = ease(frame, labelAt, labelAt + 16, 14, 0);
+  const titleOpacity = ease(frame, titleLineAt, titleLineAt + 16, 0, 1);
+  const titleY = ease(frame, titleLineAt, titleLineAt + 16, 16, 0);
+  const statValue = data.stat?.value ?? "";
+  const statLabel = data.stat?.label ?? "";
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 120,
+        right: 120,
+        top: 100,
+        bottom: 80,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 18,
+        textAlign: "center",
+      }}
+    >
+      <KickerRow
+        data={data}
+        theme={theme}
+        style={{
+          opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+          transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          justifyContent: "center",
+        }}
+        sceneId={sceneId}
+      />
+      <div
+        data-scene-id={sceneId}
+        data-field="stat"
+        style={{
+          opacity: statOpacity,
+          transform: `translateY(${statY}px) scale(${statScale})`,
+          fontSize: "clamp(120px, 18vw, 200px)",
+          fontWeight: 900,
+          letterSpacing: -8,
+          lineHeight: 0.95,
+          color: theme.accent,
+          fontFamily: theme.fontDisplay,
+          textShadow: `0 0 60px ${theme.accent}${alphaHex(0.28)}`,
+        }}
+      >
+        {statValue}
+      </div>
+      {statLabel ? (
+        <div
+          style={{
+            opacity: labelOpacity,
+            transform: `translateY(${labelY}px)`,
+            fontSize: 32,
+            fontWeight: 600,
+            color: theme.textMuted,
+            letterSpacing: 0.4,
+            maxWidth: 1100,
+          }}
+        >
+          {statLabel}
+        </div>
+      ) : null}
+      <div
+        style={{
+          marginTop: 10,
+          height: 6,
+          width: `${Math.round(underline * 300)}px`,
+          borderRadius: 6,
+          background: theme.accent,
+          boxShadow: `0 0 24px ${theme.accent}${alphaHex(0.45 * underline)}`,
+        }}
+      />
+      {titleText ? (
+        <div
+          data-scene-id={sceneId}
+          data-field="title"
+          style={{
+            opacity: titleOpacity,
+            transform: `translateY(${titleY}px)`,
+            fontSize: 40,
+            fontWeight: 700,
+            color: theme.text,
+            letterSpacing: -1,
+            lineHeight: 1.15,
+            maxWidth: 1200,
+          }}
+        >
+          {titleText}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TREATMENT F — logo-wall (centered header + a fuller branded-chip grid)
+//
+// For "backed by / integrates with / trusted by" scenes. Renders the `title` as
+// a centered header above a prominent grid of featureEntities (4-8) drawn as
+// branded chips/tiles (bigger + more of them than split-mosaic's right column).
+// Requires entities — the degrade guard drops to "icon-headline" when none.
+// ---------------------------------------------------------------------------
+const TreatmentLogoWall: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  titleText: string;
+  titleLines: string[];
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, titleText, titleLines, sceneId,
+}) => {
+  // Caller guarantees a non-empty grid (degrade guard runs before mount).
+  const entities = (data.featureEntities ?? []).slice(0, 8);
+  const wallAt = cueAt(cues, "subtitle-in", subAt + 4);
+  // 4 -> 2 cols, 5-6 -> 3 cols, 7-8 -> 4 cols (keeps tiles big + rows balanced).
+  const cols = entities.length <= 4 ? 2 : entities.length <= 6 ? 3 : 4;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 120,
+        right: 120,
+        top: 100,
+        bottom: 80,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 40,
+        textAlign: "center",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+            justifyContent: "center",
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={64}
+          centered
+          sceneId={sceneId}
+        />
+      </div>
+
+      <div
+        data-scene-id={sceneId}
+        data-field="featureEntities"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gap: 22,
+          width: "100%",
+          maxWidth: 1480,
+        }}
+      >
+        {entities.map((entity, i) => {
+          const tileAt = wallAt + i * 8;
+          const tileOpacity = ease(frame, tileAt, tileAt + 14, 0, 1);
+          const tileY = ease(frame, tileAt, tileAt + 14, 16, 0);
+          const isPerson = looksLikePerson(entity);
+          return (
+            <div
+              key={`${i}-${entity}`}
+              style={{
+                opacity: tileOpacity,
+                transform: `translateY(${tileY}px)`,
+                background: "#FFFFFF",
+                borderRadius: 18,
+                border: "1px solid #D6E4FF",
+                boxShadow: `0 8px 28px ${theme.accent}${alphaHex(0.08)}`,
+                padding: "26px 22px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 14,
+                minHeight: 96,
+              }}
+            >
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: isPerson ? "50%" : 11,
+                  background: "#EAF2FF",
+                  border: "1px solid #BFD8FF",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {isPerson ? (
+                  <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="8" r="4" stroke={theme.accent} strokeWidth="1.6" fill="none" />
+                    <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke={theme.accent} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: 20,
+                      fontWeight: 800,
+                      color: theme.accent,
+                      fontFamily: theme.fontDisplay,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {(entity.trim()[0] || "•").toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <span
+                style={{
+                  fontSize: 24,
+                  fontWeight: 700,
+                  color: theme.navy,
+                  letterSpacing: -0.3,
+                  lineHeight: 1.2,
+                  fontFamily: theme.fontDisplay,
+                  textAlign: "left",
+                }}
+              >
+                {entity}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TREATMENT G — feature-list (title + a clean vertical "what you get" list)
+//
+// Rows built from featureEntities (each a check/dot + label) OR, when no
+// entities, the `subtitle` split into 2-3 bullet rows. A crisp left-aligned
+// card. Always has SOMETHING to list (entities or subtitle clauses) — when the
+// caller has neither, the row source falls back to a single title row so it is
+// never empty (the degrade guard upstream prefers the centered fallback anyway).
+// ---------------------------------------------------------------------------
+const TreatmentFeatureList: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  titleText: string;
+  titleLines: string[];
+  subText: string;
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, titleText, titleLines, subText, sceneId,
+}) => {
+  const ents = (data.featureEntities ?? []).map((e) => (e ?? "").trim()).filter(Boolean);
+  // Row source: real entities win; else split the subtitle into 2-3 clauses; else
+  // fall back to the single title so the list is never empty.
+  let rows: string[];
+  if (ents.length > 0) {
+    rows = ents.slice(0, 5);
+  } else {
+    const clauses = subText
+      .split(/[.;—–\n]|,\s+(?=[A-Z])/)
+      .map((c) => c.trim())
+      .filter((c) => c.split(/\s+/).length >= 2);
+    rows = clauses.length >= 2 ? clauses.slice(0, 3) : (subText ? [subText] : [titleText]);
+  }
+  const listAt = cueAt(cues, "subtitle-in", subAt + 4);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 140,
+        right: 140,
+        top: 120,
+        bottom: 100,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        gap: 32,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={68}
+          sceneId={sceneId}
+        />
+      </div>
+
+      <div
+        data-scene-id={sceneId}
+        data-field="featureEntities"
+        style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 1280 }}
+      >
+        {rows.map((row, i) => {
+          const rowAt = listAt + i * 10;
+          const rowOpacity = ease(frame, rowAt, rowAt + 16, 0, 1);
+          const rowX = ease(frame, rowAt, rowAt + 16, -20, 0);
+          return (
+            <div
+              key={`${i}-${row}`}
+              style={{
+                opacity: rowOpacity,
+                transform: `translateX(${rowX}px)`,
+                display: "flex",
+                alignItems: "center",
+                gap: 22,
+                background: "#FFFFFF",
+                borderRadius: 16,
+                border: "1px solid #E2EBF8",
+                boxShadow: `0 6px 22px ${theme.accent}${alphaHex(0.06)}`,
+                padding: "20px 26px",
+              }}
+            >
+              <div
+                style={{
+                  flex: "0 0 44px",
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: "#EAF2FF",
+                  border: "1px solid #BFD8FF",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                  <path d="M5 12.5l4 4 10-10" stroke={theme.accent} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <span
+                style={{
+                  fontSize: 32,
+                  fontWeight: 600,
+                  color: theme.text,
+                  letterSpacing: -0.4,
+                  lineHeight: 1.2,
+                  fontFamily: theme.fontDisplay,
+                }}
+              >
+                {row}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Main ExplainerCard export
 // ---------------------------------------------------------------------------
 export const ExplainerCard: React.FC<{
@@ -906,8 +1353,11 @@ export const ExplainerCard: React.FC<{
   const hasStat = !!(data.stat?.value ?? "").trim();
 
   let treatment = data.treatment;
-  if (treatment === "split-mosaic" && !hasEntities) treatment = "icon-headline";
-  else if ((treatment === "split-stat" || treatment === "icon-stat") && !hasStat) treatment = "icon-headline";
+  if ((treatment === "split-mosaic" || treatment === "logo-wall") && !hasEntities) treatment = "icon-headline";
+  else if ((treatment === "split-stat" || treatment === "icon-stat" || treatment === "big-number") && !hasStat) treatment = "icon-headline";
+  // feature-list needs SOMETHING to list — entities or a subtitle to split into
+  // rows. With neither, drop to the centered fallback (never an empty list card).
+  else if (treatment === "feature-list" && !hasEntities && !subText.trim()) treatment = "icon-headline";
 
   return (
     <AbsoluteFill
@@ -1039,6 +1489,54 @@ export const ExplainerCard: React.FC<{
           underline={underline}
           subOpacity={subOpacity}
           subY={subY}
+          titleText={titleText}
+          titleLines={titleLines}
+          subText={subText}
+          sceneId={sceneId}
+        />
+      ) : treatment === "big-number" ? (
+        <TreatmentBigNumber
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          underline={underline}
+          titleText={titleText}
+          sceneId={sceneId}
+        />
+      ) : treatment === "logo-wall" ? (
+        <TreatmentLogoWall
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          titleText={titleText}
+          titleLines={titleLines}
+          sceneId={sceneId}
+        />
+      ) : treatment === "feature-list" ? (
+        <TreatmentFeatureList
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
           titleText={titleText}
           titleLines={titleLines}
           subText={subText}
