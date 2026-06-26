@@ -409,32 +409,21 @@ interface ScrubbedHeroProps {
 
 export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
   const enabled = useMotionEnabled()
-  const ref = useRef<HTMLDivElement>(null)
-  // 'start start' = hero top reaches the viewport top (rest, after the initial
-  // settle); 'end start' = hero bottom reaches the viewport top (fully scrolled
-  // past). We pull back across that exit span.
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ['start start', 'end start'],
-  })
-  const scaleRaw = useTransform(scrollYProgress, [0, 1], [1, 0.88])
-  const yRaw = useTransform(scrollYProgress, [0, 1], [0, -48])
-  const opacity = useTransform(scrollYProgress, [0, 0.7, 1], [1, 0.55, 0.2])
-  // Spring-smooth so the recede settles (our easing, not a hard 1:1 scrub).
-  const scale = useSpring(scaleRaw, { stiffness: 120, damping: 30, mass: 0.5 })
-  const y = useSpring(yRaw, { stiffness: 120, damping: 30, mass: 0.5 })
+  // Track WINDOW scroll directly (robust — no element-offset math): map the first
+  // ~560px of scroll to the pull-back. At the very top (scrollY 0) the hero is at
+  // full scale and fully interactive; scrolling down recedes it. Direct mapping
+  // (no spring) so it tracks the scroll 1:1 and is unmistakably visible.
+  const { scrollY } = useScroll()
+  const scale = useTransform(scrollY, [0, 560], [1, 0.82])
+  const y = useTransform(scrollY, [0, 560], [0, -44])
+  const opacity = useTransform(scrollY, [0, 380, 600], [1, 0.7, 0.35])
 
   if (!enabled) {
-    return (
-      <div ref={ref} className={className}>
-        {children}
-      </div>
-    )
+    return <div className={className}>{children}</div>
   }
 
   return (
     <motion.div
-      ref={ref}
       className={className}
       style={{ scale, y, opacity, transformOrigin: 'center top', willChange: 'transform, opacity' }}
     >
