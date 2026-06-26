@@ -30,8 +30,54 @@
 // with NO animation.
 
 import { Reveal } from './Motion'
+import { useEffect, useState } from 'react'
+
+// Beat 4 title edit — char-by-char at ~60 wpm (60*5 keystrokes/min = 5/s = 200ms
+// each): hold "Ship faster." → backspace to "Ship " → type "Ship today." → hold →
+// reset. Driven off the same mount clock as the 12s CSS loop so the cursor (CSS)
+// and the text (JS) stay in sync; mirrored in BOTH the inspector field and the
+// video heading.
+const ED_FULL = 'Ship faster.'
+const ED_STEM = 'Ship '
+const ED_TYPED = 'Ship today.'
+const ED_CHAR_MS = 200
+const ED_LOOP_MS = 12000
+const ED_DEL_START = 7920 // 66% of the loop — when the cursor reaches the Title field
+const ED_DEL_END = ED_DEL_START + (ED_FULL.length - ED_STEM.length) * ED_CHAR_MS
+const ED_TYPE_END = ED_DEL_END + (ED_TYPED.length - ED_STEM.length) * ED_CHAR_MS
+
+function edTitleAt(t: number): string {
+  if (t < ED_DEL_START) return ED_FULL
+  if (t < ED_DEL_END) {
+    const removed = Math.floor((t - ED_DEL_START) / ED_CHAR_MS)
+    return ED_FULL.slice(0, ED_FULL.length - removed)
+  }
+  if (t < ED_TYPE_END) {
+    const added = Math.floor((t - ED_DEL_END) / ED_CHAR_MS)
+    return ED_TYPED.slice(0, ED_STEM.length + added)
+  }
+  return ED_TYPED
+}
 
 export default function EditorDemo() {
+  // The live title text, shown in both the inspector field and the video heading.
+  const [titleText, setTitleText] = useState(ED_FULL)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setTitleText(ED_FULL) // matches the frozen mid-drag (pre-edit) reduced frame
+      return
+    }
+    // Date.now()-based so the text stays correctly timed even if the interval is
+    // throttled; setState bails out when the char hasn't changed (no churn).
+    const start = Date.now()
+    const id = setInterval(() => {
+      const next = edTitleAt((Date.now() - start) % ED_LOOP_MS)
+      setTitleText((prev) => (prev === next ? prev : next))
+    }, 80)
+    return () => clearInterval(id)
+  }, [])
+
   return (
     <section id="editor-demo" className="panel panel--lit px-5 py-20 sm:py-24">
       {/* Blue glass top edge — our signature on the rounded panel lip. */}
@@ -143,8 +189,7 @@ export default function EditorDemo() {
                     {/* heading scales live with the Title-size drag; the text node
                         crossfades to the "typed" word in beat 4 via ::after. */}
                     <h3 className="ed-headline relative inline-block font-semibold leading-[1.05] text-white">
-                      <span className="ed-headline__a">Ship faster.</span>
-                      <span aria-hidden="true" className="ed-headline__b absolute inset-0">Ship today.</span>
+                      {titleText}
                     </h3>
                     {/* subtitle scales live with the Subtitle-size nudge */}
                     <p className="ed-subtitle mx-auto mt-3 max-w-[24ch] font-medium leading-snug text-[#9FB2D4]">
@@ -248,8 +293,7 @@ export default function EditorDemo() {
                 </p>
                 <span className="mb-1 block text-[10.5px] font-semibold text-[#5A6472]">Title</span>
                 <div className="ed-field relative flex items-center rounded-lg border border-[#D4E2FB] bg-white px-2.5 py-2 text-[12px] font-medium text-[#0E1320]">
-                  <span className="ed-field__a">Ship faster.</span>
-                  <span aria-hidden="true" className="ed-field__b absolute left-2.5">Ship today.</span>
+                  <span>{titleText}</span>
                   <span aria-hidden="true" className="ed-caret ml-[1px] inline-block h-[14px] w-[1.5px] bg-[#3B82F6]" />
                 </div>
               </div>
@@ -345,46 +389,7 @@ export default function EditorDemo() {
             transform: scale(0.78);
           }
         }
-        /* heading text crossfade — "Ship faster." -> "Ship today." in beat 4 */
-        .ed-headline__a,
-        .ed-headline__b {
-          display: inline-block;
-        }
-        .ed-headline__b {
-          opacity: 0;
-          animation: ed-head-textb 12s steps(1, end) infinite;
-        }
-        @keyframes ed-head-textb {
-          0%,
-          68% {
-            opacity: 0;
-          }
-          70%,
-          92% {
-            opacity: 1;
-          }
-          94%,
-          100% {
-            opacity: 0;
-          }
-        }
-        .ed-headline__a {
-          animation: ed-head-texta 12s steps(1, end) infinite;
-        }
-        @keyframes ed-head-texta {
-          0%,
-          68% {
-            opacity: 1;
-          }
-          70%,
-          92% {
-            opacity: 0;
-          }
-          94%,
-          100% {
-            opacity: 1;
-          }
-        }
+        /* heading text is JS-driven (char-by-char in beat 4) — no CSS crossfade. */
 
         /* -------------------------------------------------- PREVIEW SUBTITLE */
         .ed-subtitle {
@@ -498,7 +503,7 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-fill {
           0%,
-          48% {
+          52% {
             width: 32%;
           }
           58%,
@@ -516,11 +521,11 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-handle {
           0%,
-          48% {
+          52% {
             left: 32%;
             transform: translate(-50%, -50%) scale(1);
           }
-          52% {
+          53% {
             transform: translate(-50%, -50%) scale(1.3);
           }
           58%,
@@ -571,87 +576,18 @@ export default function EditorDemo() {
         }
 
         /* --------------------------------------------------- TITLE TEXT FIELD */
-        /* Caret hidden until the cursor reaches the field (beat 4), then blinks;
-           the field text crossfades "Ship faster." -> "Ship today." */
+        /* Blinking text caret in the inspector Title field (field text is JS-driven). */
         .ed-caret {
-          opacity: 0;
-          animation: ed-caret-show 12s steps(1, end) infinite;
+          animation: ed-blink 1s steps(1, end) infinite;
         }
-        @keyframes ed-caret-show {
+        @keyframes ed-blink {
           0%,
-          60% {
-            opacity: 0;
-          }
-          /* visible window — blink handled by overlaying a fast flicker */
-          61%,
-          63%,
-          65%,
-          67%,
-          69%,
-          71%,
-          73%,
-          75%,
-          77%,
-          79%,
-          81%,
-          83% {
+          50% {
             opacity: 1;
           }
-          62%,
-          64%,
-          66%,
-          68%,
-          70%,
-          72%,
-          74%,
-          76%,
-          78%,
-          80%,
-          82% {
-            opacity: 0.15;
-          }
-          84%,
+          51%,
           100% {
             opacity: 0;
-          }
-        }
-        .ed-field__a,
-        .ed-field__b {
-          white-space: nowrap;
-        }
-        .ed-field__b {
-          opacity: 0;
-          animation: ed-fieldb 12s steps(1, end) infinite;
-        }
-        @keyframes ed-fieldb {
-          0%,
-          68% {
-            opacity: 0;
-          }
-          70%,
-          92% {
-            opacity: 1;
-          }
-          94%,
-          100% {
-            opacity: 0;
-          }
-        }
-        .ed-field__a {
-          animation: ed-fielda 12s steps(1, end) infinite;
-        }
-        @keyframes ed-fielda {
-          0%,
-          68% {
-            opacity: 1;
-          }
-          70%,
-          92% {
-            opacity: 0;
-          }
-          94%,
-          100% {
-            opacity: 1;
           }
         }
 
@@ -709,7 +645,7 @@ export default function EditorDemo() {
           z-index: 20;
           pointer-events: none;
           filter: drop-shadow(0 2px 4px rgba(14, 19, 32, 0.3));
-          animation: ed-cursor 12s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+          animation: ed-cursor 12s cubic-bezier(0.4, 0, 0.2, 1) infinite;
         }
         @keyframes ed-cursor {
           /* settle over the stage */
