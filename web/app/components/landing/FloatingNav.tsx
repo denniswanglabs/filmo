@@ -64,7 +64,7 @@ export default function FloatingNav() {
       >
         {/* Wordmark (left) */}
         <Link href="/" className="shrink-0 text-base">
-          <Wordmark tone="light" />
+          <Wordmark tone="dark" inkClassName="text-[#0E1320]" />
         </Link>
 
         {/* Center links — "How it works" routes to its own page; "Examples"

@@ -10,7 +10,7 @@ export default function SiteFooter() {
       <div className="mx-auto max-w-5xl">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <Wordmark tone="light" />
+            <Wordmark tone="dark" inkClassName="text-[#0E1320]" />
             <p className="mt-2 text-sm text-[#5A6472]">Your product launch AI agent.</p>
           </div>
           <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">

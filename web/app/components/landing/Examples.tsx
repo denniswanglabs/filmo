@@ -23,6 +23,8 @@ interface Card {
   poster: string
   /** brand the cut was made for */
   brand: string
+  /** the real source URL this cut was read from — seeds the composer on "Remix" */
+  sourceUrl: string
   /** one-line descriptor */
   descriptor: string
   /** grid placement — varies the masonry rhythm */
@@ -47,6 +49,7 @@ const CARDS: readonly Card[] = [
     src: '/examples/notion.mp4',
     poster: '/examples/notion.jpg',
     brand: 'Notion',
+    sourceUrl: 'https://notion.so',
     descriptor: 'Activity-demo launch cut, read from the live product.',
     span: 'sm:col-span-3',
     height: 'h-[260px] sm:h-[420px]',
@@ -56,6 +59,7 @@ const CARDS: readonly Card[] = [
     src: '/examples/linear.mp4',
     poster: '/examples/linear.jpg',
     brand: 'Linear',
+    sourceUrl: 'https://linear.app',
     descriptor: 'Build-velocity teaser grounded in the real UI.',
     span: 'sm:col-span-3',
     height: 'h-[200px] sm:h-[200px]',
@@ -65,6 +69,7 @@ const CARDS: readonly Card[] = [
     src: '/examples/stripe.mp4',
     poster: '/examples/stripe.jpg',
     brand: 'Stripe',
+    sourceUrl: 'https://stripe.com',
     descriptor: 'A payments story, planned and produced on autopilot.',
     span: 'sm:col-span-3',
     height: 'h-[200px] sm:h-[200px]',
@@ -74,6 +79,7 @@ const CARDS: readonly Card[] = [
     src: '/examples/notion.mp4',
     poster: '/examples/notion.jpg',
     brand: 'Notion',
+    sourceUrl: 'https://notion.so',
     descriptor: 'A waitlist teaser scored to a beat.',
     span: 'sm:col-span-2',
     height: 'h-[220px] sm:h-[300px]',
@@ -83,6 +89,7 @@ const CARDS: readonly Card[] = [
     src: '/examples/stripe.mp4',
     poster: '/examples/stripe.jpg',
     brand: 'Stripe',
+    sourceUrl: 'https://stripe.com',
     descriptor: 'A 30-second hero loop for the launch page.',
     span: 'sm:col-span-2',
     height: 'h-[220px] sm:h-[300px]',
@@ -92,6 +99,7 @@ const CARDS: readonly Card[] = [
     src: '/examples/linear.mp4',
     poster: '/examples/linear.jpg',
     brand: 'Linear',
+    sourceUrl: 'https://linear.app',
     descriptor: 'A Product Hunt cut built to win the day.',
     span: 'sm:col-span-2',
     height: 'h-[220px] sm:h-[300px]',
@@ -115,6 +123,23 @@ function GalleryCard({ card }: { card: Card }) {
     if (!el) return
     el.pause()
     el.currentTime = 0
+  }
+
+  // "Remix" — seed the landing composer with this cut's real source URL and bring
+  // it into view/focus. Mirrors FloatingNav.jumpToComposer (scroll #start + focus
+  // #hero-url); the URL is lifted into the composer's React state via a window
+  // CustomEvent that page.tsx listens for (avoids DOM-pasting a controlled input).
+  function remix() {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(
+      new CustomEvent('filmo:seed-composer', { detail: { url: card.sourceUrl } }),
+    )
+  }
+
+  // "Watch" — open this cut's mp4 in a new tab so a visitor can play it full-size.
+  function watch() {
+    if (typeof window === 'undefined') return
+    window.open(card.src, '_blank', 'noopener,noreferrer')
   }
 
   const brand = BRAND[card.brand]
@@ -182,17 +207,28 @@ function GalleryCard({ card }: { card: Card }) {
             {card.descriptor}
           </p>
         </div>
-        {/* "Remix" affordance — slides up on hover. */}
-        <span className="shrink-0 translate-y-2 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#2563EB] opacity-0 shadow-sm backdrop-blur-sm transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+        {/* "Remix" affordance — slides up on hover. Seeds the composer with this
+            cut's source URL. */}
+        <button
+          type="button"
+          onClick={remix}
+          aria-label={`Remix the ${card.brand} cut — pre-fill the composer with ${card.sourceUrl}`}
+          className="pointer-events-auto shrink-0 translate-y-2 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#2563EB] opacity-0 shadow-sm backdrop-blur-sm transition-all duration-300 hover:bg-white focus-visible:translate-y-0 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6] group-hover:translate-y-0 group-hover:opacity-100"
+        >
           Remix
-        </span>
+        </button>
       </figcaption>
 
-      {/* Top-right "watch" chip — appears on hover. */}
-      <span className="absolute right-4 top-4 inline-flex items-center gap-1 rounded-full bg-white/85 px-2.5 py-1 text-[11px] font-medium text-[#0E1320] opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-300 group-hover:opacity-100">
-        <span className="h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
+      {/* Top-right "watch" chip — appears on hover. Opens this cut's mp4 full-size. */}
+      <button
+        type="button"
+        onClick={watch}
+        aria-label={`Watch the ${card.brand} cut`}
+        className="pointer-events-auto absolute right-4 top-4 inline-flex items-center gap-1 rounded-full bg-white/85 px-2.5 py-1 text-[11px] font-medium text-[#0E1320] opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-300 hover:bg-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6] group-hover:opacity-100"
+      >
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
         Watch
-      </span>
+      </button>
     </figure>
   )
 }

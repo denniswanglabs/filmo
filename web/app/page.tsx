@@ -61,6 +61,23 @@ export default function Home() {
     return () => clearInterval(id)
   }, [])
 
+  // "Remix" from the Examples gallery seeds the composer with that cut's source
+  // URL, then scrolls the composer into view and focuses the URL input — same
+  // landing pattern as FloatingNav.jumpToComposer.
+  useEffect(() => {
+    function onSeed(e: Event) {
+      const detail = (e as CustomEvent<{ url?: string }>).detail
+      if (!detail?.url) return
+      setUrl(detail.url)
+      const start = document.getElementById('start')
+      start?.scrollIntoView({ behavior: 'smooth' })
+      // Focus after the smooth scroll settles so it doesn't fight the animation.
+      window.setTimeout(() => document.getElementById('hero-url')?.focus(), 400)
+    }
+    window.addEventListener('filmo:seed-composer', onSeed)
+    return () => window.removeEventListener('filmo:seed-composer', onSeed)
+  }, [])
+
   const loadRuns = useCallback(async () => {
     const { data, error } = await insforge.database
       .from('runs')

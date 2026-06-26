@@ -18,11 +18,16 @@ export function StatusChip({ status }: { status: string }) {
 export function Wordmark({
   className = '',
   tone = 'dark',
+  inkClassName,
 }: {
   className?: string
-  /** 'dark' = ink text (light backgrounds, default); 'light' = near-white text (dark stage). */
+  /** 'dark' = dark ink for LIGHT backgrounds (default); 'light' = near-white ink for DARK backgrounds. */
   tone?: 'dark' | 'light'
+  /** Optional exact text-color class for the word; overrides the tone default
+   *  (used by callers that need a specific dark-ink hex, e.g. #0E1320). */
+  inkClassName?: string
 }) {
+  const inkClass = inkClassName ?? (tone === 'light' ? 'text-white' : 'text-ink')
   return (
     <span className={`inline-flex items-center gap-1.5 font-semibold tracking-tight ${className}`}>
       {/* Soft organic mark — abstract, no tile/border (Filmo). Blue dot sits
@@ -36,11 +41,7 @@ export function Wordmark({
       </svg>
       {/* Enlarged "Filmo" wordmark — explicit size so it reads large in the nav,
           and stays balanced wherever Wordmark is reused (/login, /runs TopBar). */}
-      <span
-        className={`text-[1.6rem] leading-none ${tone === 'light' ? 'text-[#0E1320]' : 'text-ink'}`}
-      >
-        Filmo
-      </span>
+      <span className={`text-[1.6rem] leading-none ${inkClass}`}>Filmo</span>
     </span>
   )
 }
