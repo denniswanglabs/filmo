@@ -174,34 +174,38 @@ export default function RunPage() {
               <Stat label="Margin" value={formatMargin(run.margin)} accent />
             </div>
 
-            {/* Activity feed */}
-            <section className="mt-8">
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                Activity
-              </h2>
-              {events.length === 0 ? (
-                <p className="text-sm text-slate-400">No events yet.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {events.map((e) => (
-                    <li
-                      key={e.id}
-                      className="flex items-start gap-3 rounded-lg border border-black/5 bg-white px-3.5 py-2.5"
-                    >
-                      <ActorBadge actor={e.actor} />
-                      <span className="flex-1 text-sm text-ink">{e.msg}</span>
-                      <span className="shrink-0 text-xs text-slate-300">
-                        {new Date(e.created_at).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        })}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {/* Activity feed — full log. Only shown once the run reaches a terminal
+                state; during a build the live feed in BuildProgress covers this, so
+                we don't double-render two activity lists. */}
+            {TERMINAL.has(run.status) && (
+              <section className="mt-8">
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+                  Activity
+                </h2>
+                {events.length === 0 ? (
+                  <p className="text-sm text-slate-400">No events yet.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {events.map((e) => (
+                      <li
+                        key={e.id}
+                        className="flex items-start gap-3 rounded-lg border border-black/5 bg-white px-3.5 py-2.5"
+                      >
+                        <ActorBadge actor={e.actor} />
+                        <span className="flex-1 text-sm text-ink">{e.msg}</span>
+                        <span className="shrink-0 text-xs text-slate-300">
+                          {new Date(e.created_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
           </div>
         )}
       </main>
