@@ -113,3 +113,7 @@ web/.vercel/
 *.railwayignore
 docker-build.log
 worker/*.log
+
+# bundled BGM source tracks — needed on the Railway worker (ships via COPY . /app)
+!assets/music/
+!assets/music/*.mp3

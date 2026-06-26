@@ -42,11 +42,107 @@ from __future__ import annotations
 
 import argparse
 import json
+import os as _os
+import re as _re
+import subprocess as _subprocess
 from typing import Any, Dict, List, Optional
 
 DEFAULT_FPS = 30
 # Advisory hold for an unvoiced scene when its duration_s is absent/non-positive.
 DEFAULT_HOLD_S = 1.5
+
+# VO-FIT (2026-06-26) — the headline fix for "the voiceover gets cut over every
+# change of scene". The renderer plays each scene's OWN per-beat VO file
+# (scene.audio.src = voiceover.beatNN.mp3, synthesized by adapters in a SEPARATE
+# pass), but the scene's VISUAL span was sized only from the alignment word-span
+# (span_frames), which is the span of that beat's words INSIDE the stitched
+# continuous track — routinely MUCH shorter than the standalone per-beat mp3. So a
+# scene's picture ended before its narration did and the audio was truncated at the
+# cut. The fix: FLOOR each scene's frame span to the per-beat mp3's real SPEECH
+# length (raw duration minus trailing silence) plus a small tail pad, so the scene
+# always holds at least as long as its own voice. We trim trailing silence first so
+# we floor to the spoken length, not the padded length (no over-growing).
+# Tail pad after the last spoken word so the cut never clips the final phoneme.
+# Sized to comfortably cover the per-beat mp3's trailing silence (measured up to
+# ~0.5s on ElevenLabs, ~0.25s on edge-tts) PLUS a small margin, so the scene visual
+# holds for the WHOLE audio file (raw duration), not just up to the last word — i.e.
+# the cut lands in true silence, never on a phoneme. We still measure SPEECH (raw
+# minus trailing silence) first so a beat with an EXTRA-long trailing silence does
+# not over-grow the scene by that full silence; the pad is the only headroom we add.
+_VO_TAIL_PAD_S = 0.55
+# Silence detection threshold/min-duration for finding the TRAILING silence run.
+_VO_SILENCE_NOISE_DB = -38.0
+_VO_SILENCE_MIN_S = 0.20
+# Floor on the measured speech length: a beat shorter than this is treated as ~all
+# speech (avoids a bad probe collapsing a real line to near-zero).
+_VO_MIN_SPEECH_S = 0.30
+
+_SIL_START_RE = _re.compile(r"silence_start:\s*([0-9.]+)")
+_SIL_END_RE = _re.compile(r"silence_end:\s*([0-9.]+)")
+
+
+def _ffprobe_seconds(path: str) -> float:
+    """Raw container duration of an audio file in seconds (0.0 on any failure)."""
+    try:
+        out = _subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=30).stdout.strip()
+        return float(out)
+    except Exception:
+        return 0.0
+
+
+def _beat_speech_seconds(path: str) -> float:
+    """The SPEECH length of a per-beat VO mp3 = raw duration minus any TRAILING
+    silence run.
+
+    ElevenLabs (and edge-tts) mp3s carry a short trailing silence that inflates the
+    raw duration; flooring a scene to the raw length would over-grow every scene.
+    We run ffmpeg `silencedetect` and, if the LAST detected silence run reaches the
+    end of the file (silence_start present with no later silence_end, OR a
+    silence_end within a hair of raw duration), subtract that trailing silence so we
+    floor to the last spoken moment. Returns 0.0 only when the file is unreadable
+    (so the caller leaves the scene span unchanged rather than collapsing it)."""
+    raw = _ffprobe_seconds(path)
+    if raw <= 0:
+        return 0.0
+    try:
+        proc = _subprocess.run(
+            ["ffmpeg", "-nostdin", "-i", path, "-af",
+             "silencedetect=noise=%gdB:d=%g" % (_VO_SILENCE_NOISE_DB, _VO_SILENCE_MIN_S),
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=60)
+        log = (proc.stderr or "") + (proc.stdout or "")
+    except Exception:
+        # Can't analyse silence — fall back to the raw duration (never cuts voice).
+        return raw
+
+    starts = [float(m) for m in _SIL_START_RE.findall(log)]
+    ends = [float(m) for m in _SIL_END_RE.findall(log)]
+    speech_end = raw
+    if starts:
+        last_start = starts[-1]
+        # The trailing run reaches EOF when there is no silence_end after the last
+        # silence_start, or the last silence_end lands within ~50ms of the raw end.
+        trailing_to_eof = (len(ends) < len(starts)) or \
+            (ends and abs(ends[-1] - raw) <= 0.05)
+        if trailing_to_eof and last_start < raw:
+            speech_end = last_start
+    # Never collapse a real beat to ~zero on a noisy probe.
+    return max(speech_end, min(raw, _VO_MIN_SPEECH_S))
+
+
+def _beat_audio_floor_frames(beat_path: Optional[str], fps: int) -> int:
+    """Frames the scene must hold so its OWN per-beat VO is never cut:
+    round((speech_seconds + tail_pad) * fps). 0 when there is no readable beat file
+    (the caller then falls back to the alignment span / plan / media floors)."""
+    if not beat_path or not _os.path.exists(beat_path):
+        return 0
+    speech_s = _beat_speech_seconds(beat_path)
+    if speech_s <= 0:
+        return 0
+    return max(1, round((speech_s + _VO_TAIL_PAD_S) * fps))
 
 # R5 (L9 confirmed on Stripe/Notion/Shopify) — the walkthrough scene must not exceed
 # the pacing budget. The captured walk clip's own length (media_frames floor) pushed
@@ -436,6 +532,17 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
         else:
             span_frames = 0
 
+        # VO-FIT FLOOR (the headline fix): the scene plays its OWN per-beat mp3
+        # (resolved below as scene.audio.src). That standalone file is routinely
+        # LONGER than span_frames (which is only the beat's words inside the stitched
+        # track), so the picture used to end before the voice and the narration was
+        # cut at the scene change. Measure the per-beat mp3's real SPEECH length
+        # (trailing silence trimmed) + a tail pad and FLOOR the scene to it. 0 when
+        # the scene has no per-beat file (unvoiced / not yet synthesized).
+        beat_path = _scene_audio(scene_index, sid, alignment, full_audio_path)
+        beat_audio_frames = _beat_audio_floor_frames(
+            (beat_path or {}).get("src"), fps)
+
         # Planned hold (frames) from the plan scene's duration_s (the FLOOR).
         plan_hold_s = scene.get("duration_s")
         try:
@@ -465,16 +572,18 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
 
         if honor_plan_durations:
             # HOLD for the planned time, but never shorter than the voice OR a
-            # real clip's own length. A scene with neither a plan duration, a VO
-            # span, nor media falls back to DEFAULT_HOLD_S.
-            length = max(plan_frames, span_frames, media_frames)
+            # real clip's own length. `beat_audio_frames` (the per-beat mp3's real
+            # speech length) is the VO-FIT floor that keeps the narration from being
+            # cut at the scene change. A scene with neither a plan duration, a VO
+            # span/audio, nor media falls back to DEFAULT_HOLD_S.
+            length = max(plan_frames, span_frames, media_frames, beat_audio_frames)
             if length <= 0:
                 length = max(1, round(DEFAULT_HOLD_S * fps))
             out_frame = in_frame + length
-        elif span_frames > 0:
-            # Legacy: voiced scene length == word span, but never shorter than a
-            # real clip's length (a media floor must not be truncated even here).
-            out_frame = in_frame + max(span_frames, media_frames)
+        elif span_frames > 0 or beat_audio_frames > 0:
+            # Legacy: voiced scene length == its voice (max of the word span and the
+            # per-beat mp3 speech length), never shorter than a real clip's length.
+            out_frame = in_frame + max(span_frames, media_frames, beat_audio_frames)
         else:
             # Legacy unvoiced hold (advisory only), floored by the clip length.
             hold_s = plan_hold_s if plan_hold_s > 0 else DEFAULT_HOLD_S
@@ -487,7 +596,9 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
         # and respect a longer VO span so narration is never cut — keep max(span, cap).
         if _derive_role(scene) in _WALKTHROUGH_ROLES:
             scene_len = out_frame - in_frame
-            cap_len = max(WALKTHROUGH_MAX_FRAMES, span_frames)
+            # Floor the cap at the voice (word span AND per-beat mp3 speech length)
+            # so capping the walkthrough window can never cut its narration.
+            cap_len = max(WALKTHROUGH_MAX_FRAMES, span_frames, beat_audio_frames)
             if scene_len > cap_len:
                 out_frame = in_frame + cap_len
 
@@ -501,17 +612,20 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
             "in_frame": in_frame,
             "out_frame": out_frame,
             # Per-scene VO audio so the voice starts at this (stretched) scene start.
-            "audio": _scene_audio(scene_index, sid, alignment, full_audio_path),
+            # Reuse the path already resolved above for the VO-FIT floor.
+            "audio": beat_path,
             # Cue at_frame anchors to the absolute word start; rebase into the slid
             # scene by the same offset the scene moved (in_frame - span start frame).
             "_cues_raw": _resolve_cues(scene, words, fps),
             "_span_in": (round(start_s * fps) if start_s is not None else in_frame),
             # Content FLOORS for the duration-robustness grow/shrink passes: a scene
             # may be grown above these (a hold) or shrunk back to them, but NEVER below
-            # — the VO is never cut, a media clip is never truncated. Walkthrough roles
-            # are capped at WALKTHROUGH_MAX_FRAMES, so their media floor must not exceed
-            # the cap (else the shrink pass could never bring an over-long clip down).
-            "_span_frames": span_frames,
+            # — the VO is never cut, a media clip is never truncated. The VO floor is
+            # max(word span, per-beat mp3 speech length) so the shrink pass can never
+            # bring a scene below its own narration. Walkthrough roles are capped at
+            # WALKTHROUGH_MAX_FRAMES, so their media floor must not exceed the cap
+            # (else the shrink pass could never bring an over-long clip down).
+            "_span_frames": max(span_frames, beat_audio_frames),
             "_media_frames": (min(media_frames, WALKTHROUGH_MAX_FRAMES)
                               if _derive_role(scene) in _WALKTHROUGH_ROLES
                               else media_frames),

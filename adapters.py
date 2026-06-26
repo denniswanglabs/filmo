@@ -24,6 +24,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import time
 import types
 
@@ -1856,23 +1857,41 @@ def synthesize_voiceover_aligned(beats, voice, out_path, provider, total_s=None)
 
 
 def _vo_edge(script, voice, out_path):
+    """Free edge-tts synth, made ROBUST: edge-tts is a network service and
+    intermittently raises NoAudioReceived (empty stream). Retry a few times with
+    short backoff; on PERSISTENT failure DON'T crash the build — fall back to a
+    silent segment of a plausible duration so the picture/stitch still completes.
+    The warning is logged so the failure is visible without being fatal."""
     edge_voice = EDGE_VOICE_MAP.get((voice or "").strip().lower(), EDGE_VOICE_DEFAULT)
-    # edge-tts (free MS service) intermittently returns NoAudioReceived for a beat;
-    # it's transient, so retry a few times with a short backoff before giving up.
-    import time as _t
     last_err = None
-    for attempt in range(4):
+    for attempt in range(3):
         try:
-            _run(["edge-tts", "--voice", edge_voice, "--text", script, "--write-media", out_path],
-                 timeout=180)
+            _run(["edge-tts", "--voice", edge_voice, "--text", script,
+                  "--write-media", out_path], timeout=180)
             if os.path.exists(out_path) and os.path.getsize(out_path) >= 500:
-                return {"output_path": out_path, "provider": "edge-tts", "voice": edge_voice, "real": False}
-            last_err = AdapterError("edge-tts produced no audio")
-        except AdapterError as e:
-            last_err = e
-        if attempt < 3:
-            _t.sleep(1.5 * (attempt + 1))
-    raise last_err or AdapterError("edge-tts produced no audio after retries")
+                return {"output_path": out_path, "provider": "edge-tts",
+                        "voice": edge_voice, "real": False}
+            last_err = "edge-tts produced no audio (empty file)"
+        except Exception as e:  # subprocess timeout / NoAudioReceived / cmd-failed
+            last_err = str(e)
+        if attempt < 2:
+            time.sleep(0.8 * (attempt + 1))
+    # Persistent failure: synthesize a silent segment of the right length instead
+    # of raising. Estimate from word count at ~150 wpm (0.4 s/word), min 1.2 s.
+    words = len((script or "").split())
+    dur = max(1.2, round(words * 0.4, 2))
+    sys.stderr.write(
+        "adapters._vo_edge: WARNING edge-tts failed after 3 tries (%s); "
+        "writing %.1fs SILENT fallback so the build does not crash.\n"
+        % (last_err, dur))
+    _run(["ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+          "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+          "-t", "%.3f" % dur, "-c:a", "libmp3lame", "-q:a", "4", out_path],
+         timeout=60)
+    if not os.path.exists(out_path) or os.path.getsize(out_path) < 200:
+        raise AdapterError("edge-tts failed and silent fallback could not be written: %s" % last_err)
+    return {"output_path": out_path, "provider": "edge-tts-silent-fallback",
+            "voice": edge_voice, "real": False, "fallback": True, "fallback_reason": last_err}
 
 
 # ElevenLabs STOCK voice ids (premium_vo add-on). These are pre-made library
@@ -1933,8 +1952,8 @@ def _read_hermes_env():
 # Stitch (video-stitch). REAL ffmpeg in both modes.
 # ---------------------------------------------------------------------------
 
-def stitch(clips, vo_path, out_path, watermark=False):
-    """Concat clips in order (they share the frame spec) then mux the VO bed.
+def stitch(clips, vo_path, out_path, watermark=False, music_path=None):
+    """Concat clips in order (they share the frame spec) then mux the VO + BGM bed.
 
     Returns a record with the output path, duration, and the verification probe.
     Trims the VO to the video length so a long VO can't overrun the picture and
@@ -1947,6 +1966,16 @@ def stitch(clips, vo_path, out_path, watermark=False):
     drawn corner badge (this ffmpeg build has no drawtext/libfreetype, so we use
     drawbox — always available — as the watermark glyph). The record carries a
     `watermark` bool either way so the ledger/dashboard reflect it.
+
+    `music_path` — OPTIONAL background-music bed (an mp3/wav). The per-scene clip
+    render path concatenates scene clips and muxes ONLY the VO, so Remotion's
+    Timeline `<Audio>` music bed never reaches final.mp4 (the long-standing "music
+    slot stubbed with silence"). When provided, the track is looped to cover the
+    video, then mixed UNDER the VO via a VO-keyed sidechain compressor so it ducks
+    automatically: BGM ~0.45 in VO gaps, ducked to ~0.16 while the VO speaks
+    (feedback_bgm_level_depends_on_vo). The bed fades in at the head and out past
+    the visual close. None => no music (byte-identical to the prior VO-only mux).
+    The record carries `has_music` so the ledger/dashboard reflect it.
     """
     if not clips:
         raise AdapterError("stitch got no clips")
@@ -1992,21 +2021,79 @@ def stitch(clips, vo_path, out_path, watermark=False):
 
     vdur = ffprobe_duration(silent_master)
 
-    if vo_path and os.path.exists(vo_path):
-        # EBU R128 delivery loudness on the muxed audio (mirrors finish_cut.py's
-        # loudnorm) so the e2e cut lands at the ~-14 LUFS streaming standard. The
-        # finish pass that used to own this never runs in the build_runner path,
-        # so without this the VO ships ~6 LU quiet (~-20 LUFS).
+    has_vo = bool(vo_path and os.path.exists(vo_path))
+    has_music = bool(music_path and os.path.exists(music_path))
+
+    # BGM duck levels (project rule feedback_bgm_level_depends_on_vo):
+    #   - with VO present: bed sits at ~0.45 open, ducked to ~0.16 under the VO.
+    #   - solo (no VO): bed plays louder (~0.85) since nothing competes.
+    # The duck is automatic: a VO-keyed sidechaincompress pulls the 0.45 bed down
+    # to ~0.16 whenever the VO is speaking and lets it ride back up in the gaps.
+    BGM_OPEN = 0.45
+    BGM_SOLO = 0.85
+    # head fade-in + a tail fade that OUTLASTS the visual close (feedback_audio_
+    # outlasts_visual_fade): start the bed fade ~1.5s before the end and run past it.
+    FADE_IN = 0.6
+    TAIL = 1.5
+    tail_start = max(0.0, vdur - TAIL)
+
+    if has_vo and has_music:
+        # VO + ducked music. Loop the bed to cover the video, set it to the OPEN
+        # level + fade, then sidechain-duck it against the VO so it dips to ~0.16
+        # under speech. amix the ducked bed with the VO; loudnorm the sum to the
+        # -14 LUFS delivery target (the VO stays clearly dominant after the duck).
+        fc = (
+            # VO chain: split — one copy drives the mix, one keys the sidechain.
+            "[1:a]aresample=48000,aformat=channel_layouts=stereo,"
+            "apad=whole_dur=%.3f,atrim=0:%.3f,asplit=2[vo][vokey];"
+            # Music bed: loop, trim to length, OPEN level, head+tail fades.
+            "[2:a]aresample=48000,aformat=channel_layouts=stereo,"
+            "aloop=loop=-1:size=2e9,atrim=0:%.3f,"
+            "volume=%.3f,afade=t=in:st=0:d=%.3f,afade=t=out:st=%.3f:d=%.3f[bed];"
+            # Duck the bed against the VO key: ~0.45 -> ~0.16 under speech.
+            "[bed][vokey]sidechaincompress="
+            "threshold=0.03:ratio=8:attack=20:release=300:makeup=1[duck];"
+            # Mix VO + ducked bed (VO dominant), then normalize delivery loudness.
+            "[vo][duck]amix=inputs=2:duration=first:dropout_transition=0:"
+            "weights=1 1:normalize=0[mixed];"
+            "[mixed]loudnorm=I=-14:TP=-1.0:LRA=11[aout]"
+            % (vdur, vdur, vdur, BGM_OPEN, FADE_IN, tail_start, TAIL)
+        )
+        _run(["ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+              "-i", silent_master, "-i", vo_path, "-i", music_path,
+              "-filter_complex", fc,
+              "-map", "0:v:0", "-map", "[aout]", "-t", "%.3f" % vdur,
+              "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-ac", "2",
+              "-movflags", "+faststart", out_path], timeout=300)
+    elif has_vo:
+        # VO only (no music). EBU R128 delivery loudness on the muxed audio
+        # (mirrors finish_cut.py's loudnorm) so the e2e cut lands at the ~-14 LUFS
+        # streaming standard. Without this the VO ships ~6 LU quiet (~-20 LUFS).
         _run(["ffmpeg", "-y", "-nostdin", "-loglevel", "error",
               "-i", silent_master, "-i", vo_path,
               "-map", "0:v:0", "-map", "1:a:0", "-t", "%.3f" % vdur,
               "-af", "loudnorm=I=-14:TP=-1.0:LRA=11",
               "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-ac", "2",
               "-movflags", "+faststart", out_path], timeout=300)
+    elif has_music:
+        # Music only (no VO): the bed rides louder since nothing competes. Loop to
+        # cover the video, head+tail fade, loudnorm to delivery.
+        fc = (
+            "[1:a]aresample=48000,aformat=channel_layouts=stereo,"
+            "aloop=loop=-1:size=2e9,atrim=0:%.3f,"
+            "volume=%.3f,afade=t=in:st=0:d=%.3f,afade=t=out:st=%.3f:d=%.3f,"
+            "loudnorm=I=-16:TP=-1.0:LRA=11[aout]"
+            % (vdur, BGM_SOLO, FADE_IN, tail_start, TAIL)
+        )
+        _run(["ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+              "-i", silent_master, "-i", music_path,
+              "-filter_complex", fc,
+              "-map", "0:v:0", "-map", "[aout]", "-t", "%.3f" % vdur,
+              "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-ac", "2",
+              "-movflags", "+faststart", out_path], timeout=300)
     else:
-        # No VO: the concat master was built with a=0, so there is no audio
-        # stream to normalize — loudnorm is inapplicable and this stays a
-        # passthrough. (When music beds land in this path, loudnorm them here.)
+        # No VO and no music: the concat master was built with a=0, so there is no
+        # audio stream — passthrough (byte-identical to the prior no-VO path).
         os.replace(silent_master, out_path)
         silent_master = None
 
@@ -2024,6 +2111,7 @@ def stitch(clips, vo_path, out_path, watermark=False):
         "output_path": out_path,
         "duration_s": round(duration, 2),
         "has_audio": has_audio,
+        "has_music": has_music,
         "clip_count": len(clips),
         "verified": os.path.getsize(out_path) > 10000,
     }

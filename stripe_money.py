@@ -145,13 +145,20 @@ class StripeMoney:
                 "billing[address][line1]": "1 Test St", "billing[address][city]": "San Francisco",
                 "billing[address][state]": "CA", "billing[address][postal_code]": "94103",
                 "billing[address][country]": "US"})
+            # Static card limit defaults to the budget → Stripe declines an over-budget
+            # charge via spending_controls (reason `authorization_controls`), with no
+            # dependency on the webhook. Set PRODUCER_CARD_LIMIT_CENTS to a high ceiling so
+            # the over-budget charge PASSES static controls and reaches the real-time webhook
+            # (stripe_webhook.py), which declines it on the LIVE budget → reason
+            # `webhook_declined` — the brain's own verdict, the stronger autonomous artifact.
+            card_limit_cents = int(os.environ.get("PRODUCER_CARD_LIMIT_CENTS") or budget_cents)
             card = self._post("/v1/issuing/cards", {
                 "cardholder": cardholder["id"], "currency": currency, "type": "virtual",
                 "status": "active",
-                "spending_controls[spending_limits][0][amount]": budget_cents,
+                "spending_controls[spending_limits][0][amount]": card_limit_cents,
                 "spending_controls[spending_limits][0][interval]": "all_time"})
             return {"enabled": True, "provider": "stripe",
-                    "spending_limit_cents": budget_cents,
+                    "spending_limit_cents": card_limit_cents,
                     "card_id": card.get("id"), "cardholder_id": cardholder.get("id"),
                     "last4": card.get("last4")}
         except (urllib.error.URLError, KeyError, ValueError) as e:
@@ -196,6 +203,75 @@ class StripeMoney:
                     "amount_cents": amount_cents, "approved": approved,
                     "decline_reason": None if approved else "error_fallback",
                     "remaining_budget_cents": remaining_cents}
+
+    # -- SETTLE the earn: simulate the customer paying with the 4242 test card --
+    def settle_payment(self, price_cents, currency="usd", metadata=None):
+        """Simulate a customer paying the earn link with Stripe's `4242` test card.
+
+        TEST MODE ONLY. Confirms a PaymentIntent with the literal
+        4242 4242 4242 4242 Visa, which lands as a REAL *succeeded* payment in the
+        Stripe test dashboard — closing the earn loop (link -> paid). Safe by
+        default: with no key it returns a faithful simulated `succeeded` object so
+        the money-shot renders identically. It HARD-REFUSES any non-test key, since
+        confirming a card charge on a live key would move real money.
+        """
+        meta = metadata or {}
+        if not self.live:
+            return {"paid": True, "simulated": True, "provider": "dev",
+                    "status": "succeeded", "amount_cents": price_cents,
+                    "amount_received_cents": price_cents, "currency": currency,
+                    "card_brand": "visa", "card_last4": "4242",
+                    "payment_intent_id": "pi_sim_%d" % (abs(hash((price_cents, currency))) % 10**10),
+                    "note": "No Stripe key — simulated paid (4242).", "key": self.key_info}
+        if self.key_info.get("kind") != "test":
+            # NEVER confirm a real card charge on a live key — that is real money.
+            return {"paid": False, "status": "refused_non_test_key", "simulated": False,
+                    "error": "settle_payment is TEST-ONLY; refusing a %s key." % self.key_info.get("kind"),
+                    "amount_cents": price_cents, "key": self.key_info}
+        try:
+            # Build a PaymentMethod from the literal 4242 card (raw PAN is allowed in
+            # test mode). Fall back to the prebuilt `pm_card_visa` token (also 4242)
+            # if an account disables raw-PAN handling.
+            try:
+                pm = self._post("/v1/payment_methods", {
+                    "type": "card",
+                    "card[number]": "4242424242424242",
+                    "card[exp_month]": 12, "card[exp_year]": 2034, "card[cvc]": "123"})
+                pm_id = pm["id"]
+            except (urllib.error.HTTPError, urllib.error.URLError, KeyError):
+                pm_id = "pm_card_visa"
+            pi_params = {
+                "amount": price_cents, "currency": currency,
+                "payment_method": pm_id, "confirm": "true",
+                "automatic_payment_methods[enabled]": "true",
+                "automatic_payment_methods[allow_redirects]": "never",
+                "expand[0]": "latest_charge",
+                "description": "Filmo video — simulated customer payment (test 4242)"}
+            for k, v in meta.items():
+                pi_params["metadata[%s]" % k] = v
+            pi = self._post("/v1/payment_intents", pi_params)
+            charge = ((pi.get("latest_charge") and isinstance(pi.get("latest_charge"), dict)
+                       and pi["latest_charge"]) or {})
+            details = (charge.get("payment_method_details") or {}).get("card") or {}
+            return {
+                "paid": pi.get("status") == "succeeded",
+                "simulated": False, "provider": "stripe",
+                "status": pi.get("status"),
+                "amount_cents": price_cents,
+                "amount_received_cents": pi.get("amount_received"),
+                "currency": pi.get("currency", currency),
+                "payment_intent_id": pi.get("id"),
+                "charge_id": charge.get("id") or pi.get("latest_charge"),
+                "card_brand": details.get("brand", "visa"),
+                "card_last4": details.get("last4", "4242"),
+                "livemode": pi.get("livemode", False),
+                "key": self.key_info,
+            }
+        except (urllib.error.HTTPError, urllib.error.URLError, KeyError, ValueError) as e:
+            body = e.read().decode()[:300] if hasattr(e, "read") else ""
+            return {"paid": False, "status": "error", "simulated": False,
+                    "error": str(e) + (" :: " + body if body else ""),
+                    "amount_cents": price_cents, "key": self.key_info}
 
 
 def _flatten(params):

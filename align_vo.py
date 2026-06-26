@@ -32,15 +32,36 @@ Output contract (vo_alignment.json), EXACTLY:
                "text": "..."}, ...]
   }
 """
+import base64
 import json
 import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 # whisper-cli + model locations (audit-confirmed installed on this machine).
 WHISPER_BIN = "/opt/homebrew/bin/whisper-cli"
 WHISPER_MODEL = os.path.expanduser("~/.cache/whisper/ggml-base.en.bin")
+
+# ElevenLabs premium VO config. Default voice = "Rachel" (a clear neutral
+# narrator, ElevenLabs' canonical stock voice). model_id = eleven_multilingual_v2
+# (high-quality, supports the with-timestamps endpoint). Override the voice id via
+# the plan's voiceover.voice (a raw ElevenLabs voice id) or the WS_VO_VOICE_ID env.
+ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
+ELEVENLABS_DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel — neutral narrator
+ELEVENLABS_MODEL_ID = "eleven_multilingual_v2"
+# Map friendly names (the planner emits names like "Adam"/"Rachel") to stock ids,
+# so a non-id voice still resolves to a real ElevenLabs voice.
+ELEVENLABS_VOICE_IDS = {
+    "rachel": "21m00Tcm4TlvDq8ikWAM",
+    "adam": "pNInz6obpgDQGcFmaJgB",
+    "antoni": "ErXwobaYiN019PkySvjV",
+    "bella": "EXAVITQu4vr4xnSDxMaL",
+    "josh": "TxGEqnHWrfWFTfGW9XjX",
+    "sam": "yoZ06aMxZJJ28mfd3POQ",
+}
 
 _WORD_RE = re.compile(r"\w+(?:'\w+)?", re.UNICODE)
 
@@ -118,15 +139,29 @@ def synth_full_script(script, voice, out_path, tier, *, synth_fn=None,
     if key is None:
         key = os.environ.get("ELEVENLABS_API_KEY")
 
-    if tier == "premium" and key:
-        # Premium path: ElevenLabs returns char/word timestamps with the audio.
-        info = _elevenlabs_synth_with_timestamps(script, voice, out_path, key)
-        return out_path, info.get("voice", voice), "premium", info.get("alignment")
+    # PROVIDER SWITCH (independent of quality/tier): WS_VO_PROVIDER=elevenlabs
+    # forces the ElevenLabs with-timestamps path even on a `tier="free"` /
+    # `--quality standard` build (Higgsfield stays OFF — only the VO engine
+    # changes). Default/empty/"edge"/"free" keeps the $0 edge-tts + whisper path.
+    provider = (os.environ.get("WS_VO_PROVIDER") or "").strip().lower()
+    want_elevenlabs = provider == "elevenlabs" or tier == "premium"
 
-    if tier == "premium" and not key:
+    if want_elevenlabs and key:
+        # Premium path: ElevenLabs returns char/word timestamps with the audio.
+        # On any failure, fall through to the free edge-tts + whisper path below
+        # (the caller never blocks a paid render on a VO-provider outage).
+        try:
+            info = _elevenlabs_synth_with_timestamps(script, voice, out_path, key)
+            return out_path, info.get("voice", voice), "premium", info.get("alignment")
+        except Exception as e:
+            sys.stderr.write(
+                "align_vo: WARNING ElevenLabs synth failed (%s); "
+                "falling back to FREE (edge-tts + whisper).\n" % e)
+
+    if want_elevenlabs and not key:
         sys.stderr.write(
-            "align_vo: WARNING premium tier requested but no ELEVENLABS_API_KEY; "
-            "falling back to FREE (edge-tts + whisper).\n")
+            "align_vo: WARNING ElevenLabs VO requested (WS_VO_PROVIDER/tier) but no "
+            "ELEVENLABS_API_KEY; falling back to FREE (edge-tts + whisper).\n")
 
     fn = synth_fn
     if fn is None:
@@ -136,18 +171,109 @@ def synth_full_script(script, voice, out_path, tier, *, synth_fn=None,
     return out_path, info.get("voice", voice), "free", None
 
 
-def _elevenlabs_synth_with_timestamps(script, voice, out_path, key):  # pragma: no cover
-    """PREMIUM tier shape ONLY -- do NOT call in this build (no key, no spend).
+def _resolve_elevenlabs_voice_id(voice):
+    """Resolve a plan voice (a friendly name like "Adam"/"Rachel" OR a raw
+    ElevenLabs voice id) to a real ElevenLabs voice id. WS_VO_VOICE_ID overrides
+    everything; an unknown 20-char-ish token is assumed to already be a voice id;
+    otherwise we fall back to Rachel (clear neutral narrator)."""
+    env_id = (os.environ.get("WS_VO_VOICE_ID") or "").strip()
+    if env_id:
+        return env_id
+    v = (voice or "").strip()
+    if not v:
+        return ELEVENLABS_DEFAULT_VOICE_ID
+    if v.lower() in ELEVENLABS_VOICE_IDS:
+        return ELEVENLABS_VOICE_IDS[v.lower()]
+    # Heuristic: ElevenLabs voice ids are ~20 alnum chars. If it looks like one,
+    # pass it through; otherwise use the default narrator.
+    if re.fullmatch(r"[A-Za-z0-9]{18,24}", v):
+        return v
+    return ELEVENLABS_DEFAULT_VOICE_ID
 
-    The real implementation would POST to
-    /v1/text-to-speech/<voice_id>/with-timestamps, decode base64 audio into
-    out_path, and return {"voice": voice_id, "alignment": <el-char-timing>}.
-    Guarded so an accidental premium-with-key path during testing still cannot
-    spend money unless someone deliberately implements it.
+
+def _elevenlabs_synth_with_timestamps(script, voice, out_path, key,
+                                      *, opener=None):
+    """PREMIUM synth: POST to the ElevenLabs with-timestamps endpoint, write the
+    decoded mp3 to `out_path`, and return {"voice": <voice_id>, "alignment": ...}.
+
+    Endpoint (REST): POST {ELEVENLABS_BASE}/text-to-speech/<voice_id>/with-timestamps
+      Auth header:  xi-api-key: <key>
+      Body (JSON):  {"text": <full script>, "model_id": <model>,
+                     "voice_settings": {"stability", "similarity_boost", "style",
+                                        "use_speaker_boost"}}
+      Response JSON: {"audio_base64": <mp3 base64>,
+                      "alignment": {"characters": [...],
+                                    "character_start_times_seconds": [...],
+                                    "character_end_times_seconds": [...]},
+                      "normalized_alignment": {...}}
+    The returned `alignment` object is already in the EXACT shape
+    parse_elevenlabs_alignment consumes, so it is returned untouched.
+
+    `opener` is injectable for tests (defaults to urllib.request.urlopen).
+    Raises AlignError on any HTTP/decode failure so synth_full_script can fall
+    back to the free path without spending again.
     """
-    raise AlignError(
-        "ElevenLabs premium path is wired as shape-only in this build "
-        "(no spend). Implement _elevenlabs_synth_with_timestamps to enable.")
+    if not key:
+        raise AlignError("ElevenLabs synth requires an API key")
+    if not (script or "").strip():
+        raise AlignError("ElevenLabs synth requires non-empty script text")
+
+    voice_id = _resolve_elevenlabs_voice_id(voice)
+    url = "%s/text-to-speech/%s/with-timestamps?output_format=mp3_44100_128" % (
+        ELEVENLABS_BASE, voice_id)
+    body = json.dumps({
+        "text": script,
+        "model_id": ELEVENLABS_MODEL_ID,
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.75,
+            "style": 0.0,
+            "use_speaker_boost": True,
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"xi-api-key": key,
+                 "Content-Type": "application/json",
+                 "Accept": "application/json"})
+
+    do_open = opener or urllib.request.urlopen
+    try:
+        with do_open(req, timeout=120) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        raise AlignError("ElevenLabs HTTP %s: %s" % (e.code, detail))
+    except urllib.error.URLError as e:
+        raise AlignError("ElevenLabs network error: %s" % e.reason)
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as e:
+        raise AlignError("ElevenLabs returned non-JSON response: %s" % e)
+
+    audio_b64 = payload.get("audio_base64") or payload.get("audio")
+    if not audio_b64:
+        raise AlignError("ElevenLabs response missing audio_base64")
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+    except Exception as e:
+        raise AlignError("ElevenLabs audio_base64 decode failed: %s" % e)
+    if not audio_bytes:
+        raise AlignError("ElevenLabs returned empty audio")
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(audio_bytes)
+
+    alignment = payload.get("alignment") or payload.get("normalized_alignment")
+    if not alignment or not alignment.get("characters"):
+        raise AlignError("ElevenLabs response missing character alignment")
+    return {"voice": voice_id, "alignment": alignment}
 
 
 # --------------------------------------------------------------------------- #

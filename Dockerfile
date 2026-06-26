@@ -50,14 +50,8 @@ RUN rm -f /app/studio/node_modules \
     && npx remotion browser ensure \
     && npm i -g @remotion/cli@$(node -p "require('/app/studio/node_modules/remotion/package.json').version")
 
-# ── music bed: the pipeline points at sibling-repo mp3s that aren't here; provide a
-#    silent placeholder at both paths so the VO-ducked <Audio> mount never crashes ──
-RUN mkdir -p "/Users/dennis/Desktop/Projects/Demos/tappay-promo/public" \
-            "/Users/dennis/Desktop/Projects/Demos/kuli-promo/public" \
-    && ffmpeg -f lavfi -i anullsrc=r=44100:cl=stereo -t 60 -q:a 9 \
-       "/Users/dennis/Desktop/Projects/Demos/tappay-promo/public/music.mp3" \
-    && cp "/Users/dennis/Desktop/Projects/Demos/tappay-promo/public/music.mp3" \
-          "/Users/dennis/Desktop/Projects/Demos/kuli-promo/public/music.mp3"
+# ── music bed: the real BGM tracks ship via `COPY . /app` at assets/music/*.mp3,
+#    exactly where style_fill's repo-relative _MUSIC_DIR resolves. No placeholder. ──
 
 # ── Node worker deps ──
 RUN cd /app/worker && npm install --no-audit --no-fund

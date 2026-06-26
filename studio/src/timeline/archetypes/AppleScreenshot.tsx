@@ -77,6 +77,93 @@ export const AppleScreenshot: React.FC<ScreenshotProps> = (props) => {
 };
 
 // ===========================================================================
+// STATS CARD — the text-only motion-graphic case (no real screenshot).
+// The `motion-graphic-stats` scene maps onto this archetype but has an EMPTY
+// imageSrc; its content IS the headline + supporting stats. We render a clean,
+// centered, animated stat card on the light stage (NO empty browser frame) so
+// the credibility proof actually shows. Fixes the blank-stats regression the
+// screenshot overlay-removal introduced.
+// ===========================================================================
+const StatsCard: React.FC<{
+  data: SceneData;
+  cues: Cue[];
+  theme: Theme;
+  durationInFrames: number;
+  actIndex?: number;
+  sceneId?: string;
+}> = ({ data, theme, durationInFrames }) => {
+  const frame = useCurrentFrame();
+  const accent = (theme as { accent?: string }).accent ?? "#3B82F6";
+  const headline = (data.headline ?? data.title ?? "").trim() || theme.wordmark || "";
+  const support = (data.supporting ?? "").trim();
+  const punch = ((data as { punchWord?: string }).punchWord ?? "").trim();
+
+  const fadeIn = (at: number, d = 14) =>
+    interpolate(frame, [at, at + d], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: EASE_OUT_QUART,
+    });
+  const riseIn = (at: number, d = 14, dist = 28) =>
+    interpolate(frame, [at, at + d], [dist, 0], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: EASE_OUT_QUART,
+    });
+  const exit = interpolate(frame, [durationInFrames - 16, durationInFrames], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  const headlineNodes = (() => {
+    const i = punch ? headline.toLowerCase().indexOf(punch.toLowerCase()) : -1;
+    if (i < 0) return <span style={{ color: "#0E1320" }}>{headline}</span>;
+    return (
+      <>
+        <span style={{ color: "#0E1320" }}>{headline.slice(0, i)}</span>
+        <span style={{ color: accent }}>{headline.slice(i, i + punch.length)}</span>
+        <span style={{ color: "#0E1320" }}>{headline.slice(i + punch.length)}</span>
+      </>
+    );
+  })();
+
+  return (
+    <AbsoluteFill
+      style={{ alignItems: "center", justifyContent: "center", padding: 140, opacity: exit }}
+    >
+      <div style={{ textAlign: "center", maxWidth: 1500 }}>
+        <div
+          style={{
+            opacity: fadeIn(10, 18),
+            transform: `translateY(${riseIn(10, 18)}px)`,
+            fontSize: 138,
+            lineHeight: 1.02,
+            fontWeight: 700,
+            letterSpacing: -3,
+          }}
+        >
+          {headlineNodes}
+        </div>
+        {support ? (
+          <div
+            style={{
+              opacity: fadeIn(36),
+              transform: `translateY(${riseIn(36)}px)`,
+              color: "#5A6472",
+              fontSize: 54,
+              fontWeight: 500,
+              marginTop: 40,
+            }}
+          >
+            {support}
+          </div>
+        ) : null}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+// ===========================================================================
 // SPLIT layout (v2 keystone) — text-LEFT / screenshot-RIGHT.
 // ===========================================================================
 const SplitScreenshot: React.FC<ScreenshotProps> = ({
@@ -94,15 +181,43 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
   const showChrome = (data.frame ?? "browser") !== "none";
   const src = data.imageSrc ? resolveSrc(data.imageSrc) : "";
 
+  // HAS-A-REAL-SCREENSHOT signal. `data.imageSrc` is the staged capture path for a
+  // real screenshot scene (e.g. "shot-<run>-screenshot-home.png"); style_fill leaves
+  // it EMPTY ("") — or pops it entirely — for a text-only motion-graphic/stats scene
+  // that maps onto this same `apple-screenshot` archetype (its content IS the headline
+  // + supporting stats, not a captured image). The overlay-removal Dennis asked for
+  // applies ONLY to the real-screenshot case (show the clean captured shot, no text).
+  // For the text-only stats case the overlay is the WHOLE content, so we KEEP it and
+  // render a clean centered motion-graphic stat card instead (no blank frame).
+  const hasRealScreenshot = src.trim() !== "";
+  if (!hasRealScreenshot) {
+    return (
+      <StatsCard
+        data={data}
+        cues={cues}
+        theme={theme}
+        durationInFrames={durationInFrames}
+        actIndex={actIndex}
+        sceneId={sceneId}
+      />
+    );
+  }
+
   // Layout geometry. Left column is fixed-width, vertically centered; the card
   // floats right, inset from the right edge. All overridable via data.geo with a
   // literal fallback (absent geo => these literals).
+  // Geometry. With the text overlay removed the card is CENTERED + enlarged so
+  // the captured screenshot is the hero. cardW/shotH default up from the old
+  // split sizes (1010x620) to a near-full-frame studio card (1620x820) that
+  // still leaves a tasteful margin on the 1920x1080 stage. leftX/leftColW/
+  // cardRight are retained (unused by the centered layout) so data.geo overrides
+  // stay backward-compatible.
   const geo = data.geo;
   const leftX = geo?.leftX ?? 110;
   const leftColW = geo?.leftColW ?? 660;
-  const cardW = geo?.cardW ?? 1010;
+  const cardW = geo?.cardW ?? 1620;
   const cardRadius = geo?.cardRadius ?? 18;
-  const shotH = geo?.shotH ?? 620;
+  const shotH = geo?.shotH ?? 820;
   const cardRight = geo?.cardRight ?? 64;
   const cardOffsetX = geo?.cardOffsetX ?? 0;
   const cardOffsetY = geo?.cardOffsetY ?? 0;
@@ -202,6 +317,9 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
   // for the focus rect + cursor + zoom. Card-local NORMALIZED 0..1 (spec contract).
   const shotW = cardW; // the window is full card width
   const focus = data.focus;
+  // OVERLAY-REMOVAL (Dennis): the clean captured screenshot is the hero — do NOT draw
+  // a synthetic highlight ring/tint over it. (focus stays referenced for layout/zoom math.)
+  const SHOW_FOCUS_RING = false;
   // highlight holds from highlightAt until ~the end of the held tail, then fades.
   const highlightHoldEnd = Math.max(highlightAt + 24, durationInFrames - 28);
   const hl = focus ? highlightBox(frame, highlightAt, highlightHoldEnd) : { opacity: 0 };
@@ -229,15 +347,25 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
           { at: cursorAtCue - frameAt, x: focus.x + focus.w / 2, y: focus.y + focus.h / 2, click: true },
         ]
       : null;
-  // cursorAt keyframes are in card-local NORMALIZED coords; we offset `at` by the
-  // shot-window origin frame so springs seed from the right moment.
-  const cursor = cursorPath
-    ? cursorAt(
-        frame,
-        cursorPath.map((k) => ({ ...k, x: k.x * shotW, y: k.y * shotH })),
-        fps
-      )
+  // CURSOR DISABLED on screenshot scenes (user explicitly disliked the moving
+  // cursor + click ripples). Force `cursor` to null so the guarded render block
+  // below ({cursor && ...}) never draws CursorGlyph or the ripples. The cursorPath
+  // computation above is left intact (harmless, no render) so re-enabling is a
+  // one-line revert. WalkthroughPlayer keeps its own cursor — unaffected.
+  // Typed as the union (not the literal `null`) so the dead `{cursor && ...}`
+  // render block below still type-checks against the cursor shape. Using a const
+  // initialized to `null` would narrow `cursor` to `never` inside the guard.
+  const cursorEnabled = false;
+  const cursor: ReturnType<typeof cursorAt> | null = cursorEnabled
+    ? cursorAt(frame, cursorPath ?? [], fps)
     : null;
+  void cursorPath; // intentionally unused now that the cursor is disabled
+
+  // TEXT OVERLAY DISABLED (user request): the eyebrow/headline/underline/supporting
+  // bindings below are computed but no longer rendered (the left column was removed).
+  // Reference them so they stay valid + lint-clean; a one-line revert re-renders them.
+  void [eyebrowOpacity, eyebrowY, eyebrowText, headlineLines, LINE_STAGGER, LINE_DUR,
+    punchGlow, underlineW, supporting, supportingMotion, leftX, leftColW, cardRight];
 
   const addr = toAddr(data.caption ?? "");
 
@@ -254,127 +382,23 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
         }}
       />
 
-      {/* LEFT COLUMN — eyebrow + headline + underline + supporting. */}
+      {/* TEXT OVERLAY REMOVED (user request): the eyebrow + kinetic headline +
+          underline + supporting LEFT COLUMN that used to sit beside the screenshot
+          is gone. The captured screenshot now fills the frame as the hero. The
+          eyebrow/headline/underline/supporting motion values above are left intact
+          (harmless, no render) so re-enabling is a localized revert; `void` below
+          silences unused-binding lint without deleting the computations. */}
+
+      {/* CENTERED browser card — the screenshot is now the sole subject and is
+          centered + enlarged to read prominently without the text panel. The card
+          still frame-rises (spring up + scale + tilt-settle); the shot inside does
+          card-deal-in. */}
       <div
         style={{
           position: "absolute",
-          left: leftX,
-          top: 0,
-          bottom: 0,
-          width: leftColW,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          gap: 22,
-        }}
-      >
-        {eyebrowText && (
-          <div
-            data-scene-id={sceneId}
-            data-field="kicker"
-            style={{
-              opacity: eyebrowOpacity,
-              transform: `translateY(${eyebrowY}px)`,
-              fontSize: 22,
-              fontWeight: 700,
-              letterSpacing: "0.18em",
-              textTransform: "uppercase",
-              color: theme.accent,
-              fontFamily: theme.fontMono,
-            }}
-          >
-            {eyebrowText}
-          </div>
-        )}
-
-        {/* Headline — 2–3 lines, line-stagger, punch noun accent-popped. */}
-        <div
-          data-scene-id={sceneId}
-          data-field="headline"
-          style={{ display: "flex", flexDirection: "column", gap: 2 }}
-        >
-          {headlineLines.map((line, li) => {
-            const lineStart = headlineAt + li * LINE_STAGGER;
-            const lineOpacity = interpolate(frame, [lineStart, lineStart + LINE_DUR], [0, 1], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-              easing: EASE_OUT_QUART,
-            });
-            const lineY = interpolate(frame, [lineStart, lineStart + LINE_DUR], [28, 0], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-              easing: EASE_OUT_QUART,
-            });
-            const { pre, hit, post } = splitPunch(line, data.punchWord);
-            return (
-              <div
-                key={li}
-                style={{
-                  opacity: lineOpacity,
-                  transform: `translateY(${lineY}px)`,
-                  fontSize: 76,
-                  fontWeight: 700,
-                  lineHeight: 1.08,
-                  letterSpacing: "-0.02em",
-                  color: theme.text,
-                }}
-              >
-                {pre}
-                {hit && (
-                  <span
-                    style={{
-                      color: theme.accent,
-                      textShadow: `0 0 ${44 * punchGlow}px ${theme.accent}${alphaHex(punchGlow * 0.7)}`,
-                    }}
-                  >
-                    {hit}
-                  </span>
-                )}
-                {post}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* accent underline wipe */}
-        <div
-          style={{
-            width: underlineW,
-            height: 5,
-            borderRadius: 3,
-            backgroundColor: theme.accent,
-            boxShadow: `0 0 ${16 * Math.max(0.3, punchGlow)}px ${theme.accent}88`,
-          }}
-        />
-
-        {/* supporting line (muted) */}
-        {supporting && (
-          <div
-            data-scene-id={sceneId}
-            data-field="supporting"
-            style={{
-              opacity: supportingMotion.opacity,
-              transform: supportingMotion.transform,
-              fontSize: 28,
-              fontWeight: 400,
-              lineHeight: 1.4,
-              color: theme.textMuted,
-              maxWidth: leftColW - 30,
-            }}
-          >
-            {supporting}
-          </div>
-        )}
-      </div>
-
-      {/* RIGHT COLUMN — the floating browser card. The whole card frame-rises
-          (spring up + scale + tilt-settle); the shot inside does card-deal-in. */}
-      <div
-        style={{
-          position: "absolute",
-          right: cardRight + cardOffsetX,
+          left: "50%",
           top: "50%",
-          transform: `translateY(calc(-50% + ${breath + cardOffsetY}px))`,
+          transform: `translate(calc(-50% + ${cardOffsetX}px), calc(-50% + ${breath + cardOffsetY}px))`,
         }}
       >
         <div
@@ -454,7 +478,7 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
                   the rect upstream in style_fill (_focus_for_headline) — it is debug
                   metadata and must never render on the shot (R2: it was being plastered
                   over the screenshot as an ugly monospace caption, the coherence killer). */}
-              {focus && hl.opacity > 0.001 && (
+              {SHOW_FOCUS_RING && focus && hl.opacity > 0.001 && (
                 <div
                   style={{
                     position: "absolute",

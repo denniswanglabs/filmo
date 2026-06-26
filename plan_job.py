@@ -62,7 +62,10 @@ VALID_QUALITIES = ("standard", "premium")
 _QUALITY_PROMPT = {
     "standard": (
         "\n\nQUALITY: STANDARD (Remotion + real site capture). For THIS plan you may "
-        "use ONLY the scene types \"title\", \"screenshot\", and \"walkthrough\". Do "
+        "use the scene types \"title\", \"screenshot\", \"walkthrough\", and "
+        "\"motion_graphic\" (kinetic animated text/stat/figure cards, rendered by "
+        "Remotion at $0). USE at least one \"motion_graphic\" scene for fancy animated "
+        "visual energy. Do "
         "NOT plan any \"cinematic\" scene and do NOT use the models \"seedance_2_0\" "
         "or \"gpt_image_2\" — there is NO Higgsfield/AI-footage stage in a standard "
         "build. OVERRIDE structure rule 2 and the no-walkthrough rule. A STANDARD plan "
@@ -75,7 +78,9 @@ _QUALITY_PROMPT = {
         "demonstration of the emphasized feature (a recorded product tour),\n"
         "  4. a closing \"title\" CTA.\n"
         "Every scene's model is null. Keep the durations summing to EXACTLY "
-        "target_duration_s. Do NOT emit \"motion_graphic\" or \"cinematic\" scenes.\n"
+        "target_duration_s. \"motion_graphic\" scenes ARE allowed and encouraged "
+        "(Remotion, $0) for animated energy; do NOT emit \"cinematic\" scenes (no "
+        "Higgsfield in a standard build).\n"
         "COPY (this is the load-bearing part): every voiceover beat must be GROUNDED "
         "and CONCRETE about the REAL product — name a REAL feature, the REAL audience, "
         "or a real benefit with a real-looking specific number. NEVER write hollow, "
@@ -122,6 +127,87 @@ _QUALITY_PROMPT = {
     ),
 }
 
+# --- House style (Luceo Studio signature) ----------------------------------
+# Distilled from Dennis's published Luceo Studio films (research/CURATED-DESIGN-
+# LIBRARY.md): the kinetic-light flagship arc + pacing budgets + imperative-couplet
+# VO rhythm. Injected into the planner SYSTEM_PROMPT so EVERY plan is biased toward
+# the studio's signature instead of a generic SaaS template. Craft = the studio's;
+# palette = always the customer's own brand. Toggle off with HERMES_HOUSE_STYLE=0.
+_HOUSE_STYLE = (
+    "\n\nHOUSE STYLE (Luceo Studio signature — bias every plan toward this):\n"
+    "This studio has a recognizable signature distilled from its published films "
+    "(Orinovate, iKala, Webduino, Kuli, TapPay). Shape the plan to match it:\n"
+    "- ARC: cold-open brand title -> 3 to 4 punchy feature beats (ONE hero statement + "
+    "ONE concrete product element per beat) -> a closing CTA title naming the real next "
+    "step. Exactly ONE big idea per scene — never two.\n"
+    "- PACING: no scene longer than 9s; 4 to 7 content beats; every beat earns its hold. "
+    "Kinetic and readable — fast but never rushed.\n"
+    "- VO RHYTHM (kinetic typography): prefer tight IMPERATIVE COUPLETS built from the "
+    "product's REAL verb-objects, like the studio's films (\"Clock in. / Cash out.\", "
+    "\"One screen. / Whole crew.\", \"Book the stay. / Skip the guesswork.\"). Lead with "
+    "a verb, name the real thing, land the payoff. When a beat needs two ideas, split it "
+    "SETUP -> PAYOFF across two short sentences — never one breathless run-on.\n"
+    "- DISPLAY TEXT: hero titles are short and bold; accent the single punch word or "
+    "number; NO trailing period on the on-screen title text itself.\n"
+    "- SUBSTANCE: one real, NAMED feature per beat; concrete nouns and real-looking "
+    "specific numbers over buzzwords (\"powerful\", \"seamless\", \"next-generation\")."
+)
+
+# --- House templates (per-genre look selection) -----------------------------
+# Maps the target company's detected genre -> the Luceo named template whose arc best
+# fits it (research/CURATED-DESIGN-LIBRARY.md §2). The look is RENDERED by style_fill;
+# only `orinovate-kinetic-light` has a wired render theme today, so selection is CLAMPED
+# to _WIRED_TEMPLATES to avoid a plan/render mismatch (don't tell the model to plan a
+# dark aurora-glass arc the renderer can't produce). To activate a new template: wire its
+# theme in style_fill.py, add it to _WIRED_TEMPLATES, and it auto-selects for its genres.
+_HOUSE_TEMPLATES = {
+    "dev-tool":    "orinovate-kinetic-light",
+    "services":    "orinovate-kinetic-light",
+    "media":       "orinovate-kinetic-light",
+    "marketplace": "orinovate-kinetic-light",
+    "ecommerce":   "apple-style",      # product-as-hero (render theme not wired yet)
+    "fintech":     "zelios-aurora",    # premium aurora+glass (render theme not wired yet)
+    "social":      "zelios-aurora",    # consumer-facing, cinematic (not wired yet)
+}
+_DEFAULT_TEMPLATE = "orinovate-kinetic-light"
+# Only templates whose style_fill render theme exists may actually be selected.
+_WIRED_TEMPLATES = {"orinovate-kinetic-light"}
+
+
+def pick_house_style(genre):
+    """Pick the Luceo named template for a company's genre, clamped to wired themes.
+
+    Returns a template name from _HOUSE_TEMPLATES, but only if its render theme is
+    wired in style_fill (else falls back to the wired default) so the plan never
+    describes a look the renderer can't produce. Returns the default for None/unknown."""
+    want = _HOUSE_TEMPLATES.get((genre or "").strip().lower(), _DEFAULT_TEMPLATE)
+    return want if want in _WIRED_TEMPLATES else _DEFAULT_TEMPLATE
+
+
+def _fewshot_block(quality):
+    """One of Dennis's curated plans as a few-shot DEMONSTRATION, so the small model
+    learns scene-count, imperative-couplet beat rhythm, and CTA phrasing by example.
+
+    Standard-shape exemplar only (a premium plan looks different, so it would mislead a
+    premium build). Returns "" if disabled or the file is missing. Toggle: HERMES_FEWSHOT=0."""
+    if os.environ.get("HERMES_FEWSHOT", "1") == "0":
+        return ""
+    if _normalize_quality(quality) != "standard":
+        return ""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "exemplars", "orinovate-kinetic.plan.json")
+    try:
+        with open(path) as f:
+            ex = f.read().strip()
+    except OSError:
+        return ""
+    return (
+        "\n\nEXAMPLE — a Luceo Studio plan in the studio's signature. Match its shape: the "
+        "scene count and arc (title -> screenshots -> walkthrough -> motion_graphic -> CTA "
+        "title), the tight imperative-couplet beats, and the CTA that names the real next "
+        "step. Do NOT copy its company, its features, or its wording — produce the SAME "
+        "CRAFT for the brief's REAL company and its REAL features:\n" + ex)
+
 
 def _normalize_quality(quality):
     q = str(quality or "").strip().lower()
@@ -130,7 +216,8 @@ def _normalize_quality(quality):
 
 def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
              currency="usd", style="standard", quality="standard",
-             brain="super-free", company_facts=None, emphasis=None):
+             brain="super-free", company_facts=None, emphasis=None,
+             conversion_read=None):
     style = style if style in VALID_STYLES else "standard"
     quality = _normalize_quality(quality)
     # BRAIN: the operator-chosen planner LLM (all via OpenRouter). Defaults to
@@ -157,7 +244,8 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # "testing on Super" actually exercised the 120B and not a canned template.
     planner_meta = {}
     plan = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality,
-                               brain, company_facts, meta=planner_meta)
+                               brain, company_facts, meta=planner_meta,
+                               conversion_read=conversion_read)
     plan_source = "llm"
     if plan is None:
         plan_source = "template"
@@ -228,6 +316,10 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # names a real feature/metric (world-knowledge first, then scraped features).
     plan = _degut_bare_wordmark_beats(plan, _resolved_brand, company_url,
                                       company_facts, emphasis)
+    # CONVERSION READ seeding backstop: guarantee the diagnosed top fixes appear as
+    # beats and the headline_fix opens the video, even if the LLM/template dropped
+    # them. No-op when conversion_read is None (flag off) -> behavior unchanged.
+    plan = seed_plan_with_read(plan, conversion_read)
     # Drop the internal-only `_wordmark` hint before validation/return — `emphasis`
     # stays (a recognized optional job key), but `_wordmark` is a private plumbing
     # field that must not leak into the persisted plan or the strict planner schema.
@@ -338,6 +430,79 @@ def _walkthrough_brief_for_emphasis(brand, emphasis):
                 "distinct steps." % emphasis)
     return ("From the homepage, take a short guided tour of %s, showing 2-3 distinct "
             "steps through its core product flow." % brand)
+
+
+def seed_plan_with_read(plan, conversion_read):
+    """Deterministic backstop that GUARANTEES the Conversion Read's top prescriptions
+    appear in the plan, even when the LLM silently dropped them:
+      - headline_fix -> the OPENING title scene's voiceover beat text (the outcome-led
+        hero line the Read prescribes).
+      - the top priority_fixes -> directed into the content scenes' briefs (and a
+        marker in the matching beat) so each diagnosed fix maps to a beat the producer
+        will shoot. Mapping is by `maps_to`: a 'proof'/'show' fix targets the
+        screenshot/walkthrough beats (the real-capture pillars that BEAT AI-film
+        rivals); a 'cta' fix targets the CLOSING title.
+
+    Mutates + returns `plan`. No-op when conversion_read is falsy. Never raises."""
+    if not isinstance(conversion_read, dict):
+        return plan
+    scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+        vo["beats"] = beats
+        plan["voiceover"] = vo
+    beat_by_id = {b.get("scene_id"): b for b in beats if isinstance(b, dict)}
+
+    titles = [s for s in scenes if s.get("type") == "title"]
+    opening = titles[0] if titles else (scenes[0] if scenes else None)
+    closing = titles[-1] if len(titles) >= 2 else None
+    content = [s for s in scenes if s.get("type") in ("screenshot", "walkthrough")]
+
+    # 1) headline_fix -> opening title beat text (the diagnosis's outcome-led open).
+    hf = (conversion_read.get("headline_fix") or "").strip()
+    if hf and opening is not None:
+        sid = opening.get("id")
+        b = beat_by_id.get(sid)
+        if b is None:
+            b = {"scene_id": sid, "text": hf}
+            beats.insert(0, b)
+            beat_by_id[sid] = b
+        else:
+            b["text"] = hf
+
+    # 2) priority_fixes -> directed beats. Append the fix to the target scene's brief
+    # and mark its beat so the prescription is shot. Targeting by maps_to keyword.
+    def _target_for(maps_to):
+        mt = (maps_to or "").lower()
+        if "cta" in mt and closing is not None:
+            return closing
+        if ("proof" in mt or "show" in mt) and content:
+            # prefer the walkthrough (the strongest 'show' surface), else a screenshot
+            walk = [s for s in content if s.get("type") == "walkthrough"]
+            return (walk or content)[0]
+        return content[0] if content else (opening if opening is not None else None)
+
+    for f in (conversion_read.get("priority_fixes") or []):
+        if not isinstance(f, dict):
+            continue
+        fix = (f.get("fix") or "").strip()
+        if not fix:
+            continue
+        tgt = _target_for(f.get("maps_to"))
+        if tgt is None:
+            continue
+        prior = (tgt.get("brief") or "").strip()
+        tgt["brief"] = (prior + " " if prior else "") + ("CONVERSION FIX: %s" % fix)
+        # NOTE: the raw `fix` is an EDITORIAL meta-instruction (e.g.
+        # "CONVERSION FIX: Replace dual hero CTAs with one 'Start free' button.")
+        # — it belongs ONLY in the producer-facing scene BRIEF above, NEVER in the
+        # spoken voiceover. Injecting it into the beat text made the narrator read
+        # imperative stage directions aloud. The grounded OUTCOME/proof reaches the
+        # VO through headline_fix (opening beat) + the producer's grounded VO pass,
+        # so we deliberately do NOT push `fix` into any spoken beat here.
+    return plan
 
 
 def _enforce_standard_structure(plan, scenes):
@@ -500,7 +665,7 @@ def _restyle_durations(plan, style, target_duration_s):
 
 def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
                         quality="standard", brain="super-free", company_facts=None,
-                        meta=None):
+                        meta=None, conversion_read=None):
     # `meta`: optional dict the caller threads in to learn WHY the LLM path did or
     # did not produce a plan. Populated with finish_reason / usage (token costs) and
     # a short `reason` string ("ok", "no-key", "refusal", "truncated", "parse-fail",
@@ -524,12 +689,20 @@ def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
     # the dev-tool default so the historical SaaS prompt is byte-unchanged for SaaS.
     genre = detect_genre(company_url, company_facts)
     genre_hint = genre_hint_text(genre)
-    # Quality guidance goes LAST so its scene-type constraint overrides any style
-    # text that mentions cinematic/seedance (e.g. the cinematic style preset). The
-    # genre hint goes between style and quality (it's audience/value guidance, not a
-    # scene-type rule, so it must not override the quality scene-type constraint).
-    system = (vp.SYSTEM_PROMPT + (_STYLE_PROMPT.get(style) or "") + genre_hint
-              + (_QUALITY_PROMPT.get(_normalize_quality(quality)) or ""))
+    # HOUSE STYLE: bias the plan toward Dennis's Luceo Studio signature (kinetic-light
+    # arc + imperative-couplet VO), and pick the named template that best fits this
+    # company's genre (clamped to wired render themes). Recorded in meta for the
+    # render side. Toggle the whole bias off with HERMES_HOUSE_STYLE=0.
+    house_block = "" if os.environ.get("HERMES_HOUSE_STYLE", "1") == "0" else _HOUSE_STYLE
+    house_template = pick_house_style(genre)
+    meta["house_template"] = house_template
+    meta["house_style"] = bool(house_block)
+    # Order: SYSTEM contract -> house-style craft -> pacing style -> genre audience hint
+    # -> quality scene-type rule (LAST so it overrides any cinematic mention) -> few-shot
+    # example (a demonstration of the house style, appended after the rules).
+    system = (vp.SYSTEM_PROMPT + house_block + (_STYLE_PROMPT.get(style) or "") + genre_hint
+              + (_QUALITY_PROMPT.get(_normalize_quality(quality)) or "")
+              + _fewshot_block(quality))
     # Ground the brain in the REAL brand facts so the VO + briefs describe the actual
     # product, not an invented one. The block is appended to the USER prompt (after
     # the brief) and is "" when no facts were resolved — in which case the user prompt
@@ -539,7 +712,7 @@ def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
     # hollow. Call unconditionally so even a None/empty facts dict still grounds on
     # the URL's brand.
     facts_block = vp.company_facts_block(company_facts or {}, company_url=company_url,
-                                         genre=genre)
+                                         genre=genre, conversion_read=conversion_read)
     user = ("Build the scene plan for this brief. Output JSON only.\n\n"
             "company_url: %s\ngoal: %s\ntarget_duration_s: %d\n"
             % (company_url, goal, target_duration_s))

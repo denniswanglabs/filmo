@@ -36,6 +36,20 @@ BRAINS = {
         "paid": True,
         "price_per_1m": {"prompt": 0.09, "completion": 0.45},
     },
+    # Nous Hermes — the Conversion Read (page diagnosis) runs on Hermes; planning
+    # stays on Nemotron. hermes (3 405B) is the $0 default analyze brain.
+    "hermes": {
+        "label": "Nous Hermes 3 405B (free)",
+        "slug": "nousresearch/hermes-3-llama-3.1-405b:free",
+        "paid": False,
+        "price_per_1m": {"prompt": 0.0, "completion": 0.0},
+    },
+    "hermes-405b": {
+        "label": "Nous Hermes 4 405B (paid)",
+        "slug": "nousresearch/hermes-4-405b",
+        "paid": True,
+        "price_per_1m": {"prompt": 1.00, "completion": 3.00},
+    },
 }
 
 DEFAULT_BRAIN = "super-free"

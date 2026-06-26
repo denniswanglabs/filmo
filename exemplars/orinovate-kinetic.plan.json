@@ -1,0 +1,28 @@
+{
+  "job": {
+    "company_url": "https://orinovate.com",
+    "goal": "Show how Orinovate turns a CAD file into a finished, production-grade part on demand.",
+    "target_duration_s": 30,
+    "target_margin": 0.6,
+    "currency": "usd"
+  },
+  "scenes": [
+    { "id": "open-title", "type": "title", "brief": "Orinovate wordmark cold-open on a clean kinetic-light canvas.", "model": null, "duration_s": 3, "input_image": null },
+    { "id": "shot-instant-quote", "type": "screenshot", "brief": "The instant-quote flow: upload a CAD file and get pricing back in seconds.", "model": null, "duration_s": 6, "input_image": null },
+    { "id": "shot-processes", "type": "screenshot", "brief": "The capabilities view: CNC machining, 3D printing, sheet metal and laser sintering in one platform.", "model": null, "duration_s": 5, "input_image": null },
+    { "id": "walk-order-to-delivery", "type": "walkthrough", "brief": "Guided multi-step demo of placing an order and tracking the part from production to delivery.", "model": null, "duration_s": 8, "input_image": null },
+    { "id": "stat-shipped", "type": "motion_graphic", "brief": "Animated stat card: production-grade parts shipped on demand from Taiwan.", "model": null, "duration_s": 3, "input_image": null },
+    { "id": "close-cta", "type": "title", "brief": "Closing CTA card with the Orinovate wordmark and the next step.", "model": null, "duration_s": 5, "input_image": null }
+  ],
+  "voiceover": {
+    "voice": "Adam",
+    "beats": [
+      { "scene_id": "open-title", "text": "Orinovate turns your CAD file into a finished part." },
+      { "scene_id": "shot-instant-quote", "text": "Upload your design. Get an instant quote back in seconds." },
+      { "scene_id": "shot-processes", "text": "CNC, 3D printing, sheet metal — production-grade, on demand." },
+      { "scene_id": "walk-order-to-delivery", "text": "Place the order. Track every part from the floor to your door." },
+      { "scene_id": "stat-shipped", "text": "Thousands of precision parts, shipped straight from Taiwan." },
+      { "scene_id": "close-cta", "text": "Make your part today at orinovate.com." }
+    ]
+  }
+}

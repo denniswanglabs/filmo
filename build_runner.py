@@ -43,10 +43,17 @@ import orchestrator
 import plan_job
 import producer
 import stripe_earn
+import stripe_money
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "runs")
 BRANDING = os.path.join(HERE, "branding")
+
+# Conversion Read runs on Nous Hermes; planning stays on Nemotron.
+# The ANALYZE (Conversion Read) brain is chosen INDEPENDENTLY of the planner brain
+# so the operator's planner selection (Nemotron, the sponsor showcase) never drags
+# the page diagnosis off Hermes. Override with ANALYZE_BRAIN env if ever needed.
+ANALYZE_BRAIN = os.environ.get("ANALYZE_BRAIN", "hermes")
 
 # VO-DRIVEN ENGINE flag (the blank-scenes fix). When ON (default for the dashboard
 # build path), the PICTURE is produced by the VO-driven <Timeline> engine
@@ -69,6 +76,22 @@ def vo_engine_enabled():
     shipped behavior; set WS_VO_ENGINE=0 to fall back to the legacy picture.
     """
     return (os.environ.get(VO_ENGINE_ENV) or "").strip().lower() not in ("0", "false", "no", "off")
+
+
+# CONVERSION READ feature flag. build_runner runs the ANALYZE stage (read_pass ->
+# analyze -> persist) BEFORE planning and seeds the planner with the Read, so the
+# plan is Hermes-grounded and the "uses Nous Hermes" claim is true.
+# DEFAULT ON: the Conversion Read runs unless PRODUCER_CONVERSION_READ is EXPLICITLY
+# a falsy flag ('0'/'false'/'no'/'off'). Set it falsy to reproduce the legacy
+# (ungrounded) planning path.
+CONVERSION_READ_ENV = "PRODUCER_CONVERSION_READ"
+
+
+def conversion_read_enabled():
+    val = (os.environ.get(CONVERSION_READ_ENV) or "").strip().lower()
+    if val in ("0", "false", "no", "off"):
+        return False
+    return True
 
 # Poll cadence + wall-clock cap for the payment gate (webhook backstop).
 PAYMENT_POLL_INTERVAL_S = 2.5
@@ -224,6 +247,42 @@ def _brand_facts(url, run_dir):
         return {"wordmark": "", "tagline": "", "features": []}
 
 
+def _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN,
+                           read_pass_fn=None, analyze_fn=None):
+    """Run the ANALYZE stage and return the Conversion Read dict, or None when the
+    flag is OFF. Persists runs/<id>/conversion_read.json on success. Best-effort:
+    a read-pass failure degrades to a minimal Read (video still proceeds); the Read
+    is NEVER allowed to block the build. read_pass_fn/analyze_fn are injectable for
+    tests; they default to the real read_pass.read_pass / analyze.analyze_read."""
+    if not conversion_read_enabled():
+        return None
+    import analyze
+    read_pass_fn = read_pass_fn or (lambda u, rd: __import__("read_pass").read_pass(u, rd))
+    analyze_fn = analyze_fn or analyze.analyze_read
+    try:
+        rp = read_pass_fn(url, run_dir)
+    except Exception as e:
+        print("[build_runner] read_pass crashed: %s" % e, file=sys.stderr)
+        rp = {"url": url, "body_text": "", "hero_screenshot_path": None,
+              "headline": "", "degraded": True}
+    try:
+        read = analyze_fn(url, rp.get("body_text", ""),
+                          hero_path=rp.get("hero_screenshot_path"),
+                          headline=rp.get("headline"), brain=brain)
+    except Exception as e:
+        print("[build_runner] analyze crashed: %s" % e, file=sys.stderr)
+        read = analyze.minimal_read(url, rp.get("body_text", ""))
+    if rp.get("degraded"):
+        read["degraded"] = True
+    read["hero_screenshot_path"] = rp.get("hero_screenshot_path")
+    try:
+        with open(os.path.join(run_dir, "conversion_read.json"), "w") as f:
+            json.dump(read, f, indent=2)
+    except OSError as e:
+        print("[build_runner] could not persist conversion_read.json: %s" % e, file=sys.stderr)
+    return read
+
+
 def _capture_screenshots_for_run(url, run_dir):
     """Capture real website screenshots into runs/<id>/screenshots/ (idempotent).
 
@@ -278,6 +337,14 @@ def _run_vo_engine(plan, run_id, url, run_dir):
 
     # align_vo -> build_timeline -> style_fill.build_props -> props.json (+ stage
     # audio). do_render=False here so we render once, below, into the run's final.mp4.
+    #
+    # VO PROVIDER (independent of quality/Higgsfield): the VO engine is ALWAYS the
+    # Remotion Timeline (VO_ENGINE_STYLE, no Higgsfield) regardless of provider. By
+    # default the voice is $0 edge-tts + whisper (tier="free" below). Set
+    # WS_VO_PROVIDER=elevenlabs in the environment to swap ONLY the voice engine to
+    # real ElevenLabs VO (read inside align_vo.synth_full_script) — so a
+    # `--quality standard` build (Higgsfield OFF) still gets premium ElevenLabs VO.
+    # We don't pass tier="premium" here; the env switch alone selects the provider.
     res = style_fill.run_pipeline(plan_path, brand_path, VO_ENGINE_STYLE, run_dir,
                                   fps=30, do_align=True, do_render=False)
     props_path = res["props_path"]
@@ -358,6 +425,29 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
     led.write(led_path)
 
     try:
+        # -- ANALYZE (Conversion Read) -- runs BEFORE planning, behind the flag.
+        conversion_read = None
+        if conversion_read_enabled():
+            led.set_phase("analyzing")
+            led.data["stage"] = "analyzing"
+            led.event("info", "analyzing %s — reading the page and diagnosing how it "
+                      "converts before planning the video" % url)
+            led.write(led_path)
+            # Conversion Read runs on Nous Hermes; planning stays on Nemotron.
+            # Deliberately pass ANALYZE_BRAIN, NOT the planner `brain`, so the page
+            # diagnosis stays on Hermes regardless of which Nemotron the operator picked.
+            conversion_read = _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN)
+            if conversion_read is not None:
+                led.data["conversion_read"] = conversion_read
+                scored = ", ".join("%s %d" % (d.get("key"), d.get("score", 0))
+                                   for d in conversion_read.get("dimensions", []))
+                led.event("info", "conversion read: %s — scores [%s]%s"
+                          % (conversion_read.get("verdict", ""), scored,
+                             " (degraded)" if conversion_read.get("degraded") else ""))
+                led.set_phase("planning")
+                led.data["stage"] = None
+                led.write(led_path)
+
         # GROUND THE BRAIN IN REAL BRAND FACTS (the VO-vs-visual coherence fix).
         # Resolve the company's real wordmark/tagline/features from the SAME brand
         # resolver the visual cards use, BEFORE planning, and thread them into the
@@ -379,7 +469,8 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
         # could still list Seedance / GPT-image cinematic scenes.)
         plan = plan_job.plan_job(url, goal, target_duration, style=style,
                                  quality=quality, brain=brain,
-                                 company_facts=company_facts, emphasis=emphasis)
+                                 company_facts=company_facts, emphasis=emphasis,
+                                 conversion_read=conversion_read)
         # Carry the upfront QUALITY choice onto the plan so producer.cmd_estimate
         # prices it (standard floors at $5; premium includes Higgsfield + ElevenLabs
         # COGS) and orchestrate produces the matching stack. Stamp the chosen BRAIN
@@ -480,6 +571,33 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
             # CARD rendering (white vs orange), never real-asset generation.
             overlays="studio",
             earn=earn)
+
+        # RE-ATTACH the Conversion Read to the DELIVERED on-disk ledger. orchestrate()
+        # just minted a FRESH Ledger and wrote it to runs/<id>/ledger.json with NO
+        # conversion_read — clobbering the diagnosis the ANALYZE stage put on the
+        # run-level `led` above. The dashboard's Analysis panel reads l.conversion_read
+        # ONLY from this delivered ledger (dashboard/app.js), so without this re-attach
+        # the panel renders empty on every finished run. Reload the delivered ledger,
+        # restore conversion_read + re-emit the 'analyzing' event so run history shows
+        # it, and write it back. This single re-attach covers BOTH render paths:
+        #   - VO-OFF: orchestrate is the LAST writer, so this is the final on-disk state.
+        #   - VO-ON : the VO-engine tail below reloads disk_led from THIS file (565),
+        #             so Ledger.load's merge carries conversion_read into the last write.
+        # Guarded so a flag-OFF run (conversion_read is None) stays byte-identical.
+        if conversion_read is not None:
+            try:
+                delivered_led = ledger_mod.Ledger.load(led_path)
+            except (OSError, ValueError):
+                delivered_led = None
+            if delivered_led is not None and delivered_led.data.get("conversion_read") is None:
+                delivered_led.data["conversion_read"] = conversion_read
+                scored = ", ".join("%s %d" % (d.get("key"), d.get("score", 0))
+                                   for d in conversion_read.get("dimensions", []))
+                delivered_led.event("info", "analyzing — conversion read attached to the "
+                                    "delivered ledger: %s — scores [%s]%s"
+                                    % (conversion_read.get("verdict", ""), scored,
+                                       " (degraded)" if conversion_read.get("degraded") else ""))
+                delivered_led.write(led_path)
 
         # PICTURE via the VO-driven engine (the blank-scenes fix). The SACRED money
         # path (budget gate + Stripe authorize + ledger/P&L) has ALREADY run inside
@@ -600,7 +718,35 @@ def _payment_gate(led, led_path, run_id, price_cents, currency, job, mode):
 
     simulate = os.environ.get("PRODUCER_SIMULATE_PAID") == "1"
     if simulate:
-        led.event("info", "PRODUCER_SIMULATE_PAID=1 — dev affordance: resolving payment as paid ($0)")
+        # Simulate the CUSTOMER paying the link with Stripe's 4242 test card. With a
+        # sk_test_/rk_test_ key this is a REAL test-mode succeeded PaymentIntent
+        # (visible in the Stripe test dashboard — no real money); with no key it
+        # degrades to a $0 simulated-paid block. A live key is refused inside settle.
+        try:
+            pay = stripe_money.StripeMoney(live=True).settle_payment(
+                int(price_cents or 0), currency,
+                {"run_id": str(run_id), "session_id": earn.get("session_id") or ""})
+        except Exception as e:
+            pay = {"paid": True, "simulated": True, "status": "succeeded", "error": str(e),
+                   "card_brand": "visa", "card_last4": "4242"}
+        if pay.get("paid"):
+            earn["status"] = "paid"
+            earn["payment_status"] = "paid"
+            earn["payment_intent_id"] = pay.get("payment_intent_id")
+            earn["charge_id"] = pay.get("charge_id")
+            earn["card_brand"] = pay.get("card_brand") or "visa"
+            earn["card_last4"] = pay.get("card_last4") or "4242"
+            earn["payment_simulated"] = bool(pay.get("simulated"))
+            led.set_earn(earn)
+            led.event("money", "customer paid $%.2f via %s ****%s — PaymentIntent %s (%s)" % (
+                (price_cents or 0) / 100.0, (earn["card_brand"]).title(), earn["card_last4"],
+                pay.get("payment_intent_id") or "succeeded",
+                "real test-mode payment, no settlement" if not pay.get("simulated") else "simulated $0"),
+                payment_intent_id=earn.get("payment_intent_id"))
+            led.write(led_path)
+            return earn
+        # settle did not confirm — fall through to the normal poll loop below.
+        led.event("info", "simulate-pay did not confirm (%s) — falling back to payment poll" % pay.get("status"))
 
     deadline = time.monotonic() + PAYMENT_TIMEOUT_S
     while True:
@@ -650,9 +796,11 @@ def main():
     ap.add_argument("--mode", choices=["mock", "real"], default="mock")
     ap.add_argument("--duration", type=int, default=30)
     ap.add_argument("--pace", type=float, default=1.2)
-    ap.add_argument("--style", choices=list(plan_job.VALID_STYLES), default="standard",
-                    help="user-facing output style: snappy (more+shorter scenes) | "
-                         "standard (today's default) | cinematic (fewer+longer scenes)")
+    ap.add_argument("--style", choices=list(plan_job.VALID_STYLES), default="snappy",
+                    help="user-facing output style (DEFAULT snappy = more+shorter "
+                         "scenes, ~6-8 scenes, 2-4s holds, faster cut rhythm) | "
+                         "standard (legacy ~4-5 scenes, longer holds) | "
+                         "cinematic (fewest+longest scenes)")
     ap.add_argument("--quality", choices=["standard", "premium"], default="standard",
                     help="video quality (the upfront cost-plus choice): standard "
                          "(Remotion + edge-tts, no Higgsfield/ElevenLabs, ~$5) | premium "
