@@ -392,5 +392,15 @@ class CliWritesValidJson(unittest.TestCase):
             self.assertIn("palette", data)
 
 
+class TestNavSectionFilter(unittest.TestCase):
+    def test_section_heading_phrases_are_ui_labels(self):
+        for label in ["Knowledge & News", "In Founders' Words", "Be in the room with"]:
+            self.assertTrue(be._is_ui_label(label), f"{label!r} should be nav chrome")
+
+    def test_real_feature_is_not_a_ui_label(self):
+        for feat in ["Recurring billing", "Built-in fraud protection", "Instant payouts"]:
+            self.assertFalse(be._is_ui_label(feat), f"{feat!r} is a real feature")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

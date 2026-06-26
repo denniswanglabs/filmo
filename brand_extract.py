@@ -784,6 +784,16 @@ def _is_nav_segment(low):
         return True
     if low in _NAV_SINGLE_WORDS:
         return True
+    # Section-heading phrases that are site chrome, not product value props:
+    #  - "<X> & <Y>" two-noun section labels ("Knowledge & News", "Press & Media")
+    #  - possessive editorial sections ("In Founders' Words", "In Their Words")
+    #  - directive nav blurbs ("Be in the room with ...", "Join the conversation")
+    if re.search(r"^\w+\s*&\s*\w+$", low):
+        return True
+    if low.startswith("in ") and ("words" in low or "'s" in low or "’s" in low):
+        return True
+    if low.startswith(("be in ", "join the ", "explore the ", "discover ")):
+        return True
     return False
 
 
