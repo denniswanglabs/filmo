@@ -461,9 +461,9 @@ export function PinnedHero({ title, body, className = '', decoration, id }: Pinn
   // Big title sits at viewport center; settles UP to the top of the column (the
   // body below occupies layout, so y:0 is already the settled position).
   const titleY = useTransform(scrollYProgress, [0, 0.42], ['26vh', '0vh'])
-  const bodyOpacity = useTransform(scrollYProgress, [0.26, 0.48], [0, 1])
-  const bodyY = useTransform(scrollYProgress, [0.26, 0.48], [32, 0])
-  const bodyScale = useTransform(scrollYProgress, [0.26, 0.48], [0.94, 1])
+  // Composer appears SOLID once the title has mostly shrunk (a quick snap, no fade/
+  // scale that reads as "diminishing"), then stays stable until the pin releases.
+  const bodyOpacity = useTransform(scrollYProgress, [0.36, 0.42], [0, 1])
 
   if (!enabled) {
     return (
@@ -485,9 +485,7 @@ export function PinnedHero({ title, body, className = '', decoration, id }: Pinn
           <motion.div style={{ scale: titleScale, y: titleY, transformOrigin: 'center center', willChange: 'transform' }}>
             {title}
           </motion.div>
-          <motion.div style={{ opacity: bodyOpacity, y: bodyY, scale: bodyScale, willChange: 'transform, opacity' }}>
-            {body}
-          </motion.div>
+          <motion.div style={{ opacity: bodyOpacity, willChange: 'opacity' }}>{body}</motion.div>
         </div>
       </div>
     </section>
