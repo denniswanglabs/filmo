@@ -2329,92 +2329,32 @@ def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, 
              or _title_from_text(brief)
              or _brand_fallback_title(brand)
              or brand.get("wordmark") or "").strip()
+    # Subtitle = ONE distinct DETAIL drawn from THIS scene's own VO beat (the second
+    # sentence the title didn't use), deduped across scenes via the shared used list —
+    # NOT the shared brand tagline (which produced the repeated-subtitle bug). Empty is
+    # fine: a card with just the key phrase reads clean ("reinforce" model).
+    used_supporting = d.get("_used_supporting")
     subtitle = d.get("subtitle")
     if subtitle is None:
-        # Don't echo the title as the subtitle; prefer the brand tagline, but if the
-        # title already IS the tagline, leave the subtitle empty rather than dup it.
-        # Reject a truncated meta-description so a mid-word fragment never shows.
-        tag = _clean_complete_headline(brand.get("tagline") or "")
-        subtitle = "" if tag and tag == title else tag
-    # FRAGMENT GUARD: reject a subtitle that is a scrape fragment (lowercase-leading,
-    # preposition-final, or single-word). Drop it — a missing subtitle is better
-    # than a dangling fragment.
+        subtitle = _supporting_line(title, d.get("_text") or "", brief, brand,
+                                    used=used_supporting)
     if _is_fragment_subtitle(subtitle):
         subtitle = ""
-
-    # Bullets: explicit copy wins; else short capability nouns from the brand's
-    # real features (CardUi labels). Each feature scene gets a DISTINCT, on-topic
-    # ordering so the explainer scenes don't all show the identical list (BUG C).
-    # This only REORDERS the real fixture features — it never invents copy (honesty
-    # rule) and keeps every real capability on screen so the scenes read as a set.
-    # Ordering priority:
-    #   1. Match the feature whose label words overlap THIS scene's spoken/title
-    #      text and lead with it (so the CNC scene leads "CNC Machining", the laser
-    #      scene leads "Laser Sintering"), even when scene count != feature count.
-    #   2. Fall back to a positional rotation by `data._feature_index` (build_props
-    #      threads the scene's 0-based order among feature scenes) so distinct
-    #      scenes still differ when no keyword matches.
-    bullets = d.get("bullets")
-    if not bullets:
-        feats = [f.get("label") or f.get("title") for f in (brand.get("features") or [])]
-        feats = [f for f in feats if f]
-        lead = _match_feature(feats, f"{d.get('_text') or ''} {brief} {title}")
-        if lead is not None:
-            feats = feats[lead:] + feats[:lead]
+    if subtitle and isinstance(used_supporting, list):
+        key = subtitle.strip().lower()
+        if key in {u.strip().lower() for u in used_supporting}:
+            subtitle = ""
         else:
-            idx = d.get("_feature_index")
-            if isinstance(idx, int) and feats:
-                start = idx % len(feats)
-                feats = feats[start:] + feats[:start]
-        bullets = feats[:EXPLAINER_BULLET_COUNT]
+            used_supporting.append(subtitle)
 
-    # BUG 2 FIX: When real features are unavailable (bot-blocked brand, empty
-    # features list), synthesize 2-3 concise bullet phrases from the scene's
-    # own content (VO text / brief / title) so the explainer card is never hollow.
-    # Only fires when bullets is still empty after the feature-lookup above.
-    if not bullets:
-        source = " ".join(filter(None, [d.get("_text") or "", brief, title]))
-        if source.strip():
-            # Split on sentence boundaries and em-dashes to surface short clauses.
-            raw_phrases = re.split(r"[.!?,;—–\n]+", source)
-            synth: List[str] = []
-            seen: set = set()
-            for phrase in raw_phrases:
-                # Collapse whitespace, cap at ~40 chars, min 3 words.
-                p = " ".join(phrase.split())
-                if len(p.split()) < 3:
-                    continue
-                # Drop fragments that open with a conjunction/article (split
-                # artifacts like "and experiences at every destination").
-                first_word = p.split()[0].lower()
-                if first_word in _DANGLING_WORDS:
-                    continue
-                # Hard-truncate at the last word boundary within 40 chars.
-                if len(p) > 40:
-                    p = p[:40].rsplit(" ", 1)[0].strip()
-                # After truncation, drop a dangling tail word.
-                p_words = p.split()
-                while p_words and p_words[-1].lower() in _DANGLING_WORDS:
-                    p_words.pop()
-                p = " ".join(p_words)
-                if len(p.split()) < 3:
-                    continue
-                p = p[0].upper() + p[1:]  # sentence-case
-                key = p.lower()
-                if key not in seen:
-                    seen.add(key)
-                    synth.append(p)
-                if len(synth) >= 3:
-                    break
-            bullets = synth[:EXPLAINER_BULLET_COUNT]
-
-    bullets = [b for b in (bullets or []) if b][:EXPLAINER_BULLET_COUNT]
+    # Reinforce model: feature cards show the key phrase + one detail, NO bullets.
+    bullets: List[str] = []
 
     out: Dict[str, Any] = {
         "kicker": _decode(d.get("kicker") or ""),
         "title": _decode(title),
         "subtitle": _decode(subtitle or ""),
-        "bullets": [_decode(b) for b in bullets],
+        "bullets": bullets,
     }
     return out
 
@@ -3587,6 +3527,10 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
         if archetype == ARCH_EXPLAINER:
             d.setdefault("_feature_index", feature_counter)
             feature_counter += 1
+            # Share the SAME cross-scene dedup list screenshots use, so each feature
+            # card's beat-derived subtitle is DISTINCT across the set.
+            d["_used_supporting"] = used_supporting
+            d["_used_headlines"] = used_headlines
         if archetype == ARCH_WALKTHROUGH and run_emphasis:
             # Title bar tracks the emphasized feature, not the planner's VO flow.
             d.setdefault("_emphasis", run_emphasis)

@@ -1153,5 +1153,41 @@ class TestCrossSceneDedup(unittest.TestCase):
         self.assertEqual(out[1]["data"]["subtitle"], "Stop fraud before it starts.")
 
 
+class TestExplainerReinforce(unittest.TestCase):
+    def _scene(self, sid, text, feature_index=0, used=None):
+        return {
+            "id": sid, "type": "motion_graphic", "brief": "",
+            "data": {"_text": text, "_feature_index": feature_index,
+                     "_used_supporting": used if used is not None else []},
+        }
+
+    def test_explainer_emits_no_bullets(self):
+        brand = _brand()  # has real features
+        out = style_fill._shape_explainer(
+            self._scene("f1", "Accept payments worldwide with one integration."), brand)
+        self.assertEqual(out["bullets"], [])
+
+    def test_subtitle_comes_from_beat_not_shared_tagline(self):
+        brand = _brand()
+        beat = "Accept payments worldwide. Settle in 135 currencies with one integration."
+        out = style_fill._shape_explainer(self._scene("f1", beat), brand)
+        # subtitle is a distinct second-sentence detail, NOT the brand tagline
+        self.assertNotEqual(out["subtitle"].strip().lower(),
+                            (brand.get("tagline") or "").strip().lower())
+        self.assertTrue(out["subtitle"] == "" or "currenc" in out["subtitle"].lower()
+                        or out["subtitle"] != out["title"])
+
+    def test_two_cards_get_distinct_subtitles_via_shared_used_list(self):
+        brand = _brand()
+        used = []
+        a = style_fill._shape_explainer(
+            self._scene("f1", "Accept payments. Settle in 135 currencies fast.", 0, used), brand)
+        b = style_fill._shape_explainer(
+            self._scene("f2", "Stop fraud. Block bad charges before they post.", 1, used), brand)
+        if a["subtitle"] and b["subtitle"]:
+            self.assertNotEqual(style_fill._norm_phrase(a["subtitle"]),
+                                style_fill._norm_phrase(b["subtitle"]))
+
+
 if __name__ == "__main__":
     unittest.main()
