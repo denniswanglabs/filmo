@@ -78,9 +78,12 @@ export interface SceneData {
     | "feature-list"
     | "metric-row"
     | "device-frame"
-    | "comparison-columns";
+    | "comparison-columns"
+    | "pull-quote";
   // metric-row: 3-4 small real stats shown as a horizontal strip.
   metrics?: Array<{ value: string; label: string }>;
+  // pull-quote: a large editorial testimonial.
+  quote?: string; quoteAttribution?: string;
   // comparison-columns: a two-column contrast (old way vs Filmo).
   compare?: { leftTitle: string; leftItems: string[]; rightTitle: string; rightItems: string[] };
   // device-frame: text-left / a REAL captured product screenshot (reuses the

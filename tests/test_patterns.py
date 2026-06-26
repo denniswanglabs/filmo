@@ -116,5 +116,42 @@ class TestComparisonColumns(unittest.TestCase):
         self.assertNotEqual(out.get("treatment"), "comparison-columns")
 
 
+class TestPullQuote(unittest.TestCase):
+    def _shape(self, data):
+        out = dict(data); scene = {"data": dict(data)}
+        style_fill._assign_treatment_from_filled_copy(out, scene, {"wordmark": "Acme"})
+        return out
+
+    def test_real_quote_with_attribution_selects_pull_quote(self):
+        # A real, substantial quote (>=6 words) + attribution -> pull-quote.
+        out = self._shape({
+            "title": "What customers say",
+            "quote": "This product completely changed how our whole team ships.",
+            "quoteAttribution": "Jane Doe, VP of Engineering"})
+        self.assertEqual(out.get("treatment"), "pull-quote")
+        self.assertEqual(out.get("quote"),
+                         "This product completely changed how our whole team ships.")
+        self.assertEqual(out.get("quoteAttribution"), "Jane Doe, VP of Engineering")
+        self.assertIn("testimonial", out.get("patternReason", "").lower())
+
+    def test_short_quote_does_not_select_pull_quote(self):
+        # A too-short quote (<6 words) -> never pull-quote (no fabrication / padding).
+        out = self._shape({"title": "What customers say",
+                           "quote": "Love it",
+                           "quoteAttribution": "Jane Doe"})
+        self.assertNotEqual(out.get("treatment"), "pull-quote")
+
+    def test_quote_without_attribution_does_not_select_pull_quote(self):
+        # A real quote but NO attribution -> never pull-quote (unattributed = unverifiable).
+        out = self._shape({"title": "What customers say",
+                           "quote": "This product completely changed how our whole team ships."})
+        self.assertNotEqual(out.get("treatment"), "pull-quote")
+
+    def test_empty_quote_does_not_select_pull_quote(self):
+        # Absent / empty quote -> never invented.
+        out = self._shape({"title": "What customers say", "quoteAttribution": "Jane Doe"})
+        self.assertNotEqual(out.get("treatment"), "pull-quote")
+
+
 if __name__ == "__main__":
     unittest.main()

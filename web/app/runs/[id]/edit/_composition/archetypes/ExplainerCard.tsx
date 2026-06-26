@@ -1336,6 +1336,119 @@ const TreatmentIconHeadline: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT — pull-quote (a large editorial testimonial, centered)
+//
+// Mirrors TreatmentIconHeadline's centered column. Center: an accent quote-mark
+// glyph, then the REAL quote centered (large, serif-ish display), then the
+// attribution line in textMuted. HONESTY: the assembler only routes here for a
+// real (>=6-word) attributed quote — this component NEVER invents copy; it just
+// renders whatever real `quote` / `quoteAttribution` the data carries.
+// ---------------------------------------------------------------------------
+const TreatmentPullQuote: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  sceneId?: string;
+}> = ({ data, theme, frame, cues, kickerAt, titleAt, subAt, sceneId }) => {
+  const quote = (data.quote ?? "").trim();
+  const attribution = (data.quoteAttribution ?? "").trim();
+  // Stage: mark glyph rises first, then the quote, then the attribution.
+  const markAt = titleAt - 6 < kickerAt ? kickerAt + 4 : titleAt - 6;
+  const markOpacity = ease(frame, markAt, markAt + 16, 0, 1);
+  const markY = ease(frame, markAt, markAt + 16, 18, 0);
+  const quoteOpacity = ease(frame, titleAt, titleAt + 18, 0, 1);
+  const quoteY = ease(frame, titleAt, titleAt + 18, 22, 0);
+  const attrAt = cueAt(cues, "subtitle-in", subAt + 6);
+  const attrOpacity = ease(frame, attrAt, attrAt + 16, 0, 1);
+  const attrY = ease(frame, attrAt, attrAt + 16, 14, 0);
+  // Quote size shrinks for longer quotes so it always fits the centered column.
+  const quoteFontSize = quote.length > 120 ? 50 : quote.length > 72 ? 58 : 64;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 140,
+        right: 140,
+        top: 100,
+        bottom: 88,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 30,
+        textAlign: "center",
+      }}
+    >
+      <KickerRow
+        data={data}
+        theme={theme}
+        style={{
+          opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+          transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          justifyContent: "center",
+        }}
+        sceneId={sceneId}
+      />
+      {/* Accent quote-mark glyph */}
+      <div
+        style={{
+          opacity: markOpacity,
+          transform: `translateY(${markY}px)`,
+          fontSize: 150,
+          lineHeight: 0.6,
+          height: 84,
+          fontWeight: 800,
+          color: theme.accent,
+          fontFamily: theme.fontDisplay,
+        }}
+      >
+        &#8220;
+      </div>
+      <div
+        data-scene-id={sceneId}
+        data-field="quote"
+        style={{
+          opacity: quoteOpacity,
+          transform: `translateY(${quoteY}px)`,
+          fontSize: quoteFontSize,
+          fontWeight: 600,
+          lineHeight: 1.18,
+          letterSpacing: -0.8,
+          color: theme.text,
+          fontFamily: theme.fontDisplay,
+          maxWidth: "72%",
+        }}
+      >
+        {quote}
+      </div>
+      {attribution ? (
+        <div
+          data-scene-id={sceneId}
+          data-field="quoteAttribution"
+          style={{
+            opacity: attrOpacity,
+            transform: `translateY(${attrY}px)`,
+            fontSize: 22,
+            fontWeight: 600,
+            letterSpacing: 0.2,
+            color: theme.textMuted,
+            fontFamily: theme.fontDisplay,
+          }}
+        >
+          {`— ${attribution}`}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // TREATMENT E — big-number (ONE dominant stat, full-bleed)
 //
 // For scenes whose PUNCH is the number (e.g. "$800B+"). Renders the kicker, then
@@ -1860,6 +1973,8 @@ export const ExplainerCard: React.FC<{
   const hasCompare =
     (data.compare?.leftItems ?? []).filter((s) => (s ?? "").trim()).length >= 2 &&
     (data.compare?.rightItems ?? []).filter((s) => (s ?? "").trim()).length >= 2;
+  // pull-quote needs BOTH a real quote and a real attribution (never unattributed).
+  const hasQuote = !!(data.quote ?? "").trim() && !!(data.quoteAttribution ?? "").trim();
 
   let treatment = data.treatment;
   if ((treatment === "split-mosaic" || treatment === "logo-wall") && !hasEntities) treatment = "icon-headline";
@@ -1873,6 +1988,9 @@ export const ExplainerCard: React.FC<{
   // comparison-columns needs a real two-sided contrast — without it, drop to the
   // centered fallback (never a half-empty comparison).
   else if (treatment === "comparison-columns" && !hasCompare) treatment = "icon-headline";
+  // pull-quote needs a REAL attributed quote — without both a non-empty quote and
+  // attribution, drop to the centered fallback (never an empty / unattributed quote).
+  else if (treatment === "pull-quote" && !hasQuote) treatment = "icon-headline";
 
   return (
     <AbsoluteFill
@@ -2046,6 +2164,18 @@ export const ExplainerCard: React.FC<{
           underline={underline}
           titleText={titleText}
           titleLines={titleLines}
+          sceneId={sceneId}
+        />
+      ) : treatment === "pull-quote" ? (
+        <TreatmentPullQuote
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
           sceneId={sceneId}
         />
       ) : treatment === "icon-headline" ? (

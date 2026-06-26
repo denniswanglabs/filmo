@@ -2476,6 +2476,28 @@ def _assign_treatment_from_filled_copy(
                 len(left_items), len(right_items))
             return
 
+    # 3d) pull-quote: a large editorial testimonial. HONESTY GUARD (the most
+    #     important guard in this function): select ONLY when `quote` is a REAL,
+    #     non-empty string of >= 6 words AND `quoteAttribution` is non-empty. A
+    #     fabricated, padded, or unattributed testimonial is the worst possible
+    #     output for an anti-slop product -- so an absent / too-short quote OR a
+    #     missing attribution falls through to the stat/entity/floor logic below.
+    #     NEVER invent a quote or an attribution.
+    quote_text = str(d.get("quote") or "").strip()
+    attribution = str(d.get("quoteAttribution") or "").strip()
+    if quote_text and attribution and len(quote_text.split()) >= 6:
+        out["treatment"] = "pull-quote"
+        out["quote"] = _decode(quote_text)
+        out["quoteAttribution"] = _decode(attribution)
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out.pop("compare", None)
+        out.pop("imageSrc", None)
+        out["patternReason"] = "pull-quote: real testimonial"
+        return
+
     use_stat = stat if (has_real_stat and isinstance(stat, dict)) else (mined_stat or None)
     mined_only = bool(mined_stat) and not has_real_stat
     mined_label = (mined_stat.get("label") or "").strip() if mined_stat else ""
