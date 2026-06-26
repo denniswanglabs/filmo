@@ -153,5 +153,63 @@ class TestPullQuote(unittest.TestCase):
         self.assertNotEqual(out.get("treatment"), "pull-quote")
 
 
+class TestKineticStatement(unittest.TestCase):
+    """kinetic-statement (HARVESTED from cluely-promo / Luceo Studio) is OPT-IN only:
+    a scene must flag itself a hook (kind=="hook" or treatment=="kinetic-statement")
+    AND carry real title/lines text AND carry no competing data. A generic no-data
+    scene must NOT regress into it (stays icon-headline)."""
+
+    def _shape(self, data):
+        out = dict(data); scene = {"data": dict(data)}
+        style_fill._assign_treatment_from_filled_copy(out, scene, {"wordmark": "Filmo"})
+        return out
+
+    def test_hook_with_title_selects_kinetic_statement_and_populates_lines(self):
+        # An opt-in hook beat with a real title -> kinetic-statement; `lines` derived
+        # from the title (verbatim words, split into <=2 balanced lines).
+        out = self._shape({"kind": "hook", "title": "Paste a URL. Get a launch video."})
+        self.assertEqual(out.get("treatment"), "kinetic-statement")
+        lines = out.get("lines")
+        self.assertTrue(isinstance(lines, list) and 1 <= len(lines) <= 2)
+        # every word read VERBATIM from the title (no fabrication)
+        joined = " ".join(lines)
+        for w in "Paste a URL. Get a launch video.".split():
+            self.assertIn(w, joined)
+        self.assertIn("kinetic-statement", out.get("patternReason", ""))
+
+    def test_explicit_treatment_opt_in_selects_kinetic_statement(self):
+        out = self._shape({"treatment": "kinetic-statement",
+                           "title": "Your launch, produced."})
+        self.assertEqual(out.get("treatment"), "kinetic-statement")
+
+    def test_emphasis_and_underline_kept_only_when_verbatim(self):
+        out = self._shape({"kind": "hook", "title": "Get a launch video.",
+                           "emphasisWord": "launch", "underlineWord": "video",
+                           "eyebrow": "FILMO"})
+        self.assertEqual(out.get("treatment"), "kinetic-statement")
+        self.assertEqual(out.get("emphasisWord"), "launch")
+        self.assertEqual(out.get("underlineWord"), "video")
+        self.assertEqual(out.get("eyebrow"), "FILMO")
+
+    def test_non_verbatim_emphasis_word_dropped(self):
+        # An emphasis word that does NOT appear verbatim is dropped (no tint), not an error.
+        out = self._shape({"kind": "hook", "title": "Paste a URL.",
+                           "emphasisWord": "magic"})
+        self.assertEqual(out.get("treatment"), "kinetic-statement")
+        self.assertIsNone(out.get("emphasisWord"))
+
+    def test_generic_no_data_scene_does_not_select_kinetic_statement(self):
+        # NON-REGRESSION: a generic scene with NO hook flag stays icon-headline.
+        out = self._shape({"title": "Be in the room"})
+        self.assertEqual(out.get("treatment"), "icon-headline")
+        self.assertNotEqual(out.get("treatment"), "kinetic-statement")
+
+    def test_hook_with_competing_stat_does_not_select_kinetic_statement(self):
+        # Competing data (a real stat) means the hook is NOT a pure statement beat;
+        # it must fall through to the data-driven treatments, not kinetic-statement.
+        out = self._shape({"kind": "hook", "title": "Companies funded 5,000+"})
+        self.assertNotEqual(out.get("treatment"), "kinetic-statement")
+
+
 if __name__ == "__main__":
     unittest.main()

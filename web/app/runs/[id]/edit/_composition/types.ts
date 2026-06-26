@@ -79,7 +79,17 @@ export interface SceneData {
     | "metric-row"
     | "device-frame"
     | "comparison-columns"
-    | "pull-quote";
+    | "pull-quote"
+    | "kinetic-statement";
+  // kinetic-statement (HARVESTED from cluely-promo / Luceo Studio): a big editorial
+  // hook that assembles WORD-BY-WORD with a rise-blur cadence, one keyword tinted in
+  // theme.accent with a soft glow halo, and an optional highlighter sweep under one
+  // word. `lines` (below, reused) carries 1-2 real lines (derived from `title` when
+  // absent); `emphasisWord`/`underlineWord` are REAL words that appear VERBATIM in the
+  // copy (kept only when verbatim, else rendered plain — never fabricated).
+  eyebrow?: string; // optional real kicker shown above the statement
+  emphasisWord?: string; // one real word tinted theme.accent + halo
+  underlineWord?: string; // one real word that gets the highlighter sweep
   // metric-row: 3-4 small real stats shown as a horizontal strip.
   metrics?: Array<{ value: string; label: string }>;
   // pull-quote: a large editorial testimonial.

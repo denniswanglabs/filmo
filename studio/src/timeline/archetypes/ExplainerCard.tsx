@@ -1440,6 +1440,227 @@ const TreatmentPullQuote: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT — kinetic-statement (HARVESTED from cluely-promo / Luceo Studio)
+//
+// The library's animated-typography beat: a big editorial HOOK that assembles
+// WORD-BY-WORD with a rise-blur cadence (mirrors cluely-promo's `KineticLines`
+// workhorse — per-word spring stagger, translateY + opacity + blur), one keyword
+// tinted in theme.accent behind a soft radial glow halo, and an optional
+// highlighter sweep (scaleX 0->1, left-to-right) under one word, timed just after
+// that word lands. Centered, zero raster assets, THEME TOKENS ONLY so it reads on
+// any brand (white/orange Filmo included). Honesty: the assembler routes here only
+// for an opt-in hook with real verbatim copy — this component just animates it.
+//
+// Motion values ported verbatim from cluely primitives.tsx KineticLines:
+//   spring { damping: 200, stiffness: 170, mass: 0.7 }, perWord 7f stagger,
+//   transform translateY((1-p)*riseY)  [riseY 18],  opacity p,  blur (1-p)*6px.
+// ---------------------------------------------------------------------------
+const TreatmentKineticStatement: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleText: string;
+  titleLines: string[];
+  sceneId?: string;
+}> = ({ data, theme, frame, fps, kickerAt, titleAt, titleText, titleLines, sceneId }) => {
+  // Real lines: explicit `data.lines` win; else fall back to the threaded split.
+  const lines: string[] =
+    (data.lines ?? []).map((l) => (l ?? "").trim()).filter(Boolean).length > 0
+      ? (data.lines ?? []).map((l) => (l ?? "").trim()).filter(Boolean)
+      : titleLines;
+  const safeLines = lines.length ? lines : [titleText];
+
+  const eyebrow = (data.eyebrow ?? "").trim();
+  // Verbatim-match helper: strip punctuation + lowercase for word equality.
+  const norm = (w: string) => w.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const emphasisKey = norm((data.emphasisWord ?? "").trim());
+  const underlineKey = norm((data.underlineWord ?? "").trim());
+
+  // Per-word cadence (ported from KineticLines): each global word index drives a
+  // delay = start + idx*perWord; spring is sampled at (frame - delay).
+  const START = titleAt; // statement begins assembling on the title cue
+  const PER_WORD = 7;
+  const RISE_Y = 18;
+  // Word size shrinks for longer statements so a 2-line hook always fits centered.
+  const totalChars = safeLines.join(" ").length;
+  const fontSize = totalChars > 64 ? 78 : totalChars > 40 ? 92 : 104;
+
+  // Eyebrow settles a touch before the words begin assembling.
+  const eyebrowOpacity = ease(frame, kickerAt, kickerAt + 14, 0, 1);
+  const eyebrowY = ease(frame, kickerAt, kickerAt + 14, 12, 0);
+
+  // Subtle container tilt-settle + push-in (life), mirroring cluely Scene2's
+  // 3d-tilt-settle: starts faintly tilted/back, eases toward flat across ~30f.
+  const settle = interpolate(frame, [START, START + 30], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const tiltX = interpolate(settle, [0, 1], [5, 1]);
+  const push = interpolate(settle, [0, 1], [0.985, 1]);
+
+  // Walk word indices so we can time the emphasis halo + underline to their words.
+  let gi = 0;
+  const wordMeta: { line: number; word: number; idx: number }[][] = safeLines.map(
+    (line, li) => line.split(" ").map((_, wi) => ({ line: li, word: wi, idx: gi++ }))
+  );
+  // The underline lands just after its word's spring settles (~delay + ~14f).
+  let underlineWordIdx = -1;
+  if (underlineKey) {
+    outer: for (const lineMeta of wordMeta) {
+      for (const m of lineMeta) {
+        if (norm(safeLines[m.line].split(" ")[m.word]) === underlineKey) {
+          underlineWordIdx = m.idx;
+          break outer;
+        }
+      }
+    }
+  }
+  const underlineDelay = START + underlineWordIdx * PER_WORD;
+  const underline =
+    underlineWordIdx >= 0
+      ? ease(frame, underlineDelay + 10, underlineDelay + 28, 0, 1)
+      : 0;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 120,
+        right: 120,
+        top: 90,
+        bottom: 80,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 30,
+        textAlign: "center",
+        transform: `perspective(1700px) rotateX(${tiltX}deg) scale(${push})`,
+        transformOrigin: "center",
+      }}
+    >
+      {eyebrow ? (
+        <div
+          data-scene-id={sceneId}
+          data-field="eyebrow"
+          style={{
+            opacity: eyebrowOpacity,
+            transform: `translateY(${eyebrowY}px)`,
+            fontSize: 22,
+            fontWeight: 700,
+            letterSpacing: "0.22em",
+            textTransform: "uppercase",
+            color: theme.textMuted,
+            fontFamily: theme.fontDisplay,
+          }}
+        >
+          {eyebrow}
+        </div>
+      ) : null}
+
+      <div
+        data-scene-id={sceneId}
+        data-field="lines"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: fontSize * 0.1,
+          fontFamily: theme.fontDisplay,
+          fontWeight: 800,
+          letterSpacing: "-0.03em",
+          lineHeight: 1.04,
+        }}
+      >
+        {safeLines.map((line, li) => (
+          <div
+            key={li}
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              gap: `${fontSize * 0.26}px`,
+              lineHeight: 1.05,
+            }}
+          >
+            {line.split(" ").map((word, wi) => {
+              const meta = wordMeta[li][wi];
+              const delay = START + meta.idx * PER_WORD;
+              const p = spring({
+                frame: frame - delay,
+                fps,
+                config: { damping: 200, stiffness: 170, mass: 0.7 },
+              });
+              const isEmphasis = !!emphasisKey && norm(word) === emphasisKey;
+              const isUnderline = meta.idx === underlineWordIdx;
+              return (
+                <span
+                  key={wi}
+                  style={{
+                    position: "relative",
+                    display: "inline-block",
+                    color: isEmphasis ? theme.accent : theme.text,
+                    fontSize,
+                    transform: `translateY(${(1 - p) * RISE_Y}px)`,
+                    opacity: p,
+                    filter: `blur(${(1 - p) * 6}px)`,
+                    willChange: "transform, opacity, filter",
+                  }}
+                >
+                  {/* Soft accent glow halo behind the emphasis word. */}
+                  {isEmphasis ? (
+                    <span
+                      style={{
+                        position: "absolute",
+                        left: "50%",
+                        top: "52%",
+                        width: "150%",
+                        height: "120%",
+                        transform: "translate(-50%, -50%)",
+                        borderRadius: "50%",
+                        background: `radial-gradient(ellipse at center, ${theme.accent}3a 0%, ${theme.accent}00 70%)`,
+                        filter: "blur(16px)",
+                        opacity: p,
+                        pointerEvents: "none",
+                        zIndex: -1,
+                      }}
+                    />
+                  ) : null}
+                  {word}
+                  {/* Highlighter sweep under the underline word (scaleX 0->1). */}
+                  {isUnderline ? (
+                    <span
+                      style={{
+                        position: "absolute",
+                        left: "-4%",
+                        bottom: `${-fontSize * 0.04}px`,
+                        width: "108%",
+                        height: `${Math.max(10, fontSize * 0.14)}px`,
+                        borderRadius: `${Math.max(5, fontSize * 0.07)}px`,
+                        background: theme.accent,
+                        opacity: 0.9,
+                        transformOrigin: "left center",
+                        transform: `scaleX(${underline})`,
+                        zIndex: -1,
+                      }}
+                    />
+                  ) : null}
+                </span>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // TREATMENT E — big-number (ONE dominant stat, full-bleed)
 //
 // For scenes whose PUNCH is the number (e.g. "$800B+"). Renders the kicker, then
@@ -2162,6 +2383,20 @@ export const ExplainerCard: React.FC<{
           kickerAt={kickerAt}
           titleAt={titleAt}
           subAt={subAt}
+          sceneId={sceneId}
+        />
+      ) : treatment === "kinetic-statement" ? (
+        <TreatmentKineticStatement
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleText={titleText}
+          titleLines={titleLines}
           sceneId={sceneId}
         />
       ) : treatment === "icon-headline" ? (

@@ -2313,6 +2313,31 @@ def _mine_stat_from_title(title):
     return {"value": value, "label": label}
 
 
+def _split_statement_lines(title: str) -> List[str]:
+    """Split a real title into <=2 BALANCED lines for the kinetic-statement hook.
+    VERBATIM words only -- never invents or drops copy. Prefers an existing sentence
+    boundary ("Paste a URL. Get a launch video." -> two lines); else balances the word
+    count across two lines. A short title (<=4 words) stays a single line."""
+    t = " ".join((title or "").split()).strip()
+    if not t:
+        return []
+    # 1) Honor an explicit sentence boundary near the middle (keeps the punctuation).
+    parts = re.split(r"(?<=[.!?])\s+", t)
+    parts = [p.strip() for p in parts if p.strip()]
+    if len(parts) == 2:
+        return parts
+    if len(parts) > 2:
+        # Re-balance >2 sentences into two lines by word count.
+        words_all = t.split()
+    else:
+        words_all = t.split()
+    if len(words_all) <= 4:
+        return [t]
+    # 2) Balance by word count -- break at the word boundary nearest the midpoint.
+    mid = len(words_all) // 2
+    return [" ".join(words_all[:mid]).strip(), " ".join(words_all[mid:]).strip()]
+
+
 def _assign_treatment_from_filled_copy(
     out: Dict[str, Any], scene: Dict[str, Any], brand: Dict[str, Any]
 ) -> None:
@@ -2349,6 +2374,64 @@ def _assign_treatment_from_filled_copy(
     title = str(out.get("title") or "")
     subtitle = str(out.get("subtitle") or "")
     filled_copy = (title + " " + subtitle).strip()
+
+    # 3y) kinetic-statement (HARVESTED from cluely-promo / Luceo Studio): a big editorial
+    #      HOOK that assembles word-by-word (rise-blur), one keyword tinted in accent +
+    #      glow halo, an optional highlighter sweep under one word. OPT-IN ONLY +
+    #      NON-REGRESSIVE: select only when the scene flags itself a hook
+    #      (`kind == "hook"` OR the planner pre-emitted treatment="kinetic-statement")
+    #      AND there is real title/lines text AND there is NO competing data (no stat,
+    #      featureEntities, metrics, imageSrc, compare, or quote). A generic no-data
+    #      scene still degrades to icon-headline, never into this. Words read VERBATIM
+    #      from the real copy -- emphasis/underline words are kept only when they appear
+    #      verbatim in the joined lines (else rendered plain). Never fabricated.
+    opts_in_kinetic = (
+        str(d.get("kind") or "").strip().lower() == "hook"
+        or str(d.get("treatment") or "").strip() == "kinetic-statement"
+    )
+    raw_lines = [str(x).strip() for x in (d.get("lines") or [])
+                 if isinstance(x, (str, int, float)) and str(x).strip()]
+    has_statement_text = bool(raw_lines) or bool(title.strip())
+    has_competing_data = bool(
+        (d.get("stat") or {}).get("value") if isinstance(d.get("stat"), dict) else d.get("stat")
+    ) or bool(
+        [e for e in (d.get("featureEntities") or []) if str(e or "").strip()]
+    ) or bool(
+        [m for m in (d.get("metrics") or []) if isinstance(m, dict) and str(m.get("value") or "").strip()]
+    ) or bool(str(d.get("imageSrc") or "").strip()) or bool(d.get("compare")) or bool(
+        str(d.get("quote") or "").strip()
+    )
+    # A competing NUMBER mined from the title means this is a stat beat, not a pure
+    # statement beat -- defer to the stat treatments (honesty / non-regression).
+    has_competing_number = bool(_mine_stat_from_title(title))
+    if opts_in_kinetic and has_statement_text and not has_competing_data and not has_competing_number:
+        # Lines: prefer explicit real lines; else derive <=2 balanced lines from the
+        # title (verbatim words only -- _split_statement_lines never invents text).
+        lines = raw_lines[:2] if raw_lines else _split_statement_lines(title)
+        out["treatment"] = "kinetic-statement"
+        out["lines"] = [_decode(x) for x in lines]
+        joined = " ".join(out["lines"]).lower()
+        # Pass through eyebrow / emphasis / underline. Each emphasis/underline word is
+        # KEPT only when it appears verbatim (case-insensitive) in the joined lines.
+        eyebrow = str(d.get("eyebrow") or "").strip()
+        if eyebrow:
+            out["eyebrow"] = _decode(eyebrow)
+        else:
+            out.pop("eyebrow", None)
+        for key in ("emphasisWord", "underlineWord"):
+            word = str(d.get(key) or "").strip()
+            if word and re.search(r"\b" + re.escape(word.lower()) + r"\b", joined):
+                out[key] = _decode(word)
+            else:
+                out.pop(key, None)
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out.pop("compare", None)
+        out.pop("imageSrc", None)
+        out["patternReason"] = "kinetic-statement: animated hook statement"
+        return
 
     # Build a synthetic scene whose `data` carries the FILLED copy so plan_job's
     # honesty corpus (which reads data.title / data.subtitle / brief) sees the REAL
