@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import type { Run, RunEvent } from '../../lib/types'
+import { formatCents, type Run, type RunEvent } from '../../lib/types'
 
 /**
  * Live "the agent is building" view for a non-terminal run.
@@ -132,6 +132,55 @@ function ActorBadge({ actor }: { actor: string }) {
   )
 }
 
+// Pay affordance — shown only when the human-pays flow has parked the build at
+// 'awaiting_payment' AND a Stripe TEST checkout URL is on the run. Opens Stripe's
+// hosted test checkout in a new tab; once the human pays (test card 4242), the
+// pipeline's payment gate resolves and the build continues. The page already polls
+// run status, so no extra polling is needed here. Landing tokens: white surface,
+// ink #0E1320, blue accent (#3B82F6). No emojis — SVG lock mark only.
+function PayPanel({ run }: { run: Run }) {
+  const price = formatCents(run.price_cents)
+  return (
+    <div className="mt-5 rounded-xl border border-[#3B82F6]/30 bg-[#F8FAFF] p-5 ring-1 ring-inset ring-[#EAF1FF]">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#3B82F6]/10 text-[#3B82F6]">
+          <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+            <path
+              d="M6 9V6.5a4 4 0 0 1 8 0V9"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+            <rect x="4.5" y="9" width="11" height="7.5" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <p className="font-semibold text-[#0E1320]">Payment required to continue</p>
+          <p className="mt-1 text-sm text-[#5A6472]">
+            Your video is planned and priced. Complete checkout to release production — the build
+            resumes automatically once payment clears.
+          </p>
+        </div>
+      </div>
+
+      <a
+        href={run.checkout_url ?? '#'}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#3B82F6] py-3 font-semibold text-white shadow-[0_10px_30px_-10px_rgba(59,130,246,0.6)] transition hover:bg-[#2f6fe0]"
+      >
+        Pay {price}
+        <span className="text-xs font-normal text-white/80">— test card 4242·4242·4242·4242</span>
+      </a>
+
+      <p className="mt-2.5 text-center text-[11px] text-[#5A6472]">
+        Stripe test checkout — no real charge. Opens in a new tab.
+      </p>
+    </div>
+  )
+}
+
 export default function BuildProgress({ run, events }: { run: Run; events: RunEvent[] }) {
   const isQueued = run.status === 'queued'
   const elapsed = useElapsed(run.created_at)
@@ -139,6 +188,9 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
 
   // Most-recent activity first; the newest line gets a highlight so motion reads.
   const recent = [...events].sort((a, b) => b.seq - a.seq).slice(0, 6)
+
+  // Human-pays flow: the build is parked awaiting a real Stripe TEST payment.
+  const awaitingPayment = run.phase === 'awaiting_payment' && !!run.checkout_url
 
   return (
     <div className="mt-6 overflow-hidden rounded-2xl border border-black/5 bg-white shadow-sm">
@@ -169,6 +221,10 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
             ? 'Reserved a worker — the agent will begin reading your product in a moment.'
             : 'This usually takes 1–3 minutes — the agent is reading your product, planning, and rendering.'}
         </p>
+
+        {/* Pay CTA — only when the human-pays flow parked the build awaiting a real
+            Stripe TEST payment. Prominent, above the stage tracker. */}
+        {awaitingPayment && <PayPanel run={run} />}
 
         {/* Stage tracker */}
         <ol className="mt-5 space-y-2.5">

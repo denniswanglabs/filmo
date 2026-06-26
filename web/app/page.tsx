@@ -35,6 +35,9 @@ interface PendingBuild {
   goal: string
   quality: 'standard' | 'premium'
   brain: string
+  // Opt-in: require a REAL Stripe TEST payment before the build proceeds. Default
+  // false so the normal quick demo still auto-pays.
+  requirePay: boolean
 }
 
 export default function Home() {
@@ -46,6 +49,8 @@ export default function Home() {
   const [url, setUrl] = useState('')
   const [quality, setQuality] = useState<'standard' | 'premium'>('standard')
   const [brain, setBrain] = useState<string>('super-free')
+  // Opt-in human-pays toggle (default OFF → normal demo auto-pays).
+  const [requirePay, setRequirePay] = useState(false)
   const [building, setBuilding] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -107,6 +112,7 @@ export default function Home() {
           quality: p.quality,
           brain: p.brain,
           mode: 'mock',
+          payMode: p.requirePay ? 'human' : 'auto',
         })
         router.push(`/runs/${runId}`)
       } catch (err) {
@@ -118,8 +124,8 @@ export default function Home() {
   )
 
   const currentPending = useCallback(
-    (): PendingBuild => ({ url, goal, quality, brain }),
-    [url, goal, quality, brain],
+    (): PendingBuild => ({ url, goal, quality, brain, requirePay }),
+    [url, goal, quality, brain, requirePay],
   )
 
   function stashPending() {
@@ -159,6 +165,7 @@ export default function Home() {
     setGoal(p.goal ?? '')
     setQuality(p.quality ?? 'standard')
     setBrain(p.brain ?? 'super-free')
+    setRequirePay(p.requirePay ?? false)
     if (user) void runBuild(user.id, p)
   }, [loading, user, runBuild])
 
@@ -281,6 +288,26 @@ export default function Home() {
                 </select>
               </div>
             </div>
+
+            {/* Opt-in human-pays toggle. OFF = the demo auto-pays (quick path). ON =
+                the build creates a real Stripe TEST checkout the user pays (card 4242)
+                before production runs. */}
+            <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] px-3.5 py-3 transition hover:border-[#B9D2F8]">
+              <input
+                type="checkbox"
+                checked={requirePay}
+                onChange={(e) => setRequirePay(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-amber"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-[#0E1320]">
+                  Require payment (Stripe test)
+                </span>
+                <span className="block text-xs text-[#5A6472]">
+                  Pay with test card 4242 before the video renders. No real charge.
+                </span>
+              </span>
+            </label>
 
             {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 

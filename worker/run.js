@@ -92,6 +92,8 @@ function mapLedgerToRun(ledger) {
     margin: num(pnl.margin, pnl.net_margin),
     plan: ledger.plan || null,
     selection: ledger.selection || null,
+    // Stripe TEST checkout URL written by _payment_gate during the human-pays flow.
+    checkout_url: (ledger.earn || {}).checkout_url || null,
   }
 }
 
@@ -346,7 +348,11 @@ async function processJob(job) {
     '--duration', String(p.duration || 30)]
   if (p.emphasis) args.push('--emphasis', p.emphasis)
   const env = { ...process.env }
-  if ((p.mode || 'mock') === 'mock') env.PRODUCER_SIMULATE_PAID = '1'
+  // Auto-resolve payment for the normal mock demo. BUT when a build opts into the
+  // human-pays flow (pay_mode='human'), do NOT simulate payment — let the pipeline's
+  // _payment_gate create a real Stripe TEST checkout and park at 'awaiting_payment'
+  // until the human pays (test card 4242). Only the payment becomes real; render stays mock.
+  if ((p.mode || 'mock') === 'mock' && p.pay_mode !== 'human') env.PRODUCER_SIMULATE_PAID = '1'
 
   const child = spawn(PYTHON_BIN, args, { cwd: PIPELINE_DIR, env })
   child.on('error', (e) => log(`  ! spawn error ${runKey}`, String(e)))
@@ -361,7 +367,17 @@ async function processJob(job) {
     while (alive) {
       try {
         const led = readLedger(runKey)
-        if (led) { lastSeq = await syncEvents(runId, led, lastSeq); if (led.phase) await setRun(runId, { phase: led.phase }) }
+        if (led) {
+          lastSeq = await syncEvents(runId, led, lastSeq)
+          if (led.phase) {
+            // Push the checkout URL live (while status=running/phase=awaiting_payment)
+            // so the run page can render the Pay button before the build is terminal.
+            const patch = { phase: led.phase }
+            const checkoutUrl = led.earn && led.earn.checkout_url
+            if (checkoutUrl) patch.checkout_url = checkoutUrl
+            await setRun(runId, patch)
+          }
+        }
       } catch (e) { log('  ! streamer iter', String(e)) }
       await sleep(LEDGER_POLL_MS)
     }

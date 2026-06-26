@@ -48,6 +48,11 @@ export async function createBuild(input: {
   quality?: 'standard' | 'premium'
   brain?: string
   mode?: 'mock' | 'real'
+  // Opt-in HUMAN payment: 'auto' (default) lets the worker auto-resolve payment
+  // (PRODUCER_SIMULATE_PAID); 'human' creates a REAL Stripe TEST checkout the user
+  // must pay (test card 4242) before the build proceeds. Only the payment becomes
+  // real — the render stays $0 mock.
+  payMode?: 'auto' | 'human'
 }) {
   const db = adminClient()
   const runKey = `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -55,6 +60,7 @@ export async function createBuild(input: {
   const quality = input.quality || 'standard'
   const brain = input.brain || 'super-free'
   const mode = input.mode || 'mock'
+  const payMode = input.payMode || 'auto'
   const goal = input.goal || 'A 30-second brand explainer'
 
   const { data: runs, error: runErr } = await db.database
@@ -67,7 +73,7 @@ export async function createBuild(input: {
   if (runErr) throw new Error('runs.insert: ' + JSON.stringify(runErr))
   const runId = runs![0].id
 
-  const params = { company_url: input.url, goal, emphasis: input.emphasis || '', quality, brain, mode, run_key: runKey, duration: 30 }
+  const params = { company_url: input.url, goal, emphasis: input.emphasis || '', quality, brain, mode, pay_mode: payMode, run_key: runKey, duration: 30 }
   const { error: jobErr } = await db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }])
   if (jobErr) throw new Error('jobs.insert: ' + JSON.stringify(jobErr))
 

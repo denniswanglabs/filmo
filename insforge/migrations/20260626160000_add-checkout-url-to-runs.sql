@@ -1,0 +1,11 @@
+-- Surface the Stripe TEST checkout URL onto the run row so the run page can show a
+-- "Pay" button during the human-pays flow. When a build is created with
+-- pay_mode='human', the worker does NOT set PRODUCER_SIMULATE_PAID, so the pipeline's
+-- _payment_gate creates a real Stripe test checkout session, parks the run in phase
+-- 'awaiting_payment', and writes the checkout URL into the ledger (earn.checkout_url).
+-- The worker mirrors that onto runs.checkout_url; the run page renders a Pay CTA that
+-- opens it. Once the human pays (test card 4242), the gate resolves and the build
+-- continues. The existing "runs owner update/select" RLS policies and the table-wide
+-- grants to `authenticated` already cover this new column, so no policy/grant changes
+-- are required. Only the PAYMENT becomes real here — the render stays $0 mock.
+alter table public.runs add column if not exists checkout_url text; -- Stripe test checkout URL (human-pays flow)

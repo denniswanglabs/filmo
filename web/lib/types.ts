@@ -20,6 +20,9 @@ export interface Run {
   price_cents: number | null
   cogs_cents: number | null
   margin: number | null
+  // Stripe TEST checkout URL, present during the human-pays flow while the run sits
+  // at phase 'awaiting_payment'. The run page renders a Pay CTA when this is set.
+  checkout_url?: string | null
   plan: unknown
   selection: unknown
   props?: unknown
