@@ -80,3 +80,15 @@ A worker redeploy is ~5-7 min, so DO NOT deploy per iteration. Iterate locally:
 5. **Bare numbers ("10,000 alumni") + odd mined headlines:** mining mid-title numbers yields grim left headlines ("Join alumni"); needs smarter headline derivation.
 
 **Commits this loop:** 9fc491b, 15991f2, 66178c3, (iter4) , 261e9c7, + iter5/iter7. Loop scripts: `loop_plan.py`, `loop_measure.py`. Spend ≈ a few ¢.
+
+## LOOP 2 — verified-knowledge enrichment (2026-06-26 ~22:20)
+Infra: `.venv-capture` (Playwright) lets `loop_plan.py` do REAL capture locally → reproduces the hosted grounded-read condition for fast iteration.
+| # | Change | Result | Commit |
+|---|---|---|---|
+| repro | grounded YC (real capture) | all bare icon-headlines (= hosted) | — |
+| iter1 | planner-prompt verified-knowledge enrichment | 1 of 4 beats enriched (prompting ceiling) | (in 4bbc639) |
+| iter2 | TWO-PASS enrich: `enrich_brand_knowledge` (focused Nemotron call, honesty-guarded) + `_seed_feature_beats_from_enrichment` (seeds beat brief+VO text) | grounded YC → split-mosaic (6 cos) + split-stat 5000+ + 2nd mosaic | 4bbc639 |
+| iter3 | cap at ONE mosaic + spread distinct stats | YC: 1 mosaic + 2 stats (5000+, 7%) + headline = varied | 63e02e8 |
+| iter4 | trillion (T) stat suffix + entity stop-words | $6.5T+ clean; Slack Build→Slack | 015e697 |
+**Generalization + honesty (all via grounded local capture):** YC ✓ (Airbnb/Stripe/Dropbox… + 5000+/7%), Stripe ✓ (Amazon/Google/Shopify/Lyft/Instacart + $6.5T+/100+), Notion ✓ (Figma/Pixar/Toyota… + 40%), Orinovate (unknown) → enrich EMPTY, zero fabrication, only its real site stats. Honesty intact. Deployed to production worker (deploy be8ud0dva). Hosted-confirm: a3892454 (pending).
+**Loop-2 remaining polish (minor):** occasional 2-word entity stray ("Loom One"); word-form numbers ("two thousand plus") not mined; could de-dup overlapping companies across mosaic+stat scenes.
