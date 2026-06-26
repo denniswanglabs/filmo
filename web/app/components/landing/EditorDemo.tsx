@@ -699,110 +699,103 @@ export default function EditorDemo() {
            drops to the Subtitle handle, then moves to the Title text FIELD.
            Percentages are relative to the .ed container box. Scales down on
            each click / grab. Single closed loop — returns to the start. */
+        /* Positions are MEASURED against the rendered editor (ed 896x538): the
+           cursor's tip lands ON each control. Title knob top ~40.8%, subtitle knob
+           ~49.2%, text field ~72.4%, Scene 2 block at left ~30.6%. */
         .ed-cursor {
           position: absolute;
-          top: 36%;
-          left: 38%;
+          top: 40%;
+          left: 40%;
           z-index: 20;
           pointer-events: none;
           filter: drop-shadow(0 2px 4px rgba(14, 19, 32, 0.3));
           animation: ed-cursor 12s cubic-bezier(0.45, 0, 0.25, 1) infinite;
         }
         @keyframes ed-cursor {
-          /* settle */
+          /* settle over the stage */
           0% {
-            top: 36%;
-            left: 38%;
+            top: 40%;
+            left: 40%;
             transform: scale(1);
           }
-          /* BEAT 1 — down to the timeline, over Scene 2 */
+          /* BEAT 1 — down to the timeline, onto Scene 2 (30.6%, 94.2%) */
           9% {
-            top: 90%;
-            left: 27%;
+            top: 94%;
+            left: 30%;
             transform: scale(1);
           }
           11% {
-            transform: scale(0.82);
+            transform: scale(0.8);
           }
           14% {
             transform: scale(1);
           }
-          /* BEAT 2 — up to the Title-size handle (right rail, slider 1) */
+          /* BEAT 2 — onto the Title-size knob at its rest (79.7%, 40.8%) */
           20% {
-            top: 56%;
-            left: 78%;
+            top: 40%;
+            left: 79%;
             transform: scale(1);
           }
           23% {
-            transform: scale(0.82);
+            transform: scale(0.8);
           }
-          /* drag the handle RIGHT — cursor tracks it to ~92% */
+          /* drag the knob RIGHT to 86% pos (94.4%) — cursor tracks it exactly */
           42% {
-            top: 56%;
-            left: 92%;
-            transform: scale(0.82);
+            top: 40%;
+            left: 94%;
+            transform: scale(0.8);
           }
           45% {
             transform: scale(1);
           }
-          /* BEAT 3 — down to the Subtitle handle (slider 2) */
+          /* BEAT 3 — onto the Subtitle knob (80.3%, 49.2%), nudge to 60% (87.6%) */
           52% {
-            top: 66%;
+            top: 49%;
             left: 80%;
-            transform: scale(0.82);
+            transform: scale(1);
+          }
+          54% {
+            transform: scale(0.8);
           }
           58% {
-            top: 66%;
-            left: 86%;
-            transform: scale(0.82);
+            top: 49%;
+            left: 87%;
+            transform: scale(0.8);
           }
           60% {
             transform: scale(1);
           }
-          /* BEAT 4 — over to the Title text field (lower right rail) */
+          /* BEAT 4 — onto the Title text field (85%, 72.4%) */
           66% {
-            top: 88%;
-            left: 80%;
+            top: 72%;
+            left: 84%;
             transform: scale(1);
           }
           68% {
-            transform: scale(0.82);
+            transform: scale(0.8);
           }
           70% {
             transform: scale(1);
           }
-          /* hold near the field while the text swaps */
+          /* hold at the field while the text swaps */
           82% {
-            top: 88%;
-            left: 80%;
+            top: 72%;
+            left: 84%;
             transform: scale(1);
           }
           /* BEAT 5 — ease back to the start */
           100% {
-            top: 36%;
-            left: 38%;
+            top: 40%;
+            left: 40%;
             transform: scale(1);
           }
         }
 
         /* ------------------------------------------------------ PLAYHEAD */
-        /* Gentle sweep across the timeline throughout; lingers near Scene 2
-           during the edit, then continues. */
+        /* PARKED on Scene 2 — the demo only ever edits Scene 2, so the playhead
+           stays on it instead of sweeping around (which read as noise). */
         .ed-playhead {
-          left: 8%;
-          animation: ed-playhead 12s ease-in-out infinite;
-        }
-        @keyframes ed-playhead {
-          0% {
-            left: 8%;
-          }
-          12%,
-          84% {
-            left: 32%;
-          }
-          100% {
-            left: 92%;
-          }
+          left: 30%;
         }
 
         /* ==================================================================
@@ -885,14 +878,14 @@ export default function EditorDemo() {
           .ed-caret {
             opacity: 0;
           }
-          /* cursor parked on the Title-size handle */
+          /* cursor parked on the Title-size knob (dragged position) */
           .ed-cursor {
-            top: 56%;
-            left: 92%;
+            top: 40%;
+            left: 94%;
             transform: scale(1);
           }
           .ed-playhead {
-            left: 32%;
+            left: 30%;
           }
           .ed-livedot {
             opacity: 1;
