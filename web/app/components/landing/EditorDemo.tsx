@@ -15,19 +15,18 @@
 // THE LOOP (~12s, ALL beats driven off ONE shared timeline so the cursor, the
 // control it touches, the value pill, and the preview move in LOCKSTEP and the
 // SAME DIRECTION — drag right = bigger = heading grows). Beats:
-//   1. cursor → TIMELINE, clicks "Scene 2" (click pulse + brighten)
-//   2. cursor → "Title size" slider, DRAGS handle RIGHT → handle + blue fill +
-//      value pill (92→150) + preview HEADING all grow together, left-to-right
-//   3. cursor → "Subtitle size" slider, nudges → preview SUBTITLE grows in sync
-//   4. cursor → "Title" TEXT field → blinking caret, heading crossfades
-//      "Ship faster." → "Ship today." (as if typed)
-//   5. brief settle, then everything eases back to the start (no teleport)
-// The playhead sweeps the timeline gently throughout. The cursor is a small arrow
-// SVG with a white stroke; it scales down slightly on each click / drag-grab.
+//   0–4    cursor enters top-right (fades in)
+//   4–13   click Scene 2
+//   13–34  DRAG title slider (number 92→150, heading grows)
+//   34–48  nudge subtitle slider (number 34→44, subtitle grows)
+//   52–64  TYPE title text
+//   64–77  cursor exits to BOTTOM-LEFT (fades out, gone by 77%)
+//   78–92  RESET everything to original
+//   92–100 rest
 //
-// Pure CSS keyframes (transform / opacity / width only — GPU-composited), no JS
-// state. `prefers-reduced-motion` freezes a clean, legible mid-edit static frame
-// with NO animation.
+// Pure CSS keyframes (transform / opacity / width only — GPU-composited), plus
+// JS-driven size pills (titleSize / subSize counted up in the setInterval).
+// `prefers-reduced-motion` freezes a clean, legible mid-edit static frame.
 
 import { Reveal } from './Motion'
 import { useEffect, useState } from 'react'
@@ -40,9 +39,9 @@ import { useEffect, useState } from 'react'
 const ED_FULL = 'Ship faster.'
 const ED_STEM = 'Ship '
 const ED_TYPED = 'Ship today.'
-const ED_CHAR_MS = 200
+const ED_CHAR_MS = 110
 const ED_LOOP_MS = 12000
-const ED_DEL_START = 7920 // 66% of the loop — when the cursor reaches the Title field
+const ED_DEL_START = 6240 // 52% of the loop — when the cursor reaches the Title field
 const ED_DEL_END = ED_DEL_START + (ED_FULL.length - ED_STEM.length) * ED_CHAR_MS
 const ED_TYPE_END = ED_DEL_END + (ED_TYPED.length - ED_STEM.length) * ED_CHAR_MS
 
@@ -59,21 +58,43 @@ function edTitleAt(t: number): string {
   return ED_TYPED
 }
 
+function edTitleSizeAt(t: number): number {
+  if (t < 1560) return 92
+  if (t < 4080) return Math.round(92 + (150 - 92) * (t - 1560) / (4080 - 1560))
+  if (t < 9360) return 150
+  if (t < 10800) return Math.round(150 - (150 - 92) * (t - 9360) / (10800 - 9360))
+  return 92
+}
+function edSubSizeAt(t: number): number {
+  if (t < 4080) return 34
+  if (t < 5760) return Math.round(34 + (44 - 34) * (t - 4080) / (5760 - 4080))
+  if (t < 9360) return 44
+  if (t < 10800) return Math.round(44 - (44 - 34) * (t - 9360) / (10800 - 9360))
+  return 34
+}
+
 export default function EditorDemo() {
   // The live title text, shown in both the inspector field and the video heading.
   const [titleText, setTitleText] = useState(ED_FULL)
+  const [titleSize, setTitleSize] = useState(92)
+  const [subSize, setSubSize] = useState(34)
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       setTitleText(ED_FULL) // matches the frozen mid-drag (pre-edit) reduced frame
+      setTitleSize(150)
+      setSubSize(44)
       return
     }
     // Date.now()-based so the text stays correctly timed even if the interval is
     // throttled; setState bails out when the char hasn't changed (no churn).
     const start = Date.now()
     const id = setInterval(() => {
-      const next = edTitleAt((Date.now() - start) % ED_LOOP_MS)
+      const t = (Date.now() - start) % ED_LOOP_MS
+      const next = edTitleAt(t)
       setTitleText((prev) => (prev === next ? prev : next))
+      setTitleSize((prev) => { const n = edTitleSizeAt(t); return prev === n ? prev : n })
+      setSubSize((prev) => { const n = edSubSizeAt(t); return prev === n ? prev : n })
     }, 80)
     return () => clearInterval(id)
   }, [])
@@ -245,8 +266,7 @@ export default function EditorDemo() {
                   <div className="mb-1.5 flex items-baseline justify-between">
                     <span className="text-[11px] font-medium text-[#5A6472]">Title size</span>
                     <span className="ed-pill ed-pill--title relative inline-block rounded-full border border-[#BFD8FF] bg-[#EAF2FF] px-2 py-[1.5px] text-[11px] font-bold tabular-nums text-[#2563EB]">
-                      <span className="ed-pill__a">92</span>
-                      <span aria-hidden="true" className="ed-pill__b absolute inset-0 grid place-items-center">150</span>
+                      {titleSize}
                     </span>
                   </div>
                   <div className="relative h-1.5 rounded-full bg-[#E3E9F2]">
@@ -260,8 +280,7 @@ export default function EditorDemo() {
                   <div className="mb-1.5 flex items-baseline justify-between">
                     <span className="text-[11px] font-medium text-[#5A6472]">Subtitle size</span>
                     <span className="ed-pill ed-pill--sub relative inline-block rounded-full border border-[#BFD8FF] bg-[#EAF2FF] px-2 py-[1.5px] text-[11px] font-bold tabular-nums text-[#2563EB]">
-                      <span className="ed-pill__a">34</span>
-                      <span aria-hidden="true" className="ed-pill__b absolute inset-0 grid place-items-center">44</span>
+                      {subSize}
                     </span>
                   </div>
                   <div className="relative h-1.5 rounded-full bg-[#E3E9F2]">
@@ -350,12 +369,14 @@ export default function EditorDemo() {
         /* ==================================================================
            ONE shared 12s timeline drives every beat in lockstep.
            Beat map (% of the loop):
-             0–8     settle (rest frame)
-             8–18    BEAT 1  cursor → timeline, click "Scene 2"
-             18–42   BEAT 2  cursor → Title-size slider, DRAG right (92→150)
-             42–58   BEAT 3  cursor → Subtitle-size slider, nudge (34→44)
-             58–80   BEAT 4  cursor → Title text field, type → heading swaps
-             80–100  BEAT 5  settle, then ease everything back to start
+             0–4    cursor enters top-right (fades in)
+             4–13   click Scene 2
+             13–34  DRAG title slider (number 92→150, heading grows)
+             34–48  nudge subtitle slider (number 34→44, subtitle grows)
+             52–64  TYPE title text
+             64–77  cursor exits to BOTTOM-LEFT (fades out, gone by 77%)
+             78–92  RESET everything to original
+             92–100 rest
            ================================================================== */
         .ed {
           position: relative;
@@ -376,22 +397,18 @@ export default function EditorDemo() {
         }
         @keyframes ed-head-scale {
           0%,
-          20% {
+          13% {
             transform: scale(0.78);
           }
-          /* drag right = bigger, in sync with the slider fill growing. HOLD full
-             size through the beat-4 type (which finishes at ~88% of the loop) so
-             the heading never shrinks mid-typing — only reset AFTER typing lands. */
-          42%,
-          88% {
+          34%,
+          78% {
             transform: scale(1.16);
           }
-          97%,
+          92%,
           100% {
             transform: scale(0.78);
           }
         }
-        /* heading text is JS-driven (char-by-char in beat 4) — no CSS crossfade. */
 
         /* -------------------------------------------------- PREVIEW SUBTITLE */
         .ed-subtitle {
@@ -401,16 +418,14 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-scale {
           0%,
-          48% {
+          34% {
             transform: scale(1);
           }
-          /* nudge in beat 3 (42–58) -> subtitle grows; hold through the type so the
-             whole preview stays steady until typing finishes (~88%). */
-          58%,
-          88% {
+          48%,
+          78% {
             transform: scale(1.22);
           }
-          97%,
+          92%,
           100% {
             transform: scale(1);
           }
@@ -425,14 +440,14 @@ export default function EditorDemo() {
         }
         @keyframes ed-title-fill {
           0%,
-          20% {
+          13% {
             width: 30%;
           }
-          42%,
-          82% {
+          34%,
+          78% {
             width: 86%;
           }
-          96%,
+          92%,
           100% {
             width: 30%;
           }
@@ -443,59 +458,23 @@ export default function EditorDemo() {
         }
         @keyframes ed-title-handle {
           0%,
-          20% {
+          13% {
             left: 30%;
             transform: translate(-50%, -50%) scale(1);
           }
           /* grab pop as the cursor presses down on the handle */
-          24% {
+          16% {
             transform: translate(-50%, -50%) scale(1.32);
           }
-          42%,
-          82% {
+          34%,
+          78% {
             left: 86%;
             transform: translate(-50%, -50%) scale(1.18);
           }
-          96%,
+          92%,
           100% {
             left: 30%;
             transform: translate(-50%, -50%) scale(1);
-          }
-        }
-        /* value pill 92 -> 150 crossfade, lands when the drag completes */
-        .ed-pill--title .ed-pill__b {
-          opacity: 0;
-          animation: ed-title-pillb 12s steps(1, end) infinite;
-        }
-        @keyframes ed-title-pillb {
-          0%,
-          40% {
-            opacity: 0;
-          }
-          41%,
-          92% {
-            opacity: 1;
-          }
-          94%,
-          100% {
-            opacity: 0;
-          }
-        }
-        .ed-pill--title .ed-pill__a {
-          animation: ed-title-pilla 12s steps(1, end) infinite;
-        }
-        @keyframes ed-title-pilla {
-          0%,
-          40% {
-            opacity: 1;
-          }
-          41%,
-          92% {
-            opacity: 0;
-          }
-          94%,
-          100% {
-            opacity: 1;
           }
         }
 
@@ -506,14 +485,14 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-fill {
           0%,
-          52% {
+          34% {
             width: 32%;
           }
-          58%,
-          82% {
+          48%,
+          78% {
             width: 60%;
           }
-          96%,
+          92%,
           100% {
             width: 32%;
           }
@@ -524,57 +503,22 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-handle {
           0%,
-          52% {
+          34% {
             left: 32%;
             transform: translate(-50%, -50%) scale(1);
           }
-          53% {
+          36% {
             transform: translate(-50%, -50%) scale(1.3);
           }
-          58%,
-          82% {
+          48%,
+          78% {
             left: 60%;
             transform: translate(-50%, -50%) scale(1.14);
           }
-          96%,
+          92%,
           100% {
             left: 32%;
             transform: translate(-50%, -50%) scale(1);
-          }
-        }
-        .ed-pill--sub .ed-pill__b {
-          opacity: 0;
-          animation: ed-sub-pillb 12s steps(1, end) infinite;
-        }
-        @keyframes ed-sub-pillb {
-          0%,
-          55% {
-            opacity: 0;
-          }
-          56%,
-          92% {
-            opacity: 1;
-          }
-          94%,
-          100% {
-            opacity: 0;
-          }
-        }
-        .ed-pill--sub .ed-pill__a {
-          animation: ed-sub-pilla 12s steps(1, end) infinite;
-        }
-        @keyframes ed-sub-pilla {
-          0%,
-          55% {
-            opacity: 1;
-          }
-          56%,
-          92% {
-            opacity: 0;
-          }
-          94%,
-          100% {
-            opacity: 1;
           }
         }
 
@@ -601,15 +545,15 @@ export default function EditorDemo() {
         }
         @keyframes ed-clip-pulse {
           0%,
-          9% {
+          4% {
             box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
             filter: brightness(0.92);
           }
-          12% {
+          8% {
             box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.35);
             filter: brightness(1.12);
           }
-          16% {
+          12% {
             box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
             filter: brightness(1);
           }
@@ -633,17 +577,9 @@ export default function EditorDemo() {
         }
 
         /* ----------------------------------------------------- THE CURSOR */
-        /* Natural path: starts mid-stage, drops to the TIMELINE (Scene 2),
-           rises to the Title-size HANDLE and tracks it RIGHT during the drag,
-           drops to the Subtitle handle, then moves to the Title text FIELD.
+        /* Enters from the top-right corner, exits to the BOTTOM-LEFT corner.
            Percentages are relative to the .ed container box. Scales down on
-           each click / grab. Single closed loop — returns to the start. */
-        /* Positions are MEASURED against the rendered editor (ed 896x538): the
-           cursor's tip lands ON each control. Title knob top ~40.8%, subtitle knob
-           ~49.2%, text field ~72.4%, Scene 2 block at left ~30.6%. */
-        /* The cursor ENTERS from the top-right corner (fades in) and EXITS to the
-           top-right corner (fades out) — it never rests mid-stage. The card is
-           overflow-hidden, so the corner anchor sits just inside the top-right. */
+           each click / grab. Single closed loop — returns to start. */
         .ed-cursor {
           position: absolute;
           top: 5%;
@@ -655,95 +591,26 @@ export default function EditorDemo() {
           animation: ed-cursor 12s cubic-bezier(0.4, 0, 0.2, 1) infinite;
         }
         @keyframes ed-cursor {
-          /* enter from the top-right corner, fading in */
-          0% {
-            top: 5%;
-            left: 92%;
-            opacity: 0;
-            transform: scale(1);
-          }
-          4% {
-            top: 5%;
-            left: 92%;
-            opacity: 1;
-            transform: scale(1);
-          }
-          /* BEAT 1 — down to the timeline, onto Scene 2 (30.6%, 94.2%) */
-          9% {
-            top: 94%;
-            left: 30%;
-            transform: scale(1);
-          }
-          11% {
-            transform: scale(0.8);
-          }
-          14% {
-            transform: scale(1);
-          }
-          /* BEAT 2 — onto the Title-size knob at its rest (79.7%, 40.8%) */
-          20% {
-            top: 40%;
-            left: 79%;
-            transform: scale(1);
-          }
-          23% {
-            transform: scale(0.8);
-          }
-          /* drag the knob RIGHT to 86% pos (94.4%) — cursor tracks it exactly */
-          42% {
-            top: 40%;
-            left: 94%;
-            transform: scale(0.8);
-          }
-          45% {
-            transform: scale(1);
-          }
-          /* BEAT 3 — onto the Subtitle knob (80.3%, 49.2%), nudge to 60% (87.6%) */
-          52% {
-            top: 49%;
-            left: 80%;
-            transform: scale(1);
-          }
-          54% {
-            transform: scale(0.8);
-          }
-          58% {
-            top: 49%;
-            left: 87%;
-            transform: scale(0.8);
-          }
-          60% {
-            transform: scale(1);
-          }
-          /* BEAT 4 — onto the Title text field (85%, 72.4%) */
-          66% {
-            top: 72%;
-            left: 84%;
-            transform: scale(1);
-          }
-          68% {
-            transform: scale(0.8);
-          }
-          70% {
-            transform: scale(1);
-          }
-          /* HOLD at the field, fully opaque, until the typing finishes (~88%) */
-          88% {
-            top: 72%;
-            left: 84%;
-            opacity: 1;
-            transform: scale(1);
-          }
-          /* BEAT 5 — exit back up to the top-right corner, fading out */
-          96% {
-            opacity: 0.35;
-          }
-          100% {
-            top: 5%;
-            left: 92%;
-            opacity: 0;
-            transform: scale(1);
-          }
+          0%   { top: 5%;  left: 92%; opacity: 0; transform: scale(1); }
+          4%   { top: 5%;  left: 92%; opacity: 1; transform: scale(1); }
+          9%   { top: 94%; left: 30%; transform: scale(1); }
+          11%  { transform: scale(0.8); }
+          13%  { transform: scale(1); }
+          16%  { top: 40%; left: 79%; transform: scale(1); }
+          18%  { transform: scale(0.8); }
+          34%  { top: 40%; left: 94%; transform: scale(0.8); }
+          36%  { transform: scale(1); }
+          42%  { top: 49%; left: 80%; transform: scale(1); }
+          44%  { transform: scale(0.8); }
+          48%  { top: 49%; left: 87%; transform: scale(0.8); }
+          50%  { transform: scale(1); }
+          52%  { top: 72%; left: 84%; transform: scale(1); }
+          54%  { transform: scale(0.8); }
+          56%  { transform: scale(1); }
+          64%  { top: 72%; left: 84%; opacity: 1; transform: scale(1); }
+          73%  { opacity: 0.4; }
+          77%  { top: 95%; left: 5%; opacity: 0; transform: scale(1); }
+          100% { top: 5%;  left: 92%; opacity: 0; transform: scale(1); }
         }
 
         /* ------------------------------------------------------ PLAYHEAD */
@@ -756,8 +623,8 @@ export default function EditorDemo() {
         /* ==================================================================
            REDUCED MOTION — freeze a clean, legible MID-EDIT static frame.
            Title size already at 150 (dragged), heading enlarged, value pills
-           showing the new numbers, cursor parked on the Title-size handle.
-           No animation at all.
+           showing the new numbers (via JS state), cursor parked on the
+           Title-size handle. No animation at all.
            ================================================================== */
         @media (prefers-reduced-motion: reduce) {
           .ed-headline,
@@ -766,12 +633,8 @@ export default function EditorDemo() {
           .ed-subtitle,
           .ed-fill--title,
           .ed-handle--title,
-          .ed-pill--title .ed-pill__a,
-          .ed-pill--title .ed-pill__b,
           .ed-fill--sub,
           .ed-handle--sub,
-          .ed-pill--sub .ed-pill__a,
-          .ed-pill--sub .ed-pill__b,
           .ed-caret,
           .ed-field__a,
           .ed-field__b,
@@ -803,12 +666,6 @@ export default function EditorDemo() {
             left: 86%;
             transform: translate(-50%, -50%) scale(1);
           }
-          .ed-pill--title .ed-pill__a {
-            opacity: 0;
-          }
-          .ed-pill--title .ed-pill__b {
-            opacity: 1;
-          }
           /* subtitle slider at rest */
           .ed-fill--sub {
             width: 32%;
@@ -816,12 +673,6 @@ export default function EditorDemo() {
           .ed-handle--sub {
             left: 32%;
             transform: translate(-50%, -50%) scale(1);
-          }
-          .ed-pill--sub .ed-pill__a {
-            opacity: 1;
-          }
-          .ed-pill--sub .ed-pill__b {
-            opacity: 0;
           }
           /* field shows original text, no caret */
           .ed-field__a {
