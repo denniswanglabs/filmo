@@ -658,6 +658,8 @@ _ENTITY_STOP = {
     "every", "weekly", "daily", "apply", "learn", "more", "batch", "founders",
     "founder", "startups", "startup", "companies", "company", "stories", "story",
     "insights", "partners", "partner", "alumni", "network", "funding", "new", "best",
+    "build", "builds", "platform", "tools", "tool", "api", "apis", "app", "apps",
+    "cloud", "labs", "inc", "co", "team", "teams", "data", "pay", "payments",
 }
 
 

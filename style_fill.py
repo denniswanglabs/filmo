@@ -2282,8 +2282,8 @@ def _match_feature(features: List[str], scene_text: str) -> Optional[int]:
 # Magnitude-bearing stat token: currency, big-number suffix (B/M/K/billion...), %,
 # x, or a trailing "+" — i.e. an IMPRESSIVE number, not a bare "10 minutes".
 _TITLE_STAT_RE = re.compile(
-    r"\$\s?\d[\d,\.]*\s?(?:[BMK]|bn|billion|million|thousand)?\+?(?![A-Za-z])"
-    r"|\d[\d,\.]*\s?(?:B|M|K|bn|billion|million|thousand)\+?(?![A-Za-z])"
+    r"\$\s?\d[\d,\.]*\s?(?:[BMKT]|bn|billion|million|thousand|trillion)?\+?(?![A-Za-z])"
+    r"|\d[\d,\.]*\s?(?:[BMKT]|bn|billion|million|thousand|trillion)\+?(?![A-Za-z])"
     r"|\d[\d,\.]*\s?[%x](?![A-Za-z])"
     r"|\d[\d,\.]*\+",
     re.I)
