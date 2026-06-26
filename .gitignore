@@ -88,3 +88,17 @@ studio/public/brand-logo-*.svg
 
 # generated run artifacts (dashboard reads from disk; not versioned)
 runs/
+
+# ── AI-tool working dirs (never commit) ──
+.agents/
+.augment/
+.kilocode/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.windsurf/
+.claude/
+# vendored skill mirrors
+skills/
+skills-lock.json
