@@ -409,6 +409,11 @@ class TestNavSectionFilter(unittest.TestCase):
         for feat in ["Discover insights", "Explore your data"]:
             self.assertFalse(be._is_ui_label(feat), f"{feat!r} is a real feature")
 
+    def test_possessive_straight_apostrophe_is_ui_label(self):
+        # Regression: straight-apostrophe possessives (U+0027) must be caught,
+        # not just curly-apostrophe (U+2019) ones.
+        self.assertTrue(be._is_ui_label("In Maya's Story"), "straight-apostrophe possessive should be nav chrome")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

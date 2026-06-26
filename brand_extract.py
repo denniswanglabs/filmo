@@ -720,7 +720,7 @@ _NAV_SINGLE_WORDS = frozenset((
 # (allbirds "Men's Shoes"/"Customer Favorites", airbnb "Help Center"/"Find a co-host")
 # and got synthesized into a " · "-joined hero title. Two detectors:
 #   - exact category/section phrases (gendered store categories, support/account rails)
-#   - a leading function-token ("find a …", "shop …", "explore …", "browse …") that
+#   - a leading function-token ("find a …", "shop …", "browse …") that
 #     marks an imperative nav action, not a headline.
 _NAV_SECTION_EXACT = frozenset((
     "men's shoes", "mens shoes", "women's shoes", "womens shoes",
@@ -801,7 +801,7 @@ def _is_nav_segment(low):
     m = re.match(r"^(\w+)\s*&\s*(\w+)$", low)
     if m and m.group(1) in _NAV_AMP_NOUNS and m.group(2) in _NAV_AMP_NOUNS:
         return True
-    if low.startswith("in ") and ("words" in low or "’s" in low or "’s" in low):
+    if low.startswith("in ") and ("words" in low or "'s" in low or "’s" in low):
         return True
     if low.startswith(("be in ", "join the ")):
         return True
