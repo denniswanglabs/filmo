@@ -2279,6 +2279,31 @@ def _match_feature(features: List[str], scene_text: str) -> Optional[int]:
     return best_i
 
 
+# Magnitude-bearing stat token: currency, big-number suffix (B/M/K/billion...), %,
+# x, or a trailing "+" — i.e. an IMPRESSIVE number, not a bare "10 minutes".
+_TITLE_STAT_RE = re.compile(
+    r"\$\s?\d[\d,\.]*\s?(?:[BMK]|bn|billion|million|thousand)?\+?(?![A-Za-z])"
+    r"|\d[\d,\.]*\s?(?:B|M|K|bn|billion|million|thousand)\+?(?![A-Za-z])"
+    r"|\d[\d,\.]*\s?[%x](?![A-Za-z])"
+    r"|\d[\d,\.]*\+",
+    re.I)
+
+
+def _mine_stat_from_title(title):
+    """If the filled title carries an IMPRESSIVE number (currency / % / x / big-suffix
+    / trailing +), split it into {value, label}. Honest: the number is taken verbatim
+    from the real filled title. Returns None for bare/small numbers (e.g. "10 minutes")."""
+    if not title:
+        return None
+    m = _TITLE_STAT_RE.search(title)
+    if not m:
+        return None
+    value = m.group(0).strip()
+    label = (title[:m.start()] + " " + title[m.end():])
+    label = re.sub(r"\s{2,}", " ", label).strip(" —-·,:").strip()
+    return {"value": value, "label": label}
+
+
 def _assign_treatment_from_filled_copy(
     out: Dict[str, Any], scene: Dict[str, Any], brand: Dict[str, Any]
 ) -> None:
@@ -2348,17 +2373,25 @@ def _assign_treatment_from_filled_copy(
             entities = mined[:6]
     has_mosaic = len(entities) >= 3
 
-    # 2) Stat: keep an LLM stat only if its number is corroborated by real brand text
-    #    (now including the FILLED title/subtitle via the probe scene).
+    # 2) Stat: keep an LLM stat if real; else MINE an impressive stat from the title
+    #    ("$600B+ combined valuation", "3,000+ alumni"). Honest -- the number is taken
+    #    verbatim from the real filled title.
     stat = d.get("stat")
     has_real_stat = plan_job._stat_is_real(stat, probe, company_facts)
+    mined_stat = None
+    if not has_real_stat:
+        mined_stat = _mine_stat_from_title(title)
 
-    # 3) (Re)assign treatment — honesty first. A real stat wins; if the scene also
-    #    has a curated icon + a punchy (short) headline, prefer the icon-stat layout.
+    # 3) (Re)assign treatment — honesty first. Priority: a real LLM stat (icon-stat/
+    #    split-stat) > a title that IS a hero number (big-number) > >=3 entities
+    #    (split-mosaic) > icon-headline (the honest floor).
     icon = str(d.get("icon") or "").strip()
     if has_real_stat:
         punchy = bool(title) and len(title.split()) <= 6
         treatment = "icon-stat" if (icon and punchy) else "split-stat"
+    elif mined_stat:
+        treatment = "big-number"   # the title's number is the hero
+        stat = mined_stat
     elif has_mosaic:
         treatment = "split-mosaic"
     else:
@@ -2371,11 +2404,15 @@ def _assign_treatment_from_filled_copy(
     out.pop("featureEntities", None)
     if treatment in ("icon-stat", "icon-headline"):
         out["icon"] = _decode(icon) if icon else plan_job._DEFAULT_ICON
-    if treatment in ("icon-stat", "split-stat") and isinstance(stat, dict):
+    if treatment in ("icon-stat", "split-stat", "big-number") and isinstance(stat, dict):
         out["stat"] = {
             "value": _decode(str(stat.get("value") or "")),
             "label": _decode(str(stat.get("label") or "")),
         }
+    if treatment == "big-number":
+        # The title's number IS the message -> value+label carry it; drop the
+        # redundant support title so big-number reads kicker + huge value + label.
+        out["title"] = ""
     if treatment == "split-mosaic":
         out["featureEntities"] = [_decode(str(e)) for e in entities if str(e or "").strip()]
 
