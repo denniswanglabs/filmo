@@ -790,8 +790,15 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
     led.event("gate", "GATE voiceover: %s — %dc vs remaining %dc"
               % (vo_decision.upper(), vo_est, vo_remaining))
     vo_path = None
+    # WS_VO_PROVIDER=elevenlabs swaps ONLY the voice engine to ElevenLabs,
+    # INDEPENDENT of --quality (so a standard build = Higgsfield OFF but VO =
+    # ElevenLabs). It is honored in --mode real regardless of the --vo arg.
+    env_vo_provider = (os.environ.get("WS_VO_PROVIDER") or "").strip().lower()
+    env_wants_elevenlabs = env_vo_provider == "elevenlabs"
     vo_synth_provider = (vo_provider if mode == "mock"
-                         else ("elevenlabs" if vo_provider == "elevenlabs" else "edge"))
+                         else ("elevenlabs"
+                               if (vo_provider == "elevenlabs" or env_wants_elevenlabs)
+                               else "edge"))
 
     # -- QUALITY gates the VO engine (flag-gated):
     #   * premium -> a natural ElevenLabs STOCK voice. NOT a voice clone, so NO
@@ -814,6 +821,15 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
             vo_rec["premium_vo"] = {"requested": True, "engine": "edge",
                                     "voice_type": "stock", "consent_required": False,
                                     "reason": "mode=mock (no real synth)"}
+    elif premium and env_wants_elevenlabs and mode == "real":
+        # standard quality (Higgsfield OFF) but WS_VO_PROVIDER=elevenlabs forces the
+        # premium VOICE engine only. Real synth fires; the rest of the stack is std.
+        vo_synth_provider = "elevenlabs"
+        led.event("info", "STANDARD quality + WS_VO_PROVIDER=elevenlabs: ElevenLabs "
+                  "STOCK voice (Higgsfield OFF, VO engine = ElevenLabs)")
+        vo_rec["premium_vo"] = {"requested": True, "engine": "elevenlabs",
+                                "voice_type": "stock", "consent_required": False,
+                                "reason": "WS_VO_PROVIDER=elevenlabs (quality=standard)"}
     elif premium:
         # standard: the clean synthetic voice (edge-tts), always free.
         vo_synth_provider = "edge"

@@ -62,7 +62,10 @@ VALID_QUALITIES = ("standard", "premium")
 _QUALITY_PROMPT = {
     "standard": (
         "\n\nQUALITY: STANDARD (Remotion + real site capture). For THIS plan you may "
-        "use ONLY the scene types \"title\", \"screenshot\", and \"walkthrough\". Do "
+        "use the scene types \"title\", \"screenshot\", \"walkthrough\", and "
+        "\"motion_graphic\" (kinetic animated text/stat/figure cards, rendered by "
+        "Remotion at $0). USE at least one \"motion_graphic\" scene for fancy animated "
+        "visual energy. Do "
         "NOT plan any \"cinematic\" scene and do NOT use the models \"seedance_2_0\" "
         "or \"gpt_image_2\" — there is NO Higgsfield/AI-footage stage in a standard "
         "build. OVERRIDE structure rule 2 and the no-walkthrough rule. A STANDARD plan "
@@ -75,7 +78,9 @@ _QUALITY_PROMPT = {
         "demonstration of the emphasized feature (a recorded product tour),\n"
         "  4. a closing \"title\" CTA.\n"
         "Every scene's model is null. Keep the durations summing to EXACTLY "
-        "target_duration_s. Do NOT emit \"motion_graphic\" or \"cinematic\" scenes.\n"
+        "target_duration_s. \"motion_graphic\" scenes ARE allowed and encouraged "
+        "(Remotion, $0) for animated energy; do NOT emit \"cinematic\" scenes (no "
+        "Higgsfield in a standard build).\n"
         "COPY (this is the load-bearing part): every voiceover beat must be GROUNDED "
         "and CONCRETE about the REAL product — name a REAL feature, the REAL audience, "
         "or a real benefit with a real-looking specific number. NEVER write hollow, "
@@ -409,16 +414,13 @@ def seed_plan_with_read(plan, conversion_read):
             continue
         prior = (tgt.get("brief") or "").strip()
         tgt["brief"] = (prior + " " if prior else "") + ("CONVERSION FIX: %s" % fix)
-        sid = tgt.get("id")
-        tb = beat_by_id.get(sid)
-        if tb is not None and "CONVERSION FIX" not in (tb.get("text") or "") \
-                and tgt is not opening:
-            # surface the prescription in the spoken beat too (skip the opening,
-            # which is already the headline_fix line).
-            tb["text"] = (tb.get("text") or "").strip()
-            if tb["text"] and not tb["text"].endswith("."):
-                tb["text"] += "."
-            tb["text"] = (tb["text"] + " " if tb["text"] else "") + fix
+        # NOTE: the raw `fix` is an EDITORIAL meta-instruction (e.g.
+        # "CONVERSION FIX: Replace dual hero CTAs with one 'Start free' button.")
+        # — it belongs ONLY in the producer-facing scene BRIEF above, NEVER in the
+        # spoken voiceover. Injecting it into the beat text made the narrator read
+        # imperative stage directions aloud. The grounded OUTCOME/proof reaches the
+        # VO through headline_fix (opening beat) + the producer's grounded VO pass,
+        # so we deliberately do NOT push `fix` into any spoken beat here.
     return plan
 
 

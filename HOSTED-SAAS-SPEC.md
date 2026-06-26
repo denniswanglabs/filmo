@@ -34,17 +34,21 @@ pipeline lives on an always-on worker.
   fetch a run, fetch activity feed, Stripe **webhooks**. No heavy compute here.
 
 ### 2. Worker — a persistent cloud machine (CPU-heavy, GPU optional)
-- Runs the **existing Python pipeline unchanged**: `build_runner.py` → capture → Nemotron
-  plan → produce → Remotion render → ffmpeg stitch → upload. Plus **NemoClaw** (broker)
-  and the **Nemotron 550B** OpenRouter calls.
+- Runs the **existing Python pipeline unchanged**: `build_runner.py` → capture → Nous Hermes
+  Conversion Read → Nemotron plan → produce → Remotion render → ffmpeg stitch → upload. Plus
+  **NemoClaw** (broker) and the OpenRouter calls (Nous Hermes 3 405B for the page diagnosis,
+  with **Nemotron Ultra as the reliability fallback** when the free Hermes tier is rate-limited —
+  the Read's `engine` field records which model actually ran; **Nemotron 550B** for the
+  storyboard planning).
 - Pulls jobs from a queue (a Supabase `jobs` table polled, or Vercel Queues), writes
   progress to the `runs` row + `events` (so the live view + activity feed stream), and
   uploads `final.mp4` to Supabase Storage on deliver.
-- **Host:** a long-running container/VM — Fly.io machine, Railway, Render, or a plain
-  cloud VM. **GPU not required:** Remotion renders on Chromium (CPU), Higgsfield is a
-  remote API, edge-tts/ffmpeg are CPU. A beefy multi-core CPU box (8–16 vCPU) suffices;
-  add GPU only if we later move to local video models. (Recommend Fly.io for fast
-  always-on + simple secrets; decide at build time.)
+- **Host: Railway** (chosen 2026-06-23). Push-a-repo → it builds the container; simplest
+  DX for a 7-day push, persistent service + clean secrets + a Postgres add-on if we
+  ever want it co-located. **GPU not required:** Remotion renders on Chromium (CPU),
+  Higgsfield is a remote API, edge-tts/ffmpeg are CPU. A ~4GB / 2-vCPU service suffices
+  (~$20/mo at always-on; trivial at hackathon scale). Add GPU only if we later move to
+  local video models.
 
 ### 3. Data — Supabase
 - **Postgres** replaces the file-based `runs/*/ledger.json` + `runs/index.json`:
@@ -98,7 +102,7 @@ pipeline lives on an always-on worker.
    editor (phase 2) if time.
 
 ## Risks / open questions (for Dennis)
-- **Worker host choice** — Fly.io vs Railway vs a raw VM. (Recommend Fly.io.) Confirm.
+- **Worker host** — DECIDED: **Railway**.
 - **Secrets in cloud** — OPENROUTER, Stripe, ElevenLabs, Higgsfield keys move from
   `~/.hermes/.env` to the host's secret store + NemoClaw on the worker. No keys in Vercel
   except Stripe's.

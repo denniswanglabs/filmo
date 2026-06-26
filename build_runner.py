@@ -77,14 +77,20 @@ def vo_engine_enabled():
     return (os.environ.get(VO_ENGINE_ENV) or "").strip().lower() not in ("0", "false", "no", "off")
 
 
-# CONVERSION READ feature flag. When PRODUCER_CONVERSION_READ=1, build_runner runs
-# the ANALYZE stage (read_pass -> analyze -> persist) BEFORE planning and seeds the
-# planner with the Read. Default OFF -> main's behavior is byte-unchanged.
+# CONVERSION READ feature flag. build_runner runs the ANALYZE stage (read_pass ->
+# analyze -> persist) BEFORE planning and seeds the planner with the Read, so the
+# plan is Hermes-grounded and the "uses Nous Hermes" claim is true.
+# DEFAULT ON: the Conversion Read runs unless PRODUCER_CONVERSION_READ is EXPLICITLY
+# a falsy flag ('0'/'false'/'no'/'off'). Set it falsy to reproduce the legacy
+# (ungrounded) planning path.
 CONVERSION_READ_ENV = "PRODUCER_CONVERSION_READ"
 
 
 def conversion_read_enabled():
-    return (os.environ.get(CONVERSION_READ_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
+    val = (os.environ.get(CONVERSION_READ_ENV) or "").strip().lower()
+    if val in ("0", "false", "no", "off"):
+        return False
+    return True
 
 # Poll cadence + wall-clock cap for the payment gate (webhook backstop).
 PAYMENT_POLL_INTERVAL_S = 2.5
@@ -330,6 +336,14 @@ def _run_vo_engine(plan, run_id, url, run_dir):
 
     # align_vo -> build_timeline -> style_fill.build_props -> props.json (+ stage
     # audio). do_render=False here so we render once, below, into the run's final.mp4.
+    #
+    # VO PROVIDER (independent of quality/Higgsfield): the VO engine is ALWAYS the
+    # Remotion Timeline (VO_ENGINE_STYLE, no Higgsfield) regardless of provider. By
+    # default the voice is $0 edge-tts + whisper (tier="free" below). Set
+    # WS_VO_PROVIDER=elevenlabs in the environment to swap ONLY the voice engine to
+    # real ElevenLabs VO (read inside align_vo.synth_full_script) — so a
+    # `--quality standard` build (Higgsfield OFF) still gets premium ElevenLabs VO.
+    # We don't pass tier="premium" here; the env switch alone selects the provider.
     res = style_fill.run_pipeline(plan_path, brand_path, VO_ENGINE_STYLE, run_dir,
                                   fps=30, do_align=True, do_render=False)
     props_path = res["props_path"]
@@ -753,9 +767,11 @@ def main():
     ap.add_argument("--mode", choices=["mock", "real"], default="mock")
     ap.add_argument("--duration", type=int, default=30)
     ap.add_argument("--pace", type=float, default=1.2)
-    ap.add_argument("--style", choices=list(plan_job.VALID_STYLES), default="standard",
-                    help="user-facing output style: snappy (more+shorter scenes) | "
-                         "standard (today's default) | cinematic (fewer+longer scenes)")
+    ap.add_argument("--style", choices=list(plan_job.VALID_STYLES), default="snappy",
+                    help="user-facing output style (DEFAULT snappy = more+shorter "
+                         "scenes, ~6-8 scenes, 2-4s holds, faster cut rhythm) | "
+                         "standard (legacy ~4-5 scenes, longer holds) | "
+                         "cinematic (fewest+longest scenes)")
     ap.add_argument("--quality", choices=["standard", "premium"], default="standard",
                     help="video quality (the upfront cost-plus choice): standard "
                          "(Remotion + edge-tts, no Higgsfield/ElevenLabs, ~$5) | premium "

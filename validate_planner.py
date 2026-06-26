@@ -8,7 +8,9 @@ and asserts it matches the fixed contract.
 import json
 import os
 import re
+import socket
 import sys
+import time
 import urllib.request
 import urllib.error
 
@@ -416,6 +418,74 @@ def _brand_from_url(url):
 # full plan is never truncated. The two together are what make Super plan reliably.
 PLANNER_MAX_TOKENS = 16000
 
+# --- Resilience for the (non-streaming) OpenRouter call ----------------------
+# The paid Nemotron Ultra (550B) endpoint intermittently STALLS mid-response:
+# the upstream holds the HTTP connection open but stops making progress, so a
+# single long socket timeout would hang the whole build for minutes per stall.
+# We bound each attempt with a SHORT no-progress timeout (the "inter-token"
+# stall budget — if the response body doesn't arrive within this window the
+# socket read raises and we abort that attempt) and RETRY with exponential
+# backoff. Net effect: a stalled Ultra stream aborts fast and retries instead of
+# hanging forever. The free/super paths are unaffected in the happy case (they
+# answer well inside the timeout); they only gain the same retry safety net.
+# Env-overridable so an operator can widen the budget without a code change.
+def _env_int(name, default):
+    try:
+        v = int(os.environ.get(name, "") or "")
+        return v if v > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+# No-progress / inter-token timeout per attempt (seconds). urlopen(timeout=N)
+# applies N to EACH blocking socket op (connect + each read), so a hung upstream
+# that sends no bytes aborts after this window rather than after 300s.
+PLANNER_STALL_TIMEOUT_S = _env_int("PLANNER_STALL_TIMEOUT_S", 55)
+# Total attempts before giving up on this call. The paid Ultra (550B) provider
+# (Together via OpenRouter) throttles HARD under load — observed ~2/3 of bursts
+# returning 429/503 in-body envelopes tonight — and the planner makes only 1-2
+# calls per build, so a generous attempt budget is cheap insurance for getting a
+# real LLM plan (plan_source:llm) instead of the template. Operator-overridable.
+PLANNER_MAX_ATTEMPTS = _env_int("PLANNER_MAX_ATTEMPTS", 8)
+# Base backoff between attempts; doubles each retry, capped.
+PLANNER_BACKOFF_BASE_S = _env_int("PLANNER_BACKOFF_BASE_S", 3)
+PLANNER_BACKOFF_MAX_S = _env_int("PLANNER_BACKOFF_MAX_S", 20)
+
+
+class _UpstreamBodyError(Exception):
+    """OpenRouter returned HTTP 200 but the JSON body is an upstream-error
+    envelope (`{"error": {"code": 429/503, ...}}`) instead of a completion.
+
+    This is the ACTUAL Ultra "stall" failure mode: OpenRouter holds the
+    connection open with SSE-style whitespace keepalive padding, then returns a
+    200 whose body is `{"error": {"message": "Provider returned error", "code":
+    429|503}}`. Because the HTTP status is 200, urllib raises NOTHING — the old
+    code went straight to body["choices"] -> KeyError (non-retryable) -> instant
+    template fallback. We wrap it so it flows through the same retry/backoff path
+    as a real 5xx."""
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(f"upstream {code}: {message}")
+
+
+def _is_retryable_call(e):
+    """True for transient failures worth a backoff + retry on the SAME brain:
+    a stalled/timed-out socket read, a connection-level URLError (reset/DNS), an
+    HTTP 408/429/5xx, or an in-body upstream-error envelope with the same codes.
+    A clean 4xx (other than 408/429) is a real client error and is NOT retried."""
+    if isinstance(e, (socket.timeout, TimeoutError)):
+        return True
+    if isinstance(e, _UpstreamBodyError):
+        # No code, or a transient code (408/429/5xx) -> retry. A definite
+        # client-side code (e.g. 400/401/404) is not worth retrying.
+        return e.code is None or e.code in (408, 429) or 500 <= e.code < 600
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code in (408, 429) or 500 <= e.code < 600
+    # URLError wraps connection resets, DNS failures, and read timeouts.
+    if isinstance(e, urllib.error.URLError):
+        return True
+    return False
+
 
 def call_model(messages, brain=None, meta=None):
     """Call the operator-selected planner BRAIN via OpenRouter (OpenAI-compatible).
@@ -467,8 +537,46 @@ def call_model(messages, brain=None, meta=None):
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
+    # Resilient send: bound each attempt with the short no-progress timeout and
+    # retry transient stalls/timeouts/5xx with exponential backoff. A stalled
+    # Ultra stream now aborts after PLANNER_STALL_TIMEOUT_S and retries instead
+    # of hanging the build indefinitely.
+    body = None
+    last_err = None
+    for attempt in range(1, PLANNER_MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=PLANNER_STALL_TIMEOUT_S) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            # OpenRouter can return HTTP 200 with an upstream-error envelope
+            # (no "choices"). Treat that as a transient failure so it RETRIES
+            # instead of dropping straight to the template (the real Ultra
+            # throttle path: {"error":{"code":429|503}}).
+            if "choices" not in body:
+                err = body.get("error") or {}
+                code, message = err.get("code"), err.get("message")
+                body = None  # don't let the error envelope reach body["choices"]
+                raise _UpstreamBodyError(
+                    code, message or "no choices in response body",
+                )
+            break
+        except Exception as e:  # noqa: BLE001 — classify below
+            last_err = e
+            if _is_retryable_call(e) and attempt < PLANNER_MAX_ATTEMPTS:
+                backoff = min(PLANNER_BACKOFF_BASE_S * (2 ** (attempt - 1)),
+                              PLANNER_BACKOFF_MAX_S)
+                print(
+                    f"[call_model] {bdef['slug']} transient failure on attempt "
+                    f"{attempt}/{PLANNER_MAX_ATTEMPTS} ({type(e).__name__}: {e}); "
+                    f"backoff {backoff}s then retry",
+                    file=sys.stderr,
+                )
+                time.sleep(backoff)
+                continue
+            # Non-retryable, or out of attempts: propagate so the caller's own
+            # fallback (planner template / next-brain chain) takes over.
+            raise
+    if body is None:  # defensive — loop always breaks or raises
+        raise last_err if last_err else RuntimeError("call_model: no response")
     choice = body["choices"][0]
     fr = choice.get("finish_reason")
     usage = body.get("usage")

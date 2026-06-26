@@ -145,13 +145,20 @@ class StripeMoney:
                 "billing[address][line1]": "1 Test St", "billing[address][city]": "San Francisco",
                 "billing[address][state]": "CA", "billing[address][postal_code]": "94103",
                 "billing[address][country]": "US"})
+            # Static card limit defaults to the budget → Stripe declines an over-budget
+            # charge via spending_controls (reason `authorization_controls`), with no
+            # dependency on the webhook. Set PRODUCER_CARD_LIMIT_CENTS to a high ceiling so
+            # the over-budget charge PASSES static controls and reaches the real-time webhook
+            # (stripe_webhook.py), which declines it on the LIVE budget → reason
+            # `webhook_declined` — the brain's own verdict, the stronger autonomous artifact.
+            card_limit_cents = int(os.environ.get("PRODUCER_CARD_LIMIT_CENTS") or budget_cents)
             card = self._post("/v1/issuing/cards", {
                 "cardholder": cardholder["id"], "currency": currency, "type": "virtual",
                 "status": "active",
-                "spending_controls[spending_limits][0][amount]": budget_cents,
+                "spending_controls[spending_limits][0][amount]": card_limit_cents,
                 "spending_controls[spending_limits][0][interval]": "all_time"})
             return {"enabled": True, "provider": "stripe",
-                    "spending_limit_cents": budget_cents,
+                    "spending_limit_cents": card_limit_cents,
                     "card_id": card.get("id"), "cardholder_id": cardholder.get("id"),
                     "last4": card.get("last4")}
         except (urllib.error.URLError, KeyError, ValueError) as e:
