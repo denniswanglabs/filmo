@@ -187,7 +187,8 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
   const active = activeStageIndex(run.phase)
 
   // Most-recent activity first; the newest line gets a highlight so motion reads.
-  const recent = [...events].sort((a, b) => b.seq - a.seq).slice(0, 6)
+  // Show the FULL history (scrollable) so nothing scrolls out of reach on a long run.
+  const recent = [...events].sort((a, b) => b.seq - a.seq)
 
   // Human-pays flow: the build is parked awaiting a real Stripe TEST payment.
   const awaitingPayment = run.phase === 'awaiting_payment' && !!run.checkout_url
@@ -219,7 +220,7 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
         <p className="mt-2 text-sm text-slate-500">
           {isQueued
             ? 'Reserved a worker — the agent will begin reading your product in a moment.'
-            : 'This usually takes 1–3 minutes — the agent is reading your product, planning, and rendering.'}
+            : 'This usually takes 6–9 minutes — the agent reads your product, plans, prices, produces every scene, and renders. The larger models (Nemotron 550B) take longer to plan.'}
         </p>
 
         {/* Pay CTA — only when the human-pays flow parked the build awaiting a real
@@ -241,12 +242,15 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
         <div className="mt-6 border-t border-black/5 pt-5">
           <div className="mb-2.5 flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Live activity</h3>
-            <span className="text-[11px] text-slate-300">updates every few seconds</span>
+            <span className="text-[11px] text-slate-300">
+              {recent.length > 0 ? `${recent.length} steps · scroll for history` : 'updates every few seconds'}
+            </span>
           </div>
           {recent.length === 0 ? (
             <p className="text-sm text-slate-400">Warming up — first actions will appear here.</p>
           ) : (
-            <ul className="space-y-1.5">
+            // Scrollable so the full run history stays reachable (newest pinned on top).
+            <ul className="max-h-72 space-y-1.5 overflow-y-auto overscroll-contain pr-1">
               {recent.map((e, i) => (
                 <li
                   key={e.id}
