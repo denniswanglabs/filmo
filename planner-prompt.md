@@ -245,6 +245,15 @@ VOICEOVER RULES:
       payments…", "Stop fraud…", "Bill on a schedule…"). Each feature beat covers a DIFFERENT
       feature — never repeat the same value-prop or the tagline across cards (the R1 failure:
       "Build internet businesses" repeated on every scene).
+- DATA-RICH BEATS (REQUIRED — this is what makes the video good): EVERY "motion_graphic" feature
+  beat MUST carry CONCRETE REAL DATA — either (a) a REAL NUMBER in its title (a stat: "$600B+
+  combined valuation", "3,000+ alumni", "99.99% uptime", "135+ currencies"), or (b) be the ONE
+  entity-LIST scene (>= 3 real product/customer/portfolio names as a comma list in the title).
+  A beat that is just a generic value-prop with NO number and NO named entities is a FAILURE —
+  it renders as a bare card. Ground EACH beat in concrete real data you know about THIS specific
+  company (real metrics, product names, customer names, percentages, prices). Aim for a SPREAD
+  across your 2-3 beats: at least one number-stat beat AND the entity-list beat when the brand
+  has both. Honesty absolute — only REAL numbers/names, never invented.
 - CARD TREATMENT — CHOOSE A LAYOUT FOR EACH "motion_graphic" FEATURE BEAT (emit it in that
   scene's "data"): a bare feature card (title + a short line) leaves the right side empty. So
   for EACH "motion_graphic" scene, pick ONE "treatment" from the REAL data you have and emit
