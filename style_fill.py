@@ -2446,6 +2446,36 @@ def _assign_treatment_from_filled_copy(
         out["patternReason"] = "metric-row: %d real metrics" % len(out["metrics"])
         return
 
+    # 3c) comparison-columns: a two-column contrast (the muted "old way" LEFT vs the
+    #     accented "with Filmo" way RIGHT). HONESTY GUARD: select ONLY when the planner
+    #     extracted a REAL contrast -- `compare` is a dict whose leftItems and rightItems
+    #     are each lists with >=2 non-empty strings AND both side titles are non-empty.
+    #     NEVER invent a contrast; if `compare` is absent or a side is short, fall through
+    #     to the stat/entity/floor logic below (never a lopsided / half-empty comparison).
+    raw_compare = d.get("compare")
+    if isinstance(raw_compare, dict):
+        left_items = [str(x).strip() for x in (raw_compare.get("leftItems") or [])
+                      if isinstance(x, (str, int, float)) and str(x).strip()]
+        right_items = [str(x).strip() for x in (raw_compare.get("rightItems") or [])
+                       if isinstance(x, (str, int, float)) and str(x).strip()]
+        left_title = str(raw_compare.get("leftTitle") or "").strip()
+        right_title = str(raw_compare.get("rightTitle") or "").strip()
+        if len(left_items) >= 2 and len(right_items) >= 2 and left_title and right_title:
+            out["treatment"] = "comparison-columns"
+            out.pop("icon", None)
+            out.pop("stat", None)
+            out.pop("featureEntities", None)
+            out.pop("metrics", None)
+            out["compare"] = {
+                "leftTitle": _decode(left_title),
+                "leftItems": [_decode(x) for x in left_items],
+                "rightTitle": _decode(right_title),
+                "rightItems": [_decode(x) for x in right_items],
+            }
+            out["patternReason"] = "comparison-columns: %dv%d items" % (
+                len(left_items), len(right_items))
+            return
+
     use_stat = stat if (has_real_stat and isinstance(stat, dict)) else (mined_stat or None)
     mined_only = bool(mined_stat) and not has_real_stat
     mined_label = (mined_stat.get("label") or "").strip() if mined_stat else ""

@@ -82,5 +82,39 @@ class TestDeviceFrame(unittest.TestCase):
         self.assertNotEqual(out.get("treatment"), "device-frame")
 
 
+class TestComparisonColumns(unittest.TestCase):
+    def _shape(self, data):
+        out = dict(data); scene = {"data": dict(data)}
+        style_fill._assign_treatment_from_filled_copy(out, scene, {"wordmark": "Filmo"})
+        return out
+
+    def test_real_contrast_selects_comparison_columns(self):
+        # A real extracted contrast with >=2 items per side -> comparison-columns.
+        out = self._shape({"title": "Old way vs Filmo",
+                           "compare": {
+                               "leftTitle": "The old way",
+                               "leftItems": ["Hire an agency", "Wait 3 weeks", "$10k+ per video"],
+                               "rightTitle": "With Filmo",
+                               "rightItems": ["Paste a URL", "Ready in minutes", "A few dollars"]}})
+        self.assertEqual(out.get("treatment"), "comparison-columns")
+        self.assertIsInstance(out.get("compare"), dict)
+        self.assertIn("items", out.get("patternReason", "").lower())
+
+    def test_short_sides_do_not_select_comparison_columns(self):
+        # Fewer than 2 items on a side -> NOT comparison-columns (never half-empty).
+        out = self._shape({"title": "Old vs new",
+                           "compare": {
+                               "leftTitle": "The old way",
+                               "leftItems": ["Hire an agency"],
+                               "rightTitle": "With Filmo",
+                               "rightItems": ["Paste a URL", "Ready in minutes"]}})
+        self.assertNotEqual(out.get("treatment"), "comparison-columns")
+
+    def test_missing_compare_does_not_select_comparison_columns(self):
+        # Absent compare -> never invented.
+        out = self._shape({"title": "See it in action"})
+        self.assertNotEqual(out.get("treatment"), "comparison-columns")
+
+
 if __name__ == "__main__":
     unittest.main()

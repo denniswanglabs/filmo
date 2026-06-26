@@ -77,9 +77,12 @@ export interface SceneData {
     | "logo-wall"
     | "feature-list"
     | "metric-row"
-    | "device-frame";
+    | "device-frame"
+    | "comparison-columns";
   // metric-row: 3-4 small real stats shown as a horizontal strip.
   metrics?: Array<{ value: string; label: string }>;
+  // comparison-columns: a two-column contrast (old way vs Filmo).
+  compare?: { leftTitle: string; leftItems: string[]; rightTitle: string; rightItems: string[] };
   // device-frame: text-left / a REAL captured product screenshot (reuses the
   // existing `imageSrc` field below) wrapped in a clean browser frame on the
   // RIGHT. Selected only for a product beat that carries a real screenshot.

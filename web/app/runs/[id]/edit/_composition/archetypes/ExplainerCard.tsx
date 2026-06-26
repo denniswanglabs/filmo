@@ -892,6 +892,196 @@ const TreatmentMetricRow: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT — comparison-columns (a two-column contrast). LEFT = the muted "old
+// way" (de-emphasized: textMuted rows with a dash marker). RIGHT = the accented
+// "with Filmo" way (emphasized: full-text rows with an accent checkmark). A
+// centered title block sits above; a subtle theme.border divider separates the
+// columns. THEME-TOKEN ONLY so it reads clean on any brand. Caller guarantees a
+// `compare` with >=2 items per side (selection guard runs first). No remote
+// assets — identical JSX in studio + web.
+// ---------------------------------------------------------------------------
+const TreatmentComparisonColumns: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  titleText: string;
+  titleLines: string[];
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, titleText, titleLines, sceneId,
+}) => {
+  const compare = data.compare ?? { leftTitle: "", leftItems: [], rightTitle: "", rightItems: [] };
+  const leftItems = (compare.leftItems ?? []).map((s) => (s ?? "").trim()).filter(Boolean).slice(0, 5);
+  const rightItems = (compare.rightItems ?? []).map((s) => (s ?? "").trim()).filter(Boolean).slice(0, 5);
+  const rowsAt = cueAt(cues, "subtitle-in", subAt + 4);
+
+  const ColumnHeader: React.FC<{ label: string; opacity: number; accent: boolean }> = ({
+    label, opacity, accent,
+  }) => (
+    <div
+      style={{
+        opacity,
+        fontSize: 22,
+        fontWeight: 800,
+        letterSpacing: 3,
+        textTransform: "uppercase",
+        color: accent ? theme.accent : theme.textMuted,
+        fontFamily: theme.fontMono,
+        paddingBottom: 4,
+      }}
+    >
+      {label}
+    </div>
+  );
+
+  const Row: React.FC<{ text: string; i: number; accent: boolean }> = ({ text, i, accent }) => {
+    const rowAt = rowsAt + i * 8;
+    const rowOpacity = ease(frame, rowAt, rowAt + 16, 0, 1);
+    const rowX = ease(frame, rowAt, rowAt + 16, accent ? 18 : -18, 0);
+    return (
+      <div
+        style={{
+          opacity: rowOpacity,
+          transform: `translateX(${rowX}px)`,
+          display: "flex",
+          alignItems: "center",
+          gap: 18,
+        }}
+      >
+        <div
+          style={{
+            flex: "0 0 36px",
+            width: 36,
+            height: 36,
+            borderRadius: accent ? 10 : 18,
+            background: accent ? `${theme.accent}${alphaHex(0.12)}` : "transparent",
+            border: `1px solid ${accent ? `${theme.accent}${alphaHex(0.45)}` : theme.border}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {accent ? (
+            <svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+              <path d="M5 12.5l4 4 10-10" stroke={theme.accent} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+              <path d="M6 12h12" stroke={theme.textMuted} strokeWidth="2.4" strokeLinecap="round" />
+            </svg>
+          )}
+        </div>
+        <span
+          style={{
+            fontSize: 30,
+            fontWeight: accent ? 600 : 400,
+            color: accent ? theme.text : theme.textMuted,
+            letterSpacing: -0.3,
+            lineHeight: 1.25,
+            fontFamily: theme.fontDisplay,
+          }}
+        >
+          {text}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 140,
+        right: 140,
+        top: 110,
+        bottom: 96,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        gap: 44,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "center", textAlign: "center" }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            justifyContent: "center",
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={56}
+          sceneId={sceneId}
+        />
+      </div>
+
+      <div
+        data-scene-id={sceneId}
+        data-field="compare"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1px 1fr",
+          gap: 56,
+          alignItems: "start",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          <ColumnHeader
+            label={compare.leftTitle || "Before"}
+            opacity={ease(frame, rowsAt - 6, rowsAt + 8, 0, 1)}
+            accent={false}
+          />
+          {leftItems.map((text, i) => (
+            <Row key={`l-${i}-${text}`} text={text} i={i} accent={false} />
+          ))}
+        </div>
+
+        <div
+          style={{
+            width: 1,
+            alignSelf: "stretch",
+            background: theme.border,
+            opacity: ease(frame, rowsAt, rowsAt + 20, 0, 1),
+          }}
+        />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          <ColumnHeader
+            label={compare.rightTitle || "With Filmo"}
+            opacity={ease(frame, rowsAt - 6, rowsAt + 8, 0, 1)}
+            accent
+          />
+          {rightItems.map((text, i) => (
+            <Row key={`r-${i}-${text}`} text={text} i={i} accent />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // TREATMENT — device-frame (text left + a REAL product screenshot in a clean
 // browser frame, right). Sibling of split-stat. THEME-TOKEN ONLY so the frame
 // chrome reads clean on any brand (white/orange YC, etc.). The frame is a
@@ -1666,6 +1856,10 @@ export const ExplainerCard: React.FC<{
   const hasEntities = (data.featureEntities ?? []).filter((e) => (e ?? "").trim()).length > 0;
   const hasStat = !!(data.stat?.value ?? "").trim();
   const hasShot = !!(data.imageSrc ?? "").trim();
+  // comparison-columns needs >=2 real items on BOTH sides (never a lopsided contrast).
+  const hasCompare =
+    (data.compare?.leftItems ?? []).filter((s) => (s ?? "").trim()).length >= 2 &&
+    (data.compare?.rightItems ?? []).filter((s) => (s ?? "").trim()).length >= 2;
 
   let treatment = data.treatment;
   if ((treatment === "split-mosaic" || treatment === "logo-wall") && !hasEntities) treatment = "icon-headline";
@@ -1676,6 +1870,9 @@ export const ExplainerCard: React.FC<{
   // device-frame needs a real captured screenshot — with none, drop to the
   // centered fallback (never an empty browser frame).
   else if (treatment === "device-frame" && !hasShot) treatment = "icon-headline";
+  // comparison-columns needs a real two-sided contrast — without it, drop to the
+  // centered fallback (never a half-empty comparison).
+  else if (treatment === "comparison-columns" && !hasCompare) treatment = "icon-headline";
 
   return (
     <AbsoluteFill
@@ -1833,6 +2030,23 @@ export const ExplainerCard: React.FC<{
           subText={subText}
           sceneId={sceneId}
           resolveSrc={resolveSrc}
+        />
+      ) : treatment === "comparison-columns" ? (
+        <TreatmentComparisonColumns
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          titleText={titleText}
+          titleLines={titleLines}
+          sceneId={sceneId}
         />
       ) : treatment === "icon-headline" ? (
         <TreatmentIconHeadline
