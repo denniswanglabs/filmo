@@ -2387,16 +2387,18 @@ def _assign_treatment_from_filled_copy(
     if not has_real_stat:
         mined_stat = _mine_stat_from_title(title)
 
-    # 3) (Re)assign treatment — honesty first. Priority: a real LLM stat (icon-stat/
-    #    split-stat) > a title that IS a hero number (big-number) > >=3 entities
-    #    (split-mosaic) > icon-headline (the honest floor).
+    # 3) (Re)assign treatment. DENNIS'S LAYOUT PREFERENCE: text LEFT + a fancy VISUAL
+    #    RIGHT (number+bars / tile grid) -> the SPLIT treatments dominate. Real OR
+    #    mined stat -> split-stat (headline left, number + rising bars right). >=3
+    #    entities -> split-mosaic (headline left, tile grid right). Centered
+    #    big-number ONLY when the title is JUST a number (nothing for the left).
+    #    icon-headline is the honest floor (no stat/entities). Never fabricate.
     icon = str(d.get("icon") or "").strip()
-    if has_real_stat:
-        punchy = bool(title) and len(title.split()) <= 6
-        treatment = "icon-stat" if (icon and punchy) else "split-stat"
-    elif mined_stat:
-        treatment = "big-number"   # the title's number is the hero
-        stat = mined_stat
+    use_stat = stat if (has_real_stat and isinstance(stat, dict)) else (mined_stat or None)
+    mined_only = bool(mined_stat) and not has_real_stat
+    mined_label = (mined_stat.get("label") or "").strip() if mined_stat else ""
+    if use_stat:
+        treatment = "big-number" if (mined_only and not mined_label) else "split-stat"
     elif has_mosaic:
         treatment = "split-mosaic"
     else:
@@ -2407,17 +2409,23 @@ def _assign_treatment_from_filled_copy(
     out.pop("icon", None)
     out.pop("stat", None)
     out.pop("featureEntities", None)
-    if treatment in ("icon-stat", "icon-headline"):
+    if treatment == "icon-headline":
         out["icon"] = _decode(icon) if icon else plan_job._DEFAULT_ICON
-    if treatment in ("icon-stat", "split-stat", "big-number") and isinstance(stat, dict):
-        out["stat"] = {
-            "value": _decode(str(stat.get("value") or "")),
-            "label": _decode(str(stat.get("label") or "")),
-        }
-    if treatment == "big-number":
-        # The title's number IS the message -> value+label carry it; drop the
-        # redundant support title so big-number reads kicker + huge value + label.
-        out["title"] = ""
+    if treatment == "split-stat":
+        if mined_only:
+            # the title WAS the number -> descriptor becomes the LEFT headline,
+            # number goes to the RIGHT panel.
+            out["title"] = mined_label or str(out.get("title") or "")
+            out["stat"] = {"value": _decode(str(use_stat.get("value") or "")), "label": ""}
+        else:
+            out["stat"] = {
+                "value": _decode(str(use_stat.get("value") or "")),
+                "label": _decode(str(use_stat.get("label") or "")),
+            }
+    if treatment == "big-number" and isinstance(use_stat, dict):
+        out["title"] = ""   # the number is the whole message
+        out["stat"] = {"value": _decode(str(use_stat.get("value") or "")),
+                       "label": _decode(str(use_stat.get("label") or ""))}
     if treatment == "split-mosaic":
         out["featureEntities"] = [_decode(str(e)) for e in entities if str(e or "").strip()]
 
