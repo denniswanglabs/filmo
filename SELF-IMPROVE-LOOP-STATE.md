@@ -99,4 +99,12 @@ Infra: `.venv-capture` (Playwright) lets `loop_plan.py` do REAL capture locally 
 - Dead/unreachable URL → planner improvises generic copy (capture failed, no real text). Pre-existing planner behavior; enrich correctly stays empty. Edge case (real users paste real URLs).
 - Rarely a benign 2-word entity ("Loom One", "Cloudflare One"-type) — deliberately NOT stop-listed to avoid truncating real product names.
 
-**Loop-2 STATUS: GOAL ACHIEVED + HARDENED + DEPLOYED.** Verified-knowledge enrichment makes EVERY known brand render rich verified cards from generic homepages, and degrades honestly (zero fabrication) for unknown brands and name-collisions. Final worker deploy: bul2jo8ru (iter5+iter6).
+| iter7 | mine honest word-form site numbers (50-plus→50+, 92 percent→92%) | Orinovate (unknown) now gets a stat card from its real site number; no regression | (committed) |
+
+**Loop-2 STATUS: GOAL ACHIEVED + HARDENED + DEPLOYED.** Verified-knowledge enrichment makes EVERY known brand render rich verified cards from generic homepages, and degrades honestly (zero fabrication) for unknown brands and name-collisions. Final worker deploy: **b5u97io8g** (all of iter5+iter6+iter7). Final hosted re-confirm: 4cbb07d9.
+
+## LOOP 3 — PROPOSED (needs Dennis's greenlight; NOT built autonomously)
+**Goal:** extend the "rich cards from a generic homepage" win to brands the model does NOT know (where `enrich_brand_knowledge` returns empty), by HONESTLY mining real named products/customers from the GROUNDED site copy.
+**The gap (seen this loop):** iKala's real products (KOL Radar, Shoplus, Cloud ADS) ARE in the captured copy, but as prose — the enrich is empty (model doesn't know iKala) and the comma-list miner only fires on comma-lists in TITLES → no mosaic. So real-but-unfamiliar brands stay icon-headline even when their site names real products.
+**Proposed approach:** a focused pass mining PROPER-NOUN product/customer names from the full grounded `conversion_read` copy (not just titles), each corroborated VERBATIM against the captured text (honesty: must appear in real copy), then build ONE split-mosaic if ≥3 distinct found. Plus optional fully-spelled word-numbers ("two thousand plus" → 2,000+).
+**Why GATED, not built overnight:** (a) honesty boundary — "what is a real product name in prose" is judgment-laden (risk of mosaicking random capitalized words); (b) regression-prone — could inject garbled/wrong mosaics into currently-CLEAN unknown-brand gens; (c) Dennis greenlit the verified-knowledge enrich the SAME way (spec → approve → build). Reserve for his review.
