@@ -60,4 +60,19 @@ A worker redeploy is ~5-7 min, so DO NOT deploy per iteration. Iterate locally:
 | 1 | harness (style_fill) | treatment assignment runs AFTER copy is filled (`_assign_treatment_from_filled_copy`) | entities now visible to miner | ✓ (commit 9fc491b) |
 | 2 | harness (style_fill) | `_mine_stat_from_title` → big-number for real title stats ($600B+, 3,000+) | 2 big-number stat cards | ✓ (15991f2) |
 | 3 | brain (planner-prompt) + harness | planner variety + entity scenes (companies); entity miner cleanup | $500K big-number + Airbnb/Stripe/Dropbox/DoorDash split-mosaic + icon-headlines = matches target screenshot | ✓ (66178c3) |
-| 4 | harness (style_fill) | trim big-number labels to a tight phrase | cleaner hero stats | in progress |
+| 4 | harness (style_fill) | trim big-number labels to a tight phrase | cleaner hero stats | ✓ |
+| 5 | harness (style_fill) | TEXT-LEFT/VISUAL-RIGHT preference → stats route to split-stat (headline left, number+bars right), not centered big-number | YC: split-stat $500K + split-mosaic + icon-headlines = Dennis's preferred look | ✓ ([[feedback_video_split_layout_preference]]) |
+| 6 | brain + harness | planner forces ONE entity-LIST scene; split-stat headline number cleanup | YC clean; Stripe still didn't make a list scene (LLM noncompliance) | ✓ |
+| 7 | brain (planner-prompt) | REQUIRE concrete data (real number OR entity-list) in every feature beat | more stats fire, but planner STILL inconsistent run-to-run | ✓ |
+
+## FINAL SUMMARY (2-hr loop, 2026-06-26)
+**WHAT'S FIXED + DEPLOYED (production worker + Vercel):** the card pipeline now renders FANCY, VARIED, text-LEFT/visual-RIGHT cards FROM REAL DATA — split-stat (headline left, number + rising bars right), split-mosaic (headline left, company tile grid right), big-number, + 3 dormant layouts (logo-wall/feature-list/comparison) built. Treatments are decided AFTER the copy is filled; a stat miner + entity miner pull real numbers/companies from the filled titles; honesty-guarded (never fabricates). On a DATA-RICH YC plan this matches Dennis's target screenshot exactly (sample: `~/Desktop/filmo-videos/yc-loop-iter3.mp4`, `yc-hosted-FINAL-*`).
+
+**THE REMAINING GAP (the real frontier — needs Dennis-reviewed work, NOT safe to brute-force autonomously):** the PLANNER is INCONSISTENT run-to-run. Some plans are data-rich ($500K, Airbnb/Stripe/Dropbox → great split cards); others are data-poor (generic value-props → all icon-headline). The pipeline renders correctly either way, but the INPUT data isn't reliable. Root causes + next steps:
+1. **Reliable data extraction (biggest lever):** the Conversion Read / `brand_extract` does NOT reliably capture concrete stats + named products/customers (Stripe's `brand.features` were taglines, not "Billing/Connect/Radar"). FIX: make the Conversion Read EXTRACT a structured list of {real stats} + {named entities} and pass them to the planner as REQUIRED facts to use — so rich cards don't depend on the LLM's recall/compliance.
+2. **Force an entity-list scene (harness):** if the read found ≥3 named entities, deterministically ensure ONE feature scene is the comma-list (the prompt alone doesn't make the LLM comply).
+3. **Variety enforcement (post-pass):** avoid repetitive treatments (e.g. 3 split-stats) — diversify across the spread.
+4. **icon-headline → text-left:** give data-poor scenes a split-headline layout (left text / right decorative visual) so "most text on the left" always holds.
+5. **Bare numbers ("10,000 alumni") + odd mined headlines:** mining mid-title numbers yields grim left headlines ("Join alumni"); needs smarter headline derivation.
+
+**Commits this loop:** 9fc491b, 15991f2, 66178c3, (iter4) , 261e9c7, + iter5/iter7. Loop scripts: `loop_plan.py`, `loop_measure.py`. Spend ≈ a few ¢.
