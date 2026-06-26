@@ -366,7 +366,8 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
             raise ValueError("planner produced an invalid plan: " + "; ".join(problems))
     # CONTENT-QUALITY GATE (advisory + ONE corrective re-plan). Only LLM plans are
     # retried; template plans and a second failure fall through (the render-time
-    # cross-scene dedup backstop guarantees no repeats regardless).
+    # cross-scene dedup backstop still guarantees no cross-scene repeats; the other
+    # content checks (nav-labels, thin beats, proof) remain advisory).
     content_problems = validate_plan_content_quality(plan, company_facts or {})
     if content_problems and plan_source == "llm":
         print("[planner] content-quality issues -> one corrective re-plan: %s"
@@ -377,8 +378,10 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
                  "proof point (a real number or named feature), and contains no nav/section "
                  "labels. Keep the same scene ids, types, and durations.")
         retry = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality,
-                                    brain, company_facts, meta=planner_meta, extra_user=fix)
+                                    brain, company_facts, meta=planner_meta,
+                                    conversion_read=conversion_read, extra_user=fix)
         if retry is not None:
+            retry = seed_plan_with_read(retry, conversion_read)
             retry_problems = validate_plan(retry)
             if not retry_problems:
                 plan = retry
