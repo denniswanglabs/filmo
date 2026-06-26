@@ -433,6 +433,68 @@ export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
 }
 
 // ---------------------------------------------------------------------------
+// PinnedHero — a pinned scroll-INTRO. The hero is sticky-pinned across the first
+// ~1 viewport of scroll (the page doesn't move): the big centered `title` scales
+// down to its settled size while the `body` (subtitle + composer) reveals in from
+// small. After the pin releases the page scrolls normally. Both states are
+// horizontally centered, so the title only scales + nudges vertically (no off-axis
+// travel). Reduced motion / SSR render the settled hero in normal flow, no pin.
+// ---------------------------------------------------------------------------
+interface PinnedHeroProps {
+  title: ReactNode
+  body: ReactNode
+  /** classes for the centered content column. */
+  className?: string
+  /** decoration rendered inside the pinned stage, behind the content (z-0). */
+  decoration?: ReactNode
+  /** anchor id placed on the section (e.g. "start" for the nav jump). */
+  id?: string
+}
+
+export function PinnedHero({ title, body, className = '', decoration, id }: PinnedHeroProps) {
+  const enabled = useMotionEnabled()
+  const ref = useRef<HTMLElement>(null)
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] })
+  // Pin spans 200vh of runway; the sticky child is pinned for the first ~half
+  // (progress 0 → ~0.5), which is where the intro plays.
+  const titleScale = useTransform(scrollYProgress, [0, 0.42], [2.4, 1])
+  // Big title sits at viewport center; settles UP to the top of the column (the
+  // body below occupies layout, so y:0 is already the settled position).
+  const titleY = useTransform(scrollYProgress, [0, 0.42], ['26vh', '0vh'])
+  const bodyOpacity = useTransform(scrollYProgress, [0.26, 0.48], [0, 1])
+  const bodyY = useTransform(scrollYProgress, [0.26, 0.48], [32, 0])
+  const bodyScale = useTransform(scrollYProgress, [0.26, 0.48], [0.94, 1])
+
+  if (!enabled) {
+    return (
+      <section ref={ref} id={id} className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-32">
+        {decoration}
+        <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
+          {title}
+          {body}
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section ref={ref} id={id} className="relative h-[200vh]">
+      <div className="surface-dots-dark sticky top-0 flex h-screen items-center overflow-hidden border-b border-[#D4E2FB]/60">
+        {decoration}
+        <div className={`relative z-10 mx-auto w-full px-5 text-center ${className}`}>
+          <motion.div style={{ scale: titleScale, y: titleY, transformOrigin: 'center center', willChange: 'transform' }}>
+            {title}
+          </motion.div>
+          <motion.div style={{ opacity: bodyOpacity, y: bodyY, scale: bodyScale, willChange: 'transform, opacity' }}>
+            {body}
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // PinnedCenter — pins a centered element (e.g. an "Examples" CTA) while the
 // surrounding content drifts past it. Pure position:sticky; no transforms, so
 // it works identically with reduced motion. Place it as a sibling overlay

@@ -14,7 +14,8 @@ import LuceoShowcase from './components/landing/LuceoShowcase'
 import ReadyToCreate from './components/landing/ReadyToCreate'
 import PoweredBy from './components/landing/PoweredBy'
 import SiteFooter from './components/landing/SiteFooter'
-import { ParallaxWindows, ScrubbedHero } from './components/landing/Motion'
+import { PinnedHero } from './components/landing/Motion'
+import VerticalCutReveal from './components/fancy/VerticalCutReveal'
 import { BRAINS, type Run } from '../lib/types'
 
 // Composer state stashed across the Google OAuth round-trip so the prompt survives
@@ -167,39 +168,35 @@ export default function Home() {
     <div className="landing-dark min-h-screen">
       <FloatingNav />
 
-      <section
+      <PinnedHero
         id="start"
-        className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60"
-      >
-        {/* Soft light-blue aura grounds the light hero. */}
-        <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
-        {/* Decorative floating "windows" parallax layer — sits behind the composer
-            (z-0, pointer-events none), never covers the headline or form. */}
-        <ParallaxWindows />
-        <main className="relative z-10 mx-auto max-w-3xl px-5 pb-20 pt-28 sm:pt-36">
-          {/* Scroll-scrubbed pinned hero: the headline + REAL composer scrub in
-              (scale/lift) and settle, pinned across the first viewport. The form
-              stays fully functional — ScrubbedHero only wraps it in a transform.
-              Reduced motion / SSR: renders untransformed in normal flow. */}
-          <ScrubbedHero className="w-full">
-            {/* Hero — left-aligned, indented to line up with the composer's
-                inner labels (card uses p-6, so px-6 here shares that left edge). */}
-            <div className="mb-8 px-6 text-left">
-              <h1 className="text-5xl font-semibold leading-[1.03] tracking-tight text-[#0E1320] sm:text-[3.75rem]">
-                Your AI Product
-                <br />
-                Launch Producer
-              </h1>
-              <p className="mt-4 max-w-xl text-lg text-[#5A6472]">
-                Paste your URL. Filmo reads your real product, diagnoses how it converts, and
-                ships a finished launch video — planned, priced, and produced on autopilot.
-              </p>
-            </div>
+        className="mx-auto max-w-3xl"
+        decoration={
+          <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
+        }
+        title={
+          <div className="mx-auto flex justify-center text-5xl font-semibold leading-[1.03] tracking-tight text-[#0E1320] sm:text-[3.75rem]">
+            <VerticalCutReveal
+              splitBy="lines"
+              staggerDuration={0.14}
+              transition={{ type: 'spring', stiffness: 200, damping: 24 }}
+              containerClassName="items-center text-center"
+            >
+              {'Your AI Product\nLaunch Producer'}
+            </VerticalCutReveal>
+          </div>
+        }
+        body={
+          <>
+            <p className="mx-auto mt-5 max-w-xl text-lg text-[#5A6472]">
+              Paste your URL. Filmo reads your real product, diagnoses how it converts, and
+              ships a finished launch video — planned, priced, and produced on autopilot.
+            </p>
 
-            {/* Composer card — white, light-blue accents, soft shadow */}
+            {/* Composer card — centered block, left-aligned internals */}
             <form
               onSubmit={onBuild}
-              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
+              className="mx-auto mt-8 max-w-xl rounded-2xl border border-[#D4E2FB] bg-white p-6 text-left shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
             >
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Website URL</span>
@@ -291,13 +288,16 @@ export default function Home() {
                 </p>
               )}
             </form>
-          </ScrubbedHero>
+          </>
+        }
+      />
 
-          {/* Sponsor credit — Hermes Hackathon (Nous Research × NVIDIA × Stripe).
-              Sits directly under the composer as a small trust strip. */}
-          <div className="mt-8">
-            <PoweredBy />
-          </div>
+      {/* Below the pinned hero — the page scrolls normally from here. */}
+      <main className="relative z-10 mx-auto max-w-3xl px-5 pb-20 pt-12">
+        {/* Sponsor credit — Hermes Hackathon (Nous Research × NVIDIA × Stripe). */}
+        <div>
+          <PoweredBy />
+        </div>
 
           {/* Recents — only meaningful once signed in. */}
           {user && (
@@ -342,8 +342,7 @@ export default function Home() {
               )}
             </section>
           )}
-        </main>
-      </section>
+      </main>
 
       {/* Proof — real videos the pipeline produced. */}
       <Examples />
