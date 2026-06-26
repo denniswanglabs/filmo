@@ -2409,18 +2409,23 @@ def _assign_treatment_from_filled_copy(
         treatment = "icon-headline"
 
     # 4) Emit onto the rendered props (SHARED DATA CONTRACT field names exact).
+    #    Also record patternReason -- a human-readable trace of WHY this treatment was
+    #    chosen, citing the REAL data that earned it (stat value / entity count) or the
+    #    honest floor. PURELY ADDITIVE legibility: it never alters the choice above.
     out["treatment"] = treatment
     out.pop("icon", None)
     out.pop("stat", None)
     out.pop("featureEntities", None)
     if treatment == "icon-headline":
         out["icon"] = _decode(icon) if icon else plan_job._DEFAULT_ICON
+        out["patternReason"] = "icon-headline: no real stat/entities (honest floor)"
     if treatment == "split-stat":
+        stat_value = _decode(str(use_stat.get("value") or ""))
         if mined_only:
             # the title WAS the number -> descriptor becomes the LEFT headline,
             # number goes to the RIGHT panel.
             out["title"] = mined_label or str(out.get("title") or "")
-            out["stat"] = {"value": _decode(str(use_stat.get("value") or "")), "label": ""}
+            out["stat"] = {"value": stat_value, "label": ""}
         else:
             # has_real_stat: the LLM stat goes on the RIGHT; strip any COMPETING number
             # from the LEFT headline so it doesn't fight the stat panel ("Merchants see
@@ -2430,15 +2435,19 @@ def _assign_treatment_from_filled_copy(
             if ct:
                 out["title"] = ct
             out["stat"] = {
-                "value": _decode(str(use_stat.get("value") or "")),
+                "value": stat_value,
                 "label": _decode(str(use_stat.get("label") or "")),
             }
+        out["patternReason"] = "split-stat: real stat %s" % stat_value
     if treatment == "big-number" and isinstance(use_stat, dict):
+        stat_value = _decode(str(use_stat.get("value") or ""))
         out["title"] = ""   # the number is the whole message
-        out["stat"] = {"value": _decode(str(use_stat.get("value") or "")),
+        out["stat"] = {"value": stat_value,
                        "label": _decode(str(use_stat.get("label") or ""))}
+        out["patternReason"] = "big-number: %s" % stat_value
     if treatment == "split-mosaic":
         out["featureEntities"] = [_decode(str(e)) for e in entities if str(e or "").strip()]
+        out["patternReason"] = "split-mosaic: %d real entities" % len(out["featureEntities"])
 
 
 def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
