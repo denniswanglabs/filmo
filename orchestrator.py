@@ -559,7 +559,7 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
                         "output_path": rel(out, run_dir), "stripe_authorization": None,
                         "studio": studio_block})
             clips.append((idx, out))
-            led.event("info", "FREE scene %r (%s) produced — $0" % (sid, stype))
+            led.event("info", "produced scene %r (%s)" % (sid, stype))
             led.upsert_scene(rec)
             flush()
             continue
@@ -711,7 +711,7 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
                             "remaining_after_cents": budget - spent,
                             "status": "declined", "output_path": None,
                             "stripe_authorization": auth})
-                led.event("decline", "DECLINED %r even after downgrade — scene cut, $0 spent" % sid)
+                led.event("decline", "DECLINED %r even after downgrade — scene cut" % sid)
 
         else:  # decline
             # Bridge: refresh live budget so the webhook's decide() sees this
@@ -833,7 +833,7 @@ def orchestrate(plan, run_id, mode="mock", runs_dir=None, vo_provider="edge",
     elif premium:
         # standard: the clean synthetic voice (edge-tts), always free.
         vo_synth_provider = "edge"
-        led.event("info", "STANDARD VO: clean synthetic voice via edge-tts ($0)")
+        led.event("info", "synthesized the narration voice")
 
     have_vo_audio = vo_decision == "approve" and (aligned_beats or vo.get("script"))
     if have_vo_audio:
