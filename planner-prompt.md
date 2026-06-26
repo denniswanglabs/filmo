@@ -11,7 +11,7 @@ the prompt must not rename, add, or drop top-level fields. Field names are froze
 ```json
 {
   "job":        {"company_url": str, "goal": str, "target_duration_s": int, "target_margin": float, "currency": "usd"},
-  "scenes":     [ {"id": str, "type": "title|cinematic|motion_graphic", "brief": str, "model": str|null, "duration_s": int, "input_image": str|null} ],
+  "scenes":     [ {"id": str, "type": "title|screenshot|motion_graphic|walkthrough|cinematic", "brief": str, "model": str|null, "duration_s": int, "input_image": str|null} ],
   "voiceover":  {"voice": str, "beats": [ {"scene_id": str, "text": str} ]}
 }
 ```
@@ -37,13 +37,19 @@ beats as a fallback), but the planner MUST emit `beats`.
   to self-check the sum before emitting.
 - **Quality gates the allowed scene types** (the upfront customer choice, threaded into the
   planner at PLAN time):
-  - **STANDARD = real-capture.** Allowed scene types are `title`, `screenshot`, and
-    `walkthrough` (all model null). The plan is: opening `title` -> 1-2 `screenshot` scenes
-    (real captured views of the company's website) -> ONE `walkthrough` scene (a guided,
-    multi-step demonstration of the emphasized feature) -> closing `title` CTA. NO `cinematic`,
-    NO `motion_graphic`, NO `seedance_2_0` / `gpt_image_2` model — there is no Higgsfield stage
-    in a standard build. The captured screenshots and the produced walkthrough clip are wired
-    into the matching scenes at render time.
+  - **STANDARD = screenshot-HYBRID.** Allowed scene types are `title`, `screenshot`,
+    `motion_graphic`, and (optionally) `walkthrough` (all model null). The plan is: opening
+    `title` -> EXACTLY ONE `screenshot` scene (the real captured **homepage hero** — the "this
+    is a real product" proof) -> 2-3 `motion_graphic` feature beats (AUTHORED kinetic feature
+    cards, each naming ONE real product feature, rebuilt to match the voiceover exactly) ->
+    (optional) ONE `walkthrough` of the emphasized feature -> closing `title` CTA. NO `cinematic`,
+    NO `seedance_2_0` / `gpt_image_2` model — there is no Higgsfield stage in a standard build.
+    **Why the hybrid:** a per-feature screenshot grabbed the homepage / a scroll position, not
+    the feature the voiceover named, so the picture and the words drifted apart. Keeping only the
+    homepage screenshot (which always matches a general value-prop line) and rebuilding every
+    feature beat as an authored `motion_graphic` makes the picture match the VO by construction.
+    The single homepage screenshot is wired into its scene at render time; the feature cards are
+    rendered by Remotion at $0.
   - **PREMIUM REQUIRES cinematic.** A premium plan MUST include AT LEAST 2 `cinematic` scenes:
     a cinematic **establishing** shot (`seedance_2_0`) and a cinematic **hero** shot
     (`gpt_image_2` or `seedance_2_0`), plus the opening/closing `title` cards and optional
@@ -52,11 +58,12 @@ beats as a fallback), but the planner MUST emit `beats`.
     skip the Higgsfield footage that defines the tier.
   The harness appends a per-quality guidance block to the SYSTEM PROMPT (after the style
   block), and a deterministic backstop enforces both ends: for STANDARD it forces the
-  `title` -> 1-2 `screenshot` -> `walkthrough` -> `title` shape (re-typing any stray
-  cinematic/motion_graphic content scene and rewriting the walkthrough's brief to the
-  emphasis-specific multi-step goal), and for PREMIUM it upgrades feature beats to `cinematic`
-  (assigning `seedance_2_0` then `gpt_image_2`, preserving ids/durations) if the small model
-  returns fewer than 2 cinematic scenes.
+  `title` -> ONE homepage `screenshot` -> 2-3 `motion_graphic` feature cards -> `title` shape
+  (keeping only the first screenshot as the homepage hero, re-typing every extra screenshot,
+  walkthrough, and stray cinematic into a `motion_graphic` feature card, and synthesizing
+  feature cards from the real features if the model produced fewer than two), and for PREMIUM
+  it upgrades feature beats to `cinematic` (assigning `seedance_2_0` then `gpt_image_2`,
+  preserving ids/durations) if the small model returns fewer than 2 cinematic scenes.
 - **Model selection is a lookup, not a judgment**: `seedance_2_0` for cinematic scenes that
   need motion, `gpt_image_2` for cinematic still plates; `title`/`motion_graphic`
   carry `model: null` (rendered by Remotion, no Higgsfield spend).
@@ -100,7 +107,7 @@ OUTPUT SCHEMA (these top-level keys and field names are FIXED — never rename, 
   "scenes": [
     {
       "id": string,               // short kebab id, unique, e.g. "open-title", "scene-positioning-1"
-      "type": string,             // STANDARD: "title" | "screenshot" | "walkthrough"; PREMIUM: "title" | "cinematic" | "motion_graphic"
+      "type": string,             // STANDARD: "title" | "screenshot" | "motion_graphic" | "walkthrough"; PREMIUM: "title" | "cinematic" | "motion_graphic"
       "brief": string,            // one-sentence direction for this scene
       "model": string or null,    // see MODEL RULES
       "duration_s": integer,      // whole seconds, >= 2
@@ -119,12 +126,14 @@ OUTPUT SCHEMA (these top-level keys and field names are FIXED — never rename, 
 }
 
 QUALITY (the upfront customer choice — controls which scene types are allowed):
-- If the brief is STANDARD quality (real-capture build): use ONLY the scene types "title",
-  "screenshot", and "walkthrough" (all model null). Do NOT plan any "cinematic" or
-  "motion_graphic" scene and do NOT use the models "seedance_2_0" or "gpt_image_2". A STANDARD
-  plan is: an opening "title", ONE or TWO "screenshot" scenes (real captured views of the
-  company's website — homepage, then an optional key inner page), ONE "walkthrough" scene (a
-  guided, multi-step screen demonstration of the emphasized feature), and a closing "title" CTA.
+- If the brief is STANDARD quality (screenshot-HYBRID build): use the scene types "title",
+  "screenshot", "motion_graphic", and (optionally) "walkthrough" (all model null). Do NOT plan
+  any "cinematic" scene and do NOT use the models "seedance_2_0" or "gpt_image_2". A STANDARD
+  plan is: an opening "title", EXACTLY ONE "screenshot" scene (the real captured HOMEPAGE hero —
+  its voiceover beat describes the PRODUCT GENERALLY, the company + its core value, NOT a
+  specific on-page element), 2-3 "motion_graphic" feature beats (AUTHORED kinetic feature cards,
+  each naming ONE real product feature, rebuilt to match its voiceover exactly), an OPTIONAL
+  single "walkthrough" of the emphasized feature, and a closing "title" CTA.
 - If the brief is PREMIUM quality: the plan MUST include AT LEAST 2 "cinematic" scenes — this
   is a REQUIREMENT, not an option. You MUST include (1) a cinematic ESTABLISHING shot with
   model "seedance_2_0" and (2) a cinematic HERO shot with model "gpt_image_2" or "seedance_2_0",
@@ -140,21 +149,22 @@ STRUCTURE RULES (the scenes array MUST satisfy ALL of these):
    REQUIRES AT LEAST 2 cinematic: a cinematic establishing shot (model "seedance_2_0") AND a
    cinematic hero shot (model "gpt_image_2" or "seedance_2_0"). Fewer than 2 cinematic makes a
    PREMIUM plan INVALID.
-   (STANDARD) Next come 1 to 2 "screenshot" scenes (real captured website views) followed by
-   exactly ONE "walkthrough" scene (a guided, multi-step demonstration of the emphasized
-   feature). STANDARD has NO cinematic and NO motion_graphic scenes.
-3. STANDARD plans include a "walkthrough" scene (the guided product demo of the emphasized
-   feature) and "screenshot" scenes (the real site). PREMIUM plans NEVER include "walkthrough"
-   or "screenshot" — premium conveys the product through cinematic shots only.
+   (STANDARD) Next comes EXACTLY ONE "screenshot" scene (the real captured HOMEPAGE hero),
+   then 2 to 3 "motion_graphic" feature beats (authored kinetic feature cards, each naming ONE
+   real product feature), and an OPTIONAL single "walkthrough" of the emphasized feature.
+3. STANDARD plans use ONE "screenshot" (the homepage proof) plus "motion_graphic" feature cards
+   (and at most one optional "walkthrough"). PREMIUM plans NEVER include "walkthrough" or
+   "screenshot" — premium conveys the product through cinematic shots only.
 4. The LAST scene has type "title" (the closing card / CTA).
-5. PREMIUM MAY include "motion_graphic" scenes (a divider or stat card, model null) as optional
-   feature beats. STANDARD does NOT use "motion_graphic".
+5. STANDARD USES "motion_graphic" scenes for its feature beats (2-3, model null). PREMIUM MAY
+   include "motion_graphic" scenes (a divider or stat card, model null) as optional feature beats.
 6. duration_s across ALL scenes MUST sum to EXACTLY target_duration_s. Verify the sum
    before you emit. If it does not match, adjust scene durations until it does.
 
-The allowed scene types are: an opening "title" card; for STANDARD, "screenshot" (captured site
-views) and ONE "walkthrough" (guided demo); for PREMIUM, "cinematic" establishing / feature
-shots and optional "motion_graphic" feature beats; and a closing "title" card.
+The allowed scene types are: an opening "title" card; for STANDARD, ONE "screenshot" (the
+captured homepage hero), 2-3 "motion_graphic" feature cards, and an optional "walkthrough";
+for PREMIUM, "cinematic" establishing / feature shots and optional "motion_graphic" feature
+beats; and a closing "title" card.
 
 MODEL RULES (the "model" field):
 - type "cinematic": choose a Higgsfield model.
@@ -207,20 +217,28 @@ VOICEOVER RULES:
 - The CLOSING title's beat is the call to action and SHOULD name the real next step (e.g.
   "Start accepting payments at stripe.com.", "Find your next trip on Tripadvisor."), not a
   generic "get started", so the CTA lands ON the closing card.
-- SCREENSHOT SCENES — ONE FEATURE EACH, COHERENT WITH THE SHOT (the text-left / screenshot-
-  right layout shows the scene's headline NEXT TO the captured page, and a highlight box marks
-  the named element, so the words and the picture MUST be about the same thing):
-    * Each "screenshot" scene's "brief" names ONE concrete, on-page product capability the
-      captured view will show (e.g. for stripe.com: "Accepting card and wallet payments through
-      one integration"; "The dashboard's real-time revenue and payouts view"; "Going live with a
-      few lines of code"). The brief is the SUBJECT the headline + highlight both point at.
-    * That scene's VO "beat" describes THAT SAME feature — its first sentence is the value-prop
-      the headline is built from; lead with the feature noun ("Accept payments…", "Every
-      transaction…", "Go live…"). Do NOT narrate the page, the screenshot, or the brand tagline.
-    * When there are TWO screenshot scenes, they MUST cover DIFFERENT features (e.g. payments
-      then dashboard) — never repeat the same value-prop or the tagline across both. Distinct
-      subjects per scene is required (the R1 failure: "Build internet businesses" repeated on
-      every scene).
+- THE SINGLE HOMEPAGE SCREENSHOT — GENERAL VALUE-PROP, NOT A SPECIFIC-ELEMENT CLAIM (the
+  STANDARD plan has EXACTLY ONE "screenshot": the captured HOMEPAGE hero):
+    * Its "brief" is the homepage hero ("Real captured HOMEPAGE hero of <Brand> in a branded
+      browser card"). Because the capture is the homepage — not a specific feature page — its
+      VO "beat" MUST describe the PRODUCT GENERALLY: the company plus its core value-prop (e.g.
+      "Stripe powers online payments for millions of businesses.", "Tripadvisor helps travelers
+      plan and book better trips."). This is deliberate — a homepage shot always matches a
+      general "this is the product" line, so the picture and the words NEVER drift apart.
+    * Do NOT make the homepage beat a specific on-page-element claim (e.g. "See the live
+      dashboard here") — a homepage capture may not show that element, which is exactly the
+      old drift bug. Keep it general.
+- MOTION_GRAPHIC FEATURE BEATS — ONE REAL FEATURE EACH, AUTHORED TO MATCH (the STANDARD plan's
+  2-3 "motion_graphic" scenes are the feature beats):
+    * Each "motion_graphic" scene's "brief" names ONE concrete, REAL product feature from the
+      COMPANY FACTS (e.g. for stripe.com: "Accepting card and wallet payments through one
+      integration"; "Built-in fraud protection and instant payouts"; "Recurring billing and
+      invoicing"). Because the card is REBUILT (not a captured page), the on-screen visual is
+      authored to MATCH the named feature exactly — picture and VO coherent by construction.
+    * That scene's VO "beat" describes THAT SAME feature; lead with the feature noun ("Accept
+      payments…", "Stop fraud…", "Bill on a schedule…"). Each feature beat covers a DIFFERENT
+      feature — never repeat the same value-prop or the tagline across cards (the R1 failure:
+      "Build internet businesses" repeated on every scene).
 - Do NOT emit a single combined "script" — use the per-scene "beats" array only.
 
 VALIDITY:
@@ -304,8 +322,9 @@ unchanged.
      nothing else." Then parse again. If it still fails, surface the error — do not loop.
 - **Post-parse schema assertion** (cheap, deterministic — run it even when parse succeeds):
   top-level keys == {job, scenes, voiceover}; scenes[0].type == "title";
-  scenes[-1].type == "title"; NO walkthrough scene; **STANDARD: ZERO cinematic (Remotion-only:
-  title + motion_graphic), PREMIUM: >= 2 cinematic (2-4)** with every cinematic.model in
+  scenes[-1].type == "title"; **STANDARD: ZERO cinematic, EXACTLY ONE screenshot (the homepage
+  hero), >= 2 motion_graphic feature cards, at most 1 (optional) walkthrough; PREMIUM: >= 2
+  cinematic (2-4)** with every cinematic.model in
   {seedance_2_0, gpt_image_2}; sum(duration_s) == target_duration_s; voiceover.voice == "Adam";
   voiceover.beats is a non-empty array of {scene_id, text} with one beat per non-title scene and
   every scene_id matching a scenes[].id. These are the same checks the validation script applies.

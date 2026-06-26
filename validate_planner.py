@@ -49,7 +49,7 @@ OUTPUT SCHEMA (these top-level keys and field names are FIXED -- never rename, a
   "scenes": [
     {
       "id": string,               // short kebab id, unique
-      "type": string,             // STANDARD: "title" | "screenshot" | "walkthrough"; PREMIUM: "title" | "cinematic" | "motion_graphic"
+      "type": string,             // STANDARD: "title" | "screenshot" | "motion_graphic" | "walkthrough"; PREMIUM: "title" | "cinematic" | "motion_graphic"
       "brief": string,            // one-sentence direction for this scene
       "model": string or null,    // see MODEL RULES
       "duration_s": integer,      // whole seconds, >= 2
@@ -68,7 +68,7 @@ OUTPUT SCHEMA (these top-level keys and field names are FIXED -- never rename, a
 }
 
 QUALITY (the upfront customer choice — controls which scene types are allowed):
-- If the brief is STANDARD quality (real-capture build): use ONLY the scene types "title", "screenshot", and "walkthrough" (all model null). Do NOT plan any "cinematic" or "motion_graphic" scene and do NOT use the models "seedance_2_0" or "gpt_image_2". A STANDARD plan is: an opening "title", ONE or TWO "screenshot" scenes (real captured views of the company's website — homepage, then an optional key inner page), ONE "walkthrough" scene (a guided, multi-step screen demonstration of the emphasized feature), and a closing "title" CTA.
+- If the brief is STANDARD quality (screenshot-HYBRID build): use the scene types "title", "screenshot", "motion_graphic", and (optionally) "walkthrough" (all model null). Do NOT plan any "cinematic" scene and do NOT use the models "seedance_2_0" or "gpt_image_2". A STANDARD plan is: an opening "title", EXACTLY ONE "screenshot" scene (the real captured HOMEPAGE hero — its voiceover beat describes the PRODUCT GENERALLY, the company + its core value, NOT a specific on-page element), 2-3 "motion_graphic" feature beats (AUTHORED kinetic feature cards, each naming ONE real product feature, rebuilt to match its voiceover exactly), an OPTIONAL single "walkthrough" of the emphasized feature, and a closing "title" CTA.
 - If the brief is PREMIUM quality: the plan MUST include AT LEAST 2 "cinematic" scenes — this is a REQUIREMENT, not an option. Premium is defined by real AI-generated cinematic footage; a premium plan with zero cinematic scenes is INVALID. You MUST include both of these cinematic scenes:
     1. a cinematic ESTABLISHING shot with model "seedance_2_0" (a moving establishing plate of what the company does), and
     2. a cinematic HERO shot with model "gpt_image_2" (a composed hero still) or model "seedance_2_0" (a moving hero plate).
@@ -78,13 +78,13 @@ A separate QUALITY guidance block may be appended after this prompt; when presen
 
 STRUCTURE RULES (the scenes array MUST satisfy ALL of these):
 1. The FIRST scene has type "title" (the opening brand/title card).
-2. (PREMIUM) Next come 2 to 4 scenes with type "cinematic" that convey the company's positioning (what it is, who it serves, why it matters) -- inferred from the company_url and goal. PREMIUM REQUIRES AT LEAST 2 cinematic scenes: a cinematic establishing shot (model "seedance_2_0") AND a cinematic hero shot (model "gpt_image_2" or "seedance_2_0"). (STANDARD) Next come 1 to 2 "screenshot" scenes (real captured website views) then exactly ONE "walkthrough" scene (a guided, multi-step demonstration of the emphasized feature). STANDARD has no cinematic and no motion_graphic.
-3. STANDARD plans include a "walkthrough" scene (the guided product demo) and "screenshot" scenes (the real site). PREMIUM plans NEVER include "walkthrough" or "screenshot" -- premium conveys the product through cinematic shots only.
+2. (PREMIUM) Next come 2 to 4 scenes with type "cinematic" that convey the company's positioning (what it is, who it serves, why it matters) -- inferred from the company_url and goal. PREMIUM REQUIRES AT LEAST 2 cinematic scenes: a cinematic establishing shot (model "seedance_2_0") AND a cinematic hero shot (model "gpt_image_2" or "seedance_2_0"). (STANDARD) Next comes EXACTLY ONE "screenshot" scene (the real captured HOMEPAGE hero), then 2 to 3 "motion_graphic" feature beats (authored kinetic feature cards, each naming ONE real product feature), and an OPTIONAL single "walkthrough" of the emphasized feature. STANDARD has no cinematic.
+3. STANDARD plans use ONE "screenshot" (the homepage proof) plus "motion_graphic" feature cards (and at most one optional "walkthrough"). PREMIUM plans NEVER include "walkthrough" or "screenshot" -- premium conveys the product through cinematic shots only.
 4. The LAST scene has type "title" (the closing card / CTA).
-5. PREMIUM MAY include "motion_graphic" scenes (a divider, stat card, or feature beat, model null) as optional feature beats. STANDARD does NOT use "motion_graphic".
+5. STANDARD USES "motion_graphic" scenes for its feature beats (2-3, model null). PREMIUM MAY include "motion_graphic" scenes (a divider, stat card, or feature beat, model null) as optional feature beats.
 6. duration_s across ALL scenes MUST sum to EXACTLY target_duration_s. Verify the sum before you emit. If it does not match, adjust scene durations until it does.
 
-The allowed scene types are: an opening "title" card; for STANDARD, "screenshot" (captured site views) and ONE "walkthrough" (guided demo); for PREMIUM, "cinematic" establishing / feature shots and optional "motion_graphic" feature beats; and a closing "title" card.
+The allowed scene types are: an opening "title" card; for STANDARD, ONE "screenshot" (the captured homepage hero), 2-3 "motion_graphic" feature cards, and an optional "walkthrough"; for PREMIUM, "cinematic" establishing / feature shots and optional "motion_graphic" feature beats; and a closing "title" card.
 
 MODEL RULES (the "model" field):
 - type "cinematic": choose a Higgsfield model.
@@ -603,10 +603,11 @@ def extract_json(text):
 def schema_check(plan, target_duration_s, quality="premium"):
     """Assert the plan matches the fixed contract for the given quality.
 
-    quality="standard": the plan MUST be Remotion-only — ZERO cinematic and ZERO
-    walkthrough scenes (only title + motion_graphic). quality="premium": cinematic
-    scenes ARE allowed (2-4 required, the historical contract). Default is
-    "premium" so the existing live validation run (PREMIUM-equivalent) is unchanged.
+    quality="standard": the SCREENSHOT-HYBRID — Remotion-only (ZERO cinematic),
+    EXACTLY ONE screenshot (the homepage proof) plus 2+ motion_graphic feature cards;
+    a walkthrough is OPTIONAL (0 or 1). quality="premium": cinematic scenes ARE
+    allowed (2-4 required, the historical contract). Default is "premium" so the
+    existing live validation run (PREMIUM-equivalent) is unchanged.
     """
     quality = "standard" if str(quality).strip().lower() == "standard" else "premium"
     problems = []
@@ -628,7 +629,9 @@ def schema_check(plan, target_duration_s, quality="premium"):
     # is the cinematic stack (title + cinematic + motion_graphic). Gate the allowed
     # types on quality so each path only emits the scene types its stack renders.
     if quality == "standard":
-        allowed_types = {"title", "screenshot", "walkthrough"}
+        # SCREENSHOT-HYBRID: title + ONE homepage screenshot + motion_graphic feature
+        # cards, with an OPTIONAL walkthrough still tolerated.
+        allowed_types = {"title", "screenshot", "motion_graphic", "walkthrough"}
     else:
         allowed_types = {"title", "cinematic", "motion_graphic"}
     if not scenes:
@@ -648,16 +651,21 @@ def schema_check(plan, target_duration_s, quality="premium"):
         n_walk = sum(1 for s in scenes if s.get("type") == "walkthrough")
         n_shot = sum(1 for s in scenes if s.get("type") == "screenshot")
         n_cine = sum(1 for s in scenes if s.get("type") == "cinematic")
+        n_mg = sum(1 for s in scenes if s.get("type") == "motion_graphic")
         if quality == "standard":
-            # STANDARD is the real-capture stack: title -> 1-2 screenshot ->
-            # walkthrough -> title. NO cinematic / motion_graphic; EXACTLY one
-            # walkthrough and at least one screenshot.
+            # STANDARD is the SCREENSHOT-HYBRID: title -> EXACTLY ONE homepage
+            # screenshot -> 2+ motion_graphic feature cards -> title. NO cinematic;
+            # the walkthrough is OPTIONAL (0 or 1). The single homepage screenshot
+            # always matches a general value-prop line, killing the VO-vs-picture
+            # drift; the feature beats are authored motion_graphic cards.
             if n_cine != 0:
-                problems.append(f"cinematic count={n_cine}, expected 0 for STANDARD (real-capture: title + screenshot + walkthrough)")
-            if n_shot < 1:
-                problems.append(f"screenshot count={n_shot}, expected >=1 for STANDARD (the captured site views)")
-            if n_walk != 1:
-                problems.append(f"walkthrough count={n_walk}, expected exactly 1 for STANDARD (the guided demo)")
+                problems.append(f"cinematic count={n_cine}, expected 0 for STANDARD (hybrid: title + 1 screenshot + motion_graphic)")
+            if n_shot != 1:
+                problems.append(f"screenshot count={n_shot}, expected exactly 1 for STANDARD (the homepage hero proof shot)")
+            if n_mg < 2:
+                problems.append(f"motion_graphic count={n_mg}, expected >=2 for STANDARD (the authored kinetic feature cards)")
+            if n_walk > 1:
+                problems.append(f"walkthrough count={n_walk}, expected at most 1 for STANDARD (optional product tour)")
         else:
             # PREMIUM is cinematic-only and RETIRES the walkthrough/screenshot types.
             if n_walk != 0:

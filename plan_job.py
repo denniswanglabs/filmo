@@ -61,26 +61,39 @@ VALID_QUALITIES = ("standard", "premium")
 # is visibly different from standard; standard forbids cinematic (Remotion-only).
 _QUALITY_PROMPT = {
     "standard": (
-        "\n\nQUALITY: STANDARD (Remotion + real site capture). For THIS plan you may "
-        "use the scene types \"title\", \"screenshot\", \"walkthrough\", and "
-        "\"motion_graphic\" (kinetic animated text/stat/figure cards, rendered by "
-        "Remotion at $0). USE at least one \"motion_graphic\" scene for fancy animated "
-        "visual energy. Do "
+        "\n\nQUALITY: STANDARD (Remotion + ONE real homepage capture + authored kinetic "
+        "feature cards). For THIS plan you may use the scene types \"title\", "
+        "\"screenshot\", \"motion_graphic\", and (optionally) \"walkthrough\" — all "
+        "model null, all rendered by Remotion at $0. Do "
         "NOT plan any \"cinematic\" scene and do NOT use the models \"seedance_2_0\" "
         "or \"gpt_image_2\" — there is NO Higgsfield/AI-footage stage in a standard "
-        "build. OVERRIDE structure rule 2 and the no-walkthrough rule. A STANDARD plan "
-        "has EXACTLY this shape, in order:\n"
+        "build. OVERRIDE structure rule 2. A STANDARD plan "
+        "has this shape, in order:\n"
         "  1. an opening \"title\" card (the brand lockup),\n"
-        "  2. ONE or TWO \"screenshot\" scenes (model null) — each is a real captured "
-        "view of the company's website shown in a branded browser card; the first is "
-        "the homepage, an optional second is a key inner page,\n"
-        "  3. ONE \"walkthrough\" scene (model null) — a guided, multi-step screen "
-        "demonstration of the emphasized feature (a recorded product tour),\n"
-        "  4. a closing \"title\" CTA.\n"
+        "  2. EXACTLY ONE \"screenshot\" scene (model null) — the company's HOMEPAGE "
+        "hero, a real captured view shown in a branded browser card. Because the "
+        "capture is the homepage (not a specific feature page), its voiceover beat "
+        "MUST describe the PRODUCT GENERALLY — the company plus its core value-prop — "
+        "NOT a specific on-page element or claim. This is deliberate: a homepage shot "
+        "always matches a general \"this is the product\" line, so the picture and the "
+        "words never drift apart,\n"
+        "  3. TWO or THREE \"motion_graphic\" feature beats (model null) — AUTHORED "
+        "kinetic animated feature cards, NOT screenshots. EACH one names exactly ONE "
+        "REAL product feature drawn from the COMPANY FACTS. Because these are rebuilt "
+        "kinetic cards (not a captured page), the on-screen visual is generated to "
+        "MATCH the named feature exactly — so the picture and the voiceover are "
+        "coherent by construction. Do NOT capture a screenshot for a feature; build a "
+        "motion_graphic card instead,\n"
+        "  4. OPTIONAL: you MAY keep ONE \"walkthrough\" scene (model null, a guided "
+        "multi-step product tour of the emphasized feature) ONLY if it reads well; "
+        "otherwise prefer a third \"motion_graphic\" feature beat instead. Do not "
+        "force a walkthrough,\n"
+        "  5. a closing \"title\" CTA.\n"
         "Every scene's model is null. Keep the durations summing to EXACTLY "
-        "target_duration_s. \"motion_graphic\" scenes ARE allowed and encouraged "
-        "(Remotion, $0) for animated energy; do NOT emit \"cinematic\" scenes (no "
-        "Higgsfield in a standard build).\n"
+        "target_duration_s. Lean on \"motion_graphic\" for the feature beats (Remotion, "
+        "$0) — they are the authored kinetic energy that BEATS a drifting screenshot; "
+        "do NOT emit \"cinematic\" scenes (no Higgsfield in a standard build), and do "
+        "NOT add a second screenshot.\n"
         "COPY (this is the load-bearing part): every voiceover beat must be GROUNDED "
         "and CONCRETE about the REAL product — name a REAL feature, the REAL audience, "
         "or a real benefit with a real-looking specific number. NEVER write hollow, "
@@ -88,9 +101,13 @@ _QUALITY_PROMPT = {
         "the product. These exact lines (and close paraphrases) are BANNED: \"This is "
         "<Brand> — straight from the real site.\", \"Here is the product, exactly as "
         "you would see it.\", \"See the product in action, step by step.\", \"See how "
-        "to use the …\". Write the screenshot/walkthrough beats as benefit-driven "
-        "lines naming the REAL capability on screen (e.g. \"Accept payments in 135+ "
-        "currencies.\", \"Read millions of real traveler reviews before you book.\"). "
+        "to use the …\". Write the SINGLE homepage screenshot beat as a GENERAL "
+        "product value-prop (the company + its core value), NOT a specific-element "
+        "claim — e.g. \"Stripe powers online payments for millions of businesses.\", "
+        "\"Tripadvisor helps travelers plan and book better trips.\". Write each "
+        "motion_graphic feature beat as a benefit-driven line naming the ONE REAL "
+        "feature on that card (e.g. \"Accept payments in 135+ currencies.\", \"Read "
+        "millions of real traveler reviews before you book.\"). "
         "Use tight IMPERATIVE couplets where the line is short, like the reference "
         "films (\"Clock in. / Cash out.\"). RHYTHM: keep every beat TIGHT — one crisp "
         "idea, AT MOST one comma, never a comma-chained run-on of three or more "
@@ -202,11 +219,12 @@ def _fewshot_block(quality):
     except OSError:
         return ""
     return (
-        "\n\nEXAMPLE — a Luceo Studio plan in the studio's signature. Match its shape: the "
-        "scene count and arc (title -> screenshots -> walkthrough -> motion_graphic -> CTA "
-        "title), the tight imperative-couplet beats, and the CTA that names the real next "
-        "step. Do NOT copy its company, its features, or its wording — produce the SAME "
-        "CRAFT for the brief's REAL company and its REAL features:\n" + ex)
+        "\n\nEXAMPLE — a Luceo Studio plan in the studio's signature. Match its CRAFT — the "
+        "tight imperative-couplet beats and the CTA that names the real next step — but use "
+        "the CURRENT STANDARD HYBRID shape (title -> ONE homepage screenshot -> 2-3 "
+        "motion_graphic feature cards -> CTA title), NOT this example's older scene mix. Do "
+        "NOT copy its company, its features, or its wording — produce the SAME CRAFT for the "
+        "brief's REAL company and its REAL features:\n" + ex)
 
 
 def _normalize_quality(quality):
@@ -273,7 +291,11 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     plan["job"].update({"company_url": company_url, "goal": goal,
                         "target_duration_s": target_duration_s,
                         "target_margin": target_margin, "currency": currency,
-                        "emphasis": emphasis, "_wordmark": _resolved_brand})
+                        "emphasis": emphasis, "_wordmark": _resolved_brand,
+                        # internal-only hint so the STANDARD hybrid backstop can name
+                        # synthesized motion_graphic feature cards from the real
+                        # features. Popped (with _wordmark) before validation/return.
+                        "_company_facts": company_facts or {}})
     # Deterministic quality guard. STANDARD: force the real-capture structure (title
     # -> 1-2 screenshot -> walkthrough -> title). PREMIUM: guarantee >= 2 cinematic by
     # upgrading feature beats if the live model under-delivered. Runs even when the
@@ -320,10 +342,12 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # beats and the headline_fix opens the video, even if the LLM/template dropped
     # them. No-op when conversion_read is None (flag off) -> behavior unchanged.
     plan = seed_plan_with_read(plan, conversion_read)
-    # Drop the internal-only `_wordmark` hint before validation/return — `emphasis`
-    # stays (a recognized optional job key), but `_wordmark` is a private plumbing
-    # field that must not leak into the persisted plan or the strict planner schema.
+    # Drop the internal-only `_wordmark` / `_company_facts` hints before
+    # validation/return — `emphasis` stays (a recognized optional job key), but these
+    # are private plumbing fields that must not leak into the persisted plan or the
+    # strict planner schema.
     (plan.get("job") or {}).pop("_wordmark", None)
+    (plan.get("job") or {}).pop("_company_facts", None)
     problems = validate_plan(plan)
     if problems:
         if plan_source == "llm":
@@ -361,13 +385,17 @@ def _enforce_quality(plan, quality):
     The SYSTEM_PROMPT + _QUALITY_PROMPT already steer the model, but small models
     drift, so this guarantees the contract no matter what the LLM returns:
 
-    - STANDARD: GUARANTEE the Standard structure (the same defense-in-depth idea as
-      the premium upgrade backstop) — opening title -> 1-2 screenshot scenes -> one
-      walkthrough scene -> closing title. Stray cinematic/motion_graphic content
-      scenes are RE-TYPED into that shape (the first becomes a screenshot, the next a
-      walkthrough); a plan that already has screenshot/walkthrough scenes is left
-      alone. If the model produced no usable content scenes, deterministic ones are
-      synthesized so a Standard plan ALWAYS carries the real-capture pillars.
+    - STANDARD (the SCREENSHOT-HYBRID): GUARANTEE the hybrid shape — opening title ->
+      EXACTLY ONE homepage screenshot -> 2-3 motion_graphic feature beats (authored
+      kinetic cards matching the VO by construction) -> closing title. This kills the
+      VO-vs-picture drift: per-feature SCREENSHOTS grabbed the homepage / a scroll
+      position instead of the named feature, so the picture and the words diverged.
+      Only the homepage screenshot stays (it always matches a general "this is the
+      product" line); every per-feature beat becomes an AUTHORED motion_graphic. Stray
+      cinematic scenes and any EXTRA screenshot/walkthrough beyond the single homepage
+      shot are RE-TYPED into motion_graphic feature beats. If the model produced no
+      feature scenes, deterministic motion_graphics are synthesized so a Standard plan
+      ALWAYS carries both the homepage proof shot and the kinetic feature cards.
     - PREMIUM: GUARANTEE at least 2 cinematic scenes. If the model under-delivers
       (returns < 2 cinematic — the live-Nemotron bug), upgrade enough non-title
       feature beats (preferring motion_graphic, then any non-title) to cinematic so
@@ -382,7 +410,7 @@ def _enforce_quality(plan, quality):
     q = _normalize_quality(quality)
     scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
     if q == "standard":
-        return _enforce_standard_structure(plan, scenes)
+        return _enforce_standard_hybrid(plan, scenes)
 
     # PREMIUM: ensure >= 2 cinematic scenes with valid Higgsfield models.
     # First, normalize any stray walkthrough to cinematic (walkthrough is retired).
@@ -458,7 +486,10 @@ def seed_plan_with_read(plan, conversion_read):
     titles = [s for s in scenes if s.get("type") == "title"]
     opening = titles[0] if titles else (scenes[0] if scenes else None)
     closing = titles[-1] if len(titles) >= 2 else None
-    content = [s for s in scenes if s.get("type") in ("screenshot", "walkthrough")]
+    # The "show" surfaces in the STANDARD hybrid are the single homepage screenshot
+    # plus the authored motion_graphic feature cards (and any legacy walkthrough).
+    content = [s for s in scenes
+               if s.get("type") in ("screenshot", "walkthrough", "motion_graphic")]
 
     # 1) headline_fix -> opening title beat text (the diagnosis's outcome-led open).
     hf = (conversion_read.get("headline_fix") or "").strip()
@@ -479,9 +510,11 @@ def seed_plan_with_read(plan, conversion_read):
         if "cta" in mt and closing is not None:
             return closing
         if ("proof" in mt or "show" in mt) and content:
-            # prefer the walkthrough (the strongest 'show' surface), else a screenshot
+            # prefer an authored motion_graphic feature card (matches its VO by
+            # construction), else a walkthrough, else the homepage screenshot
+            mg = [s for s in content if s.get("type") == "motion_graphic"]
             walk = [s for s in content if s.get("type") == "walkthrough"]
-            return (walk or content)[0]
+            return (mg or walk or content)[0]
         return content[0] if content else (opening if opening is not None else None)
 
     for f in (conversion_read.get("priority_fixes") or []):
@@ -505,23 +538,31 @@ def seed_plan_with_read(plan, conversion_read):
     return plan
 
 
-def _enforce_standard_structure(plan, scenes):
-    """Deterministically force the Standard shape: title -> 1-2 screenshot ->
-    walkthrough -> title (model null everywhere). Defense-in-depth so a STANDARD
-    plan ALWAYS carries the real-capture pillars regardless of what the LLM returned.
+def _enforce_standard_hybrid(plan, scenes):
+    """Deterministically force the Standard SCREENSHOT-HYBRID shape: title -> EXACTLY
+    ONE homepage screenshot -> 2-3 motion_graphic feature beats -> title (model null
+    everywhere). Defense-in-depth so a STANDARD plan ALWAYS lands on the hybrid even
+    when a small model strays.
+
+    WHY the hybrid: the old per-feature SCREENSHOT scenes captured the homepage / a
+    scroll position, NOT the specific feature the voiceover named — so the picture and
+    the VO drifted apart. Fix: keep only ONE anchored homepage screenshot ("this is a
+    real product" proof, which always matches a general value-prop line), and make
+    every per-feature beat an AUTHORED motion_graphic kinetic card that is REBUILT to
+    match the named feature exactly.
 
     Strategy (preserve ids/durations/order where possible):
       - Title scenes keep type "title" / model null.
-      - Existing screenshot/walkthrough content scenes are kept as-is (model null).
-      - Stray content scenes (cinematic / motion_graphic / other) are RE-TYPED to
-        fill any missing pillar: the first available becomes a "screenshot", the next
-        a "walkthrough"; any remaining stray content scenes also become screenshots
-        (so nothing is left as an unrenderable cinematic/motion_graphic).
-      - If the plan has NO content scene at all to host a walkthrough, one is
-        synthesized between the title cards (rare; only when the LLM emitted a
-        title-only plan).
-    The walkthrough scene's brief is rewritten to the emphasis-specific multi-step
-    goal so capture has a concrete target.
+      - Keep EXACTLY ONE "screenshot" — the FIRST screenshot scene in order (the
+        homepage). Any additional screenshots are RE-TYPED to motion_graphic feature
+        beats.
+      - Every "walkthrough" scene is RE-TYPED to a motion_graphic feature beat (the
+        walkthrough is optional and not forced by the backstop).
+      - Stray "cinematic" / unknown content scenes are RE-TYPED to motion_graphic.
+      - If the plan has NO screenshot at all, the FIRST content scene becomes the
+        homepage screenshot (or one is synthesized if there are no content scenes).
+      - Guarantee AT LEAST 2 motion_graphic feature beats: if fewer survive, synthesize
+        kinetic feature cards (named from the real features) until there are 2.
     """
     job = plan.get("job") or {}
     brand = _brand_name(job.get("company_url"))
@@ -530,66 +571,100 @@ def _enforce_standard_structure(plan, scenes):
         brand = _wm
     emphasis = job.get("emphasis")
 
+    # Real feature labels for naming synthesized motion_graphic cards (and a fallback).
+    raw_feats = (job.get("_company_facts") or {}).get("features") if isinstance(
+        job.get("_company_facts"), dict) else None
+    feats = []
+    for f in (raw_feats or []):
+        if isinstance(f, dict):
+            f = f.get("label") or f.get("title") or ""
+        if str(f).strip():
+            feats.append(str(f).strip())
+
     content = [s for s in scenes if s.get("type") != "title"]
-    has_walk = any(s.get("type") == "walkthrough" for s in content)
-    has_shot = any(s.get("type") == "screenshot" for s in content)
 
-    # Re-type stray content scenes (cinematic / motion_graphic / unknown) into the
-    # missing pillars, in scene order.
-    stray = [s for s in content if s.get("type") not in ("screenshot", "walkthrough")]
-    if not has_shot and stray:
-        s = stray.pop(0)
-        s["type"] = "screenshot"
-        s["model"] = None
-        has_shot = True
-    if not has_walk and stray:
-        s = stray.pop(0)
-        s["type"] = "walkthrough"
-        s["model"] = None
-        has_walk = True
-    # Anything still stray becomes an extra screenshot (never leave a cinematic/
-    # motion_graphic in a Standard plan).
-    for s in stray:
-        s["type"] = "screenshot"
-        s["model"] = None
-    # Normalize models on the kept pillars.
+    # 1) Pick the single homepage screenshot: the first screenshot in order, else the
+    #    first content scene of any type. Everything else becomes a motion_graphic.
+    home_shot = None
     for s in content:
-        if s.get("type") in ("screenshot", "walkthrough"):
-            s["model"] = None
+        if s.get("type") == "screenshot":
+            home_shot = s
+            break
+    if home_shot is None and content:
+        home_shot = content[0]
+    if home_shot is not None:
+        home_shot["type"] = "screenshot"
+        home_shot["model"] = None
+        home_shot["brief"] = ("Real captured HOMEPAGE hero of %s in a branded browser "
+                              "card" % brand)
 
-    # If no walkthrough could be sourced from existing scenes, synthesize one and
-    # insert it just before the closing title (or at the end if no closing title).
-    if not has_walk:
-        wt = {"id": "walkthrough", "type": "walkthrough",
-              "brief": "", "model": None,
-              "duration_s": 8, "input_image": None}
-        all_scenes = plan.get("scenes") or []
-        insert_at = len(all_scenes)
-        for i in range(len(all_scenes) - 1, -1, -1):
-            if isinstance(all_scenes[i], dict) and all_scenes[i].get("type") == "title":
-                insert_at = i
-                break
-        all_scenes.insert(insert_at, wt)
+    # 2) Every other content scene -> motion_graphic feature beat (model null). This
+    #    re-types extra screenshots, all walkthroughs, and any stray cinematic/unknown.
+    for s in content:
+        if s is home_shot:
+            continue
+        s["type"] = "motion_graphic"
+        s["model"] = None
+
+    # 3) Synthesize the homepage screenshot if the plan had no content scene at all.
+    all_scenes = plan.get("scenes") or []
+    if home_shot is None:
+        shot = {"id": "screenshot-home", "type": "screenshot",
+                "brief": "Real captured HOMEPAGE hero of %s in a branded browser card" % brand,
+                "model": None, "duration_s": 5, "input_image": None}
+        insert_at = _insert_before_closing_title(all_scenes)
+        all_scenes.insert(insert_at, shot)
         plan["scenes"] = all_scenes
-        content.append(wt)
-        # rebalance: steal a couple seconds from the longest non-title scene so the
-        # total still sums to target (the duration backstop also re-checks below).
-        donors = sorted((s for s in all_scenes if isinstance(s, dict)
-                         and s.get("type") == "title" or s.get("type") == "screenshot"),
-                        key=lambda s: int(s.get("duration_s", 2)), reverse=True)
-        steal = wt["duration_s"]
-        for d in donors:
-            if steal <= 0:
-                break
-            give = min(steal, max(0, int(d.get("duration_s", 2)) - 2))
-            d["duration_s"] = int(d.get("duration_s", 2)) - give
-            steal -= give
+        home_shot = shot
+        _steal_duration_for(all_scenes, shot)
 
-    # Rewrite the walkthrough brief to the emphasis-specific multi-step goal.
-    for s in content:
-        if s.get("type") == "walkthrough":
-            s["brief"] = _walkthrough_brief_for_emphasis(brand, emphasis)
+    # 4) Guarantee >= 2 motion_graphic feature beats (authored kinetic cards). The
+    #    feature names come from the real COMPANY FACTS when available, so each card
+    #    matches its VO by construction.
+    n_mg = sum(1 for s in (plan.get("scenes") or [])
+               if isinstance(s, dict) and s.get("type") == "motion_graphic")
+    i = n_mg
+    while n_mg < 2:
+        feat_label = feats[n_mg] if n_mg < len(feats) else None
+        brief = ("Kinetic animated feature card for %s%s" %
+                 (brand, (": %s" % feat_label) if feat_label else ""))
+        mg = {"id": "feature-%d" % (n_mg + 1), "type": "motion_graphic",
+              "brief": brief, "model": None, "duration_s": 5, "input_image": None}
+        all_scenes = plan.get("scenes") or []
+        insert_at = _insert_before_closing_title(all_scenes)
+        all_scenes.insert(insert_at, mg)
+        plan["scenes"] = all_scenes
+        _steal_duration_for(all_scenes, mg)
+        n_mg += 1
     return plan
+
+
+def _insert_before_closing_title(all_scenes):
+    """Index just before the LAST title scene (so a new content scene lands between
+    the title cards), else the end of the list."""
+    insert_at = len(all_scenes)
+    for i in range(len(all_scenes) - 1, -1, -1):
+        if isinstance(all_scenes[i], dict) and all_scenes[i].get("type") == "title":
+            insert_at = i
+            break
+    return insert_at
+
+
+def _steal_duration_for(all_scenes, new_scene):
+    """Rebalance: take new_scene's duration back from the longest title/screenshot/
+    motion_graphic scenes so the total still sums to target (the duration backstop
+    re-checks downstream). Never starves a donor below the 2s schema floor."""
+    donors = sorted(
+        (s for s in all_scenes if isinstance(s, dict) and s is not new_scene
+         and s.get("type") in ("title", "screenshot", "motion_graphic")),
+        key=lambda s: int(s.get("duration_s", 2)), reverse=True)
+    steal = int(new_scene.get("duration_s", 5))
+    for d in donors:
+        if steal <= 0:
+            break
+        give = min(steal, max(0, int(d.get("duration_s", 2)) - 2))
+        d["duration_s"] = int(d.get("duration_s", 2)) - give
+        steal -= give
 
 
 def _restyle_durations(plan, style, target_duration_s):
@@ -1550,46 +1625,24 @@ def _degut_bare_wordmark_beats(plan, brand, company_url, company_facts, emphasis
 
 def _standard_template_plan(brand, company_url, goal, target_duration_s, style,
                             emphasis=None, company_facts=None):
-    """Standard deterministic plan: title -> 2 screenshot -> walkthrough -> title.
+    """Standard deterministic SCREENSHOT-HYBRID plan: title -> ONE homepage screenshot
+    -> 2-3 motion_graphic feature beats -> title.
 
-    The real-capture pillars (model null everywhere): the opening title, two captured
-    website views, one guided walkthrough of the emphasized feature, the closing CTA.
-    No cinematic / motion_graphic — a standard build renders the titles in Remotion
-    and fills the screenshot/walkthrough scenes with real captured assets. Durations
-    sum to EXACTLY target_duration_s here (and stay summed after _restyle_durations).
+    The hybrid pillars (model null everywhere): the opening title, ONE captured
+    HOMEPAGE hero (the "real product" proof), 2-3 AUTHORED kinetic feature cards
+    (motion_graphic) each naming one real feature, the closing CTA. No cinematic — a
+    standard build renders the titles + feature cards in Remotion and fills the single
+    screenshot scene with the real captured homepage. Durations sum to EXACTLY
+    target_duration_s here (and stay summed after _restyle_durations).
+
+    WHY: a per-feature screenshot grabbed the homepage / a scroll position, not the
+    named feature, so VO and picture drifted. The homepage screenshot's beat is a
+    GENERAL value-prop (always matches), and each feature beat is an authored card
+    built to match its VO line by construction.
 
     Beats are GROUNDED and IMPERATIVE (no hollow "straight from the real site"
-    filler, no "use the <noun>" grammar bug) — see _grounded_template_beats.
+    filler) — see _grounded_template_beats.
     """
-    open_d, close_d = 3, 5
-    body = max(6, target_duration_s - open_d - close_d)
-    # Split the body across two screenshots + one (longer) walkthrough; the
-    # walkthrough gets the larger share so the demo can breathe.
-    walk_d = max(6, body // 2)
-    shot_rem = max(4, body - walk_d)
-    shot1 = max(2, shot_rem // 2)
-    shot2 = max(2, shot_rem - shot1)
-    # Correct any rounding so the four content+title scenes sum to target exactly.
-    total = open_d + shot1 + shot2 + walk_d + close_d
-    walk_d += (target_duration_s - total)
-    if walk_d < 2:  # pathological tiny target — clamp and re-derive
-        walk_d = 2
-
-    scenes = [
-        {"id": "title-open", "type": "title", "brief": "%s wordmark and tagline" % brand,
-         "model": None, "duration_s": open_d, "input_image": None},
-        {"id": "screenshot-home", "type": "screenshot",
-         "brief": "Real captured homepage of %s in a branded browser card" % brand,
-         "model": None, "duration_s": shot1, "input_image": None},
-        {"id": "screenshot-inner", "type": "screenshot",
-         "brief": "Real captured key page of %s showing the product" % brand,
-         "model": None, "duration_s": shot2, "input_image": None},
-        {"id": "walkthrough", "type": "walkthrough",
-         "brief": _walkthrough_brief_for_emphasis(brand, emphasis),
-         "model": None, "duration_s": walk_d, "input_image": None},
-        {"id": "title-close", "type": "title", "brief": "Call to action: get started with %s" % brand,
-         "model": None, "duration_s": close_d, "input_image": None},
-    ]
     # Normalize scraped features (may be strings or {label}/{title} dicts) to a list
     # of real capability strings for grounding.
     raw_feats = (company_facts or {}).get("features") or []
@@ -1601,13 +1654,65 @@ def _standard_template_plan(brand, company_url, goal, target_duration_s, style,
             feats.append(str(f).strip())
     open_line, home_line, inner_line, walk_line, cta_line = _grounded_template_beats(
         brand, company_url, emphasis, feats, company_facts=company_facts)
+
+    # THREE motion_graphic feature beats: name a real feature on each when we have them.
+    # home_line is the strongest first feature line; inner_line the second. A third
+    # feature line is derived from the next real feature, else a grounded benefit line.
+    feat_lines = [home_line, inner_line]
+    if len(feats) >= 3:
+        f2 = feats[2]
+        f2_core = (f2[:1].upper() + f2[1:]).strip().rstrip(".!?")
+        feat_lines.append(f2_core + ".")
+    else:
+        feat_lines.append(walk_line)
+
+    # Durations: opening title + ONE homepage screenshot + 3 feature cards + closing
+    # CTA. The homepage shot gets a slightly longer hold (the proof shot); the three
+    # feature cards split the rest. All >= 2s; corrected to sum to target exactly.
+    open_d, close_d = 3, 5
+    body = max(8, target_duration_s - open_d - close_d)
+    shot_d = max(4, body // 3)        # homepage hero hold
+    feat_budget = max(6, body - shot_d)
+    fa = max(2, feat_budget // 3)
+    fb = max(2, feat_budget // 3)
+    fc = max(2, feat_budget - fa - fb)
+    # Correct rounding so all six scenes sum to target exactly (adjust the homepage).
+    total = open_d + shot_d + fa + fb + fc + close_d
+    shot_d += (target_duration_s - total)
+    if shot_d < 2:  # pathological tiny target — clamp
+        shot_d = 2
+
+    scenes = [
+        {"id": "title-open", "type": "title", "brief": "%s wordmark and tagline" % brand,
+         "model": None, "duration_s": open_d, "input_image": None},
+        {"id": "screenshot-home", "type": "screenshot",
+         "brief": "Real captured HOMEPAGE hero of %s in a branded browser card" % brand,
+         "model": None, "duration_s": shot_d, "input_image": None},
+        {"id": "feature-1", "type": "motion_graphic",
+         "brief": "Kinetic animated feature card for %s%s" % (
+             brand, (": %s" % feats[0]) if feats else ""),
+         "model": None, "duration_s": fa, "input_image": None},
+        {"id": "feature-2", "type": "motion_graphic",
+         "brief": "Kinetic animated feature card for %s%s" % (
+             brand, (": %s" % feats[1]) if len(feats) > 1 else ""),
+         "model": None, "duration_s": fb, "input_image": None},
+        {"id": "feature-3", "type": "motion_graphic",
+         "brief": "Kinetic animated feature card for %s%s" % (
+             brand, (": %s" % feats[2]) if len(feats) > 2 else ""),
+         "model": None, "duration_s": fc, "input_image": None},
+        {"id": "title-close", "type": "title", "brief": "Call to action: get started with %s" % brand,
+         "model": None, "duration_s": close_d, "input_image": None},
+    ]
     beats = [
         # OPENING beat is a full value-prop sentence (a real feature/metric), NOT the
         # bare "%s." wordmark — bare wordmark beats are the D3=2 thin-grounding bug.
         {"scene_id": "title-open", "text": open_line},
-        {"scene_id": "screenshot-home", "text": home_line},
-        {"scene_id": "screenshot-inner", "text": inner_line},
-        {"scene_id": "walkthrough", "text": walk_line},
+        # The HOMEPAGE screenshot's beat is a GENERAL product value-prop (the company +
+        # its core value), so the homepage shot always matches the words.
+        {"scene_id": "screenshot-home", "text": open_line},
+        {"scene_id": "feature-1", "text": feat_lines[0]},
+        {"scene_id": "feature-2", "text": feat_lines[1]},
+        {"scene_id": "feature-3", "text": feat_lines[2]},
         {"scene_id": "title-close", "text": cta_line},
     ]
     return {
