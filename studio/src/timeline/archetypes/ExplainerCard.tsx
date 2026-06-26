@@ -1882,6 +1882,7 @@ const TreatmentLogoWall: React.FC<{
           const tileOpacity = ease(frame, tileAt, tileAt + 14, 0, 1);
           const tileY = ease(frame, tileAt, tileAt + 14, 16, 0);
           const isPerson = looksLikePerson(entity);
+          const logo = (data.entityLogos ?? [])[i];
           return (
             <div
               key={`${i}-${entity}`}
@@ -1900,38 +1901,45 @@ const TreatmentLogoWall: React.FC<{
                 minHeight: 96,
               }}
             >
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: isPerson ? "50%" : 11,
-                  background: "#EAF2FF",
-                  border: "1px solid #BFD8FF",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                {isPerson ? (
-                  <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="8" r="4" stroke={theme.accent} strokeWidth="1.6" fill="none" />
-                    <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke={theme.accent} strokeWidth="1.6" fill="none" strokeLinecap="round" />
-                  </svg>
-                ) : (
-                  <span
-                    style={{
-                      fontSize: 20,
-                      fontWeight: 800,
-                      color: theme.accent,
-                      fontFamily: theme.fontDisplay,
-                      lineHeight: 1,
-                    }}
-                  >
-                    {(entity.trim()[0] || "•").toUpperCase()}
-                  </span>
-                )}
-              </div>
+              {logo ? (
+                <Img
+                  src={logo}
+                  style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 8, flexShrink: 0 }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: isPerson ? "50%" : 11,
+                    background: "#EAF2FF",
+                    border: "1px solid #BFD8FF",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {isPerson ? (
+                    <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="4" stroke={theme.accent} strokeWidth="1.6" fill="none" />
+                      <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke={theme.accent} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: 20,
+                        fontWeight: 800,
+                        color: theme.accent,
+                        fontFamily: theme.fontDisplay,
+                        lineHeight: 1,
+                      }}
+                    >
+                      {(entity.trim()[0] || "•").toUpperCase()}
+                    </span>
+                  )}
+                </div>
+              )}
               <span
                 style={{
                   fontSize: 24,
