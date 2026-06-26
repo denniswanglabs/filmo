@@ -50,6 +50,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 import align_vo
 import build_timeline
+# plan_job owns the HONEST card-treatment/entity/stat logic. We reuse its miners
+# (`_mine_named_entities`, `_stat_is_real`, `_feature_entities_from_facts`) in a
+# POST-FILL pass below so treatment selection runs on the REAL filled card copy
+# (title/subtitle) instead of the empty titles plan_job saw at plan time. Safe
+# import: plan_job depends only on validate_planner/brain/plan_schema (no cycle).
+import plan_job
 
 # ---------------------------------------------------------------------------
 # HTML-ENTITY DECODE  (R5 fix — must be the LAST pass on every user-facing string)
@@ -2268,6 +2274,107 @@ def _match_feature(features: List[str], scene_text: str) -> Optional[int]:
     return best_i
 
 
+def _assign_treatment_from_filled_copy(
+    out: Dict[str, Any], scene: Dict[str, Any], brand: Dict[str, Any]
+) -> None:
+    """AUTHORITATIVE card-treatment pass that runs on the FILLED card copy.
+
+    THE BUG THIS FIXES: plan_job's `_assign_card_treatments` runs at PLAN time —
+    BEFORE this function (style_fill) writes the card title/subtitle. So plan_job's
+    entity miner + `_stat_is_real` saw EMPTY titles and every feature card collapsed
+    to "icon-headline", even for entity-rich scenes like "Airbnb, Stripe, Dropbox
+    founders share raw stories" whose title is filled HERE, afterward.
+
+    This pass re-derives the treatment from the REAL filled copy (`out["title"]` +
+    `out["subtitle"]`, plus any LLM-emitted stat/treatment that survived plan time)
+    and OVERRIDES whatever plan_job picked. It reuses plan_job's HONEST miners so the
+    rules stay in one place:
+      1. Mine featureEntities from the filled title+subtitle (>= 3 proper nouns ->
+         keep; exclude the brand wordmark). Real-text only — never invents.
+      2. Keep an LLM-emitted `stat` only if `plan_job._stat_is_real` passes against
+         a scene whose data carries the FILLED copy (so the stat's number must appear
+         in real brand text).
+      3. (Re)assign treatment: real stat -> "split-stat" (or "icon-stat" when the
+         scene already has a curated icon + a punchy headline); >= 3 real entities ->
+         "split-mosaic"; else "icon-headline" (the honest floor).
+    Writes treatment / icon / stat / featureEntities onto `out` (the dict the render
+    reads). Honesty FIRST — never fabricate a stat or an entity.
+
+    `brand` is style_fill's resolved brand-facts dict (wordmark/tagline/features) and
+    serves directly as plan_job's `company_facts` (same field names).
+    """
+    d = scene.get("data") or {}
+    company_facts = brand if isinstance(brand, dict) else {}
+    real_entities = plan_job._feature_entities_from_facts(company_facts)
+
+    title = str(out.get("title") or "")
+    subtitle = str(out.get("subtitle") or "")
+    filled_copy = (title + " " + subtitle).strip()
+
+    # Build a synthetic scene whose `data` carries the FILLED copy so plan_job's
+    # honesty corpus (which reads data.title / data.subtitle / brief) sees the REAL
+    # rendered text rather than the empty plan-time data.
+    probe = {
+        "brief": scene.get("brief") or "",
+        "data": {
+            "title": title,
+            "subtitle": subtitle,
+            "_text": d.get("_text") or "",
+        },
+    }
+
+    # 1) Entities: prefer LLM-emitted featureEntities that are corroborated by the
+    #    filled copy / real features; else mine proper nouns from the filled copy.
+    entities: List[str] = []
+    raw_ents = d.get("featureEntities")
+    if isinstance(raw_ents, list):
+        ent_corpus = " ".join([filled_copy, " ".join(real_entities),
+                               str(company_facts.get("tagline") or "")]).lower()
+        entities = [str(e).strip() for e in raw_ents
+                    if str(e or "").strip() and str(e).strip().lower() in ent_corpus]
+    if len(entities) < 3:
+        mined = plan_job._mine_named_entities(
+            filled_copy,
+            exclude=(company_facts.get("wordmark"), company_facts.get("brand"),
+                     company_facts.get("name"),
+                     (real_entities[0] if real_entities else None)),
+        )
+        if len(mined) >= 3:
+            entities = mined[:6]
+    has_mosaic = len(entities) >= 3
+
+    # 2) Stat: keep an LLM stat only if its number is corroborated by real brand text
+    #    (now including the FILLED title/subtitle via the probe scene).
+    stat = d.get("stat")
+    has_real_stat = plan_job._stat_is_real(stat, probe, company_facts)
+
+    # 3) (Re)assign treatment — honesty first. A real stat wins; if the scene also
+    #    has a curated icon + a punchy (short) headline, prefer the icon-stat layout.
+    icon = str(d.get("icon") or "").strip()
+    if has_real_stat:
+        punchy = bool(title) and len(title.split()) <= 6
+        treatment = "icon-stat" if (icon and punchy) else "split-stat"
+    elif has_mosaic:
+        treatment = "split-mosaic"
+    else:
+        treatment = "icon-headline"
+
+    # 4) Emit onto the rendered props (SHARED DATA CONTRACT field names exact).
+    out["treatment"] = treatment
+    out.pop("icon", None)
+    out.pop("stat", None)
+    out.pop("featureEntities", None)
+    if treatment in ("icon-stat", "icon-headline"):
+        out["icon"] = _decode(icon) if icon else plan_job._DEFAULT_ICON
+    if treatment in ("icon-stat", "split-stat") and isinstance(stat, dict):
+        out["stat"] = {
+            "value": _decode(str(stat.get("value") or "")),
+            "label": _decode(str(stat.get("label") or "")),
+        }
+    if treatment == "split-mosaic":
+        out["featureEntities"] = [_decode(str(e)) for e in entities if str(e or "").strip()]
+
+
 def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
     """ExplainerCard data: kicker / title / subtitle / bullets.
 
@@ -2374,32 +2481,17 @@ def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, 
         "bullets": [_decode(b) for b in bullets],
     }
 
-    # CARD TREATMENT pass-through (SHARED DATA CONTRACT with the Remotion
-    # ExplainerCard archetype). plan_job's RULES + HONESTY guard already chose a
-    # treatment and STRIPPED any stat/featureEntities not backed by real brand data,
-    # so here we only CARRY the surviving fields into the rendered props. We never
-    # synthesize a stat/entity (honesty rule) — only what the guard left on data.
+    # CARD TREATMENT (SHARED DATA CONTRACT with the Remotion ExplainerCard archetype).
+    # AUTHORITATIVE post-fill pass: plan_job's plan-time `_assign_card_treatments` saw
+    # EMPTY titles (this function fills them AFTER plan time), so it collapsed every
+    # feature card to "icon-headline" even when the filled copy is entity/stat-rich.
+    # Re-derive the treatment HERE, on the REAL filled title/subtitle, reusing
+    # plan_job's HONEST miners. This OVERRIDES plan_job's stale pick.
     #   treatment        "icon-stat" | "split-mosaic" | "split-stat" | "icon-headline"
     #   icon             curated icon name (icon-stat / icon-headline)
     #   stat             {"value": str, "label": str} (stat treatments)
     #   featureEntities  list[str] of REAL named entities (split-mosaic)
-    treatment = d.get("treatment")
-    if treatment in _CARD_TREATMENTS:
-        out["treatment"] = treatment
-        icon = str(d.get("icon") or "").strip()
-        if icon:
-            out["icon"] = _decode(icon)
-        stat = d.get("stat")
-        if isinstance(stat, dict) and stat.get("value"):
-            out["stat"] = {
-                "value": _decode(str(stat.get("value") or "")),
-                "label": _decode(str(stat.get("label") or "")),
-            }
-        ents = d.get("featureEntities")
-        if isinstance(ents, list):
-            kept = [_decode(str(e)) for e in ents if str(e or "").strip()]
-            if kept:
-                out["featureEntities"] = kept
+    _assign_treatment_from_filled_copy(out, scene, brand)
     return out
 
 
