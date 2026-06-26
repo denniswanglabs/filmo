@@ -625,6 +625,42 @@ def _stat_is_real(stat, scene, company_facts):
     return all(n in corpus_nums for n in nums)
 
 
+# Generic words that are NOT named entities (so a comma-separated sentence never
+# gets mistaken for an entity list). Lowercase.
+_ENTITY_STOP = {
+    "the", "a", "an", "and", "or", "with", "for", "from", "to", "of", "in", "on",
+    "every", "weekly", "daily", "apply", "learn", "more", "batch", "founders",
+    "founder", "startups", "startup", "companies", "company", "stories", "story",
+    "insights", "partners", "partner", "alumni", "network", "funding", "new", "best",
+}
+
+
+def _mine_named_entities(text, exclude=()):
+    """Conservatively pull a comma/'and'-separated list of PROPER NOUNS from REAL
+    scene text (never invents). Honest fallback so an entity-rich scene like
+    "Airbnb, Stripe, Dropbox founders share..." yields split-mosaic instead of
+    collapsing to icon-headline when the LLM didn't emit structured featureEntities.
+    Returns [] unless it finds a clean list (caller requires >= 3)."""
+    if not text:
+        return []
+    ex = {str(x or "").strip().lower() for x in exclude if x}
+    out, seen = [], set()
+    for part in re.split(r",|\band\b|&", str(text)):
+        m = re.match(r"\s*([A-Z][A-Za-z0-9.]*(?:\s[A-Z][A-Za-z0-9.]*)?)", part)
+        if not m:
+            continue
+        cand = m.group(1).strip()
+        words = cand.split()
+        # "Dropbox founders" -> "Dropbox": drop a trailing generic second word
+        if len(words) == 2 and words[1].lower() in _ENTITY_STOP:
+            cand = words[0]
+        key = cand.lower()
+        if len(cand) >= 2 and key not in ex and key not in _ENTITY_STOP and key not in seen:
+            seen.add(key)
+            out.append(cand)
+    return out
+
+
 def _assign_card_treatments(plan):
     """RULES GUARD + HONESTY GUARD over each feature (motion_graphic) scene's data.
 
@@ -653,19 +689,46 @@ def _assign_card_treatments(plan):
         # --- HONESTY PASS: drop anything not backed by real data -------------
         if not _stat_is_real(data.get("stat"), scene, company_facts):
             data.pop("stat", None)
-        # featureEntities: keep ONLY the LLM-named entities that are real features.
+        # featureEntities: keep the LLM-named entities CORROBORATED by real brand
+        # text -- the scene's own brief/title/subtitle, the tagline, or feature
+        # labels (the SAME honesty corpus _stat_is_real trusts). Real entities the
+        # LLM surfaced from the captured site (e.g. "Airbnb, Stripe, Dropbox") now
+        # survive; entities invented out of nowhere (absent from every real source)
+        # are still dropped. Never fabricates. (Previously corroborated ONLY against
+        # the `features` list, which excluded real named companies/integrations and
+        # forced honest split-mosaic scenes down to icon-headline.)
         raw_ents = data.get("featureEntities")
         if isinstance(raw_ents, list):
-            real_lc = {e.lower() for e in real_entities}
+            feat_text = " ".join(
+                (f.get("label") or f.get("title") or "") if isinstance(f, dict) else str(f)
+                for f in (company_facts.get("features") or [])
+            )
+            ent_corpus = " ".join(str(x or "") for x in (
+                scene.get("brief"), data.get("_text"), data.get("title"),
+                data.get("subtitle"), company_facts.get("tagline"), feat_text,
+                " ".join(real_entities),
+            )).lower()
             kept = []
             for e in raw_ents:
                 s = str(e or "").strip()
-                if s and s.lower() in real_lc:
+                if s and s.lower() in ent_corpus:
                     kept.append(s)
             if kept:
                 data["featureEntities"] = kept
             else:
                 data.pop("featureEntities", None)
+
+        # HONEST FALLBACK: if no structured entities survived, mine >=3 proper nouns
+        # from the scene's OWN real title/subtitle (e.g. "Airbnb, Stripe, Dropbox ...")
+        # so a genuinely entity-rich scene gets split-mosaic. Mined from real text only.
+        if not data.get("featureEntities"):
+            mined = _mine_named_entities(
+                " ".join(str(data.get(k) or "") for k in ("title", "subtitle")),
+                exclude=(company_facts.get("wordmark"), company_facts.get("brand"),
+                         (real_entities[0] if real_entities else None)),
+            )
+            if len(mined) >= 3:
+                data["featureEntities"] = mined[:6]
 
         has_real_stat = isinstance(data.get("stat"), dict) and bool(data.get("stat"))
         ents = data.get("featureEntities") if isinstance(data.get("featureEntities"), list) else []
