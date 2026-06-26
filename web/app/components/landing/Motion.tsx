@@ -464,11 +464,14 @@ export function PinnedHero({ title, body, className = '', decoration, id }: Pinn
   // (useTransform clamps at its output edges) — no fade, no shrink — so the hero
   // stays solid through the held second screen and then scrolls off as one unit
   // when the pin releases. The box never "diminishes".
-  const titleScale = useTransform(scrollYProgress, [0, 0.5], [2.4, 1])
-  const titleY = useTransform(scrollYProgress, [0, 0.5], ['26vh', '0vh'])
-  // Body snaps in over a short window right as the title finishes settling, then
-  // is clamped at opacity 1 for the rest of the pin — solid, never diminishing.
-  const bodyOpacity = useTransform(scrollYProgress, [0.44, 0.52], [0, 1])
+  const titleScale = useTransform(scrollYProgress, [0, 0.72], [2.0, 1])
+  const titleY = useTransform(scrollYProgress, [0, 0.72], ['20vh', '0vh'])
+  // Reveal spans MOST of the pin (continuous as you scroll, minimal dead hold).
+  // The body snaps in solid right as the title finishes settling, then is clamped
+  // at opacity 1 for the short held remainder so the box and title stay on screen
+  // TOGETHER and scroll off TOGETHER when the pin releases — the box never vanishes
+  // independently of the title.
+  const bodyOpacity = useTransform(scrollYProgress, [0.6, 0.72], [0, 1])
 
   if (!enabled) {
     return (
@@ -483,7 +486,7 @@ export function PinnedHero({ title, body, className = '', decoration, id }: Pinn
   }
 
   return (
-    <section ref={ref} id={id} className="relative h-[200vh]">
+    <section ref={ref} id={id} className="relative h-[150vh]">
       <div className="surface-dots-dark sticky top-0 flex h-screen items-center overflow-hidden border-b border-[#D4E2FB]/60">
         {decoration}
         <div className={`relative z-10 mx-auto w-full px-5 text-center ${className}`}>

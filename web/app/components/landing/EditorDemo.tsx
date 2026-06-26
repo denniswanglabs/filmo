@@ -15,10 +15,10 @@
 // THE LOOP (~12s, ALL beats driven off ONE shared timeline so the cursor, the
 // control it touches, the value pill, and the preview move in LOCKSTEP and the
 // SAME DIRECTION — drag right = bigger = heading grows). Beats:
-//   0–4    cursor enters top-right (fades in)
+//   0–4    cursor enters BOTTOM-LEFT (fades in)
 //   4–13   click Scene 2
 //   13–34  DRAG title slider (number 92→150, heading grows)
-//   34–48  nudge subtitle slider (number 34→44, subtitle grows)
+//   38–48  nudge subtitle slider (number 34→44, subtitle grows)
 //   52–64  TYPE title text
 //   64–77  cursor exits to BOTTOM-LEFT (fades out, gone by 77%)
 //   78–92  RESET everything to original
@@ -66,8 +66,8 @@ function edTitleSizeAt(t: number): number {
   return 92
 }
 function edSubSizeAt(t: number): number {
-  if (t < 4080) return 34
-  if (t < 5760) return Math.round(34 + (44 - 34) * (t - 4080) / (5760 - 4080))
+  if (t < 4560) return 34
+  if (t < 5760) return Math.round(34 + (44 - 34) * (t - 4560) / (5760 - 4560))
   if (t < 9360) return 44
   if (t < 10800) return Math.round(44 - (44 - 34) * (t - 9360) / (10800 - 9360))
   return 34
@@ -369,10 +369,10 @@ export default function EditorDemo() {
         /* ==================================================================
            ONE shared 12s timeline drives every beat in lockstep.
            Beat map (% of the loop):
-             0–4    cursor enters top-right (fades in)
+             0–4    cursor enters BOTTOM-LEFT (fades in)
              4–13   click Scene 2
              13–34  DRAG title slider (number 92→150, heading grows)
-             34–48  nudge subtitle slider (number 34→44, subtitle grows)
+             38–48  nudge subtitle slider (number 34→44, subtitle grows)
              52–64  TYPE title text
              64–77  cursor exits to BOTTOM-LEFT (fades out, gone by 77%)
              78–92  RESET everything to original
@@ -418,7 +418,7 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-scale {
           0%,
-          34% {
+          38% {
             transform: scale(1);
           }
           48%,
@@ -485,7 +485,7 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-fill {
           0%,
-          34% {
+          38% {
             width: 32%;
           }
           48%,
@@ -503,11 +503,11 @@ export default function EditorDemo() {
         }
         @keyframes ed-sub-handle {
           0%,
-          34% {
+          38% {
             left: 32%;
             transform: translate(-50%, -50%) scale(1);
           }
-          36% {
+          40% {
             transform: translate(-50%, -50%) scale(1.3);
           }
           48%,
@@ -577,13 +577,13 @@ export default function EditorDemo() {
         }
 
         /* ----------------------------------------------------- THE CURSOR */
-        /* Enters from the top-right corner, exits to the BOTTOM-LEFT corner.
+        /* Enters from the bottom-left corner, exits to the bottom-left corner.
            Percentages are relative to the .ed container box. Scales down on
            each click / grab. Single closed loop — returns to start. */
         .ed-cursor {
           position: absolute;
-          top: 5%;
-          left: 92%;
+          top: 95%;
+          left: 5%;
           opacity: 0;
           z-index: 20;
           pointer-events: none;
@@ -591,26 +591,25 @@ export default function EditorDemo() {
           animation: ed-cursor 12s cubic-bezier(0.4, 0, 0.2, 1) infinite;
         }
         @keyframes ed-cursor {
-          0%   { top: 5%;  left: 92%; opacity: 0; transform: scale(1); }
-          4%   { top: 5%;  left: 92%; opacity: 1; transform: scale(1); }
-          9%   { top: 94%; left: 30%; transform: scale(1); }
-          11%  { transform: scale(0.8); }
-          13%  { transform: scale(1); }
-          16%  { top: 40%; left: 79%; transform: scale(1); }
-          18%  { transform: scale(0.8); }
-          34%  { top: 40%; left: 94%; transform: scale(0.8); }
-          36%  { transform: scale(1); }
-          42%  { top: 49%; left: 80%; transform: scale(1); }
-          44%  { transform: scale(0.8); }
-          48%  { top: 49%; left: 87%; transform: scale(0.8); }
-          50%  { transform: scale(1); }
-          52%  { top: 72%; left: 84%; transform: scale(1); }
-          54%  { transform: scale(0.8); }
+          0%   { top: 95%;   left: 5%;    opacity: 0; transform: scale(1); }
+          4%   { top: 95%;   left: 5%;    opacity: 1; transform: scale(1); }
+          8%   { top: 94%;   left: 30%;   opacity: 1; transform: scale(1); }
+          10%  { top: 94%;   left: 30%;   transform: scale(0.8); }
+          13%  { top: 40.2%; left: 79.2%; transform: scale(1); }
+          15%  { transform: scale(0.85); }
+          17%  { transform: scale(1); }
+          34%  { top: 40.2%; left: 93.9%; transform: scale(1); }
+          38%  { top: 48.7%; left: 79.8%; transform: scale(1); }
+          40%  { transform: scale(0.85); }
+          42%  { transform: scale(1); }
+          48%  { top: 48.7%; left: 87.1%; transform: scale(1); }
+          52%  { top: 72%;   left: 84%;   transform: scale(1); }
+          54%  { transform: scale(0.85); }
           56%  { transform: scale(1); }
-          64%  { top: 72%; left: 84%; opacity: 1; transform: scale(1); }
+          64%  { top: 72%;   left: 84%;   opacity: 1; transform: scale(1); }
           73%  { opacity: 0.4; }
-          77%  { top: 95%; left: 5%; opacity: 0; transform: scale(1); }
-          100% { top: 5%;  left: 92%; opacity: 0; transform: scale(1); }
+          77%  { top: 95%;   left: 5%;    opacity: 0; transform: scale(1); }
+          100% { top: 95%;   left: 5%;    opacity: 0; transform: scale(1); }
         }
 
         /* ------------------------------------------------------ PLAYHEAD */
