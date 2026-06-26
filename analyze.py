@@ -8,7 +8,8 @@ fallback so the pipeline NEVER crashes on a small model's malformed output.
 
 Reuses validate_planner.call_model / extract_json (the exact OpenRouter path the
 planner uses) so the analyze call inherits the planner's reasoning-off + token
-accounting + brain-registry behavior. Default brain = super-free ($0).
+accounting + brain-registry behavior. Default brain = super-paid (PAID Nemotron
+Super 120B) so the hosted Conversion Read never hits the free-tier HTTP 429 limits.
 """
 import json
 import re
@@ -33,6 +34,7 @@ SCORE_MIN, SCORE_MAX = 0, 5
 ENGINE_BY_BRAIN = {
     "hermes": "nous-hermes-3-405b",
     "hermes-405b": "nous-hermes-4-405b",
+    "super-paid": "nemotron-super-120b",
     "ultra-paid": "nemotron-ultra-fallback",
 }
 
@@ -44,10 +46,11 @@ def _engine_for(brain):
     return ENGINE_BY_BRAIN.get(b) or brain_mod.brain_def(b)["slug"]
 
 
-# Default tiered order for the Conversion Read: Hermes is the honest primary (our
-# only Nous-model usage); Nemotron Ultra is the RELIABILITY fallback when the free
-# Hermes tier is throttled. minimal_read is the last-resort floor below both.
-ANALYZE_BRAIN_CHAIN = ("hermes", "ultra-paid")
+# The BRAIN is NVIDIA Nemotron. Both the Conversion Read and planning run on
+# Nemotron -- 550B (`ultra-paid`) primary, 120B (`super-paid`) reliability fallback,
+# both PAID so there are no free-tier 429s. minimal_read is the last-resort floor.
+# (Hermes is the agent HARNESS, not a model call.)
+ANALYZE_BRAIN_CHAIN = ("ultra-paid", "super-paid")
 
 # 429 backoff for the free Hermes tier (Venice-hosted, intermittently rate-limited).
 # Bounded so a build never hangs: a couple of short sleeps keep total Hermes wait
@@ -627,13 +630,14 @@ def _analyze_read_one_brain(url, body_text, headline, brain):
     return None  # exhausted content attempts on this brain -> caller falls onward
 
 
-def analyze_read(url, body_text, hero_path=None, headline=None, brain="hermes"):
+def analyze_read(url, body_text, hero_path=None, headline=None, brain="ultra-paid"):
     """Produce a validated Conversion Read for `url` from its `body_text`.
 
     Reuses validate_planner.call_model / extract_json (the planner's OpenRouter
-    path). Hermes is the honest PRIMARY (our one real Nous-model usage); when the
-    caller asks for the default `hermes` brain and it ultimately fails — even after
-    429 backoff+retries — we DON'T drop straight to the bare minimal_read. We first
+    path). The hosted default is the PAID Nemotron Super 120B (`super-paid`) — it
+    avoids the free-tier HTTP 429 rate-limits that stalled hosted generation. When
+    the caller asks for that default brain and it ultimately fails — even after 429
+    backoff+retries — we DON'T drop straight to the bare minimal_read. We first
     retry the Read once on **Nemotron Ultra** (`ultra-paid`) as a RELIABILITY
     fallback. Only if Ultra ALSO fails do we fall to minimal_read(url, body_text)
     marked degraded -- so the caller ALWAYS gets a valid Read and the pipeline never
@@ -643,11 +647,12 @@ def analyze_read(url, body_text, hero_path=None, headline=None, brain="hermes"):
     brain = brain_mod.normalize_brain(brain)
     if not brain_mod.brain_key():
         return minimal_read(url, body_text)
-    # Build the tiered brain chain. If the caller asked for the default `hermes`
-    # primary, append the Nemotron Ultra reliability fallback. If the caller asked
-    # for a DIFFERENT brain explicitly, honor exactly that one (no surprise paid
-    # fallback) -- keeps existing/test callers' behavior predictable.
-    if brain == "hermes":
+    # Build the tiered brain chain. If the caller asked for the default primary
+    # (`super-paid`, the head of ANALYZE_BRAIN_CHAIN), use the full paid chain so the
+    # Nemotron Ultra reliability fallback is appended. If the caller asked for a
+    # DIFFERENT brain explicitly, honor exactly that one (no surprise fallback) --
+    # keeps existing/test callers' behavior predictable.
+    if brain == ANALYZE_BRAIN_CHAIN[0]:
         chain = list(ANALYZE_BRAIN_CHAIN)
     else:
         chain = [brain]

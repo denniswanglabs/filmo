@@ -532,8 +532,8 @@ def call_model(messages, brain=None, meta=None):
             "Content-Type": "application/json",
             "Accept": "application/json",
             # OpenRouter ranking/attribution headers (optional, harmless).
-            "HTTP-Referer": "https://walk.studio",
-            "X-Title": "Walk Studio",
+            "HTTP-Referer": "https://filmostudio.vercel.app",
+            "X-Title": "Filmo",
         },
         method="POST",
     )

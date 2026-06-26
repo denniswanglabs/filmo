@@ -1,6 +1,6 @@
 # Naming + Logo exploration — the video-production agent
 
-> **DECISION (2026-06-20): Dennis picked `Walk Studio`.** Mark: `branding/logo-walkstudio-{light,dark}.svg`. Use across the dashboard header + the submission video. Domain/handle pending the collision check — if bare `walkstudio.com` is taken (likely), use **`walk.studio`** (the `.studio` TLD reads as intentional) or `getwalkstudio`. Trademark note: "Walk Studio" is legible but weak as a standalone mark (generic phrase) — fine for the hackathon; revisit if it becomes a real product.
+> **DECISION (UPDATED 2026-06-26): the product is now `Filmo`, live at https://filmostudio.vercel.app.** (Earlier name `Walk Studio`, picked 2026-06-20, has been retired.) Mark: `branding/logo-walkstudio-{light,dark}.svg` (filenames kept for now; re-skin later). Use the `Filmo` wordmark across the dashboard header + the submission video. The rest of this doc below is the original 2026-06-20 naming exploration, preserved as historical record — names like "Walk Studio" / "Walkwright" / "Showrunner" in the tables below are the original shortlist, not the final pick.
 
 _Overnight branding exploration, 2026-06-20. **These are OPTIONS for Dennis to pick — nothing is
 finalized.** No code/dashboard/protected runs were touched; only this file + `branding/*.svg` were

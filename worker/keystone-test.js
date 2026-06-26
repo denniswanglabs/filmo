@@ -14,7 +14,7 @@ const log = (step, ok, extra = '') => console.log(`${ok ? '  OK ' : ' ERR '} ${s
 const die = (step, error) => { console.error(' ERR ' + step + ' —', JSON.stringify(error)); process.exit(1) }
 
 const stamp = Date.now()
-const email = `keystone+${stamp}@walk.studio`
+const email = `keystone+${stamp}@filmostudio.vercel.app`
 const runKey = `keystone-${stamp}`
 let userId, runId, fileKey
 
@@ -36,7 +36,7 @@ console.log(`\n=== InsForge keystone test (${baseUrl}) ===`)
 // 2) admin: insert a run (status=running)
 {
   const { data, error } = await admin.database.from('runs')
-    .insert([{ user_id: userId, run_key: runKey, brand: 'walk.studio', goal: 'keystone validation', status: 'running', brain: 'super-free', mode: 'mock' }])
+    .insert([{ user_id: userId, run_key: runKey, brand: 'filmostudio.vercel.app', goal: 'keystone validation', status: 'running', brain: 'super-free', mode: 'mock' }])
     .select()
   if (error) die('runs.insert', error)
   runId = data?.[0]?.id

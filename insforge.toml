@@ -2,8 +2,7 @@
 allowed_redirect_urls = [
   "http://localhost:3000",
   "https://walkstudioprojects.vercel.app",
-  "https://walk.studio",
-  "https://www.walk.studio",
+  "https://filmostudio.vercel.app",
 ]
 require_email_verification = false
 verify_email_method = "code"

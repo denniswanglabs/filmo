@@ -95,8 +95,8 @@ def call_model(messages):
     req = urllib.request.Request(API_URL, data=json.dumps(payload).encode(),
                                  headers={"Authorization": "Bearer " + key,
                                           "Content-Type": "application/json",
-                                          "HTTP-Referer": "https://walk.studio",
-                                          "X-Title": "Walk Studio"}, method="POST")
+                                          "HTTP-Referer": "https://filmostudio.vercel.app",
+                                          "X-Title": "Filmo"}, method="POST")
     with urllib.request.urlopen(req, timeout=300) as resp:
         body = json.loads(resp.read().decode())
     return body["choices"][0]["message"]["content"]
