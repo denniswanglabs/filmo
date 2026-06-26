@@ -188,7 +188,7 @@ export default function Home() {
         }
         body={
           <>
-            <p className="mx-auto mt-5 max-w-xl text-lg text-[#5A6472]">
+            <p className="mx-auto mt-5 max-w-2xl text-lg text-[#5A6472]">
               Paste your URL. Filmo reads your real product, diagnoses how it converts, and
               ships a finished launch video — planned, priced, and produced on autopilot.
             </p>
@@ -196,7 +196,7 @@ export default function Home() {
             {/* Composer card — centered block, left-aligned internals */}
             <form
               onSubmit={onBuild}
-              className="mx-auto mt-8 max-w-xl rounded-2xl border border-[#D4E2FB] bg-white p-6 text-left shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
+              className="mx-auto mt-8 max-w-2xl rounded-2xl border border-[#D4E2FB] bg-white p-6 text-left shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
             >
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Website URL</span>

@@ -433,19 +433,22 @@ export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
 }
 
 // ---------------------------------------------------------------------------
-// PinnedHero — a pinned scroll-INTRO. The hero is sticky-pinned across the first
-// ~1 viewport of scroll (the page doesn't move): the big centered `title` scales
-// down to its settled size while the `body` (subtitle + composer) reveals in from
-// small. After the pin releases the page scrolls normally. Both states are
-// horizontally centered, so the title only scales + nudges vertically (no off-axis
-// travel). Reduced motion / SSR render the settled hero in normal flow, no pin.
+// PinnedHero — a MOUNT-driven hero intro. The hero is a normal-flow block (no
+// pin, no scroll runway): on mount the big centered `title` does a one-shot
+// zoom-settle while the `body` (subtitle + composer) snaps in SOLID just after.
+// Once the intro completes there is ZERO coupling to scroll — the hero simply
+// translates off-screen with the document like any section. The title's per-line
+// reveal is carried by the `title` prop's own VerticalCutReveal; here we add only
+// a gentle scale-settle on the title wrapper so the two reads as one calm gesture.
+// Reduced motion / SSR render the settled hero in normal flow, no transforms.
+// (Name kept as PinnedHero for API compatibility with page.tsx.)
 // ---------------------------------------------------------------------------
 interface PinnedHeroProps {
   title: ReactNode
   body: ReactNode
   /** classes for the centered content column. */
   className?: string
-  /** decoration rendered inside the pinned stage, behind the content (z-0). */
+  /** decoration rendered inside the stage, behind the content (z-0). */
   decoration?: ReactNode
   /** anchor id placed on the section (e.g. "start" for the nav jump). */
   id?: string
@@ -453,21 +456,16 @@ interface PinnedHeroProps {
 
 export function PinnedHero({ title, body, className = '', decoration, id }: PinnedHeroProps) {
   const enabled = useMotionEnabled()
-  const ref = useRef<HTMLElement>(null)
-  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] })
-  // Pin spans 200vh of runway; the sticky child is pinned for the first ~half
-  // (progress 0 → ~0.5), which is where the intro plays.
-  const titleScale = useTransform(scrollYProgress, [0, 0.42], [2.4, 1])
-  // Big title sits at viewport center; settles UP to the top of the column (the
-  // body below occupies layout, so y:0 is already the settled position).
-  const titleY = useTransform(scrollYProgress, [0, 0.42], ['26vh', '0vh'])
-  // Composer appears SOLID once the title has mostly shrunk (a quick snap, no fade/
-  // scale that reads as "diminishing"), then stays stable until the pin releases.
-  const bodyOpacity = useTransform(scrollYProgress, [0.36, 0.42], [0, 1])
 
+  // Settled, untransformed hero — used for SSR/reduced-motion AND as the exact
+  // first paint on the client (motion only switches on after mount, so server and
+  // client HTML match → no hydration mismatch).
   if (!enabled) {
     return (
-      <section ref={ref} id={id} className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-32">
+      <section
+        id={id}
+        className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-32"
+      >
         {decoration}
         <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
           {title}
@@ -477,16 +475,37 @@ export function PinnedHero({ title, body, className = '', decoration, id }: Pinn
     )
   }
 
+  // Motion path: normal-flow section (same padding/stage styling as the rest
+  // state) that scrolls off naturally. The intro plays ONCE on mount via
+  // time-based framer-motion — nothing here reads scroll, so scrolling never
+  // changes scale or opacity.
   return (
-    <section ref={ref} id={id} className="relative h-[200vh]">
-      <div className="surface-dots-dark sticky top-0 flex h-screen items-center overflow-hidden border-b border-[#D4E2FB]/60">
-        {decoration}
-        <div className={`relative z-10 mx-auto w-full px-5 text-center ${className}`}>
-          <motion.div style={{ scale: titleScale, y: titleY, transformOrigin: 'center center', willChange: 'transform' }}>
-            {title}
-          </motion.div>
-          <motion.div style={{ opacity: bodyOpacity, willChange: 'opacity' }}>{body}</motion.div>
-        </div>
+    <section
+      id={id}
+      className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-32"
+    >
+      {decoration}
+      <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
+        {/* Title: gentle scale-settle that complements (not competes with) the
+            VerticalCutReveal line reveal inside `title`. Calm ease-out, one shot. */}
+        <motion.div
+          initial={{ scale: 1.25 }}
+          animate={{ scale: 1 }}
+          transition={{ duration: 0.7, ease: EASE_OUT }}
+          style={{ transformOrigin: 'center center', willChange: 'transform' }}
+        >
+          {title}
+        </motion.div>
+        {/* Body: snaps in SOLID just after the title settles — tiny rise, no scale.
+            Animates to opacity 1 ONCE and stays there permanently (no scroll link). */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, delay: 0.45, ease: EASE_OUT }}
+          style={{ willChange: 'transform, opacity' }}
+        >
+          {body}
+        </motion.div>
       </div>
     </section>
   )

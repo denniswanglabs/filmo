@@ -35,17 +35,27 @@ body {
   scroll-margin-top: 96px;
 }
 
-/* Faint blue dotted texture behind the hero stage — soft blue dots on white. */
+/* Faint blue dotted texture behind the hero stage — soft blue dots on white.
+   Alpha nudged 0.08 → 0.10 so the texture reads a touch more across the wider
+   hero, still a whisper (not a grid). */
 .surface-dots-dark {
-  background-image: radial-gradient(rgba(59, 130, 246, 0.08) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(59, 130, 246, 0.10) 1px, transparent 1px);
   background-size: 22px 22px;
 }
 
-/* Soft light-blue aura that grounds the light hero (static; no layout cost). */
+/* Branded light-blue aura that grounds the light hero (static; no layout cost,
+   no animation; pointer-events:none layer in the DOM). All stops stay in the
+   Filmo accent-blue family. Built from four layers for depth + asymmetry:
+   1) a soft cool-blue wash falling from the top edge,
+   2) the primary glow blooming from top-center (strongest stop ~.28),
+   3) a secondary off-center glow (upper-right) for asymmetry,
+   4) a faint counter-glow (lower-left) so the bloom isn't perfectly mirrored. */
 .stage-aura {
   background:
-    radial-gradient(60% 55% at 50% -5%, rgba(79, 141, 247, 0.20) 0%, transparent 70%),
-    radial-gradient(45% 45% at 85% 25%, rgba(79, 141, 247, 0.12) 0%, transparent 70%);
+    linear-gradient(to bottom, rgba(79, 141, 247, 0.06) 0%, transparent 32%),
+    radial-gradient(62% 58% at 50% -6%, rgba(79, 141, 247, 0.28) 0%, transparent 72%),
+    radial-gradient(46% 46% at 84% 22%, rgba(59, 130, 246, 0.16) 0%, transparent 70%),
+    radial-gradient(40% 42% at 16% 70%, rgba(79, 141, 247, 0.10) 0%, transparent 72%);
 }
 
 /* Edge masks so the parallax columns fade out top & bottom into the stage. */
