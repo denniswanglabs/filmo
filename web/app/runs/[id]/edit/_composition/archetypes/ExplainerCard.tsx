@@ -10,6 +10,19 @@
 // CardUi exactly. Reveals fire on the scene's CUE frames (relative to in_frame):
 //   title-in -> title, subtitle-in -> subtitle, point-1..point-N -> each bullet.
 // Sensible fallback cue frames keep it animating even when a scene has no cues.
+//
+// RICH TREATMENTS (feature-card-richness spec): switch on data.treatment:
+//   "icon-stat"     — centered: kicker · SVG icon tile · headline · stat row
+//   "split-mosaic"  — 2-col: text left + dark entity-tile grid right
+//   "split-stat"    — 2-col: text left + light stat panel right (rising bars)
+//   "icon-headline" — centered, FULL-WIDTH: kicker · SVG icon · headline (FALLBACK)
+//   absent/unknown  — ORIGINAL card (backward-compat, byte-identical behavior)
+//
+// DEGRADE-TO-CENTER GUARD (kills the right-side white-space bug): the two-column
+// treatments require their right-column data. When "split-mosaic" has no
+// featureEntities, or "split-stat"/"icon-stat" has no stat, we DROP to the
+// centered full-width "icon-headline" fallback instead of rendering a blank /
+// ghosted right half. The fallback is symmetric + centered so it FILLS WIDTH.
 import React from "react";
 import { AbsoluteFill, Img, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Cue, SceneData, Theme } from "../types";
@@ -79,6 +92,739 @@ const CornerMark: React.FC<{
   );
 };
 
+// ---------------------------------------------------------------------------
+// Icon set — inline SVG paths for curated icon names. Stroke style, 24px
+// viewBox, ACCENT color for stroke. Unknown / missing → "spark" (never a
+// broken / empty icon slot).
+// ---------------------------------------------------------------------------
+const ACCENT = "#3B82F6";
+
+type IconName =
+  | "rocket" | "spark" | "shield" | "chart" | "users" | "bolt"
+  | "globe" | "dollar" | "layers" | "sparkles" | "target" | "clock";
+
+const ICON_PATHS: Record<IconName, React.ReactNode> = {
+  rocket: (
+    <>
+      <path d="M12 2C12 2 7 7 7 14l5 5 5-5c0-7-5-12-5-12z" stroke={ACCENT} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+      <circle cx="12" cy="13" r="2" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <path d="M9 19l-2 3M15 19l2 3" stroke={ACCENT} strokeWidth="1.5" strokeLinecap="round"/>
+    </>
+  ),
+  spark: (
+    <>
+      <path d="M12 2l2.5 7H22l-6.5 4.5 2.5 7L12 17l-6 3.5 2.5-7L2 9h7.5z" stroke={ACCENT} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+    </>
+  ),
+  shield: (
+    <>
+      <path d="M12 3L4 7v5c0 4.4 3.4 8.5 8 9.5 4.6-1 8-5.1 8-9.5V7l-8-4z" stroke={ACCENT} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+      <path d="M9 12l2 2 4-4" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </>
+  ),
+  chart: (
+    <>
+      <rect x="3" y="14" width="4" height="7" rx="1" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <rect x="10" y="9" width="4" height="12" rx="1" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <rect x="17" y="4" width="4" height="17" rx="1" stroke={ACCENT} strokeWidth="2" fill="none"/>
+    </>
+  ),
+  users: (
+    <>
+      <circle cx="9" cy="8" r="3" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke={ACCENT} strokeWidth="2" fill="none" strokeLinecap="round"/>
+      <circle cx="17" cy="8" r="2.5" stroke={ACCENT} strokeWidth="1.5" fill="none"/>
+      <path d="M21 20c0-2.8-1.8-5.2-4.3-6" stroke={ACCENT} strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+    </>
+  ),
+  bolt: (
+    <>
+      <path d="M13 2L4 14h8l-1 8 9-12h-8l1-8z" stroke={ACCENT} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <ellipse cx="12" cy="12" rx="4" ry="9" stroke={ACCENT} strokeWidth="1.5" fill="none"/>
+      <path d="M3 12h18" stroke={ACCENT} strokeWidth="1.5"/>
+      <path d="M3 8h18M3 16h18" stroke={ACCENT} strokeWidth="1" opacity="0.5"/>
+    </>
+  ),
+  dollar: (
+    <>
+      <circle cx="12" cy="12" r="9" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <path d="M12 7v10M9.5 9.5c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5S13.4 14 12 14s-2.5 1.1-2.5 2.5S10.6 19 12 19" stroke={ACCENT} strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+    </>
+  ),
+  layers: (
+    <>
+      <path d="M2 12l10 6 10-6" stroke={ACCENT} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+      <path d="M2 17l10 6 10-6" stroke={ACCENT} strokeWidth="1.5" fill="none" strokeLinejoin="round" opacity="0.6"/>
+      <path d="M12 2L2 7l10 5 10-5-10-5z" stroke={ACCENT} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+    </>
+  ),
+  sparkles: (
+    <>
+      <path d="M12 2l1.5 4.5L18 8l-4.5 1.5L12 14l-1.5-4.5L6 8l4.5-1.5z" stroke={ACCENT} strokeWidth="1.5" fill="none" strokeLinejoin="round"/>
+      <path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z" stroke={ACCENT} strokeWidth="1.5" fill="none" strokeLinejoin="round"/>
+      <path d="M5 16l.6 1.4L7 18l-1.4.6L5 20l-.6-1.4L3 18l1.4-.6z" stroke={ACCENT} strokeWidth="1.5" fill="none" strokeLinejoin="round"/>
+    </>
+  ),
+  target: (
+    <>
+      <circle cx="12" cy="12" r="9" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <circle cx="12" cy="12" r="5" stroke={ACCENT} strokeWidth="1.5" fill="none"/>
+      <circle cx="12" cy="12" r="2" stroke={ACCENT} strokeWidth="1.5" fill="none"/>
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="9" stroke={ACCENT} strokeWidth="2" fill="none"/>
+      <path d="M12 7v5l3.5 3.5" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </>
+  ),
+};
+
+// Curated-icons-only resolver: unknown / missing → "spark" default glyph, so an
+// icon-stat / icon-headline scene never renders a broken / empty icon slot.
+function iconPath(name: string | undefined): React.ReactNode {
+  const key = (name ?? "spark") as IconName;
+  return ICON_PATHS[key] ?? ICON_PATHS["spark"];
+}
+
+// Renders an SVG icon in a rounded #EAF2FF tile with a 1px #BFD8FF border (~84px).
+const IconTile: React.FC<{ name: string | undefined; size?: number }> = ({ name, size = 84 }) => (
+  <div
+    style={{
+      width: size,
+      height: size,
+      borderRadius: 20,
+      background: "#EAF2FF",
+      border: "1px solid #BFD8FF",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    }}
+  >
+    <svg
+      width={44}
+      height={44}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      {iconPath(name)}
+    </svg>
+  </div>
+);
+
+// Returns true when a string looks like a person name (single or two capitalized
+// words, no punctuation like .com / Inc / & which indicate companies).
+function looksLikePerson(s: string): boolean {
+  return /^[A-Z][a-z]+(?: [A-Z][a-z]+)?$/.test(s.trim());
+}
+
+// ---------------------------------------------------------------------------
+// Shared sub-components
+// ---------------------------------------------------------------------------
+
+const KickerRow: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  style?: React.CSSProperties;
+  sceneId?: string;
+}> = ({ data, theme, style, sceneId }) => (
+  <div
+    data-scene-id={sceneId}
+    data-field="kicker"
+    style={{
+      display: "flex",
+      alignItems: "baseline",
+      gap: 22,
+      ...style,
+    }}
+  >
+    <span
+      style={{
+        fontSize: 24,
+        fontWeight: 700,
+        letterSpacing: 6,
+        textTransform: "uppercase" as const,
+        color: theme.accent,
+        fontFamily: theme.fontMono,
+      }}
+    >
+      {data.kicker || theme.wordmark}
+    </span>
+    {data.kicker ? (
+      <span style={{ fontSize: 22, fontWeight: 600, color: theme.navy }}>
+        {theme.wordmark}
+      </span>
+    ) : null}
+  </div>
+);
+
+const TitleBlock: React.FC<{
+  titleText: string;
+  titleLines: string[];
+  frame: number;
+  fps: number;
+  titleAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  theme: Theme;
+  fontSize?: number;
+  centered?: boolean;
+  sceneId?: string;
+}> = ({
+  titleText,
+  titleLines,
+  frame,
+  fps,
+  titleAt,
+  titleOpacity,
+  titleContainerY,
+  underline,
+  theme,
+  fontSize = 96,
+  centered = false,
+  sceneId,
+}) => {
+  const TITLE_STAGGER = 16;
+  const TITLE_DUR = 16;
+  return (
+    <div
+      data-scene-id={sceneId}
+      data-field="title"
+      style={{
+        position: "relative",
+        display: centered ? "flex" : "inline-block",
+        flexDirection: centered ? "column" : undefined,
+        alignItems: centered ? "center" : undefined,
+        textAlign: centered ? "center" : undefined,
+        opacity: titleOpacity,
+        transform: `translateY(${titleContainerY}px)`,
+      }}
+    >
+      {titleLines.map((line, li) => {
+        const sl = stagedLine(frame, li, titleAt, TITLE_STAGGER, 28, TITLE_DUR);
+        const lineColor = sl.colorP > 0.5 ? theme.text : theme.textDim;
+        return (
+          <div
+            key={li}
+            style={{
+              opacity: sl.opacity,
+              transform: sl.transform,
+              fontSize,
+              fontWeight: 900,
+              letterSpacing: -3,
+              lineHeight: 1.04,
+              color: lineColor,
+              maxWidth: 1500,
+            }}
+          >
+            {line}
+          </div>
+        );
+      })}
+      <div
+        style={{
+          marginTop: 14,
+          height: 8,
+          width: `${Math.round(underline * 360)}px`,
+          borderRadius: 6,
+          background: theme.accent,
+          boxShadow: `0 0 24px ${theme.accent}${alphaHex(0.45 * underline)}`,
+        }}
+      />
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TREATMENT A — icon-stat (centered)
+// ---------------------------------------------------------------------------
+const TreatmentIconStat: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  titleText: string;
+  titleLines: string[];
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt,
+  titleOpacity, titleContainerY, underline, titleText, titleLines, sceneId,
+}) => {
+  const iconAt = titleAt - 8 < kickerAt ? kickerAt + 6 : titleAt - 8;
+  const statAt = cueAt(cues, "subtitle-in", titleAt + 20);
+  const iconOpacity = ease(frame, iconAt, iconAt + 14, 0, 1);
+  const iconY = ease(frame, iconAt, iconAt + 14, 16, 0);
+  const statOpacity = ease(frame, statAt, statAt + 16, 0, 1);
+  const statY = ease(frame, statAt, statAt + 16, 14, 0);
+  const statValue = data.stat?.value ?? "";
+  const statLabel = data.stat?.label ?? "";
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 120,
+        right: 120,
+        top: 100,
+        bottom: 80,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 28,
+        textAlign: "center",
+      }}
+    >
+      <KickerRow
+        data={data}
+        theme={theme}
+        style={{
+          opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+          transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          justifyContent: "center",
+        }}
+        sceneId={sceneId}
+      />
+      <div style={{ opacity: iconOpacity, transform: `translateY(${iconY}px)` }}>
+        <IconTile name={data.icon} size={84} />
+      </div>
+      <TitleBlock
+        titleText={titleText}
+        titleLines={titleLines}
+        frame={frame}
+        fps={fps}
+        titleAt={titleAt}
+        titleOpacity={titleOpacity}
+        titleContainerY={titleContainerY}
+        underline={underline}
+        theme={theme}
+        fontSize={72}
+        centered
+        sceneId={sceneId}
+      />
+      {statValue ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            opacity: statOpacity,
+            transform: `translateY(${statY}px)`,
+          }}
+        >
+          <span style={{ fontSize: 64, fontWeight: 900, color: theme.accent, letterSpacing: -2, lineHeight: 1, fontFamily: theme.fontDisplay }}>
+            {statValue}
+          </span>
+          {statLabel ? (
+            <span style={{ fontSize: 26, fontWeight: 400, color: theme.textMuted, letterSpacing: 0.2 }}>
+              {statLabel}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TREATMENT B — split-mosaic (text left + entity grid right)
+// ---------------------------------------------------------------------------
+const TreatmentSplitMosaic: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  subOpacity: number;
+  subY: number;
+  titleText: string;
+  titleLines: string[];
+  subText: string;
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, subOpacity, subY,
+  titleText, titleLines, subText, sceneId,
+}) => {
+  // Caller guarantees a non-empty grid (degrade guard runs before mount).
+  const entities = (data.featureEntities ?? []).slice(0, 6);
+  const gridAt = cueAt(cues, "subtitle-in", subAt + 4);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 140,
+        right: 60,
+        top: 120,
+        bottom: 100,
+        display: "grid",
+        gridTemplateColumns: "1.05fr 0.95fr",
+        gap: 48,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={72}
+          sceneId={sceneId}
+        />
+        {subText ? (
+          <div
+            data-scene-id={sceneId}
+            data-field="subtitle"
+            style={{ opacity: subOpacity, transform: `translateY(${subY}px)`, fontSize: 28, fontWeight: 400, color: theme.textMuted, maxWidth: 680 }}
+          >
+            {subText}
+          </div>
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          background: "#0B0F1A",
+          borderRadius: 24,
+          padding: 32,
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: 14,
+          alignContent: "center",
+          minHeight: 280,
+        }}
+      >
+        {entities.map((entity, i) => {
+          const tileAt = gridAt + i * 10;
+          const tileOpacity = ease(frame, tileAt, tileAt + 14, 0, 1);
+          const tileY = ease(frame, tileAt, tileAt + 14, 12, 0);
+          const isPerson = looksLikePerson(entity);
+          return (
+            <div
+              key={`${i}-${entity}`}
+              style={{
+                opacity: tileOpacity,
+                transform: `translateY(${tileY}px)`,
+                background: "#161B2E",
+                borderRadius: 12,
+                border: "1px solid #1E2B45",
+                padding: "12px 10px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                minHeight: 72,
+              }}
+            >
+              {isPerson ? (
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "50%",
+                    background: "#1E3A5F",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="8" r="4" stroke="#BFD8FF" strokeWidth="1.5" fill="none"/>
+                    <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="#BFD8FF" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+                  </svg>
+                </div>
+              ) : null}
+              <span
+                style={{
+                  fontSize: isPerson ? 13 : 14,
+                  fontWeight: 600,
+                  color: "#CBD5E1",
+                  textAlign: "center",
+                  lineHeight: 1.3,
+                  letterSpacing: 0.2,
+                  fontFamily: theme.fontDisplay,
+                }}
+              >
+                {entity}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TREATMENT C — split-stat (text left + stat panel right with rising bars)
+// ---------------------------------------------------------------------------
+const TreatmentSplitStat: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  subOpacity: number;
+  subY: number;
+  titleText: string;
+  titleLines: string[];
+  subText: string;
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, subOpacity, subY,
+  titleText, titleLines, subText, sceneId,
+}) => {
+  const statAt = cueAt(cues, "subtitle-in", subAt + 4);
+  const statOpacity = ease(frame, statAt, statAt + 20, 0, 1);
+  const statY = ease(frame, statAt, statAt + 20, 20, 0);
+  // Caller guarantees a non-empty stat value (degrade guard runs before mount).
+  const statValue = data.stat?.value ?? "";
+  const statLabel = data.stat?.label ?? "";
+  const BAR_HEIGHTS = [30, 48, 62, 80, 100];
+  const BAR_BASE = 120;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 140,
+        right: 60,
+        top: 120,
+        bottom: 100,
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 48,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={72}
+          sceneId={sceneId}
+        />
+        {subText ? (
+          <div
+            data-scene-id={sceneId}
+            data-field="subtitle"
+            style={{ opacity: subOpacity, transform: `translateY(${subY}px)`, fontSize: 28, fontWeight: 400, color: theme.textMuted, maxWidth: 680 }}
+          >
+            {subText}
+          </div>
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          background: "#EAF2FF",
+          borderRadius: 24,
+          padding: "40px 44px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 16,
+          opacity: statOpacity,
+          transform: `translateY(${statY}px)`,
+          minHeight: 280,
+        }}
+      >
+        {statValue ? (
+          <span style={{ fontSize: 120, fontWeight: 900, color: theme.accent, letterSpacing: -4, lineHeight: 1, fontFamily: theme.fontDisplay, textAlign: "center" }}>
+            {statValue}
+          </span>
+        ) : null}
+        {statLabel ? (
+          <span style={{ fontSize: 26, fontWeight: 600, color: "#1A3A5C", letterSpacing: 0.3, textAlign: "center" }}>
+            {statLabel}
+          </span>
+        ) : null}
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: BAR_BASE, marginTop: 16 }}>
+          {BAR_HEIGHTS.map((hPct, i) => {
+            const barAt = statAt + 8 + i * 6;
+            const barGrow = ease(frame, barAt, barAt + 20, 0, 1);
+            const barH = (hPct / 100) * BAR_BASE;
+            const barOpacity = 0.4 + (hPct / 100) * 0.6;
+            return (
+              <div
+                key={i}
+                style={{ width: 18, height: barH * barGrow, borderRadius: 5, background: theme.accent, opacity: barOpacity }}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TREATMENT D — icon-headline (centered, FULL-WIDTH) — THE FALLBACK
+//
+// This is also the degrade target for the two-column treatments. It is a
+// symmetric, centered, full-width composition: the container is inset by the
+// SAME amount left/right (120/120) and the content is centered both axes, so it
+// fills the stage with no right-side white space.
+// ---------------------------------------------------------------------------
+const TreatmentIconHeadline: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  subOpacity: number;
+  subY: number;
+  titleText: string;
+  titleLines: string[];
+  subText: string;
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, kickerAt, titleAt,
+  titleOpacity, titleContainerY, underline, subOpacity, subY,
+  titleText, titleLines, subText, sceneId,
+}) => {
+  const iconAt = titleAt - 8 < kickerAt ? kickerAt + 6 : titleAt - 8;
+  const iconOpacity = ease(frame, iconAt, iconAt + 14, 0, 1);
+  const iconY = ease(frame, iconAt, iconAt + 14, 16, 0);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 120,
+        right: 120,
+        top: 100,
+        bottom: 80,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 28,
+        textAlign: "center",
+      }}
+    >
+      <KickerRow
+        data={data}
+        theme={theme}
+        style={{
+          opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+          transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          justifyContent: "center",
+        }}
+        sceneId={sceneId}
+      />
+      <div style={{ opacity: iconOpacity, transform: `translateY(${iconY}px)` }}>
+        <IconTile name={data.icon} size={84} />
+      </div>
+      <TitleBlock
+        titleText={titleText}
+        titleLines={titleLines}
+        frame={frame}
+        fps={fps}
+        titleAt={titleAt}
+        titleOpacity={titleOpacity}
+        titleContainerY={titleContainerY}
+        underline={underline}
+        theme={theme}
+        fontSize={72}
+        centered
+        sceneId={sceneId}
+      />
+      {/* Optional centered supporting line — keeps the centered block from
+          reading thin when the scene happens to carry a subtitle. */}
+      {subText ? (
+        <div
+          data-scene-id={sceneId}
+          data-field="subtitle"
+          style={{
+            opacity: subOpacity,
+            transform: `translateY(${subY}px)`,
+            fontSize: 30,
+            fontWeight: 400,
+            color: theme.textMuted,
+            maxWidth: 1100,
+            textAlign: "center",
+          }}
+        >
+          {subText}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Main ExplainerCard export
+// ---------------------------------------------------------------------------
 export const ExplainerCard: React.FC<{
   data: SceneData;
   cues: Cue[];
@@ -149,6 +895,20 @@ export const ExplainerCard: React.FC<{
   const badgeLabel = actIndex > 0 ? actLabel(data.kicker) : "";
   const badgeText = actIndex > 0 ? `${actNum(actIndex)}${badgeLabel ? ` — ${badgeLabel}` : ""}` : "";
 
+  // -------------------------------------------------------------------------
+  // TREATMENT RESOLUTION + DEGRADE-TO-CENTER GUARD.
+  // ABSENT / unknown treatment → render the ORIGINAL card (backward compat).
+  // For the data-driven treatments, if the required right-column data is
+  // missing we DROP to "icon-headline" (centered, full-width) so we never
+  // render a blank / ghosted right half (the white-space bug).
+  // -------------------------------------------------------------------------
+  const hasEntities = (data.featureEntities ?? []).filter((e) => (e ?? "").trim()).length > 0;
+  const hasStat = !!(data.stat?.value ?? "").trim();
+
+  let treatment = data.treatment;
+  if (treatment === "split-mosaic" && !hasEntities) treatment = "icon-headline";
+  else if ((treatment === "split-stat" || treatment === "icon-stat") && !hasStat) treatment = "icon-headline";
+
   return (
     <AbsoluteFill
       style={{
@@ -205,165 +965,249 @@ export const ExplainerCard: React.FC<{
         }}
       />
 
-      <div
-        style={{
-          position: "absolute",
-          left: 140,
-          right: 120,
-          top: 150,
-          bottom: 120,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          gap: 22,
-        }}
-      >
-        {/* Kicker eyebrow + wordmark */}
+      {/* ------------------------------------------------------------------ */}
+      {/* TREATMENT SWITCH                                                    */}
+      {/* ------------------------------------------------------------------ */}
+      {treatment === "icon-stat" ? (
+        <TreatmentIconStat
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          titleText={titleText}
+          titleLines={titleLines}
+          sceneId={sceneId}
+        />
+      ) : treatment === "split-mosaic" ? (
+        <TreatmentSplitMosaic
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          subOpacity={subOpacity}
+          subY={subY}
+          titleText={titleText}
+          titleLines={titleLines}
+          subText={subText}
+          sceneId={sceneId}
+        />
+      ) : treatment === "split-stat" ? (
+        <TreatmentSplitStat
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          subOpacity={subOpacity}
+          subY={subY}
+          titleText={titleText}
+          titleLines={titleLines}
+          subText={subText}
+          sceneId={sceneId}
+        />
+      ) : treatment === "icon-headline" ? (
+        <TreatmentIconHeadline
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          subOpacity={subOpacity}
+          subY={subY}
+          titleText={titleText}
+          titleLines={titleLines}
+          subText={subText}
+          sceneId={sceneId}
+        />
+      ) : (
+        /* ---------------------------------------------------------------- */
+        /* ORIGINAL card — ABSENT/unknown treatment. Byte-identical behavior */
+        /* ---------------------------------------------------------------- */
         <div
-          data-scene-id={sceneId}
-          data-field="kicker"
           style={{
+            position: "absolute",
+            left: 140,
+            right: 120,
+            top: 150,
+            bottom: 120,
             display: "flex",
-            alignItems: "baseline",
+            flexDirection: "column",
+            justifyContent: "center",
             gap: 22,
-            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
-            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
           }}
         >
-          <span
-            style={{
-              fontSize: 24,
-              fontWeight: 700,
-              letterSpacing: 6,
-              textTransform: "uppercase",
-              color: theme.accent,
-              fontFamily: theme.fontMono,
-            }}
-          >
-            {data.kicker || theme.wordmark}
-          </span>
-          {data.kicker ? (
-            <span style={{ fontSize: 22, fontWeight: 600, color: theme.navy }}>
-              {theme.wordmark}
-            </span>
-          ) : null}
-        </div>
-
-        {/* Title — staged line-by-line reveal with two-tone active/pending treatment.
-            Each line fades+rises in sequence (16f stagger). The outer wrapper
-            keeps the kinetic-light spring for the whole title block. */}
-        <div
-          data-scene-id={sceneId}
-          data-field="title"
-          style={{
-            position: "relative",
-            display: "inline-block",
-            opacity: titleOpacity,
-            transform: `translateY(${titleContainerY}px)`,
-          }}
-        >
-          {titleLines.map((line, li) => {
-            const sl = stagedLine(frame, li, titleAt, TITLE_STAGGER, 28, TITLE_DUR);
-            const lineColor = sl.colorP > 0.5 ? theme.text : theme.textDim;
-            return (
-              <div
-                key={li}
-                style={{
-                  opacity: sl.opacity,
-                  transform: sl.transform,
-                  fontSize: 96,
-                  fontWeight: 900,
-                  letterSpacing: -3,
-                  lineHeight: 1.04,
-                  color: lineColor,
-                  maxWidth: 1500,
-                }}
-              >
-                {line}
-              </div>
-            );
-          })}
-          <div
-            style={{
-              marginTop: 14,
-              height: 8,
-              width: `${Math.round(underline * 360)}px`,
-              borderRadius: 6,
-              background: theme.accent,
-              boxShadow: `0 0 24px ${theme.accent}${alphaHex(0.45 * underline)}`,
-            }}
-          />
-        </div>
-
-        {/* Subtitle */}
-        {subText ? (
+          {/* Kicker eyebrow + wordmark */}
           <div
             data-scene-id={sceneId}
-            data-field="subtitle"
+            data-field="kicker"
             style={{
-              opacity: subOpacity,
-              transform: `translateY(${subY}px)`,
-              fontSize: 32,
-              fontWeight: 400,
-              color: theme.textMuted,
-              maxWidth: 1200,
+              display: "flex",
+              alignItems: "baseline",
+              gap: 22,
+              opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+              transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
             }}
           >
-            {subText}
+            <span
+              style={{
+                fontSize: 24,
+                fontWeight: 700,
+                letterSpacing: 6,
+                textTransform: "uppercase",
+                color: theme.accent,
+                fontFamily: theme.fontMono,
+              }}
+            >
+              {data.kicker || theme.wordmark}
+            </span>
+            {data.kicker ? (
+              <span style={{ fontSize: 22, fontWeight: 600, color: theme.navy }}>
+                {theme.wordmark}
+              </span>
+            ) : null}
           </div>
-        ) : null}
 
-        {/* Staggered capability bullets — numbered badges (NO emoji) */}
-        {bullets.length > 0 ? (
-          <div data-scene-id={sceneId} data-field="bullets" style={{ display: "flex", flexDirection: "column", gap: 18, marginTop: 12 }}>
-            {bullets.map((b, i) => {
-              const at = bulletAt(i);
-              const r = reveal(frame, at, 22, 16);
+          {/* Title — staged line-by-line reveal with two-tone active/pending treatment.
+              Each line fades+rises in sequence (16f stagger). The outer wrapper
+              keeps the kinetic-light spring for the whole title block. */}
+          <div
+            data-scene-id={sceneId}
+            data-field="title"
+            style={{
+              position: "relative",
+              display: "inline-block",
+              opacity: titleOpacity,
+              transform: `translateY(${titleContainerY}px)`,
+            }}
+          >
+            {titleLines.map((line, li) => {
+              const sl = stagedLine(frame, li, titleAt, TITLE_STAGGER, 28, TITLE_DUR);
+              const lineColor = sl.colorP > 0.5 ? theme.text : theme.textDim;
               return (
                 <div
-                  key={`${i}-${b}`}
+                  key={li}
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 24,
-                    opacity: r.opacity,
-                    transform: r.transform,
+                    opacity: sl.opacity,
+                    transform: sl.transform,
+                    fontSize: 96,
+                    fontWeight: 900,
+                    letterSpacing: -3,
+                    lineHeight: 1.04,
+                    color: lineColor,
+                    maxWidth: 1500,
                   }}
                 >
-                  <div
-                    style={{
-                      flex: "0 0 52px",
-                      width: 52,
-                      height: 52,
-                      borderRadius: 14,
-                      background: theme.navy,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 24,
-                      fontWeight: 800,
-                      color: "#ffffff",
-                      fontFamily: theme.fontMono,
-                    }}
-                  >
-                    {i + 1}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 38,
-                      fontWeight: 600,
-                      color: theme.text,
-                      letterSpacing: -0.4,
-                    }}
-                  >
-                    {b}
-                  </div>
+                  {line}
                 </div>
               );
             })}
+            <div
+              style={{
+                marginTop: 14,
+                height: 8,
+                width: `${Math.round(underline * 360)}px`,
+                borderRadius: 6,
+                background: theme.accent,
+                boxShadow: `0 0 24px ${theme.accent}${alphaHex(0.45 * underline)}`,
+              }}
+            />
           </div>
-        ) : null}
-      </div>
+
+          {/* Subtitle */}
+          {subText ? (
+            <div
+              data-scene-id={sceneId}
+              data-field="subtitle"
+              style={{
+                opacity: subOpacity,
+                transform: `translateY(${subY}px)`,
+                fontSize: 32,
+                fontWeight: 400,
+                color: theme.textMuted,
+                maxWidth: 1200,
+              }}
+            >
+              {subText}
+            </div>
+          ) : null}
+
+          {/* Staggered capability bullets — numbered badges (NO emoji) */}
+          {bullets.length > 0 ? (
+            <div data-scene-id={sceneId} data-field="bullets" style={{ display: "flex", flexDirection: "column", gap: 18, marginTop: 12 }}>
+              {bullets.map((b, i) => {
+                const at = bulletAt(i);
+                const r = reveal(frame, at, 22, 16);
+                return (
+                  <div
+                    key={`${i}-${b}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 24,
+                      opacity: r.opacity,
+                      transform: r.transform,
+                    }}
+                  >
+                    <div
+                      style={{
+                        flex: "0 0 52px",
+                        width: 52,
+                        height: 52,
+                        borderRadius: 14,
+                        background: theme.navy,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 24,
+                        fontWeight: 800,
+                        color: "#ffffff",
+                        fontFamily: theme.fontMono,
+                      }}
+                    >
+                      {i + 1}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 38,
+                        fontWeight: 600,
+                        color: theme.text,
+                        letterSpacing: -0.4,
+                      }}
+                    >
+                      {b}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      )}
 
       <CornerMark theme={theme} opacity={ease(frame, kickerAt + 6, kickerAt + 22, 0, 0.65)} sceneId={sceneId} resolveSrc={resolveSrc} />
     </AbsoluteFill>

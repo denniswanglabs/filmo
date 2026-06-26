@@ -21,6 +21,49 @@ CINEMATIC_MODELS = {"seedance_2_0", "gpt_image_2", "nano_banana_flash", "nano_ba
 SELECTION_QUALITY = {"standard", "premium"}
 
 
+# Card-treatment vocabulary (SHARED DATA CONTRACT with the Remotion ExplainerCard
+# archetype). These optional fields live on scene["data"] for motion_graphic /
+# explainer-card scenes. ALL optional: a scene that omits them is still valid (the
+# visual side renders a plain card). When present they must be well-shaped.
+CARD_TREATMENTS = {"icon-stat", "split-mosaic", "split-stat", "icon-headline"}
+
+
+def validate_scene_data(data):
+    """Validate the OPTIONAL card-treatment fields on a scene's `data`. Returns [].
+
+    Pass-through-but-validated: every field is optional (a `data` without them is
+    valid), but a present field must be well-shaped:
+      - treatment      one of CARD_TREATMENTS
+      - icon           a non-empty string
+      - stat           {"value": str, "label": str}
+      - featureEntities list[str]   (NOT `entities` — that collided with an existing field)
+    Unknown extra keys are tolerated (data carries many other archetype fields)."""
+    problems = []
+    if data is None:
+        return problems
+    if not isinstance(data, dict):
+        return ["scene.data is not an object"]
+
+    if "treatment" in data and data.get("treatment") not in CARD_TREATMENTS:
+        problems.append("scene.data.treatment=%r must be one of %s"
+                        % (data.get("treatment"), sorted(CARD_TREATMENTS)))
+    if "icon" in data and not (isinstance(data.get("icon"), str) and data.get("icon").strip()):
+        problems.append("scene.data.icon=%r must be a non-empty string" % data.get("icon"))
+    if "stat" in data:
+        stat = data.get("stat")
+        if not isinstance(stat, dict):
+            problems.append("scene.data.stat=%r must be an object {value,label}" % stat)
+        else:
+            for k in ("value", "label"):
+                if not isinstance(stat.get(k), str):
+                    problems.append("scene.data.stat.%s=%r must be a string" % (k, stat.get(k)))
+    if "featureEntities" in data:
+        ents = data.get("featureEntities")
+        if not isinstance(ents, list) or not all(isinstance(e, str) for e in ents):
+            problems.append("scene.data.featureEntities=%r must be a list of strings" % ents)
+    return problems
+
+
 def default_selection():
     """The documented default `selection` for plans that omit one.
 
@@ -204,6 +247,10 @@ def validate_plan(plan, *, strict_durations=False):
         elif stype in {"title", "walkthrough", "motion_graphic", "screenshot"}:
             if s.get("model") is not None:
                 problems.append("%s scene %r model should be null" % (stype, sid))
+        # OPTIONAL card-treatment fields on data (icon-stat/split-mosaic/...) — when
+        # present they must be well-shaped; a scene that omits them stays valid.
+        if "data" in s:
+            problems.extend(validate_scene_data(s.get("data")))
 
     vo = plan.get("voiceover", {})
     if not isinstance(vo, dict):

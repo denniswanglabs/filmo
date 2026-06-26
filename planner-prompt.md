@@ -111,7 +111,13 @@ OUTPUT SCHEMA (these top-level keys and field names are FIXED — never rename, 
       "brief": string,            // one-sentence direction for this scene
       "model": string or null,    // see MODEL RULES
       "duration_s": integer,      // whole seconds, >= 2
-      "input_image": null         // always null at planning time
+      "input_image": null,        // always null at planning time
+      "data": {                   // OPTIONAL — only on "motion_graphic" feature beats; see CARD TREATMENT RULES
+        "treatment": string,      // "icon-stat" | "split-mosaic" | "split-stat" | "icon-headline"
+        "icon": string,           // curated icon name (icon-stat / icon-headline) — see icon list
+        "stat": {"value": string, "label": string},  // a REAL number from the brand (stat treatments)
+        "featureEntities": [string]                   // >= 3 REAL named entities/integrations (split-mosaic)
+      }
     }
   ],
   "voiceover": {
@@ -239,6 +245,30 @@ VOICEOVER RULES:
       payments…", "Stop fraud…", "Bill on a schedule…"). Each feature beat covers a DIFFERENT
       feature — never repeat the same value-prop or the tagline across cards (the R1 failure:
       "Build internet businesses" repeated on every scene).
+- CARD TREATMENT — CHOOSE A LAYOUT FOR EACH "motion_graphic" FEATURE BEAT (emit it in that
+  scene's "data"): a bare feature card (title + a short line) leaves the right side empty. So
+  for EACH "motion_graphic" scene, pick ONE "treatment" from the REAL data you have and emit
+  the fields it needs in "data":
+    * "icon-stat"    — you have a REAL number AND a punchy headline. Emit "icon" (a curated icon
+                       name), "stat": {"value": "<the real number, e.g. 135+ currencies>",
+                       "label": "<what it measures>"}, and a tight headline as the scene title.
+    * "split-stat"   — you have a REAL number but no icon-worthy headline. Emit just
+                       "stat": {"value": ..., "label": ...}.
+    * "split-mosaic" — you can name >= 3 REAL named entities / integrations / capabilities (from
+                       the COMPANY FACTS features, e.g. for stripe: "Billing","Radar","Connect",
+                       "Issuing"). Emit "featureEntities": ["...","...","..."] (>= 3 real names).
+    * "icon-headline"— you have NEITHER a real number NOR >= 3 real entities. Emit "icon" (a
+                       curated icon name) + a headline as the scene title. NO number. This is the
+                       HONEST default — prefer it over inventing a stat.
+  HONESTY IS ABSOLUTE: NEVER invent a stat number or a named entity to fill a treatment. A
+  "stat.value" MUST contain a REAL number that comes from the brand's real facts / your verified
+  knowledge of this specific company (e.g. stripe "135+ currencies", "99.999% uptime") — if you
+  have no real number, use "icon-headline" instead. "featureEntities" MUST be REAL named features
+  / integrations of THIS company — if you cannot name 3 real ones, do NOT use "split-mosaic".
+  Better an honest icon + headline than a fabricated number. When in doubt -> "icon-headline".
+  CURATED ICON NAMES (pick the closest; unknown names safely default to "spark"): "rocket",
+  "spark", "shield", "chart", "users", "bolt", "globe", "dollar", "layers", "sparkles",
+  "target", "clock".
 - Do NOT emit a single combined "script" — use the per-scene "beats" array only.
 
 VALIDITY:

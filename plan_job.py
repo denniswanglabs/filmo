@@ -342,6 +342,13 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # beats and the headline_fix opens the video, even if the LLM/template dropped
     # them. No-op when conversion_read is None (flag off) -> behavior unchanged.
     plan = seed_plan_with_read(plan, conversion_read)
+    # Card-treatment RULES GUARD + HONESTY GUARD (runs for BOTH the LLM and template
+    # paths, while `_company_facts` is still on job so it can verify real data): for
+    # each motion_graphic/explainer-card scene, keep a valid LLM-picked treatment whose
+    # data survives the honesty pass, else assign one deterministically — and STRIP any
+    # stat/featureEntities not backed by real captured brand data (never invent a number
+    # or an entity; when in doubt -> "icon-headline"). MUST run before the pop below.
+    plan = _assign_card_treatments(plan)
     # Drop the internal-only `_wordmark` / `_company_facts` hints before
     # validation/return — `emphasis` stays (a recognized optional job key), but these
     # are private plumbing fields that must not leak into the persisted plan or the
@@ -535,6 +542,181 @@ def seed_plan_with_read(plan, conversion_read):
         # imperative stage directions aloud. The grounded OUTCOME/proof reaches the
         # VO through headline_fix (opening beat) + the producer's grounded VO pass,
         # so we deliberately do NOT push `fix` into any spoken beat here.
+    return plan
+
+
+# --- Card treatment selection (HYBRID: LLM picks, rules guard) --------------
+# The visual side renders each motion_graphic/explainer-card scene with one of four
+# TREATMENTS (the SHARED DATA CONTRACT with the Remotion ExplainerCard archetype):
+#   "icon-stat"     icon + a real number stat + punchy headline
+#   "split-stat"    a real number stat, no icon-worthy headline
+#   "split-mosaic"  >= 3 real named entities / integrations
+#   "icon-headline" icon + headline, NO number (the HONEST fallback)
+# The LLM picks one per scene from the REAL data it has (planner-prompt.md). This is
+# the deterministic RULES GUARD + HONESTY GUARD that runs after the LLM/template:
+#   1. fill in a treatment for any feature scene the LLM left bare, and
+#   2. STRIP any stat / featureEntities NOT backed by real captured brand data, then
+#      force "icon-headline" — NEVER invent a number or an entity (honesty rule).
+_CARD_TREATMENTS = {"icon-stat", "split-mosaic", "split-stat", "icon-headline"}
+
+# Curated generic icon names the LLM is told to pick from (the Remotion side defaults
+# any unknown icon name). Kept in sync with the list in planner-prompt.md. Used here
+# only to default a MISSING icon — never to reject one (unknown names pass through).
+_DEFAULT_ICON = "spark"
+_KNOWN_ICONS = {
+    # The 12 curated glyphs in ExplainerCard.tsx ICON_PATHS (Remotion side).
+    "rocket", "spark", "shield", "chart", "users", "bolt",
+    "globe", "dollar", "layers", "sparkles", "target", "clock",
+}
+
+# A real stat needs a real NUMBER. This matches a digit-bearing token (e.g. "135+",
+# "99.999%", "$1T", "10x", "2,000") so a stat.value with no number is rejected.
+_STAT_NUMBER_RE = re.compile(r"\d")
+
+
+def _feature_entities_from_facts(company_facts):
+    """Real named entities/integrations from the resolved COMPANY FACTS, or [].
+
+    The ONLY honest source of named entities today is the brand's real `features`
+    (curated fixture or brand_extract — never invented). Returns the de-duped feature
+    labels so the split-mosaic treatment can be grounded. NEVER fabricates."""
+    facts = company_facts if isinstance(company_facts, dict) else {}
+    out, seen = [], set()
+    for f in (facts.get("features") or []):
+        if isinstance(f, dict):
+            f = f.get("label") or f.get("title") or ""
+        label = str(f or "").strip()
+        key = label.lower()
+        if label and key not in seen:
+            seen.add(key)
+            out.append(label)
+    return out
+
+
+def _stat_is_real(stat, scene, company_facts):
+    """True only when `stat` carries a real NUMBER that appears in real brand text.
+
+    Honesty guard: the pipeline has NO dedicated numeric-stat source, so a stat is
+    trustworthy ONLY when its number is corroborated by text that originated from the
+    real brand — the scene's own brief / threaded VO beat text (written from the real
+    COMPANY FACTS), the tagline, or a feature label. A number the LLM invented out of
+    nowhere has no corroborating source and is REJECTED. Never fabricates."""
+    if not isinstance(stat, dict):
+        return False
+    value = str(stat.get("value") or "").strip()
+    if not value or not _STAT_NUMBER_RE.search(value):
+        return False  # a stat with no number is not a stat
+    # The digit runs that must be corroborated (e.g. "135", "99.999", "1").
+    nums = re.findall(r"\d[\d,\.]*", value)
+    if not nums:
+        return False
+    d = scene.get("data") or {}
+    facts = company_facts if isinstance(company_facts, dict) else {}
+    feat_text = " ".join(
+        (f.get("label") or f.get("title") or "") if isinstance(f, dict) else str(f)
+        for f in (facts.get("features") or [])
+    )
+    corpus = " ".join(str(x or "") for x in (
+        scene.get("brief"), d.get("_text"), d.get("title"), d.get("subtitle"),
+        facts.get("tagline"), feat_text,
+    ))
+    corpus_nums = set(re.findall(r"\d[\d,\.]*", corpus))
+    # Every number in the stat must appear verbatim in the real corpus.
+    return all(n in corpus_nums for n in nums)
+
+
+def _assign_card_treatments(plan):
+    """RULES GUARD + HONESTY GUARD over each feature (motion_graphic) scene's data.
+
+    Hybrid backstop to the LLM's per-scene pick (planner-prompt.md):
+      - HONESTY FIRST: strip any `stat` not backed by a real number in real brand
+        text, and any `featureEntities` not present in the real features. Never invent.
+      - If the LLM emitted a valid treatment AND the fields it needs survived the
+        honesty pass, keep it (defaulting a missing icon for the icon treatments).
+      - Otherwise assign deterministically from what's REAL:
+          real stat -> "split-stat"; >= 3 real entities -> "split-mosaic";
+          else "icon-headline" (icon + headline, NO number — the honest floor).
+    Mutates scene["data"] in place; returns the plan. Only touches motion_graphic
+    scenes (the explainer-card archetype) — all other scene types are untouched."""
+    job = plan.get("job") or {}
+    company_facts = job.get("_company_facts") if isinstance(job.get("_company_facts"), dict) else {}
+    real_entities = _feature_entities_from_facts(company_facts)
+
+    for scene in (plan.get("scenes") or []):
+        if not isinstance(scene, dict) or scene.get("type") != "motion_graphic":
+            continue
+        data = scene.get("data")
+        if not isinstance(data, dict):
+            data = {}
+            scene["data"] = data
+
+        # --- HONESTY PASS: drop anything not backed by real data -------------
+        if not _stat_is_real(data.get("stat"), scene, company_facts):
+            data.pop("stat", None)
+        # featureEntities: keep ONLY the LLM-named entities that are real features.
+        raw_ents = data.get("featureEntities")
+        if isinstance(raw_ents, list):
+            real_lc = {e.lower() for e in real_entities}
+            kept = []
+            for e in raw_ents:
+                s = str(e or "").strip()
+                if s and s.lower() in real_lc:
+                    kept.append(s)
+            if kept:
+                data["featureEntities"] = kept
+            else:
+                data.pop("featureEntities", None)
+
+        has_real_stat = isinstance(data.get("stat"), dict) and bool(data.get("stat"))
+        ents = data.get("featureEntities") if isinstance(data.get("featureEntities"), list) else []
+        has_mosaic = len(ents) >= 3
+
+        # --- KEEP a valid LLM pick whose surviving data still supports it -----
+        treatment = data.get("treatment")
+        keep = False
+        if treatment in _CARD_TREATMENTS:
+            if treatment in ("icon-stat", "split-stat"):
+                keep = has_real_stat                 # stat treatments need a real stat
+            elif treatment == "split-mosaic":
+                keep = has_mosaic                    # mosaic needs >= 3 real entities
+            else:  # icon-headline needs nothing beyond an icon (added below)
+                keep = True
+
+        if not keep:
+            # --- DETERMINISTIC ASSIGNMENT from what is REAL ------------------
+            if has_real_stat:
+                treatment = "split-stat"
+            elif has_mosaic:
+                treatment = "split-mosaic"
+            else:
+                treatment = "icon-headline"
+            data["treatment"] = treatment
+
+        # Stat treatments must not keep a now-missing stat; force the honest floor.
+        if treatment in ("icon-stat", "split-stat") and not has_real_stat:
+            treatment = "icon-headline"
+            data["treatment"] = treatment
+        # Mosaic must not keep too-few entities; force the honest floor.
+        if treatment == "split-mosaic" and not has_mosaic:
+            data.pop("featureEntities", None)
+            treatment = "icon-headline"
+            data["treatment"] = treatment
+
+        # icon treatments need a curated icon name; default a missing/blank one.
+        if treatment in ("icon-stat", "icon-headline"):
+            icon = str(data.get("icon") or "").strip()
+            if not icon:
+                data["icon"] = _DEFAULT_ICON
+        else:
+            data.pop("icon", None)  # split treatments don't render an icon
+
+        # Drop fields the FINAL treatment doesn't render so stale stripped-honesty
+        # data never lingers (e.g. a forced icon-headline keeps no stat/entities).
+        if treatment not in ("icon-stat", "split-stat"):
+            data.pop("stat", None)
+        if treatment != "split-mosaic":
+            data.pop("featureEntities", None)
+
     return plan
 
 

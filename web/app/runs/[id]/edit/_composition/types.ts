@@ -60,6 +60,23 @@ export interface SceneData {
   // short capability lines (parsed from the VO/brief) revealed as numbered badges.
   bullets?: string[];
 
+  // explainer-card RICH TREATMENT fields (feature-card-richness spec).
+  // `treatment` selects one of 4 layout variants. ABSENT / unknown → the
+  // existing card renders exactly as before (backward-compat guaranteed).
+  // Degrade: split-mosaic w/o featureEntities, or split-stat/icon-stat w/o
+  // stat → archetype drops to the centered, full-width "icon-headline".
+  treatment?: "icon-stat" | "split-mosaic" | "split-stat" | "icon-headline";
+  // Curated icon name rendered as inline SVG inside the card tile.
+  // Set: rocket, spark, shield, chart, users, bolt, globe, dollar, layers,
+  //      sparkles, target, clock. Unknown / missing → falls back to "spark".
+  icon?: string;
+  // A REAL (never invented) stat shown in icon-stat / split-stat treatments.
+  stat?: { value: string; label: string };
+  // REAL named entities (companies / people / labels) for the split-mosaic
+  // treatment tile grid (up to 6). Named separately from `entities` which is
+  // the apple-registry object array — these are plain strings.
+  featureEntities?: string[];
+
   // apple-hero fields (product-as-hero lockup)
   // reuses kicker / title / punchWord / subtitle above. `product` is an
   // optional short product/feature name shown on the hero "product" plate.

@@ -71,6 +71,10 @@ ARCH_CARD = "card-ui"
 # real footage on a $0/standard run (the blank-scenes fix). Shows the narrated
 # point as kinetic motion-graphics instead of a flat solid color.
 ARCH_EXPLAINER = "explainer-card"
+# Card-treatment vocabulary (SHARED DATA CONTRACT with the Remotion ExplainerCard
+# archetype). plan_job picks + honesty-guards these on scene["data"]; _shape_explainer
+# only carries the surviving fields into the rendered props.
+_CARD_TREATMENTS = {"icon-stat", "split-mosaic", "split-stat", "icon-headline"}
 # A produced walkthrough MP4 (Walk Agent capture) played INSIDE the branded studio
 # composition, so the clip inherits Walk Studio overlays + per-scene VO. Used for a
 # `walkthrough` role ONLY when a real clip exists; otherwise the role falls back to
@@ -2369,6 +2373,33 @@ def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, 
         "subtitle": _decode(subtitle or ""),
         "bullets": [_decode(b) for b in bullets],
     }
+
+    # CARD TREATMENT pass-through (SHARED DATA CONTRACT with the Remotion
+    # ExplainerCard archetype). plan_job's RULES + HONESTY guard already chose a
+    # treatment and STRIPPED any stat/featureEntities not backed by real brand data,
+    # so here we only CARRY the surviving fields into the rendered props. We never
+    # synthesize a stat/entity (honesty rule) — only what the guard left on data.
+    #   treatment        "icon-stat" | "split-mosaic" | "split-stat" | "icon-headline"
+    #   icon             curated icon name (icon-stat / icon-headline)
+    #   stat             {"value": str, "label": str} (stat treatments)
+    #   featureEntities  list[str] of REAL named entities (split-mosaic)
+    treatment = d.get("treatment")
+    if treatment in _CARD_TREATMENTS:
+        out["treatment"] = treatment
+        icon = str(d.get("icon") or "").strip()
+        if icon:
+            out["icon"] = _decode(icon)
+        stat = d.get("stat")
+        if isinstance(stat, dict) and stat.get("value"):
+            out["stat"] = {
+                "value": _decode(str(stat.get("value") or "")),
+                "label": _decode(str(stat.get("label") or "")),
+            }
+        ents = d.get("featureEntities")
+        if isinstance(ents, list):
+            kept = [_decode(str(e)) for e in ents if str(e or "").strip()]
+            if kept:
+                out["featureEntities"] = kept
     return out
 
 
