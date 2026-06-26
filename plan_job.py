@@ -660,6 +660,7 @@ _ENTITY_STOP = {
     "insights", "partners", "partner", "alumni", "network", "funding", "new", "best",
     "build", "builds", "platform", "tools", "tool", "api", "apis", "app", "apps",
     "cloud", "labs", "inc", "co", "team", "teams", "data", "pay", "payments",
+    "plan", "plans", "suite", "console", "dashboard", "portal",
 }
 
 
