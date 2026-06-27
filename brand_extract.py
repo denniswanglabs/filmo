@@ -163,7 +163,15 @@ def _wordmark_svg(name, accent, ink):
 def _find_capture_manifest(loc):
     """Resolve `loc` (a manifest.json path, a run dir, or a screenshots dir) to a
     manifest.json path that exists, or None. Tolerant of the common layouts the
-    pipeline produces: runs/<id>/screenshots/manifest.json."""
+    pipeline produces: runs/<id>/screenshots-read/manifest.json (the EARLY read pass
+    that captures the brand logo) and runs/<id>/screenshots/manifest.json (the
+    produce pass that captures page shots).
+
+    `screenshots-read/` is checked FIRST: it is the dedicated brand-extraction pass
+    that reliably captures `brand/logo.svg`, whereas the produce pass captures page
+    screenshots and may carry no logo record. Looking only in `screenshots/` was why
+    a real captured logo (e.g. Airbnb's wordmark) never reached theme.logoSrc and the
+    badge fell back to the initial-in-a-square."""
     if not loc:
         return None
     loc = str(loc)
@@ -171,6 +179,7 @@ def _find_capture_manifest(loc):
         return loc
     cands = (
         os.path.join(loc, "manifest.json"),
+        os.path.join(loc, "screenshots-read", "manifest.json"),
         os.path.join(loc, "screenshots", "manifest.json"),
     )
     for c in cands:

@@ -348,23 +348,40 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # then HONESTLY seeds the feature beats so style_fill derives data-rich titles
     # (split-stat / split-mosaic) instead of bare icon-headlines. Unknown/small brand ->
     # empty enrich -> seeds NOTHING -> honest icon-headline floor (never fabricates).
+    # VERIFIED-KNOWLEDGE ENRICH + CONTENT-FIT seeding SHARE the feature-beat budget. We
+    # compute enrich first (for the `reserve` below) but SEED story_shape FIRST so the
+    # diverse narrative patterns (process-pipeline / pull-quote) get first pick of the
+    # beats and fire RELIABLY -- the post-fill router already PREFERS them over the
+    # stat/mosaic treatments once their data is on a beat (style_fill 3pp/3d). Then enrich
+    # fills the REMAINING beats. We RESERVE one beat for enrich's single mosaic when the
+    # brand has >= 3 real named customers, so the final mix stays DIVERSE (e.g.
+    # process-pipeline + pull-quote + mosaic) instead of the narrative patterns crowding
+    # out the logo wall. (Previously enrich seeded first and consumed every beat with
+    # mosaic + up to 3 stats, so content-fit beats almost never had room to fire.)
+    enrich = {}
     try:
-        enrich = enrich_brand_knowledge(_resolved_brand, company_url, brain)
+        enrich = enrich_brand_knowledge(_resolved_brand, company_url, brain) or {}
         if enrich.get("stats") or enrich.get("entities"):
             print("[planner] verified-knowledge enrich brand=%r stats=%d entities=%d"
                   % (_resolved_brand, len(enrich.get("stats") or []),
                      len(enrich.get("entities") or [])), file=sys.stderr)
-        plan = _seed_feature_beats_from_enrichment(plan, enrich)
     except Exception as e:  # never let enrichment break a build
+        enrich = {}
         print("[planner] verified-knowledge enrich skipped (%s)" % e, file=sys.stderr)
     # CONTENT-FIT seeding from the Design Brief's story_shape (process_steps ->
     # process-pipeline, testimonial -> pull-quote) so each company surfaces the patterns
     # its REAL story supports. No-op on empty story_shape.
     try:
         _story_shape = ((conversion_read or {}).get("design_brief") or {}).get("story_shape") or {}
-        plan = _seed_feature_beats_from_story_shape(plan, _story_shape)
+        _reserve = 1 if len([e for e in (enrich.get("entities") or [])
+                             if str(e or "").strip()]) >= 3 else 0
+        plan = _seed_feature_beats_from_story_shape(plan, _story_shape, reserve=_reserve)
     except Exception as e:
         print("[planner] story_shape seeding skipped (%s)" % e, file=sys.stderr)
+    try:
+        plan = _seed_feature_beats_from_enrichment(plan, enrich)
+    except Exception as e:  # never let enrichment break a build
+        print("[planner] verified-knowledge enrich seed skipped (%s)" % e, file=sys.stderr)
     # Card-treatment RULES GUARD + HONESTY GUARD (runs for BOTH the LLM and template
     # paths, while `_company_facts` is still on job so it can verify real data): for
     # each motion_graphic/explainer-card scene, keep a valid LLM-picked treatment whose
@@ -902,10 +919,16 @@ def _seed_feature_beats_from_enrichment(plan, enrich):
             beat_by_id[sid] = b
 
     # Track which scenes are already data-rich (don't touch) and which are seeded now.
+    # This now ALSO respects the content-fit seeder that runs BEFORE us: a beat already
+    # carrying steps / quote / metrics / compare is a story_shape (process-pipeline /
+    # pull-quote) claim -- enrich must fill the REMAINING beats, never clobber it.
     consumed = set()
     for s in feature_scenes:
         bt = _beat_text_for(s.get("id"))
-        if _beat_already_has_stat(s, bt) or _beat_already_has_entities(s, bt):
+        dd = s.get("data") if isinstance(s.get("data"), dict) else {}
+        if (_beat_already_has_stat(s, bt) or _beat_already_has_entities(s, bt)
+                or dd.get("steps") or dd.get("quote") or dd.get("metrics")
+                or dd.get("compare")):
             consumed.add(id(s))
 
     # 1) ENTITY-LIST — exactly ONE mosaic total (variety). If a mosaic beat already
@@ -936,11 +959,31 @@ def _seed_feature_beats_from_enrichment(plan, enrich):
     return plan
 
 
-def _seed_feature_beats_from_story_shape(plan, story_shape):
+def _voice_quote(quote):
+    """The VO line for a pull-quote beat = the testimonial itself (trimmed so it never
+    drags), so the narration MATCHES what's on screen and the scene lasts long enough to
+    read -- instead of a 3-word "what customers say" label that flashes by (Dennis's
+    Zapier note). Pull-quote ignores the derived title, so voicing the quote is safe."""
+    words = str(quote or "").split()
+    if not words:
+        return "What customers say"
+    if len(words) <= 18:
+        return quote
+    return " ".join(words[:18]).rstrip(",.;:") + "…"
+
+
+def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0):
     """CONTENT-FIT seeding (Design Brief): stamp REAL story_shape material onto feature
     beats so the post-fill router renders the matching pattern -- process_steps ->
     process-pipeline, testimonial -> pull-quote. Honesty: only real material; empty
-    story_shape -> no-op; never override a beat already carrying data. Never raises."""
+    story_shape -> no-op; never override a beat already carrying data. Never raises.
+
+    `reserve` = feature beats to LEAVE FREE for the enrich pass (its mosaic / stats) so
+    the final mix stays diverse. We claim at most (free - reserve) beats.
+
+    READ TIME: each seeded beat also gets a `duration_s` FLOOR -- build_timeline holds a
+    scene for max(duration_s, VO span), so the floor guarantees the quote / step flow
+    stays on screen long enough to read even when its VO line is short."""
     if not isinstance(story_shape, dict) or not story_shape:
         return plan
     scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
@@ -974,16 +1017,27 @@ def _seed_feature_beats_from_story_shape(plan, story_shape):
                 or dd.get("steps") or dd.get("quote") or dd.get("compare")):
             consumed.add(id(s))
 
+    # Claim the FIRST free beat, but only while we'd still leave `reserve` beats for the
+    # enrich pass that runs after us. Returns None once the budget is spent.
+    def _claim_target():
+        free = [s for s in feature_scenes if id(s) not in consumed]
+        return free[0] if len(free) > reserve else None
+
     # process_steps -> process-pipeline (>= 2 real steps with a title)
     steps = [s for s in (story_shape.get("process_steps") or [])
              if isinstance(s, dict) and str(s.get("title") or "").strip()]
     if len(steps) >= 2:
-        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        target = _claim_target()
         if target is not None:
-            target.setdefault("data", {})["steps"] = [
-                {"badge": "0%d" % (i + 1), "title": str(x.get("title")).strip(),
-                 "body": str(x.get("body") or "").strip()}
-                for i, x in enumerate(steps[:4])]
+            seeded = [{"badge": "0%d" % (i + 1), "title": str(x.get("title")).strip(),
+                       "body": str(x.get("body") or "").strip()}
+                      for i, x in enumerate(steps[:4])]
+            target.setdefault("data", {})["steps"] = seeded
+            # READ TIME: a horizontal step flow with drawing connectors needs a hold long
+            # enough to read each card -- ~1.5s per step, floored to 6s, capped at 8s.
+            # Keep the VO line SHORT ("How it works"): process-pipeline renders the
+            # derived title, so a long line would become an ugly headline.
+            target["duration_s"] = max(6, min(8, 2 + len(seeded) + len(seeded) // 2))
             _seed_scene(target, "How it works")
             consumed.add(id(target))
 
@@ -992,12 +1046,20 @@ def _seed_feature_beats_from_story_shape(plan, story_shape):
     quote = str((t or {}).get("quote") or "").strip()
     who = str((t or {}).get("who") or "").strip()
     if quote and who and len(quote.split()) >= 6:
-        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        target = _claim_target()
         if target is not None:
             dd = target.setdefault("data", {})
             dd["quote"] = quote
             dd["quoteAttribution"] = who
-            _seed_scene(target, "What customers say")
+            # READ TIME: the testimonial must stay on screen long enough to READ (the
+            # Zapier quote flashed because its VO beat was a 3-word label). Floor the hold
+            # to ~the reading time of the visible quote, and VOICE the quote so the
+            # narration matches the screen. Pull-quote ignores the title -> safe.
+            # Word-scaled (~4 wps target): 6w->5s, 18w->8s, 24w+->9s -- so a long real
+            # testimonial (Zapier's 27w joined excerpt) holds 9s, not a brisk 8s.
+            words = len(quote.split())
+            target["duration_s"] = max(5, min(9, 4 + words // 4))
+            _seed_scene(target, _voice_quote(quote))
             consumed.add(id(target))
 
     return plan
