@@ -500,6 +500,9 @@ def minimal_read(url, body_text=""):
         "headline_fix": "The outcome your customer gets — in one clear line.",
         "degraded": True,
         "engine": "minimal",
+        # Honest empty design brief — a floored Read has no corroborated material, so
+        # downstream (plan_job / style_fill) degrades to the icon-headline floor.
+        "design_brief": {"story_shape": {}, "brand_vibe": {}},
     }
 
 
@@ -545,6 +548,285 @@ SYSTEM_PROMPT = (
 
 # Hidden-reasoning budget is generous; the Read is small but the model may reason.
 ANALYZE_MAX_TOKENS = 4000
+
+
+# --- THE DESIGN BRIEF ---------------------------------------------------------
+# A structured, honesty-guarded brief that drives content-fit design selection
+# (Unit 1 of the design-fit-variety spec). It is a SEPARATE focused Nemotron call
+# (same OpenRouter path as enrich_brand_knowledge), kept OFF the frozen 6-dimension
+# Read JSON contract so the Read stays byte-identical. The result is ATTACHED as an
+# extra key read["design_brief"] (validate_read ignores extra keys -> additive/safe).
+#
+# HONESTY IS ABSOLUTE — the discipline mirrors plan_job._ENRICH_SYSTEM: the model
+# emits ONLY material it is confident is REAL for this exact company (corroborated in
+# the scraped copy or its verified knowledge). When unsure it leaves the field
+# EMPTY/ABSENT. An empty brief is CORRECT and expected for vague/unknown sites — it
+# means the design honestly degrades to the icon-headline floor rather than inventing
+# a stat, step, quote, score, customer, or number. The parser DEFAULTS to an empty
+# brief on any error and NEVER raises, so the Read path is never blocked.
+
+# Valid brand_vibe enums (anything else -> dropped so the field stays empty/honest).
+_VIBE_LABELS = ("enterprise", "startup-bold", "consumer-playful", "technical-precise")
+_VIBE_MOTION = ("calm", "energetic")
+# Story-shape budget caps (keep the brief tight; trim over-eager lists).
+_BRIEF_MAX_STATS = 4
+_BRIEF_MAX_CUSTOMERS = 8
+_BRIEF_MAX_STEPS = 5
+_BRIEF_MAX_RESULTS = 6
+# A value is only a "stat"/"score"/"metric" if it actually carries a number.
+_BRIEF_NUMBER_RE = re.compile(r"\d")
+
+_DESIGN_BRIEF_SYSTEM = (
+    "You are a careful fact-checker scoping the VISUAL DESIGN of a product-launch "
+    "video. From a real product page's copy (and what you confidently KNOW about the "
+    "exact company), you extract the company's REAL story material and its brand vibe, "
+    "so the video's design can be chosen to FIT the company. Output STRICT JSON ONLY "
+    "— no markdown, no code fences, no prose. First char {, last char }.\n\n"
+    "HONESTY IS ABSOLUTE. Include a field ONLY if it is CORROBORATED in the page copy "
+    "above OR is a real, specific, verifiable fact you are confident is TRUE for THIS "
+    "EXACT company. NEVER fabricate a stat, step, quote, score, customer, or number. "
+    "If you are not confident, LEAVE THE FIELD EMPTY or omit it. An EMPTY brief is "
+    "CORRECT and EXPECTED for vague, small, obscure, or unfamiliar sites. Do NOT pad "
+    "with generic marketing claims, round guesses, invented process steps, or made-up "
+    "customer names. When in doubt, leave it out.\n\n"
+    "OUTPUT SCHEMA (every field OPTIONAL — emit only the ones you have REAL material "
+    "for; an empty object {} is a valid, honest answer):\n"
+    "{\n"
+    '  "story_shape": {\n'
+    '    "stats": [{"value": "<number e.g. $500K, 99.99%, 10x, 135+>", '
+    '"label": "<2-4 words: what it measures>"}],\n'
+    '    "customers": ["<real named customer/logo>", ...],\n'
+    '    "process_steps": [{"title": "<step name>", "body": "<1 short line>"}],\n'
+    '    "contrast": {"before": "<the old/painful way>", "after": "<the new way>"},\n'
+    '    "testimonial": {"quote": "<verbatim quote from the page>", "who": "<name/role>"},\n'
+    '    "scored_results": [{"name": "<thing scored>", "score": "<number or grade>"}],\n'
+    '    "corpus": {"count": "<a real count e.g. 12,000>", "label": "<what is counted>"},\n'
+    '    "has_screenshot": <true|false: does the page clearly show the product UI?>,\n'
+    '    "hero_metric": {"value": "<the single headline number>", "label": "<what it is>"}\n'
+    "  },\n"
+    '  "brand_vibe": {"label": "enterprise|startup-bold|consumer-playful|technical-precise", '
+    '"motion": "calm|energetic"}\n'
+    "}\n\n"
+    "RULES:\n"
+    "- story_shape fields are GATED on REAL material:\n"
+    "  * stats/hero_metric/scored_results/corpus.count: each value MUST contain a "
+    "number. No number -> it is not a stat; omit it.\n"
+    "  * customers: REAL proper-noun company names actually named on the page or that "
+    "you know are real customers. No generic words ('businesses', 'teams'). If none are "
+    "named, omit it.\n"
+    "  * process_steps: ONLY if the page actually lays out a numbered/sequential "
+    "workflow (e.g. 'Step 1 ... Step 2 ...', 'How it works'). Do NOT invent steps to "
+    "fill the list. If there is no real sequence, omit it.\n"
+    "  * contrast: ONLY if the page frames a real before/after (old way vs new way). "
+    "  * testimonial: ONLY a quote VERBATIM from the page with a real attribution.\n"
+    "  * has_screenshot: true ONLY if the copy/page clearly shows the working product "
+    "UI (a dashboard, app, screenshot). Otherwise false.\n"
+    "- brand_vibe: classify the company's tone. label = the closest of the 4 enums; "
+    "motion = 'energetic' for bold/playful consumer/startup brands, 'calm' for "
+    "enterprise/precise/technical brands. Omit brand_vibe if genuinely unclear.\n"
+    "- Prefer EMPTY over WRONG. An empty story_shape for a vague page is the right "
+    "answer. Do not guess to look thorough."
+)
+
+# The brief is small; reasoning may run, so keep a modest cap.
+DESIGN_BRIEF_MAX_TOKENS = 2500
+
+
+def _clean_str(v, limit=240):
+    """Coerce a model value to a trimmed string (empty if not a non-empty scalar)."""
+    if isinstance(v, bool) or v is None:
+        return ""
+    if isinstance(v, (int, float)):
+        v = str(v)
+    if not isinstance(v, str):
+        return ""
+    return v.strip()[:limit]
+
+
+def _clean_numbered(v, limit=80):
+    """A trimmed string that MUST carry a digit (for stat/score/count values)."""
+    s = _clean_str(v, limit)
+    return s if s and _BRIEF_NUMBER_RE.search(s) else ""
+
+
+def _parse_design_brief(obj):
+    """Validate + sanitize a model design-brief object into the canonical shape
+    {"story_shape": {...}, "brand_vibe": {...}}. Drops any field that is not REAL,
+    well-formed material (honesty floor): stats/scores/counts must carry a number;
+    customers must be non-empty proper-noun-ish strings; steps must have a title; the
+    testimonial needs a real quote; vibe enums are validated against the allow-lists.
+    Returns the EMPTY brief ({"story_shape": {}, "brand_vibe": {}}) on anything it
+    can't trust. NEVER raises — an empty/partial brief is correct and expected."""
+    empty = {"story_shape": {}, "brand_vibe": {}}
+    if not isinstance(obj, dict):
+        return empty
+    raw_ss = obj.get("story_shape")
+    if not isinstance(raw_ss, dict):
+        raw_ss = {}
+    ss = {}
+
+    # stats: [{value(number), label}]
+    stats = []
+    seen_stat = set()
+    for s in (raw_ss.get("stats") or []):
+        if not isinstance(s, dict):
+            continue
+        value = _clean_numbered(s.get("value"))
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen_stat:
+            continue
+        seen_stat.add(key)
+        label = " ".join(_clean_str(s.get("label"), 60).split()[:4])
+        stats.append({"value": value, "label": label})
+        if len(stats) >= _BRIEF_MAX_STATS:
+            break
+    if stats:
+        ss["stats"] = stats
+
+    # customers: [proper-noun str]
+    customers = []
+    seen_cust = set()
+    for c in (raw_ss.get("customers") or []):
+        cand = _clean_str(c, 60)
+        if not cand:
+            continue
+        key = cand.lower()
+        if key in seen_cust:
+            continue
+        # proper-noun-ish: leading capital/digit, up to 3 tokens.
+        if not re.match(r"^[A-Z0-9][\w.\-&]*(?:\s+[A-Za-z0-9][\w.\-&]*){0,2}$", cand):
+            continue
+        seen_cust.add(key)
+        customers.append(cand)
+        if len(customers) >= _BRIEF_MAX_CUSTOMERS:
+            break
+    if customers:
+        ss["customers"] = customers
+
+    # process_steps: [{title, body}] — title required.
+    steps = []
+    for st in (raw_ss.get("process_steps") or []):
+        if not isinstance(st, dict):
+            continue
+        title = _clean_str(st.get("title"), 80)
+        if not title:
+            continue
+        steps.append({"title": title, "body": _clean_str(st.get("body"), 200)})
+        if len(steps) >= _BRIEF_MAX_STEPS:
+            break
+    if steps:
+        ss["process_steps"] = steps
+
+    # contrast: {before, after} — both halves required.
+    contrast = raw_ss.get("contrast")
+    if isinstance(contrast, dict):
+        before = _clean_str(contrast.get("before"), 160)
+        after = _clean_str(contrast.get("after"), 160)
+        if before and after:
+            ss["contrast"] = {"before": before, "after": after}
+
+    # testimonial: {quote, who} — quote required.
+    testi = raw_ss.get("testimonial")
+    if isinstance(testi, dict):
+        quote = _clean_str(testi.get("quote"), 320)
+        if quote:
+            ss["testimonial"] = {"quote": quote, "who": _clean_str(testi.get("who"), 80)}
+
+    # scored_results: [{name, score(number-ish)}] — score must carry a digit.
+    scored = []
+    for sr in (raw_ss.get("scored_results") or []):
+        if not isinstance(sr, dict):
+            continue
+        name = _clean_str(sr.get("name"), 80)
+        score = _clean_numbered(sr.get("score"), 40)
+        if not name or not score:
+            continue
+        scored.append({"name": name, "score": score})
+        if len(scored) >= _BRIEF_MAX_RESULTS:
+            break
+    if scored:
+        ss["scored_results"] = scored
+
+    # corpus: {count(number), label}
+    corpus = raw_ss.get("corpus")
+    if isinstance(corpus, dict):
+        count = _clean_numbered(corpus.get("count"), 40)
+        if count:
+            ss["corpus"] = {"count": count, "label": _clean_str(corpus.get("label"), 60)}
+
+    # has_screenshot: bool (only carry it when explicitly True — absence == unknown/false).
+    if raw_ss.get("has_screenshot") is True:
+        ss["has_screenshot"] = True
+
+    # hero_metric: {value(number), label}
+    hero = raw_ss.get("hero_metric")
+    if isinstance(hero, dict):
+        hv = _clean_numbered(hero.get("value"))
+        if hv:
+            ss["hero_metric"] = {"value": hv, "label": _clean_str(hero.get("label"), 60)}
+
+    # brand_vibe: validated enums.
+    vibe = {}
+    raw_vibe = obj.get("brand_vibe")
+    if isinstance(raw_vibe, dict):
+        label = _clean_str(raw_vibe.get("label"), 40).lower()
+        motion = _clean_str(raw_vibe.get("motion"), 40).lower()
+        if label in _VIBE_LABELS:
+            vibe["label"] = label
+        if motion in _VIBE_MOTION:
+            vibe["motion"] = motion
+
+    return {"story_shape": ss, "brand_vibe": vibe}
+
+
+def _build_brief_messages(url, body_text, headline=None):
+    body = (body_text or "")[:4000]
+    user = "Scope the design brief for this product page. Output JSON only.\n\n" \
+           "url: %s\n" % url
+    if headline:
+        user += "captured_headline: %s\n" % headline
+    user += "\nPAGE COPY (verbatim, may be truncated):\n%s\n" % body
+    user += ("\nReturn ONLY the JSON design-brief object. Include a field ONLY if it is "
+             "REAL and corroborated; leave it empty otherwise. An empty brief is "
+             "correct for a vague page. No prose, no apology, no markdown.\n")
+    return [{"role": "system", "content": _DESIGN_BRIEF_SYSTEM},
+            {"role": "user", "content": user}]
+
+
+EMPTY_DESIGN_BRIEF = {"story_shape": {}, "brand_vibe": {}}
+
+
+def design_brief(url, body_text, headline=None, brain="ultra-paid"):
+    """A FOCUSED Nemotron call -> the honesty-guarded design brief for `url`.
+
+    Returns {"story_shape": {...}, "brand_vibe": {...}} containing ONLY material the
+    model is confident is REAL (corroborated in the copy or its verified knowledge).
+    On ANY error/refusal/garble, or when there is no brain key, returns the EMPTY
+    brief so the caller attaches an honest empty brief and the design degrades to the
+    floor. Reuses the planner's OpenRouter path (vp.call_model + extract_read_json,
+    the analyze-local tolerant parser). NEVER raises. Runs on the same paid Nemotron
+    chain as the Read (default ultra-paid 550B)."""
+    brain = brain_mod.normalize_brain(brain)
+    if not brain_mod.brain_key():
+        return dict(EMPTY_DESIGN_BRIEF)
+    messages = _build_brief_messages(url, body_text, headline=headline)
+    _restore = getattr(vp, "PLANNER_MAX_TOKENS", DESIGN_BRIEF_MAX_TOKENS)
+    vp.PLANNER_MAX_TOKENS = min(getattr(vp, "PLANNER_MAX_TOKENS", DESIGN_BRIEF_MAX_TOKENS),
+                               DESIGN_BRIEF_MAX_TOKENS)
+    try:
+        raw = vp.call_model(messages, brain=brain)
+        obj = extract_read_json(raw)
+    except Exception as e:  # network / parse / anything -> honest empty brief
+        print("[analyze] design_brief failed (%s); using empty brief" % e, file=sys.stderr)
+        return dict(EMPTY_DESIGN_BRIEF)
+    finally:
+        vp.PLANNER_MAX_TOKENS = _restore
+    try:
+        return _parse_design_brief(obj)
+    except Exception:
+        return dict(EMPTY_DESIGN_BRIEF)
 
 
 def _build_messages(url, body_text, headline=None):
@@ -646,7 +928,8 @@ def analyze_read(url, body_text, hero_path=None, headline=None, brain="ultra-pai
     (text-only model today). The PLANNER path is untouched (it never calls this)."""
     brain = brain_mod.normalize_brain(brain)
     if not brain_mod.brain_key():
-        return minimal_read(url, body_text)
+        return _attach_design_brief(minimal_read(url, body_text), url, body_text,
+                                    headline, brain, skip=True)
     # Build the tiered brain chain. If the caller asked for the default primary
     # (`super-paid`, the head of ANALYZE_BRAIN_CHAIN), use the full paid chain so the
     # Nemotron Ultra reliability fallback is appended. If the caller asked for a
@@ -662,14 +945,41 @@ def analyze_read(url, body_text, hero_path=None, headline=None, brain="ultra-pai
         for b in chain:
             read = _analyze_read_one_brain(url, body_text, headline, b)
             if read is not None:
-                return read
+                return _attach_design_brief(read, url, body_text, headline, b)
             if len(chain) > 1:
                 print("[analyze] brain %r failed; falling to next in chain" % b, file=sys.stderr)
     finally:
         # Restore the shared cap so the planner (which runs after analyze) is not
         # permanently shrunk by this call -- belt-and-suspenders per the plan note.
         vp.PLANNER_MAX_TOKENS = _restore
-    return minimal_read(url, body_text)
+    # The Read itself fell to the floor; still attach an honest EMPTY design brief
+    # (no extra model call — a floored Read means the page/model is unavailable).
+    return _attach_design_brief(minimal_read(url, body_text), url, body_text,
+                                headline, brain, skip=True)
+
+
+def _attach_design_brief(read, url, body_text, headline, brain, skip=False):
+    """Attach the honesty-guarded design brief to a Read dict and return it. ADDITIVE:
+    read["design_brief"] is an extra key (validate_read ignores extra keys). NEVER
+    raises and NEVER overwrites a non-empty brief a caller already set. When `skip` is
+    True (the Read floored to minimal / no brain key) we attach the EMPTY brief without
+    spending a model call — an empty brief is the correct honest default, so downstream
+    can always read read["design_brief"]["story_shape"] / ["brand_vibe"]."""
+    if not isinstance(read, dict):
+        return read
+    existing = read.get("design_brief")
+    if isinstance(existing, dict) and (existing.get("story_shape") or existing.get("brand_vibe")):
+        return read  # respect a brief a caller already supplied
+    if skip:
+        read["design_brief"] = dict(EMPTY_DESIGN_BRIEF)
+        return read
+    try:
+        read["design_brief"] = design_brief(url, body_text, headline=headline, brain=brain)
+    except Exception as e:  # belt-and-suspenders — design_brief already never raises
+        print("[analyze] _attach_design_brief unexpected error (%s); empty brief" % e,
+              file=sys.stderr)
+        read["design_brief"] = dict(EMPTY_DESIGN_BRIEF)
+    return read
 
 
 def _patch_token_cap():

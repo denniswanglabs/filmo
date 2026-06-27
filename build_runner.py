@@ -282,6 +282,12 @@ def _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN,
     if rp.get("degraded"):
         read["degraded"] = True
     read["hero_screenshot_path"] = rp.get("hero_screenshot_path")
+    # Guarantee the design brief key is present so downstream (plan_job / style_fill)
+    # can always read conversion_read["design_brief"] without a guard. analyze_read /
+    # minimal_read already set it; this defends against an injected analyze_fn (tests)
+    # that returns a Read without one. Empty brief == honest "no corroborated material".
+    if isinstance(read, dict):
+        read.setdefault("design_brief", {"story_shape": {}, "brand_vibe": {}})
     try:
         with open(os.path.join(run_dir, "conversion_read.json"), "w") as f:
             json.dump(read, f, indent=2)

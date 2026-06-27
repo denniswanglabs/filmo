@@ -211,5 +211,91 @@ class TestKineticStatement(unittest.TestCase):
         self.assertNotEqual(out.get("treatment"), "kinetic-statement")
 
 
+class TestDesignBriefParse(unittest.TestCase):
+    """Unit 1 — the honesty-guarded Design Brief parser (no model; $0)."""
+
+    def _parse(self, obj):
+        import analyze
+        return analyze._parse_design_brief(obj)
+
+    def test_non_dict_returns_empty(self):
+        self.assertEqual(self._parse("nope"),
+                         {"story_shape": {}, "brand_vibe": {}})
+        self.assertEqual(self._parse(None),
+                         {"story_shape": {}, "brand_vibe": {}})
+
+    def test_empty_object_is_empty_brief(self):
+        self.assertEqual(self._parse({}),
+                         {"story_shape": {}, "brand_vibe": {}})
+
+    def test_rich_real_material_is_kept(self):
+        out = self._parse({
+            "story_shape": {
+                "stats": [{"value": "$500K", "label": "per company"},
+                          {"value": "$800B+", "label": "combined value"}],
+                "customers": ["Airbnb", "Stripe", "Dropbox"],
+                "process_steps": [{"title": "Apply", "body": "Submit"},
+                                  {"title": "Build", "body": "We fund"}],
+                "contrast": {"before": "Cold outreach", "after": "Warm intros"},
+                "testimonial": {"quote": "YC changed everything", "who": "Founder"},
+                "scored_results": [{"name": "Speed", "score": "9.2"}],
+                "corpus": {"count": "5,000+", "label": "companies"},
+                "has_screenshot": True,
+                "hero_metric": {"value": "$800B+", "label": "value"},
+            },
+            "brand_vibe": {"label": "startup-bold", "motion": "energetic"},
+        })
+        ss = out["story_shape"]
+        self.assertEqual(len(ss["stats"]), 2)
+        self.assertEqual(ss["customers"], ["Airbnb", "Stripe", "Dropbox"])
+        self.assertEqual(len(ss["process_steps"]), 2)
+        self.assertEqual(ss["contrast"]["before"], "Cold outreach")
+        self.assertEqual(ss["testimonial"]["quote"], "YC changed everything")
+        self.assertEqual(ss["scored_results"][0]["score"], "9.2")
+        self.assertEqual(ss["corpus"]["count"], "5,000+")
+        self.assertIs(ss["has_screenshot"], True)
+        self.assertEqual(out["brand_vibe"], {"label": "startup-bold", "motion": "energetic"})
+
+    def test_stat_without_number_is_dropped(self):
+        out = self._parse({"story_shape": {
+            "stats": [{"value": "powerful", "label": "x"},
+                      {"value": "10x", "label": "faster"}]}})
+        # only the numbered stat survives -> honesty floor for the fake one
+        self.assertEqual(out["story_shape"]["stats"], [{"value": "10x", "label": "faster"}])
+
+    def test_generic_customers_dropped(self):
+        out = self._parse({"story_shape": {
+            "customers": ["businesses", "teams", "solutions"]}})
+        self.assertNotIn("customers", out["story_shape"])
+
+    def test_step_without_title_dropped(self):
+        out = self._parse({"story_shape": {
+            "process_steps": [{"title": "", "body": "no title"}]}})
+        self.assertNotIn("process_steps", out["story_shape"])
+
+    def test_partial_contrast_dropped(self):
+        out = self._parse({"story_shape": {"contrast": {"before": "old"}}})
+        self.assertNotIn("contrast", out["story_shape"])
+
+    def test_score_without_number_dropped(self):
+        out = self._parse({"story_shape": {
+            "scored_results": [{"name": "Speed", "score": "fast"}]}})
+        self.assertNotIn("scored_results", out["story_shape"])
+
+    def test_invalid_vibe_enums_dropped(self):
+        out = self._parse({"brand_vibe": {"label": "mega-bold", "motion": "fast"}})
+        self.assertEqual(out["brand_vibe"], {})
+
+    def test_has_screenshot_false_is_absent(self):
+        # absence == unknown/false (honesty): only explicit True is carried.
+        out = self._parse({"story_shape": {"has_screenshot": False}})
+        self.assertNotIn("has_screenshot", out["story_shape"])
+
+    def test_minimal_read_carries_empty_brief(self):
+        import analyze
+        read = analyze.minimal_read("https://example.com")
+        self.assertEqual(read["design_brief"], {"story_shape": {}, "brand_vibe": {}})
+
+
 if __name__ == "__main__":
     unittest.main()
