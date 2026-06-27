@@ -908,30 +908,17 @@ def _seed_feature_beats_from_enrichment(plan, enrich):
             _seed_scene(target, ", ".join(entities[:6]))
             consumed.add(id(target))
 
-    # 2) STATS. When the brand has 3+ distinct real metrics, consolidate them into ONE
-    #    "metric-row" strip (a premium "by the numbers" beat) instead of repeated
-    #    single-stat scenes — denser + less repetitive. With <3, spread as individual
-    #    split-stat beats as before.
-    clean_stats = []
-    for stat in stats:
+    # 2) STAT beats — fill the REMAINING generic beats with DISTINCT stats (we prefer a
+    #    spread of stats over repeated mosaics).
+    for stat in stats[:3]:
+        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        if target is None:
+            break  # don't exceed the existing feature-beat count
         value = str(stat.get("value") or "").strip()
         label = str(stat.get("label") or "").strip()
-        if value:
-            clean_stats.append({"value": value, "label": label})
-    if len(clean_stats) >= 3:
-        target = next((s for s in feature_scenes if id(s) not in consumed), None)
-        if target is not None:
-            target.setdefault("data", {})["metrics"] = clean_stats[:4]
-            _seed_scene(target, "By the numbers")
-            consumed.add(id(target))
-    else:
-        for stat in clean_stats[:3]:
-            target = next((s for s in feature_scenes if id(s) not in consumed), None)
-            if target is None:
-                break  # don't exceed the existing feature-beat count
-            seed_text = ("%s %s" % (stat["value"], stat["label"])).strip() if stat["label"] else stat["value"]
-            _seed_scene(target, seed_text)
-            consumed.add(id(target))
+        seed_text = ("%s %s" % (value, label)).strip() if label else value
+        _seed_scene(target, seed_text)
+        consumed.add(id(target))
 
     return plan
 
