@@ -885,6 +885,264 @@ const TreatmentMetricRow: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT — process-pipeline (HARVESTED from smartbase-promo / Luceo Studio,
+// StepsOverviewScene.tsx). A "how it works in N steps" flow: a centered
+// eyebrow+headline on top, then a HORIZONTAL row of up to 4 numbered STEP cards
+// joined by animated CONNECTOR ARROWS that draw L->R (the signature motion).
+// Each card: an accent-tinted rounded badge tile (the step number) + a title +
+// a short body. Cards stagger in (spring rise+fade); each connector draws just
+// AFTER the card to its left lands (a bar that scaleX 0->1 from the left, then
+// an arrowhead fades in). THEME-TOKEN ONLY so it reads clean on any brand.
+// Caller guarantees a non-empty `steps` list (degrade guard runs first). No
+// remote assets — identical JSX in studio + web.
+// ---------------------------------------------------------------------------
+const STEP_ENTER_STAGGER = 16; // frames between successive card entrances
+
+// One numbered step card. `enterAt` is its scene-relative entrance frame; it
+// rises + fades on a kinetic spring (mirrors the smartbase StepCard cadence).
+const ProcessStepCard: React.FC<{
+  index: number;
+  step: { badge: string; title: string; body: string };
+  theme: Theme;
+  frame: number;
+  fps: number;
+  enterAt: number;
+  sceneId?: string;
+}> = ({ index, step, theme, frame, fps, enterAt, sceneId }) => {
+  const cardSpring = spring({
+    frame: frame - enterAt,
+    fps,
+    config: { damping: 18, stiffness: 140 },
+  });
+  const opacity = ease(frame, enterAt, enterAt + 14, 0, 1);
+  const y = interpolate(cardSpring, [0, 1], [40, 0]);
+  const badge = (step.badge || String(index + 1)).trim();
+
+  return (
+    <div
+      data-scene-id={sceneId}
+      data-field={`step-${index}`}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        opacity,
+        transform: `translateY(${y}px)`,
+        background: theme.bgCard,
+        border: `1.5px solid ${theme.border}`,
+        borderRadius: 22,
+        padding: "34px 30px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 18,
+        boxShadow: "0 16px 40px rgba(20,40,80,0.07)",
+      }}
+    >
+      <div
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 16,
+          background: `${theme.accent}1A`,
+          color: theme.accent,
+          fontSize: 30,
+          fontWeight: 800,
+          letterSpacing: -1,
+          fontFamily: theme.fontMono,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {badge}
+      </div>
+      <div
+        style={{
+          fontSize: 38,
+          fontWeight: 700,
+          color: theme.text,
+          letterSpacing: -1,
+          lineHeight: 1.05,
+          fontFamily: theme.fontDisplay,
+        }}
+      >
+        {step.title}
+      </div>
+      {step.body ? (
+        <div
+          style={{
+            fontSize: 21,
+            fontWeight: 400,
+            color: theme.textMuted,
+            letterSpacing: -0.2,
+            lineHeight: 1.35,
+          }}
+        >
+          {step.body}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+// The signature connector: a horizontal accent bar that DRAWS left-to-right
+// (scaleX 0->1 from the left edge), then an arrowhead fades in just behind the
+// draw. Fires just after the card to its left lands.
+const ProcessConnector: React.FC<{ frame: number; fireAt: number; theme: Theme }> = ({
+  frame,
+  fireAt,
+  theme,
+}) => {
+  const draw = ease(frame, fireAt, fireAt + 16, 0, 1);
+  const head = ease(frame, fireAt + 8, fireAt + 22, 0, 1);
+  return (
+    <div style={{ width: 56, height: 6, position: "relative", flexShrink: 0 }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: 56,
+          height: 6,
+          borderRadius: 3,
+          background: theme.accent,
+          transformOrigin: "left center",
+          transform: `scaleX(${draw})`,
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: 46,
+          top: -8,
+          width: 0,
+          height: 0,
+          borderLeft: `12px solid ${theme.accent}`,
+          borderTop: "11px solid transparent",
+          borderBottom: "11px solid transparent",
+          opacity: head,
+        }}
+      />
+    </div>
+  );
+};
+
+const TreatmentProcessPipeline: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  titleText: string;
+  titleLines: string[];
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, titleText, titleLines, sceneId,
+}) => {
+  // Caller guarantees 2-4 real steps (degrade guard runs before mount).
+  const steps = (data.steps ?? []).slice(0, 4);
+  // The row begins entering after the header settles (subtitle-in cue, else a
+  // sensible fallback). Each card enters STEP_ENTER_STAGGER frames after the last.
+  const rowAt = cueAt(cues, "subtitle-in", subAt + 4);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 120,
+        right: 120,
+        top: 100,
+        bottom: 90,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 52,
+        textAlign: "center",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+            justifyContent: "center",
+          }}
+          sceneId={sceneId}
+        />
+        <TitleBlock
+          titleText={titleText}
+          titleLines={titleLines}
+          frame={frame}
+          fps={fps}
+          titleAt={titleAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          theme={theme}
+          fontSize={60}
+          centered
+          sceneId={sceneId}
+        />
+      </div>
+
+      <div
+        data-scene-id={sceneId}
+        data-field="steps"
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "stretch",
+          justifyContent: "center",
+          gap: 0,
+          width: "100%",
+          maxWidth: 1640,
+        }}
+      >
+        {steps.map((step, i) => {
+          const enterAt = rowAt + i * STEP_ENTER_STAGGER;
+          return (
+            <React.Fragment key={`${i}-${step.title}`}>
+              <ProcessStepCard
+                index={i}
+                step={step}
+                theme={theme}
+                frame={frame}
+                fps={fps}
+                enterAt={enterAt}
+                sceneId={sceneId}
+              />
+              {i < steps.length - 1 ? (
+                <div
+                  style={{
+                    flexShrink: 0,
+                    alignSelf: "center",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "0 14px",
+                  }}
+                >
+                  {/* Connector draws just after THIS card lands, before the next. */}
+                  <ProcessConnector frame={frame} fireAt={enterAt + 12} theme={theme} />
+                </div>
+              ) : null}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // TREATMENT — comparison-columns (a two-column contrast). LEFT = the muted "old
 // way" (de-emphasized: textMuted rows with a dash marker). RIGHT = the accented
 // "with Filmo" way (emphasized: full-text rows with an accent checkmark). A
@@ -2219,6 +2477,8 @@ export const ExplainerCard: React.FC<{
     (data.compare?.rightItems ?? []).filter((s) => (s ?? "").trim()).length >= 2;
   // pull-quote needs BOTH a real quote and a real attribution (never unattributed).
   const hasQuote = !!(data.quote ?? "").trim() && !!(data.quoteAttribution ?? "").trim();
+  // process-pipeline needs >=2 real steps with a title (never an empty/one-card flow).
+  const hasSteps = (data.steps ?? []).filter((s) => (s?.title ?? "").trim()).length >= 2;
 
   let treatment = data.treatment;
   if ((treatment === "split-mosaic" || treatment === "logo-wall") && !hasEntities) treatment = "icon-headline";
@@ -2235,6 +2495,9 @@ export const ExplainerCard: React.FC<{
   // pull-quote needs a REAL attributed quote — without both a non-empty quote and
   // attribution, drop to the centered fallback (never an empty / unattributed quote).
   else if (treatment === "pull-quote" && !hasQuote) treatment = "icon-headline";
+  // process-pipeline needs >=2 real steps — without them, drop to the centered
+  // fallback (never a single-card / empty flow).
+  else if (treatment === "process-pipeline" && !hasSteps) treatment = "icon-headline";
 
   return (
     <AbsoluteFill
@@ -2369,6 +2632,23 @@ export const ExplainerCard: React.FC<{
           titleText={titleText}
           titleLines={titleLines}
           subText={subText}
+          sceneId={sceneId}
+        />
+      ) : treatment === "process-pipeline" ? (
+        <TreatmentProcessPipeline
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          titleText={titleText}
+          titleLines={titleLines}
           sceneId={sceneId}
         />
       ) : treatment === "device-frame" ? (

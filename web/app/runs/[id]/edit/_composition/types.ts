@@ -80,7 +80,8 @@ export interface SceneData {
     | "device-frame"
     | "comparison-columns"
     | "pull-quote"
-    | "kinetic-statement";
+    | "kinetic-statement"
+    | "process-pipeline";
   // kinetic-statement (HARVESTED from cluely-promo / Luceo Studio): a big editorial
   // hook that assembles WORD-BY-WORD with a rise-blur cadence, one keyword tinted in
   // theme.accent with a soft glow halo, and an optional highlighter sweep under one
@@ -92,6 +93,11 @@ export interface SceneData {
   underlineWord?: string; // one real word that gets the highlighter sweep
   // metric-row: 3-4 small real stats shown as a horizontal strip.
   metrics?: Array<{ value: string; label: string }>;
+  // process-pipeline (HARVESTED from smartbase-promo / Luceo Studio): a horizontal
+  // row of numbered STEP cards joined by connector arrows that draw L->R — a "how it
+  // works in N steps" flow. 2-4 REAL steps (never invented); `badge` is the step
+  // number/label, `title` the step name, `body` a short description.
+  steps?: Array<{ badge: string; title: string; body: string }>;
   // pull-quote: a large editorial testimonial.
   quote?: string; quoteAttribution?: string;
   // comparison-columns: a two-column contrast (old way vs Filmo).
