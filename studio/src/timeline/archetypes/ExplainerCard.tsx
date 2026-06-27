@@ -1544,6 +1544,33 @@ const TreatmentKineticStatement: React.FC<{
         transformOrigin: "center",
       }}
     >
+      {(data as { brandBadge?: boolean }).brandBadge ? (
+        <div
+          style={{
+            opacity: eyebrowOpacity,
+            transform: `translateY(${eyebrowY}px) scale(${interpolate(eyebrowOpacity, [0, 1], [0.85, 1])})`,
+            width: 78,
+            height: 78,
+            borderRadius: 18,
+            // Real company logo when available (white tile for contrast); else an
+            // accent square with the brand initial.
+            background: (theme.logoSrc ?? "").trim() ? "#FFFFFF" : theme.accent,
+            border: (theme.logoSrc ?? "").trim() ? `1px solid ${theme.border}` : "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 16px 34px -16px rgba(20,40,80,0.35)",
+          }}
+        >
+          {(theme.logoSrc ?? "").trim() ? (
+            <Img src={resolveLogo((theme.logoSrc ?? "").trim())} style={{ width: 50, height: 50, objectFit: "contain" }} />
+          ) : (
+            <span style={{ color: "#fff", fontSize: 44, fontWeight: 800, fontFamily: theme.fontDisplay, lineHeight: 1 }}>
+              {(((theme.wordmark ?? "").trim() || "F")[0] || "F").toUpperCase()}
+            </span>
+          )}
+        </div>
+      ) : null}
       {eyebrow ? (
         <div
           data-scene-id={sceneId}
