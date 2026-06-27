@@ -580,7 +580,10 @@ def _wants_kinetic_open(vibe_label: str, vibe_motion: str, tie_break: int) -> bo
         return True
     if vibe_label in ("enterprise", "technical-precise") or vibe_motion == "calm":
         return False
-    return tie_break == 1
+    # Unknown/unclassifiable vibe -> the SAFE, established clean wordmark opening
+    # (no signal is not a "tie"). The hash tie-break (`tie_break`) is reserved for
+    # genuine content-fit ties in Phase 2 routing.
+    return False
 
 
 def _open_variant_for(brand: Dict[str, Any]) -> int:
