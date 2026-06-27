@@ -357,6 +357,14 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
         plan = _seed_feature_beats_from_enrichment(plan, enrich)
     except Exception as e:  # never let enrichment break a build
         print("[planner] verified-knowledge enrich skipped (%s)" % e, file=sys.stderr)
+    # CONTENT-FIT seeding from the Design Brief's story_shape (process_steps ->
+    # process-pipeline, testimonial -> pull-quote) so each company surfaces the patterns
+    # its REAL story supports. No-op on empty story_shape.
+    try:
+        _story_shape = ((conversion_read or {}).get("design_brief") or {}).get("story_shape") or {}
+        plan = _seed_feature_beats_from_story_shape(plan, _story_shape)
+    except Exception as e:
+        print("[planner] story_shape seeding skipped (%s)" % e, file=sys.stderr)
     # Card-treatment RULES GUARD + HONESTY GUARD (runs for BOTH the LLM and template
     # paths, while `_company_facts` is still on job so it can verify real data): for
     # each motion_graphic/explainer-card scene, keep a valid LLM-picked treatment whose
@@ -924,6 +932,73 @@ def _seed_feature_beats_from_enrichment(plan, enrich):
         seed_text = ("%s %s" % (value, label)).strip() if label else value
         _seed_scene(target, seed_text)
         consumed.add(id(target))
+
+    return plan
+
+
+def _seed_feature_beats_from_story_shape(plan, story_shape):
+    """CONTENT-FIT seeding (Design Brief): stamp REAL story_shape material onto feature
+    beats so the post-fill router renders the matching pattern -- process_steps ->
+    process-pipeline, testimonial -> pull-quote. Honesty: only real material; empty
+    story_shape -> no-op; never override a beat already carrying data. Never raises."""
+    if not isinstance(story_shape, dict) or not story_shape:
+        return plan
+    scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
+    feature_scenes = [s for s in scenes if s.get("type") == "motion_graphic"]
+    if not feature_scenes:
+        return plan
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+        vo["beats"] = beats
+        plan["voiceover"] = vo
+    beat_by_id = {b.get("scene_id"): b for b in beats if isinstance(b, dict)}
+
+    def _seed_scene(scene, text):
+        sid = scene.get("id")
+        scene["brief"] = text
+        b = beat_by_id.get(sid)
+        if isinstance(b, dict):
+            b["text"] = text
+        else:
+            b = {"scene_id": sid, "text": text}
+            beats.append(b)
+            beat_by_id[sid] = b
+
+    # Don't override a beat that already carries real data (stat/entities/metrics/etc.).
+    consumed = set()
+    for s in feature_scenes:
+        dd = s.get("data") or {}
+        if (dd.get("stat") or dd.get("featureEntities") or dd.get("metrics")
+                or dd.get("steps") or dd.get("quote") or dd.get("compare")):
+            consumed.add(id(s))
+
+    # process_steps -> process-pipeline (>= 2 real steps with a title)
+    steps = [s for s in (story_shape.get("process_steps") or [])
+             if isinstance(s, dict) and str(s.get("title") or "").strip()]
+    if len(steps) >= 2:
+        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        if target is not None:
+            target.setdefault("data", {})["steps"] = [
+                {"badge": "0%d" % (i + 1), "title": str(x.get("title")).strip(),
+                 "body": str(x.get("body") or "").strip()}
+                for i, x in enumerate(steps[:4])]
+            _seed_scene(target, "How it works")
+            consumed.add(id(target))
+
+    # testimonial -> pull-quote (real quote >= 6 words + attribution)
+    t = story_shape.get("testimonial") or {}
+    quote = str((t or {}).get("quote") or "").strip()
+    who = str((t or {}).get("who") or "").strip()
+    if quote and who and len(quote.split()) >= 6:
+        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        if target is not None:
+            dd = target.setdefault("data", {})
+            dd["quote"] = quote
+            dd["quoteAttribution"] = who
+            _seed_scene(target, "What customers say")
+            consumed.add(id(target))
 
     return plan
 

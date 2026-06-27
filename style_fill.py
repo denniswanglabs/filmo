@@ -2562,6 +2562,33 @@ def _assign_treatment_from_filled_copy(
         out["patternReason"] = "metric-row: %d real metrics" % len(out["metrics"])
         return
 
+    # 3pp) process-pipeline: a horizontal "how it works" flow of numbered step cards
+    #      (harvested from smartbase). HONESTY: select only when REAL steps exist
+    #      (>=2 each with a title). Content-fit -- driven by the Design Brief's
+    #      story_shape.process_steps seeded onto data.steps.
+    raw_steps = d.get("steps")
+    valid_steps: List[Dict[str, Any]] = []
+    if isinstance(raw_steps, list):
+        for st in raw_steps:
+            if not isinstance(st, dict):
+                continue
+            stitle = str(st.get("title") or "").strip()
+            if stitle:
+                valid_steps.append({
+                    "badge": _decode(str(st.get("badge") or ("0%d" % (len(valid_steps) + 1)))),
+                    "title": _decode(stitle),
+                    "body": _decode(str(st.get("body") or "").strip()),
+                })
+    if len(valid_steps) >= 2:
+        out["treatment"] = "process-pipeline"
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out["steps"] = valid_steps[:4]
+        out["patternReason"] = "process-pipeline: %d real steps" % len(out["steps"])
+        return
+
     # 3c) comparison-columns: a two-column contrast (the muted "old way" LEFT vs the
     #     accented "with Filmo" way RIGHT). HONESTY GUARD: select ONLY when the planner
     #     extracted a REAL contrast -- `compare` is a dict whose leftItems and rightItems
