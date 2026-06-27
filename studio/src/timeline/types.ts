@@ -81,7 +81,8 @@ export interface SceneData {
     | "comparison-columns"
     | "pull-quote"
     | "kinetic-statement"
-    | "process-pipeline";
+    | "process-pipeline"
+    | "scan-grid";
   // kinetic-statement (HARVESTED from cluely-promo / Luceo Studio): a big editorial
   // hook that assembles WORD-BY-WORD with a rise-blur cadence, one keyword tinted in
   // theme.accent with a soft glow halo, and an optional highlighter sweep under one
@@ -98,6 +99,14 @@ export interface SceneData {
   // works in N steps" flow. 2-4 REAL steps (never invented); `badge` is the step
   // number/label, `title` the step name, `body` a short description.
   steps?: Array<{ badge: string; title: string; body: string }>;
+  // scan-grid (HARVESTED from kuli-promo / Luceo Studio): a grid of entity/feature
+  // tiles (reuses `featureEntities[]` + index-aligned `entityLogos[]`) that an accent
+  // "AI scanline" sweeps top->bottom, lighting each row as it passes, with a live
+  // "N / Total {label}" counter ticking up in a header pill (parsed from `stat.value`;
+  // absent => no counter, never invented). `tilePills` is an OPTIONAL index-aligned
+  // short REAL attribute per tile, revealed after the scan crosses that tile (absent
+  // => no pills). NEVER invented.
+  tilePills?: string[];
   // pull-quote: a large editorial testimonial.
   quote?: string; quoteAttribution?: string;
   // comparison-columns: a two-column contrast (old way vs Filmo).

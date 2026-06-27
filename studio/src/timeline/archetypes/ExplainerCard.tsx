@@ -1143,6 +1143,363 @@ const TreatmentProcessPipeline: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// TREATMENT — scan-grid (HARVESTED from kuli-promo / Luceo Studio). A grid of
+// entity/feature tiles that an accent "AI scanline" sweeps top->bottom across,
+// lighting each ROW as it passes (tiles glow row-by-row: boxShadow + accent
+// border + a sweep highlight), with a live "N / Total {label}" counter ticking
+// up in a header pill (accent-tinted, tabular-nums, a small spinning arc). The
+// active, "we analyze everything" sibling of the static logo-wall / split-mosaic.
+// Caller guarantees a non-empty grid (degrade guard runs before mount). The
+// counter is shown ONLY when stat.value parses to a real number (else omitted,
+// never invented). `tilePills[]` is an optional index-aligned REAL attribute per
+// tile, revealed after the scan crosses that tile. Mirrors kuli's scan-timing
+// math: rows light at staggered frames as the scanline descends; the line's
+// vertical position interpolates 0->100% over the sweep window.
+// THEME-TOKEN ONLY. Logo seam matches split-mosaic (studio bare <Img>).
+// ---------------------------------------------------------------------------
+// Parse the integer total from a stat.value like "2.4M", "5,000+", "247", "$9.9B".
+// Returns null when no real number is present (so the caller OMITS the counter
+// rather than inventing one). Recognizes K/M/B/T magnitude suffixes.
+const parseStatCount = (raw: string | undefined): number | null => {
+  const s = (raw ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/([\d.,]+)\s*([KMBT])?/i);
+  if (!m) return null;
+  const num = parseFloat(m[1].replace(/,/g, ""));
+  if (!isFinite(num)) return null;
+  const mult: Record<string, number> = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 };
+  const suffix = (m[2] ?? "").toLowerCase();
+  const total = suffix ? num * (mult[suffix] ?? 1) : num;
+  return total > 0 ? Math.round(total) : null;
+};
+
+// A small clockwise-spinning arc (mirrors kuli's Spinner) — telegraphs "analyzing".
+const ScanGridSpinner: React.FC<{ frame: number; color: string }> = ({ frame, color }) => {
+  const angle = (frame * 12) % 360;
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" style={{ transform: `rotate(${angle}deg)` }}>
+      <circle cx="12" cy="12" r="9" stroke={color} strokeWidth="2.5" fill="none" strokeOpacity="0.2" />
+      <path d="M12 3 A 9 9 0 0 1 21 12" stroke={color} strokeWidth="2.5" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+};
+
+// The horizontal accent scanline that sweeps the grid top->bottom over the sweep
+// window (mirrors kuli's vertical Scanline). Hidden before/after the window.
+const ScanGridScanline: React.FC<{ frame: number; startFrame: number; endFrame: number; theme: Theme }> = ({
+  frame,
+  startFrame,
+  endFrame,
+  theme,
+}) => {
+  const t = ease(frame, startFrame, endFrame, 0, 1);
+  if (t <= 0 || t >= 1) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: -12,
+        right: -12,
+        top: `${t * 100}%`,
+        height: 4,
+        background: `linear-gradient(90deg, ${theme.accent}00 0%, ${theme.accent} 30%, ${theme.accent} 70%, ${theme.accent}00 100%)`,
+        boxShadow: `0 0 18px ${theme.accent}`,
+        pointerEvents: "none",
+        zIndex: 5,
+      }}
+    />
+  );
+};
+
+// One grid tile. Enters on a diagonal cascade, then LIGHTS UP (glow + accent
+// border + sweep highlight) as `scannedAmount` rises from 0->1 when the scanline
+// crosses its row; an optional REAL attribute pill pops after the pass.
+const ScanGridTile: React.FC<{
+  entity: string;
+  logo?: string;
+  pill?: string;
+  theme: Theme;
+  arrive: number;
+  scannedAmount: number;
+  pillArrive: number;
+}> = ({ entity, logo, pill, theme, arrive, scannedAmount, pillArrive }) => (
+  <div
+    style={{
+      position: "relative",
+      borderRadius: 14,
+      overflow: "hidden",
+      background: theme.bgCard,
+      border: `1px solid ${theme.border}`,
+      opacity: interpolate(arrive, [0, 1], [0, 1]),
+      transform: `scale(${interpolate(arrive, [0, 1], [0.92, 1])})`,
+      boxShadow:
+        scannedAmount > 0.05
+          ? `0 0 ${scannedAmount * 22}px ${theme.accent}${alphaHex(scannedAmount * 0.4)}, 0 2px 10px rgba(20,40,80,0.06)`
+          : "0 2px 10px rgba(20,40,80,0.06)",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      minHeight: 116,
+      padding: "16px 12px",
+    }}
+  >
+    {logo ? (
+      <Img src={logo} style={{ width: 46, height: 46, objectFit: "contain", borderRadius: 8 }} />
+    ) : (
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 12,
+          background: theme.accent,
+          color: "#FFFFFF",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 20,
+          fontWeight: 800,
+          fontFamily: theme.fontDisplay,
+          flexShrink: 0,
+        }}
+      >
+        {(entity || "?").trim().charAt(0).toUpperCase()}
+      </div>
+    )}
+    <span
+      style={{
+        fontSize: 15,
+        fontWeight: 600,
+        color: theme.text,
+        textAlign: "center",
+        lineHeight: 1.25,
+        letterSpacing: 0.2,
+        fontFamily: theme.fontDisplay,
+      }}
+    >
+      {entity}
+    </span>
+
+    {/* Sweep highlight as the line crosses (peaks mid-pass) */}
+    {scannedAmount > 0 && scannedAmount < 1 ? (
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: `linear-gradient(180deg, ${theme.accent}00 0%, ${theme.accent}26 50%, ${theme.accent}00 100%)`,
+          opacity: 1 - Math.abs(scannedAmount - 0.5) * 2,
+          pointerEvents: "none",
+        }}
+      />
+    ) : null}
+
+    {/* Accent border-glow once scanned */}
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        borderRadius: 14,
+        border: `2px solid ${theme.accent}${alphaHex(scannedAmount * 0.7)}`,
+        pointerEvents: "none",
+      }}
+    />
+
+    {/* Optional REAL attribute pill — pops after the scan passes this tile */}
+    {pill ? (
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 10,
+          padding: "4px 10px",
+          borderRadius: 999,
+          background: `${theme.accent}1A`,
+          border: `1px solid ${theme.accent}40`,
+          fontSize: 11,
+          fontWeight: 700,
+          color: theme.accent,
+          letterSpacing: 0.3,
+          fontFamily: theme.fontMono,
+          opacity: pillArrive,
+          transform: `translateY(${(1 - pillArrive) * 8}px)`,
+        }}
+      >
+        {pill}
+      </div>
+    ) : null}
+  </div>
+);
+
+const TreatmentScanGrid: React.FC<{
+  data: SceneData;
+  theme: Theme;
+  frame: number;
+  fps: number;
+  cues: Cue[];
+  kickerAt: number;
+  titleAt: number;
+  subAt: number;
+  titleOpacity: number;
+  titleContainerY: number;
+  underline: number;
+  titleText: string;
+  titleLines: string[];
+  sceneId?: string;
+}> = ({
+  data, theme, frame, fps, cues, kickerAt, titleAt, subAt,
+  titleOpacity, titleContainerY, underline, titleText, titleLines, sceneId,
+}) => {
+  // Caller guarantees a non-empty grid (degrade guard runs before mount).
+  const entities = (data.featureEntities ?? []).slice(0, 12);
+  const logos = data.entityLogos ?? [];
+  const pills = data.tilePills ?? [];
+  const cols = entities.length <= 6 ? 3 : 4;
+  const rows = Math.max(1, Math.ceil(entities.length / cols));
+
+  // Counter: parse a REAL total from stat.value; null => omit the pill entirely.
+  const total = parseStatCount(data.stat?.value);
+  const statLabel = (data.stat?.label ?? "").trim();
+
+  // The grid cascades in, then the scanline sweeps. Timing mirrors kuli's math:
+  // the sweep window opens after the grid lands; each row lights as the line
+  // crosses it; the counter ticks across the same window.
+  const gridAt = cueAt(cues, "subtitle-in", subAt + 4);
+  const SCAN_START = gridAt + 34;
+  const SCAN_END = SCAN_START + 80;
+
+  const counter = interpolate(frame, [SCAN_START, SCAN_END], [0, total ?? 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: (x) => 1 - Math.pow(1 - x, 3),
+  });
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 120,
+        right: 120,
+        top: 92,
+        bottom: 84,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 30,
+      }}
+    >
+      {/* Header: kicker + counter pill on the right */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 24,
+          flexWrap: "wrap",
+        }}
+      >
+        <KickerRow
+          data={data}
+          theme={theme}
+          style={{
+            opacity: ease(frame, kickerAt, kickerAt + 14, 0, 1),
+            transform: `translateY(${ease(frame, kickerAt, kickerAt + 14, 12, 0)}px)`,
+          }}
+          sceneId={sceneId}
+        />
+        {total !== null ? (
+          <div
+            data-scene-id={sceneId}
+            data-field="counter"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+              padding: "8px 16px",
+              borderRadius: 999,
+              background: `${theme.accent}14`,
+              border: `1px solid ${theme.accent}40`,
+              fontSize: 16,
+              fontWeight: 700,
+              color: theme.accent,
+              fontFamily: theme.fontMono,
+              fontVariantNumeric: "tabular-nums",
+              opacity: ease(frame, gridAt, gridAt + 14, 0, 1),
+              transform: `translateY(${ease(frame, gridAt, gridAt + 14, 10, 0)}px)`,
+            }}
+          >
+            <ScanGridSpinner frame={frame} color={theme.accent} />
+            {Math.round(counter).toLocaleString()} / {total.toLocaleString()}
+            {statLabel ? ` ${statLabel}` : ""}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Title */}
+      <TitleBlock
+        titleText={titleText}
+        titleLines={titleLines}
+        frame={frame}
+        fps={fps}
+        titleAt={titleAt}
+        titleOpacity={titleOpacity}
+        titleContainerY={titleContainerY}
+        underline={underline}
+        theme={theme}
+        fontSize={54}
+        centered
+        sceneId={sceneId}
+      />
+
+      {/* Tile grid with overlaid scanline */}
+      <div
+        data-scene-id={sceneId}
+        data-field="grid"
+        style={{
+          position: "relative",
+          display: "grid",
+          gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gap: 16,
+          width: "100%",
+          maxWidth: cols === 3 ? 1080 : 1440,
+        }}
+      >
+        {entities.map((entity, i) => {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          // Diagonal cascade (top-left first), like kuli's tile entrance.
+          const delay = (col + row) * 5 + gridAt;
+          const arrive = interpolate(
+            spring({ frame: frame - delay, fps, durationInFrames: 26, config: { damping: 180, mass: 0.7, stiffness: 130 } }),
+            [0, 1],
+            [0, 1],
+          );
+          // The scanline reaches each ROW at a staggered frame as it descends.
+          const rowScanT = rows <= 1 ? SCAN_START : SCAN_START + (row / (rows - 1)) * (SCAN_END - SCAN_START);
+          const scannedAmount = ease(frame, rowScanT, rowScanT + 8, 0, 1);
+          const pillArrive = ease(frame, rowScanT + 8, rowScanT + 24, 0, 1);
+          return (
+            <ScanGridTile
+              key={`${i}-${entity}`}
+              entity={entity}
+              logo={logos[i]}
+              pill={(pills[i] ?? "").trim() || undefined}
+              theme={theme}
+              arrive={arrive}
+              scannedAmount={scannedAmount}
+              pillArrive={pillArrive}
+            />
+          );
+        })}
+
+        <ScanGridScanline frame={frame} startFrame={SCAN_START} endFrame={SCAN_END} theme={theme} />
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // TREATMENT — comparison-columns (a two-column contrast). LEFT = the muted "old
 // way" (de-emphasized: textMuted rows with a dash marker). RIGHT = the accented
 // "with Filmo" way (emphasized: full-text rows with an accent checkmark). A
@@ -2481,7 +2838,7 @@ export const ExplainerCard: React.FC<{
   const hasSteps = (data.steps ?? []).filter((s) => (s?.title ?? "").trim()).length >= 2;
 
   let treatment = data.treatment;
-  if ((treatment === "split-mosaic" || treatment === "logo-wall") && !hasEntities) treatment = "icon-headline";
+  if ((treatment === "split-mosaic" || treatment === "logo-wall" || treatment === "scan-grid") && !hasEntities) treatment = "icon-headline";
   else if ((treatment === "split-stat" || treatment === "icon-stat" || treatment === "big-number") && !hasStat) treatment = "icon-headline";
   // feature-list needs SOMETHING to list — entities or a subtitle to split into
   // rows. With neither, drop to the centered fallback (never an empty list card).
@@ -2636,6 +2993,23 @@ export const ExplainerCard: React.FC<{
         />
       ) : treatment === "process-pipeline" ? (
         <TreatmentProcessPipeline
+          data={data}
+          theme={theme}
+          frame={frame}
+          fps={fps}
+          cues={cues}
+          kickerAt={kickerAt}
+          titleAt={titleAt}
+          subAt={subAt}
+          titleOpacity={titleOpacity}
+          titleContainerY={titleContainerY}
+          underline={underline}
+          titleText={titleText}
+          titleLines={titleLines}
+          sceneId={sceneId}
+        />
+      ) : treatment === "scan-grid" ? (
+        <TreatmentScanGrid
           data={data}
           theme={theme}
           frame={frame}
