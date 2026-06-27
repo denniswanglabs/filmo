@@ -391,6 +391,11 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # build_runner reads plan["_planner"] into ledger selection. Not a frozen-schema
     # key on `job`/`scenes`/`voiceover`, so the strict planner schema is unaffected;
     # build_runner persists it under plan["selection"] for the dashboard.
+    # Stash the Design Brief (story_shape + brand_vibe) on the plan so build_props can
+    # read brand_vibe for the per-brand opening style + content-fit routing. Always
+    # present (possibly empty) so downstream never needs a guard.
+    plan["design_brief"] = ((conversion_read or {}).get("design_brief")
+                            or {"story_shape": {}, "brand_vibe": {}})
     plan["_planner"] = {
         "plan_source": plan_source,
         "brain": brain,

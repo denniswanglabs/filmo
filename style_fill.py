@@ -571,6 +571,27 @@ def _ground_screenshot_vo_beats(plan: Dict[str, Any], out_dir: str,
     return beats
 
 
+def _wants_kinetic_open(vibe_label: str, vibe_motion: str, tie_break: int) -> bool:
+    """Per-brand OPENING style (Design-Fit variety): a bold/energetic brand opens with
+    the animated kinetic-statement (word-rise + accent emphasis); an enterprise/calm
+    brand keeps the clean wordmark lockup; an unknown vibe falls to the hash tie-break
+    so different unknown brands still vary."""
+    if vibe_label in ("startup-bold", "consumer-playful") or vibe_motion == "energetic":
+        return True
+    if vibe_label in ("enterprise", "technical-precise") or vibe_motion == "calm":
+        return False
+    return tie_break == 1
+
+
+def _open_variant_for(brand: Dict[str, Any]) -> int:
+    """Deterministic per-brand tie-break for the opening style. Uses hashlib (NOT
+    hash(), which is salted per-process and would differ between the worker's runs)."""
+    import hashlib
+    seed = str((brand or {}).get("host") or (brand or {}).get("name")
+               or (brand or {}).get("wordmark") or "brand").lower()
+    return int(hashlib.sha1((seed + "|open").encode()).hexdigest(), 16) % 2
+
+
 def _scene_role(scene: Dict[str, Any]) -> str:
     """The classifier key for the registry: explicit `role`, else `type`."""
     return str(scene.get("role") or scene.get("type") or "").strip().lower()
@@ -2424,6 +2445,15 @@ def _assign_treatment_from_filled_copy(
                 out[key] = _decode(word)
             else:
                 out.pop(key, None)
+        # Brand-badge opening (Design-Fit vibe variety): keep the badge flag, and if no
+        # explicit emphasis word, accent the longest content word so the opening pops.
+        if d.get("brandBadge"):
+            out["brandBadge"] = True
+            if not out.get("emphasisWord"):
+                _w = max((w.strip(".,!?:;\"'") for w in " ".join(out["lines"]).split()),
+                         key=len, default="")
+                if len(_w) >= 5:
+                    out["emphasisWord"] = _decode(_w)
         out.pop("icon", None)
         out.pop("stat", None)
         out.pop("featureEntities", None)
@@ -3884,6 +3914,16 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
     # not whatever flow the planner's free-text VO happened to narrate.
     run_emphasis = str((plan.get("job") or {}).get("emphasis") or "").strip()
 
+    # Per-brand OPENING style (Design-Fit variety): bold/energetic vibe -> animated
+    # kinetic-statement opening; enterprise/calm -> clean wordmark; unknown -> tie-break.
+    # Read the Design Brief's vibe once before the loop.
+    _vibe = (plan.get("design_brief") or {}).get("brand_vibe") or {}
+    _open_kinetic = _wants_kinetic_open(
+        str(_vibe.get("label") or "").strip().lower(),
+        str(_vibe.get("motion") or "").strip().lower(),
+        _open_variant_for(brand),
+    )
+
     tl_scenes = timeline.get("scenes", [])
     last_idx = len(tl_scenes) - 1
     feature_counter = 0  # 0-based position among explainer/feature scenes (BUG C)
@@ -3910,6 +3950,21 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
             d.setdefault("_text", tl_text)
 
         archetype = style.archetype_for(plan_scene)  # role decides the archetype
+
+        # PER-BRAND OPENING VARIETY (Design-Fit): the opening hero may render as an
+        # animated kinetic-statement with a brand badge instead of the clean wordmark
+        # lockup. style.shape() dispatches on ROLE, so set role="feature" to run the
+        # explainer shaper (which honors data.treatment="kinetic-statement") and mirror
+        # the local `archetype`. Content stays the REAL tagline (kinetic derives its
+        # lines verbatim from the threaded title).
+        if (_open_kinetic and archetype == ARCH_HERO and idx == 0 and last_idx > 0
+                and not _is_closing_title(plan_scene)):
+            plan_scene["role"] = "feature"
+            d["treatment"] = "kinetic-statement"
+            d["brandBadge"] = True
+            if not str(d.get("eyebrow") or "").strip():
+                d["eyebrow"] = str(brand.get("wordmark") or brand.get("name") or "").strip().upper()
+            archetype = ARCH_EXPLAINER
 
         # Thread scene-POSITION hints the shapers use for variety:
         #  - the FINAL title scene is the closing CTA (BUG B), even if its id/role
