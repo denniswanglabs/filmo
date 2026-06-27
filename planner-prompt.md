@@ -111,7 +111,13 @@ OUTPUT SCHEMA (these top-level keys and field names are FIXED — never rename, 
       "brief": string,            // one-sentence direction for this scene
       "model": string or null,    // see MODEL RULES
       "duration_s": integer,      // whole seconds, >= 2
-      "input_image": null         // always null at planning time
+      "input_image": null,        // always null at planning time
+      "data": {                   // OPTIONAL — only on "motion_graphic" feature beats; see CARD TREATMENT RULES
+        "treatment": string,      // "icon-stat" | "split-mosaic" | "split-stat" | "icon-headline"
+        "icon": string,           // curated icon name (icon-stat / icon-headline) — see icon list
+        "stat": {"value": string, "label": string},  // a REAL number from the brand (stat treatments)
+        "featureEntities": [string]                   // >= 3 REAL named entities/integrations (split-mosaic)
+      }
     }
   ],
   "voiceover": {
@@ -239,6 +245,60 @@ VOICEOVER RULES:
       payments…", "Stop fraud…", "Bill on a schedule…"). Each feature beat covers a DIFFERENT
       feature — never repeat the same value-prop or the tagline across cards (the R1 failure:
       "Build internet businesses" repeated on every scene).
+- DATA-RICH BEATS (REQUIRED — this is what makes the video good): EVERY "motion_graphic" feature
+  beat MUST carry CONCRETE REAL DATA — either (a) a REAL NUMBER in its title (a stat: "$600B+
+  combined valuation", "3,000+ alumni", "99.99% uptime", "135+ currencies"), or (b) be the ONE
+  entity-LIST scene (>= 3 real product/customer/portfolio names as a comma list in the title).
+  A beat that is just a generic value-prop with NO number and NO named entities is a FAILURE —
+  it renders as a bare card. DO NOT limit yourself to the scraped homepage copy — it is OFTEN
+  GENERIC marketing with no concrete numbers/names. ENRICH each beat from your VERIFIED KNOWLEDGE
+  of THIS specific company: its real, well-known METRICS and its named CUSTOMERS / PRODUCTS /
+  PORTFOLIO. Examples (use the ones that apply to the actual company): Y Combinator -> "$500K
+  standard deal", "$800B+ combined valuation of funded companies", and the list "Airbnb, Stripe,
+  Coinbase, Dropbox, DoorDash"; Stripe -> "135+ currencies", "99.99% uptime", and the list
+  "Billing, Connect, Radar, Issuing". Aim for a SPREAD across your 2-3 beats: at least one
+  number-stat beat AND the entity-list beat when the company has both.
+  HONESTY ABSOLUTE: use ONLY facts you genuinely KNOW are TRUE for this EXACT company. If you do
+  not know real specific metrics/names for it (a small or unfamiliar company), DO NOT guess —
+  fall back to an honest generic beat (icon-headline). Never fabricate a number or a name.
+- CARD TREATMENT — CHOOSE A LAYOUT FOR EACH "motion_graphic" FEATURE BEAT (emit it in that
+  scene's "data"): a bare feature card (title + a short line) leaves the right side empty. So
+  for EACH "motion_graphic" scene, pick ONE "treatment" from the REAL data you have and emit
+  the fields it needs in "data":
+    * "icon-stat"    — you have a REAL number AND a punchy headline. Emit "icon" (a curated icon
+                       name), "stat": {"value": "<the real number, e.g. 135+ currencies>",
+                       "label": "<what it measures>"}, and a tight headline as the scene title.
+    * "split-stat"   — you have a REAL number but no icon-worthy headline. Emit just
+                       "stat": {"value": ..., "label": ...}.
+    * "split-mosaic" — you can name >= 3 REAL named entities / integrations / capabilities (from
+                       the COMPANY FACTS features, e.g. for stripe: "Billing","Radar","Connect",
+                       "Issuing"). Emit "featureEntities": ["...","...","..."] (>= 3 real names).
+    * "icon-headline"— you have NEITHER a real number NOR >= 3 real entities. Emit "icon" (a
+                       curated icon name) + a headline as the scene title. NO number. This is the
+                       HONEST default — prefer it over inventing a stat.
+  HONESTY IS ABSOLUTE: NEVER invent a stat number or a named entity to fill a treatment. A
+  "stat.value" MUST contain a REAL number that comes from the brand's real facts / your verified
+  knowledge of this specific company (e.g. stripe "135+ currencies", "99.999% uptime") — if you
+  have no real number, use "icon-headline" instead. "featureEntities" MUST be REAL named features
+  / integrations of THIS company — if you cannot name 3 real ones, do NOT use "split-mosaic".
+  Better an honest icon + headline than a fabricated number. When in doubt -> "icon-headline".
+  LAYOUT VARIETY (this drives the "fancy" look): across your 2-3 feature beats, MIX the
+  treatments — do NOT make them all the same. Aim for a SPREAD: one stat card, one
+  entity/mosaic card, one headline card, when the real data supports it.
+  ENTITY/MOSAIC SCENES: "featureEntities" are not only product features — they are ANY >= 3
+  REAL named entities this company is associated with: PRODUCTS/modules, customers, portfolio/
+  backed companies, integrations, partners, or logos (e.g. Stripe -> "Billing","Connect",
+  "Radar","Issuing"; Y Combinator -> "Airbnb","Stripe","Coinbase","Dropbox","DoorDash"). If this
+  company has >= 3 such REAL names, you MUST DEDICATE EXACTLY ONE feature beat to the LIST —
+  put the names as a comma list IN the scene title (e.g. "Billing, Connect, Radar, Issuing" or
+  "Airbnb, Stripe, Dropbox, DoorDash") so the mosaic renders. Do NOT spread those names across
+  separate one-each feature beats (that wastes the mosaic) — collect them into ONE list scene.
+  Still honest — only REAL names.
+  STAT SCENES: when a feature's punch IS a single REAL number, put that number IN the scene
+  title (e.g. "$600B+ combined valuation", "3,000+ alumni") so it renders as a big hero stat.
+  CURATED ICON NAMES (pick the closest; unknown names safely default to "spark"): "rocket",
+  "spark", "shield", "chart", "users", "bolt", "globe", "dollar", "layers", "sparkles",
+  "target", "clock".
 - Do NOT emit a single combined "script" — use the per-scene "beats" array only.
 
 VALIDITY:

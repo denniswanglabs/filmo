@@ -60,6 +60,77 @@ export interface SceneData {
   // short capability lines (parsed from the VO/brief) revealed as numbered badges.
   bullets?: string[];
 
+  // explainer-card RICH TREATMENT fields (feature-card-richness spec).
+  // `treatment` selects one of the layout variants. ABSENT / unknown → the
+  // existing card renders exactly as before (backward-compat guaranteed).
+  // Degrade: split-mosaic/logo-wall w/o featureEntities, split-stat/icon-stat/
+  // big-number w/o stat, or feature-list w/o entities+subtitle → archetype drops
+  // to the centered, full-width "icon-headline".
+  // DORMANT: big-number / logo-wall / feature-list render + validate but NO
+  // selection logic emits them yet (the orchestrator wires selection later).
+  treatment?:
+    | "icon-stat"
+    | "split-mosaic"
+    | "split-stat"
+    | "icon-headline"
+    | "big-number"
+    | "logo-wall"
+    | "feature-list"
+    | "metric-row"
+    | "device-frame"
+    | "comparison-columns"
+    | "pull-quote"
+    | "kinetic-statement"
+    | "process-pipeline"
+    | "scan-grid";
+  // kinetic-statement (HARVESTED from cluely-promo / Luceo Studio): a big editorial
+  // hook that assembles WORD-BY-WORD with a rise-blur cadence, one keyword tinted in
+  // theme.accent with a soft glow halo, and an optional highlighter sweep under one
+  // word. `lines` (below, reused) carries 1-2 real lines (derived from `title` when
+  // absent); `emphasisWord`/`underlineWord` are REAL words that appear VERBATIM in the
+  // copy (kept only when verbatim, else rendered plain — never fabricated).
+  eyebrow?: string; // optional real kicker shown above the statement
+  emphasisWord?: string; // one real word tinted theme.accent + halo
+  underlineWord?: string; // one real word that gets the highlighter sweep
+  // metric-row: 3-4 small real stats shown as a horizontal strip.
+  metrics?: Array<{ value: string; label: string }>;
+  // process-pipeline (HARVESTED from smartbase-promo / Luceo Studio): a horizontal
+  // row of numbered STEP cards joined by connector arrows that draw L->R — a "how it
+  // works in N steps" flow. 2-4 REAL steps (never invented); `badge` is the step
+  // number/label, `title` the step name, `body` a short description.
+  steps?: Array<{ badge: string; title: string; body: string }>;
+  // scan-grid (HARVESTED from kuli-promo / Luceo Studio): a grid of entity/feature
+  // tiles (reuses `featureEntities[]` + index-aligned `entityLogos[]`) that an accent
+  // "AI scanline" sweeps top->bottom, lighting each row as it passes, with a live
+  // "N / Total {label}" counter ticking up in a header pill (parsed from `stat.value`;
+  // absent => no counter, never invented). `tilePills` is an OPTIONAL index-aligned
+  // short REAL attribute per tile, revealed after the scan crosses that tile (absent
+  // => no pills). NEVER invented.
+  tilePills?: string[];
+  // pull-quote: a large editorial testimonial.
+  quote?: string; quoteAttribution?: string;
+  // comparison-columns: a two-column contrast (old way vs Filmo).
+  compare?: { leftTitle: string; leftItems: string[]; rightTitle: string; rightItems: string[] };
+  // device-frame: text-left / a REAL captured product screenshot (reuses the
+  // existing `imageSrc` field below) wrapped in a clean browser frame on the
+  // RIGHT. Selected only for a product beat that carries a real screenshot.
+  // Curated icon name rendered as inline SVG inside the card tile.
+  // Set: rocket, spark, shield, chart, users, bolt, globe, dollar, layers,
+  //      sparkles, target, clock. Unknown / missing → falls back to "spark".
+  icon?: string;
+  // A REAL (never invented) stat shown in icon-stat / split-stat treatments.
+  stat?: { value: string; label: string };
+  // REAL named entities (companies / people / labels) for the split-mosaic
+  // treatment tile grid (up to 6). Named separately from `entities` which is
+  // the apple-registry object array — these are plain strings.
+  featureEntities?: string[];
+  // OPTIONAL real brand logos for the split-mosaic / logo-wall tiles, index-
+  // aligned with `featureEntities`. Each is a self-contained data URI
+  // ("data:image/png;base64,…") staged at BUILD time (no render-time network).
+  // An empty string / missing entry = no logo found -> the tile falls back to
+  // the entity name/initial. NEVER invented — only real fetched marks.
+  entityLogos?: string[];
+
   // apple-hero fields (product-as-hero lockup)
   // reuses kicker / title / punchWord / subtitle above. `product` is an
   // optional short product/feature name shown on the hero "product" plate.

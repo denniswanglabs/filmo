@@ -393,10 +393,13 @@ export function SlidingPanel({
 }
 
 // ---------------------------------------------------------------------------
-// ScrubbedHero — static hero wrapper. The hero (headline + REAL composer) now
-// renders fully visible at full opacity on first paint, with no pin, no scrub,
-// no scale-in, and no dim. Kept as a thin pass-through so page.tsx doesn't have
-// to change its markup; it just renders the children in normal flow.
+// ScrubbedHero — zoom-OUT / pull-back hero. At rest (top of page) the hero
+// (headline + REAL composer) renders full size and fully interactive. As the
+// visitor scrolls PAST the first viewport, it scales down, lifts, and dims —
+// the camera "pulling back" to hand off to the page below. Because the pull-back
+// is keyed to scrolling AWAY (offset start→ -start), the composer stays at
+// scale 1 and usable while you're actually at the top. Transform/opacity only,
+// GPU-composited. Reduced motion / SSR render the flat rest state (no transform).
 // ---------------------------------------------------------------------------
 interface ScrubbedHeroProps {
   children: ReactNode
@@ -405,7 +408,71 @@ interface ScrubbedHeroProps {
 }
 
 export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
-  return <div className={className}>{children}</div>
+  const enabled = useMotionEnabled()
+  // Track WINDOW scroll directly (robust — no element-offset math): map the first
+  // ~560px of scroll to the pull-back. At the very top (scrollY 0) the hero is at
+  // full scale and fully interactive; scrolling down recedes it. Direct mapping
+  // (no spring) so it tracks the scroll 1:1 and is unmistakably visible.
+  const { scrollY } = useScroll()
+  const scale = useTransform(scrollY, [0, 560], [1, 0.82])
+  const y = useTransform(scrollY, [0, 560], [0, -44])
+  const opacity = useTransform(scrollY, [0, 380, 600], [1, 0.7, 0.35])
+
+  if (!enabled) {
+    return <div className={className}>{children}</div>
+  }
+
+  return (
+    <motion.div
+      className={className}
+      style={{ scale, y, opacity, transformOrigin: 'center top', willChange: 'transform, opacity' }}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PinnedHero — a MOUNT-driven hero intro. The hero is a normal-flow block (no
+// pin, no scroll runway): on mount the big centered `title` does a one-shot
+// zoom-settle while the `body` (subtitle + composer) snaps in SOLID just after.
+// Once the intro completes there is ZERO coupling to scroll — the hero simply
+// translates off-screen with the document like any section. The title's per-line
+// reveal is carried by the `title` prop's own VerticalCutReveal; here we add only
+// a gentle scale-settle on the title wrapper so the two reads as one calm gesture.
+// Reduced motion / SSR render the settled hero in normal flow, no transforms.
+// (Name kept as PinnedHero for API compatibility with page.tsx.)
+// ---------------------------------------------------------------------------
+interface PinnedHeroProps {
+  title: ReactNode
+  body: ReactNode
+  /** classes for the centered content column. */
+  className?: string
+  /** decoration rendered inside the stage, behind the content (z-0). */
+  decoration?: ReactNode
+  /** anchor id placed on the section (e.g. "start" for the nav jump). */
+  id?: string
+}
+
+export function PinnedHero({ title, body, className = '', decoration, id }: PinnedHeroProps) {
+  // STATIC, normal-flow hero — intentionally NO scroll pin and NO scroll-tied
+  // opacity/scale. Earlier scroll-reveal versions coupled the composer box's
+  // opacity to scroll progress, which made the box FADE on scroll. That is gone:
+  // the title and the composer box are always fully solid and simply scroll off
+  // with the page like any section. The box never fades, ever. (The title still
+  // carries its own one-shot on-mount reveal via VerticalCutReveal in `title`.)
+  return (
+    <section
+      id={id}
+      className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-28 sm:pt-32"
+    >
+      {decoration}
+      <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
+        {title}
+        {body}
+      </div>
+    </section>
+  )
 }
 
 // ---------------------------------------------------------------------------

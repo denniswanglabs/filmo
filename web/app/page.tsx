@@ -10,29 +10,21 @@ import { AuthGate } from './components/AuthGate'
 import FloatingNav from './components/landing/FloatingNav'
 import Examples from './components/landing/Examples'
 import EditorDemo from './components/landing/EditorDemo'
+import PatternLookbook from './components/landing/PatternLookbook'
 import LuceoShowcase from './components/landing/LuceoShowcase'
 import ReadyToCreate from './components/landing/ReadyToCreate'
 import PoweredBy from './components/landing/PoweredBy'
 import SiteFooter from './components/landing/SiteFooter'
-import { ParallaxWindows, ScrubbedHero } from './components/landing/Motion'
+import { PinnedHero } from './components/landing/Motion'
+import VerticalCutReveal from './components/fancy/VerticalCutReveal'
 import { BRAINS, type Run } from '../lib/types'
 
 // Composer state stashed across the Google OAuth round-trip so the prompt survives
 // the redirect and the build resumes automatically on return.
 const PENDING_KEY = 'ws_pending_build'
 
-// Auto-cycling example prompts for the composer placeholder — makes the hero feel
-// alive without touching the real value/state (decorative attribute only).
-const EXAMPLE_PROMPTS = [
-  'A 30-second explainer that makes our product feel inevitable.',
-  'A Product Hunt launch cut that wins the day.',
-  'A waitlist teaser that sells the promise before we ship.',
-  'A landing-page hero loop scored to a beat.',
-] as const
-
 interface PendingBuild {
   url: string
-  goal: string
   quality: 'standard' | 'premium'
   brain: string
   // Opt-in: require a REAL Stripe TEST payment before the build proceeds. Default
@@ -45,10 +37,10 @@ export default function Home() {
   const { user, loading } = useAuth()
 
   // Composer state
-  const [goal, setGoal] = useState('')
   const [url, setUrl] = useState('')
   const [quality, setQuality] = useState<'standard' | 'premium'>('standard')
-  const [brain, setBrain] = useState<string>('super-free')
+  // Default to the flagship paid Ultra; Super (free) stays selectable in the dropdown.
+  const [brain, setBrain] = useState<string>('ultra-paid')
   // Opt-in human-pays toggle (default OFF → normal demo auto-pays).
   const [requirePay, setRequirePay] = useState(false)
   const [building, setBuilding] = useState(false)
@@ -59,13 +51,6 @@ export default function Home() {
 
   // Recents
   const [runs, setRuns] = useState<Run[] | null>(null)
-
-  // Rotating placeholder index — purely decorative (does not affect the value).
-  const [phIndex, setPhIndex] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setPhIndex((i) => (i + 1) % EXAMPLE_PROMPTS.length), 3500)
-    return () => clearInterval(id)
-  }, [])
 
   // "Remix" from the Examples gallery seeds the composer with that cut's source
   // URL, then scrolls the composer into view and focuses the URL input — same
@@ -108,7 +93,6 @@ export default function Home() {
         const { runId } = await createBuild({
           userId,
           url: p.url.trim(),
-          goal: p.goal.trim() || undefined,
           quality: p.quality,
           brain: p.brain,
           mode: 'mock',
@@ -124,8 +108,8 @@ export default function Home() {
   )
 
   const currentPending = useCallback(
-    (): PendingBuild => ({ url, goal, quality, brain, requirePay }),
-    [url, goal, quality, brain, requirePay],
+    (): PendingBuild => ({ url, quality, brain, requirePay }),
+    [url, quality, brain, requirePay],
   )
 
   function stashPending() {
@@ -162,9 +146,8 @@ export default function Home() {
     }
     // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
     setUrl(p.url ?? '')
-    setGoal(p.goal ?? '')
     setQuality(p.quality ?? 'standard')
-    setBrain(p.brain ?? 'super-free')
+    setBrain(p.brain ?? 'ultra-paid')
     setRequirePay(p.requirePay ?? false)
     if (user) void runBuild(user.id, p)
   }, [loading, user, runBuild])
@@ -186,55 +169,38 @@ export default function Home() {
     <div className="landing-dark min-h-screen">
       <FloatingNav />
 
-      <section
+      <PinnedHero
         id="start"
-        className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60"
-      >
-        {/* Soft light-blue aura grounds the light hero. */}
-        <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
-        {/* Decorative floating "windows" parallax layer — sits behind the composer
-            (z-0, pointer-events none), never covers the headline or form. */}
-        <ParallaxWindows />
-        <main className="relative z-10 mx-auto max-w-3xl px-5 pb-20 pt-28 sm:pt-36">
-          {/* Scroll-scrubbed pinned hero: the headline + REAL composer scrub in
-              (scale/lift) and settle, pinned across the first viewport. The form
-              stays fully functional — ScrubbedHero only wraps it in a transform.
-              Reduced motion / SSR: renders untransformed in normal flow. */}
-          <ScrubbedHero className="w-full">
-            {/* Hero — left-aligned, indented to line up with the composer's
-                inner labels (card uses p-6, so px-6 here shares that left edge). */}
-            <div className="mb-8 px-6 text-left">
-              <h1 className="text-5xl font-semibold leading-[1.03] tracking-tight text-[#0E1320] sm:text-[3.75rem]">
-                Your AI Product
-                <br />
-                Launch Producer
-              </h1>
-              <p className="mt-4 max-w-xl text-lg text-[#5A6472]">
-                Paste your URL. Filmo reads your real product, diagnoses how it converts, and
-                ships a finished launch video — planned, priced, and produced on autopilot.
-              </p>
-            </div>
+        className="mx-auto max-w-3xl"
+        decoration={
+          <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
+        }
+        title={
+          <div className="mx-auto flex justify-center text-5xl font-semibold leading-[1.03] tracking-tight text-[#0E1320] sm:text-[3.75rem]">
+            <VerticalCutReveal
+              splitBy="lines"
+              staggerDuration={0.14}
+              transition={{ type: 'spring', stiffness: 200, damping: 24 }}
+              containerClassName="items-center text-center"
+            >
+              {'Your AI Product\nLaunch Producer'}
+            </VerticalCutReveal>
+          </div>
+        }
+        body={
+          <>
+            <p className="mx-auto mt-4 max-w-2xl text-lg text-[#5A6472]">
+              Paste your URL. Filmo reads your real product, diagnoses how it converts, and
+              ships a finished launch video — planned, priced, and produced on autopilot.
+            </p>
 
-            {/* Composer card — white, light-blue accents, soft shadow */}
+            {/* Composer card — centered block, left-aligned internals */}
             <form
               onSubmit={onBuild}
-              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
+              className="mx-auto mt-6 max-w-2xl rounded-2xl border border-[#D4E2FB] bg-white p-5 text-left shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
             >
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">
-                What should the video show?
-              </span>
-              <textarea
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                rows={2}
-                placeholder={EXAMPLE_PROMPTS[phIndex]}
-                className="w-full resize-none rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] px-3.5 py-3 text-[#0E1320] outline-none transition placeholder:text-[#9AA6B8] focus:border-amber focus:bg-white"
-              />
-            </label>
-
-            <label className="mt-4 block">
-              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Company URL</span>
+              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Website URL</span>
               <div className="flex items-center rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] transition focus-within:border-amber focus-within:bg-white">
                 <span className="select-none pl-3.5 pr-1 text-[#9AA6B8]">https://</span>
                 <input
@@ -323,13 +289,16 @@ export default function Home() {
                 </p>
               )}
             </form>
-          </ScrubbedHero>
+          </>
+        }
+      />
 
-          {/* Sponsor credit — Hermes Hackathon (Nous Research × NVIDIA × Stripe).
-              Sits directly under the composer as a small trust strip. */}
-          <div className="mt-8">
-            <PoweredBy />
-          </div>
+      {/* Below the pinned hero — the page scrolls normally from here. */}
+      <main className="relative z-10 mx-auto max-w-3xl px-5 pb-20 pt-12">
+        {/* Sponsor credit — Hermes Hackathon (Nous Research × NVIDIA × Stripe). */}
+        <div>
+          <PoweredBy />
+        </div>
 
           {/* Recents — only meaningful once signed in. */}
           {user && (
@@ -374,13 +343,15 @@ export default function Home() {
               )}
             </section>
           )}
-        </main>
-      </section>
+      </main>
 
       {/* Proof — real videos the pipeline produced. */}
       <Examples />
       {/* Product demo — a looping faux editor showing live text-size editing. */}
       <EditorDemo />
+      {/* The curation moat — the hand-curated pattern library, read straight as
+          one narrative beat with the Luceo films it's distilled from (below). */}
+      <PatternLookbook />
       {/* Built on Luceo Studio's launch films. */}
       <LuceoShowcase />
       {/* Closing CTA — deep-navy band, scrolls back to the composer. */}

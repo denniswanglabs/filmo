@@ -921,8 +921,8 @@ def _call_nemotron(messages, brain_key_name: str, timeout_s: int = 60):
             "Authorization": "Bearer %s" % key,
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "HTTP-Referer": "https://walk.studio",
-            "X-Title": "Walk Studio",
+            "HTTP-Referer": "https://filmostudio.vercel.app",
+            "X-Title": "Filmo",
         },
         method="POST",
     )

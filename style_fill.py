@@ -50,6 +50,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 import align_vo
 import build_timeline
+# plan_job owns the HONEST card-treatment/entity/stat logic. We reuse its miners
+# (`_mine_named_entities`, `_stat_is_real`, `_feature_entities_from_facts`) in a
+# POST-FILL pass below so treatment selection runs on the REAL filled card copy
+# (title/subtitle) instead of the empty titles plan_job saw at plan time. Safe
+# import: plan_job depends only on validate_planner/brain/plan_schema (no cycle).
+import plan_job
 
 # ---------------------------------------------------------------------------
 # HTML-ENTITY DECODE  (R5 fix — must be the LAST pass on every user-facing string)
@@ -71,6 +77,15 @@ ARCH_CARD = "card-ui"
 # real footage on a $0/standard run (the blank-scenes fix). Shows the narrated
 # point as kinetic motion-graphics instead of a flat solid color.
 ARCH_EXPLAINER = "explainer-card"
+# Card-treatment vocabulary (SHARED DATA CONTRACT with the Remotion ExplainerCard
+# archetype). plan_job picks + honesty-guards these on scene["data"]; _shape_explainer
+# only carries the surviving fields into the rendered props. The last three are
+# DORMANT — the ExplainerCard renders them, but no selection logic emits them yet.
+_CARD_TREATMENTS = {
+    "icon-stat", "split-mosaic", "split-stat", "icon-headline",
+    # DORMANT — render + validate only; no selection logic emits these yet.
+    "big-number", "logo-wall", "feature-list",
+}
 # A produced walkthrough MP4 (Walk Agent capture) played INSIDE the branded studio
 # composition, so the clip inherits Walk Studio overlays + per-scene VO. Used for a
 # `walkthrough` role ONLY when a real clip exists; otherwise the role falls back to
@@ -554,6 +569,30 @@ def _ground_screenshot_vo_beats(plan: Dict[str, Any], out_dir: str,
         if grounded and _word_count(grounded) >= 4:
             b["text"] = grounded
     return beats
+
+
+def _wants_kinetic_open(vibe_label: str, vibe_motion: str, tie_break: int) -> bool:
+    """Per-brand OPENING style (Design-Fit variety): a bold/energetic brand opens with
+    the animated kinetic-statement (word-rise + accent emphasis); an enterprise/calm
+    brand keeps the clean wordmark lockup; an unknown vibe falls to the hash tie-break
+    so different unknown brands still vary."""
+    if vibe_label in ("startup-bold", "consumer-playful") or vibe_motion == "energetic":
+        return True
+    if vibe_label in ("enterprise", "technical-precise") or vibe_motion == "calm":
+        return False
+    # Unknown/unclassifiable vibe -> the SAFE, established clean wordmark opening
+    # (no signal is not a "tie"). The hash tie-break (`tie_break`) is reserved for
+    # genuine content-fit ties in Phase 2 routing.
+    return False
+
+
+def _open_variant_for(brand: Dict[str, Any]) -> int:
+    """Deterministic per-brand tie-break for the opening style. Uses hashlib (NOT
+    hash(), which is salted per-process and would differ between the worker's runs)."""
+    import hashlib
+    seed = str((brand or {}).get("host") or (brand or {}).get("name")
+               or (brand or {}).get("wordmark") or "brand").lower()
+    return int(hashlib.sha1((seed + "|open").encode()).hexdigest(), 16) % 2
 
 
 def _scene_role(scene: Dict[str, Any]) -> str:
@@ -2311,6 +2350,396 @@ def _match_feature(features: List[str], scene_text: str) -> Optional[int]:
     return best_i
 
 
+# Magnitude-bearing stat token: currency, big-number suffix (B/M/K/billion...), %,
+# x, or a trailing "+" — i.e. an IMPRESSIVE number, not a bare "10 minutes".
+_TITLE_STAT_RE = re.compile(
+    r"\$\s?\d[\d,\.]*\s?(?:[BMKT]|bn|billion|million|thousand|trillion)?\+?(?![A-Za-z])"
+    r"|\d[\d,\.]*\s?(?:[BMKT]|bn|billion|million|thousand|trillion)\+?(?![A-Za-z])"
+    r"|\d[\d,\.]*\s?[%x](?![A-Za-z])"
+    r"|\d[\d,\.]*\+",
+    re.I)
+
+
+def _mine_stat_from_title(title):
+    """If the filled title carries an IMPRESSIVE number (currency / % / x / big-suffix
+    / trailing +), split it into {value, label}. Honest: the number is taken verbatim
+    from the real filled title. Returns None for bare/small numbers (e.g. "10 minutes")."""
+    if not title:
+        return None
+    # Normalize honest word-forms so site numbers like "50-plus" / "92 percent" mine
+    # like their symbolic forms "50+" / "92%". The DIGITS stay verbatim — no invention.
+    norm = re.sub(r"(?<![A-Za-z0-9])(\d[\d,\.]*)\s*[- ]?\s*plus\b", r"\1+", title, flags=re.I)
+    norm = re.sub(r"(?<![A-Za-z0-9])(\d[\d,\.]*)\s+percent\b", r"\1%", norm, flags=re.I)
+    m = _TITLE_STAT_RE.search(norm)
+    if not m:
+        return None
+    value = m.group(0).strip()
+    label = (norm[:m.start()] + " " + norm[m.end():])
+    label = re.sub(r"\s{2,}", " ", label).strip(" —-·,:").strip()
+    # Keep the label a TIGHT phrase for a hero stat: cut at the first clause break
+    # and cap at ~5 words ("The standard deal: for 7% with uncapped..." -> "The
+    # standard deal").
+    label = re.split(r"[:—;(]| - ", label)[0].strip()
+    label = " ".join(label.split()[:5])
+    return {"value": value, "label": label}
+
+
+def _split_statement_lines(title: str) -> List[str]:
+    """Split a real title into <=2 BALANCED lines for the kinetic-statement hook.
+    VERBATIM words only -- never invents or drops copy. Prefers an existing sentence
+    boundary ("Paste a URL. Get a launch video." -> two lines); else balances the word
+    count across two lines. A short title (<=4 words) stays a single line."""
+    t = " ".join((title or "").split()).strip()
+    if not t:
+        return []
+    # 1) Honor an explicit sentence boundary near the middle (keeps the punctuation).
+    parts = re.split(r"(?<=[.!?])\s+", t)
+    parts = [p.strip() for p in parts if p.strip()]
+    if len(parts) == 2:
+        return parts
+    if len(parts) > 2:
+        # Re-balance >2 sentences into two lines by word count.
+        words_all = t.split()
+    else:
+        words_all = t.split()
+    if len(words_all) <= 4:
+        return [t]
+    # 2) Balance by word count -- break at the word boundary nearest the midpoint.
+    mid = len(words_all) // 2
+    return [" ".join(words_all[:mid]).strip(), " ".join(words_all[mid:]).strip()]
+
+
+def _assign_treatment_from_filled_copy(
+    out: Dict[str, Any], scene: Dict[str, Any], brand: Dict[str, Any]
+) -> None:
+    """AUTHORITATIVE card-treatment pass that runs on the FILLED card copy.
+
+    THE BUG THIS FIXES: plan_job's `_assign_card_treatments` runs at PLAN time —
+    BEFORE this function (style_fill) writes the card title/subtitle. So plan_job's
+    entity miner + `_stat_is_real` saw EMPTY titles and every feature card collapsed
+    to "icon-headline", even for entity-rich scenes like "Airbnb, Stripe, Dropbox
+    founders share raw stories" whose title is filled HERE, afterward.
+
+    This pass re-derives the treatment from the REAL filled copy (`out["title"]` +
+    `out["subtitle"]`, plus any LLM-emitted stat/treatment that survived plan time)
+    and OVERRIDES whatever plan_job picked. It reuses plan_job's HONEST miners so the
+    rules stay in one place:
+      1. Mine featureEntities from the filled title+subtitle (>= 3 proper nouns ->
+         keep; exclude the brand wordmark). Real-text only — never invents.
+      2. Keep an LLM-emitted `stat` only if `plan_job._stat_is_real` passes against
+         a scene whose data carries the FILLED copy (so the stat's number must appear
+         in real brand text).
+      3. (Re)assign treatment: real stat -> "split-stat" (or "icon-stat" when the
+         scene already has a curated icon + a punchy headline); >= 3 real entities ->
+         "split-mosaic"; else "icon-headline" (the honest floor).
+    Writes treatment / icon / stat / featureEntities onto `out` (the dict the render
+    reads). Honesty FIRST — never fabricate a stat or an entity.
+
+    `brand` is style_fill's resolved brand-facts dict (wordmark/tagline/features) and
+    serves directly as plan_job's `company_facts` (same field names).
+    """
+    d = scene.get("data") or {}
+    company_facts = brand if isinstance(brand, dict) else {}
+    real_entities = plan_job._feature_entities_from_facts(company_facts)
+
+    title = str(out.get("title") or "")
+    subtitle = str(out.get("subtitle") or "")
+    filled_copy = (title + " " + subtitle).strip()
+
+    # 3y) kinetic-statement (HARVESTED from cluely-promo / Luceo Studio): a big editorial
+    #      HOOK that assembles word-by-word (rise-blur), one keyword tinted in accent +
+    #      glow halo, an optional highlighter sweep under one word. OPT-IN ONLY +
+    #      NON-REGRESSIVE: select only when the scene flags itself a hook
+    #      (`kind == "hook"` OR the planner pre-emitted treatment="kinetic-statement")
+    #      AND there is real title/lines text AND there is NO competing data (no stat,
+    #      featureEntities, metrics, imageSrc, compare, or quote). A generic no-data
+    #      scene still degrades to icon-headline, never into this. Words read VERBATIM
+    #      from the real copy -- emphasis/underline words are kept only when they appear
+    #      verbatim in the joined lines (else rendered plain). Never fabricated.
+    opts_in_kinetic = (
+        str(d.get("kind") or "").strip().lower() == "hook"
+        or str(d.get("treatment") or "").strip() == "kinetic-statement"
+    )
+    raw_lines = [str(x).strip() for x in (d.get("lines") or [])
+                 if isinstance(x, (str, int, float)) and str(x).strip()]
+    has_statement_text = bool(raw_lines) or bool(title.strip())
+    has_competing_data = bool(
+        (d.get("stat") or {}).get("value") if isinstance(d.get("stat"), dict) else d.get("stat")
+    ) or bool(
+        [e for e in (d.get("featureEntities") or []) if str(e or "").strip()]
+    ) or bool(
+        [m for m in (d.get("metrics") or []) if isinstance(m, dict) and str(m.get("value") or "").strip()]
+    ) or bool(str(d.get("imageSrc") or "").strip()) or bool(d.get("compare")) or bool(
+        str(d.get("quote") or "").strip()
+    )
+    # A competing NUMBER mined from the title means this is a stat beat, not a pure
+    # statement beat -- defer to the stat treatments (honesty / non-regression).
+    has_competing_number = bool(_mine_stat_from_title(title))
+    if opts_in_kinetic and has_statement_text and not has_competing_data and not has_competing_number:
+        # Lines: prefer explicit real lines; else derive <=2 balanced lines from the
+        # title (verbatim words only -- _split_statement_lines never invents text).
+        lines = raw_lines[:2] if raw_lines else _split_statement_lines(title)
+        out["treatment"] = "kinetic-statement"
+        out["lines"] = [_decode(x) for x in lines]
+        joined = " ".join(out["lines"]).lower()
+        # Pass through eyebrow / emphasis / underline. Each emphasis/underline word is
+        # KEPT only when it appears verbatim (case-insensitive) in the joined lines.
+        eyebrow = str(d.get("eyebrow") or "").strip()
+        if eyebrow:
+            out["eyebrow"] = _decode(eyebrow)
+        else:
+            out.pop("eyebrow", None)
+        for key in ("emphasisWord", "underlineWord"):
+            word = str(d.get(key) or "").strip()
+            if word and re.search(r"\b" + re.escape(word.lower()) + r"\b", joined):
+                out[key] = _decode(word)
+            else:
+                out.pop(key, None)
+        # Brand-badge opening (Design-Fit vibe variety): keep the badge flag, and if no
+        # explicit emphasis word, accent the longest content word so the opening pops.
+        if d.get("brandBadge"):
+            out["brandBadge"] = True
+            if not out.get("emphasisWord"):
+                _w = max((w.strip(".,!?:;\"'") for w in " ".join(out["lines"]).split()),
+                         key=len, default="")
+                if len(_w) >= 5:
+                    out["emphasisWord"] = _decode(_w)
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out.pop("compare", None)
+        out.pop("imageSrc", None)
+        out["patternReason"] = "kinetic-statement: animated hook statement"
+        return
+
+    # Build a synthetic scene whose `data` carries the FILLED copy so plan_job's
+    # honesty corpus (which reads data.title / data.subtitle / brief) sees the REAL
+    # rendered text rather than the empty plan-time data.
+    probe = {
+        "brief": scene.get("brief") or "",
+        "data": {
+            "title": title,
+            "subtitle": subtitle,
+            "_text": d.get("_text") or "",
+        },
+    }
+
+    # 1) Entities: prefer LLM-emitted featureEntities that are corroborated by the
+    #    filled copy / real features; else mine proper nouns from the filled copy.
+    entities: List[str] = []
+    raw_ents = d.get("featureEntities")
+    if isinstance(raw_ents, list):
+        ent_corpus = " ".join([filled_copy, " ".join(real_entities),
+                               str(company_facts.get("tagline") or "")]).lower()
+        entities = [str(e).strip() for e in raw_ents
+                    if str(e or "").strip() and str(e).strip().lower() in ent_corpus]
+    if len(entities) < 3:
+        mined = plan_job._mine_named_entities(
+            filled_copy,
+            exclude=(company_facts.get("wordmark"), company_facts.get("brand"),
+                     company_facts.get("name"),
+                     (real_entities[0] if real_entities else None)),
+        )
+        if len(mined) >= 3:
+            entities = mined[:6]
+    has_mosaic = len(entities) >= 3
+
+    # 2) Stat: keep an LLM stat if real; else MINE an impressive stat from the title
+    #    ("$600B+ combined valuation", "3,000+ alumni"). Honest -- the number is taken
+    #    verbatim from the real filled title.
+    stat = d.get("stat")
+    has_real_stat = plan_job._stat_is_real(stat, probe, company_facts)
+    mined_stat = None
+    if not has_real_stat:
+        mined_stat = _mine_stat_from_title(title)
+
+    # 3) (Re)assign treatment. DENNIS'S LAYOUT PREFERENCE: text LEFT + a fancy VISUAL
+    #    RIGHT (number+bars / tile grid) -> the SPLIT treatments dominate. Real OR
+    #    mined stat -> split-stat (headline left, number + rising bars right). >=3
+    #    entities -> split-mosaic (headline left, tile grid right). Centered
+    #    big-number ONLY when the title is JUST a number (nothing for the left).
+    #    icon-headline is the honest floor (no stat/entities). Never fabricate.
+    icon = str(d.get("icon") or "").strip()
+
+    # 3z) device-frame: text-left / a REAL captured product screenshot wrapped in a
+    #     clean browser frame on the RIGHT. HONESTY GUARD: select ONLY when the scene
+    #     carries a real captured screenshot (`imageSrc` non-empty) AND it is a product
+    #     beat (`kind == "product"` or the planner pre-emitted treatment="device-frame").
+    #     Never select without a real screenshot -- without one there is nothing honest
+    #     to show in the frame, so we fall through to the stat/entity/floor logic.
+    image_src = str(d.get("imageSrc") or "").strip()
+    is_product_beat = (
+        str(d.get("kind") or "").strip().lower() == "product"
+        or str(d.get("treatment") or "").strip() == "device-frame"
+    )
+    if image_src and is_product_beat:
+        out["treatment"] = "device-frame"
+        out["imageSrc"] = image_src
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out["patternReason"] = "device-frame: real product screenshot"
+        return
+
+    # 3a) metric-row: a strip of 3-4 REAL small stats (value + label). Selected
+    #     BEFORE the single-stat treatments. HONESTY GUARD: keep only metrics whose
+    #     `value` carries a real number (same miner as the title stat); drop the rest.
+    #     If fewer than 3 survive, do NOT select metric-row -- fall through to the
+    #     stat/entity/floor logic below (never a half-empty strip).
+    raw_metrics = d.get("metrics")
+    valid_metrics: List[Dict[str, Any]] = []
+    if isinstance(raw_metrics, list):
+        for m in raw_metrics:
+            if not isinstance(m, dict):
+                continue
+            value = str(m.get("value") or "").strip()
+            if value and _TITLE_STAT_RE.search(value):
+                valid_metrics.append({
+                    "value": _decode(value),
+                    "label": _decode(str(m.get("label") or "").strip()),
+                })
+    if len(valid_metrics) >= 3:
+        out["treatment"] = "metric-row"
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out["metrics"] = valid_metrics[:4]
+        out["patternReason"] = "metric-row: %d real metrics" % len(out["metrics"])
+        return
+
+    # 3pp) process-pipeline: a horizontal "how it works" flow of numbered step cards
+    #      (harvested from smartbase). HONESTY: select only when REAL steps exist
+    #      (>=2 each with a title). Content-fit -- driven by the Design Brief's
+    #      story_shape.process_steps seeded onto data.steps.
+    raw_steps = d.get("steps")
+    valid_steps: List[Dict[str, Any]] = []
+    if isinstance(raw_steps, list):
+        for st in raw_steps:
+            if not isinstance(st, dict):
+                continue
+            stitle = str(st.get("title") or "").strip()
+            if stitle:
+                valid_steps.append({
+                    "badge": _decode(str(st.get("badge") or ("0%d" % (len(valid_steps) + 1)))),
+                    "title": _decode(stitle),
+                    "body": _decode(str(st.get("body") or "").strip()),
+                })
+    if len(valid_steps) >= 2:
+        out["treatment"] = "process-pipeline"
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out["steps"] = valid_steps[:4]
+        out["patternReason"] = "process-pipeline: %d real steps" % len(out["steps"])
+        return
+
+    # 3c) comparison-columns: a two-column contrast (the muted "old way" LEFT vs the
+    #     accented "with Filmo" way RIGHT). HONESTY GUARD: select ONLY when the planner
+    #     extracted a REAL contrast -- `compare` is a dict whose leftItems and rightItems
+    #     are each lists with >=2 non-empty strings AND both side titles are non-empty.
+    #     NEVER invent a contrast; if `compare` is absent or a side is short, fall through
+    #     to the stat/entity/floor logic below (never a lopsided / half-empty comparison).
+    raw_compare = d.get("compare")
+    if isinstance(raw_compare, dict):
+        left_items = [str(x).strip() for x in (raw_compare.get("leftItems") or [])
+                      if isinstance(x, (str, int, float)) and str(x).strip()]
+        right_items = [str(x).strip() for x in (raw_compare.get("rightItems") or [])
+                       if isinstance(x, (str, int, float)) and str(x).strip()]
+        left_title = str(raw_compare.get("leftTitle") or "").strip()
+        right_title = str(raw_compare.get("rightTitle") or "").strip()
+        if len(left_items) >= 2 and len(right_items) >= 2 and left_title and right_title:
+            out["treatment"] = "comparison-columns"
+            out.pop("icon", None)
+            out.pop("stat", None)
+            out.pop("featureEntities", None)
+            out.pop("metrics", None)
+            out["compare"] = {
+                "leftTitle": _decode(left_title),
+                "leftItems": [_decode(x) for x in left_items],
+                "rightTitle": _decode(right_title),
+                "rightItems": [_decode(x) for x in right_items],
+            }
+            out["patternReason"] = "comparison-columns: %dv%d items" % (
+                len(left_items), len(right_items))
+            return
+
+    # 3d) pull-quote: a large editorial testimonial. HONESTY GUARD (the most
+    #     important guard in this function): select ONLY when `quote` is a REAL,
+    #     non-empty string of >= 6 words AND `quoteAttribution` is non-empty. A
+    #     fabricated, padded, or unattributed testimonial is the worst possible
+    #     output for an anti-slop product -- so an absent / too-short quote OR a
+    #     missing attribution falls through to the stat/entity/floor logic below.
+    #     NEVER invent a quote or an attribution.
+    quote_text = str(d.get("quote") or "").strip()
+    attribution = str(d.get("quoteAttribution") or "").strip()
+    if quote_text and attribution and len(quote_text.split()) >= 6:
+        out["treatment"] = "pull-quote"
+        out["quote"] = _decode(quote_text)
+        out["quoteAttribution"] = _decode(attribution)
+        out.pop("icon", None)
+        out.pop("stat", None)
+        out.pop("featureEntities", None)
+        out.pop("metrics", None)
+        out.pop("compare", None)
+        out.pop("imageSrc", None)
+        out["patternReason"] = "pull-quote: real testimonial"
+        return
+
+    use_stat = stat if (has_real_stat and isinstance(stat, dict)) else (mined_stat or None)
+    mined_only = bool(mined_stat) and not has_real_stat
+    mined_label = (mined_stat.get("label") or "").strip() if mined_stat else ""
+    if use_stat:
+        treatment = "big-number" if (mined_only and not mined_label) else "split-stat"
+    elif has_mosaic:
+        treatment = "split-mosaic"
+    else:
+        treatment = "icon-headline"
+
+    # 4) Emit onto the rendered props (SHARED DATA CONTRACT field names exact).
+    #    Also record patternReason -- a human-readable trace of WHY this treatment was
+    #    chosen, citing the REAL data that earned it (stat value / entity count) or the
+    #    honest floor. PURELY ADDITIVE legibility: it never alters the choice above.
+    out["treatment"] = treatment
+    out.pop("icon", None)
+    out.pop("stat", None)
+    out.pop("featureEntities", None)
+    if treatment == "icon-headline":
+        out["icon"] = _decode(icon) if icon else plan_job._DEFAULT_ICON
+        out["patternReason"] = "icon-headline: no real stat/entities (honest floor)"
+    if treatment == "split-stat":
+        stat_value = _decode(str(use_stat.get("value") or ""))
+        if mined_only:
+            # the title WAS the number -> descriptor becomes the LEFT headline,
+            # number goes to the RIGHT panel.
+            out["title"] = mined_label or str(out.get("title") or "")
+            out["stat"] = {"value": stat_value, "label": ""}
+        else:
+            # has_real_stat: the LLM stat goes on the RIGHT; strip any COMPETING number
+            # from the LEFT headline so it doesn't fight the stat panel ("Merchants see
+            # revenue lift, 99.9%" + stat 12% -> headline "Merchants see revenue lift").
+            ct = _TITLE_STAT_RE.sub("", str(out.get("title") or ""))
+            ct = re.sub(r"\s{2,}", " ", ct).strip(" ,—-·:").strip()
+            if ct:
+                out["title"] = ct
+            out["stat"] = {
+                "value": stat_value,
+                "label": _decode(str(use_stat.get("label") or "")),
+            }
+        out["patternReason"] = "split-stat: real stat %s" % stat_value
+    if treatment == "big-number" and isinstance(use_stat, dict):
+        stat_value = _decode(str(use_stat.get("value") or ""))
+        out["title"] = ""   # the number is the whole message
+        out["stat"] = {"value": stat_value,
+                       "label": _decode(str(use_stat.get("label") or ""))}
+        out["patternReason"] = "big-number: %s" % stat_value
+    if treatment == "split-mosaic":
+        out["featureEntities"] = [_decode(str(e)) for e in entities if str(e or "").strip()]
+        out["patternReason"] = "split-mosaic: %d real entities" % len(out["featureEntities"])
+
+
 def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
     """ExplainerCard data: kicker / title / subtitle / bullets.
 
@@ -2351,6 +2780,18 @@ def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, 
         "subtitle": _decode(subtitle or ""),
         "bullets": bullets,
     }
+
+    # CARD TREATMENT (SHARED DATA CONTRACT with the Remotion ExplainerCard archetype).
+    # AUTHORITATIVE post-fill pass: plan_job's plan-time `_assign_card_treatments` saw
+    # EMPTY titles (this function fills them AFTER plan time), so it collapsed every
+    # feature card to "icon-headline" even when the filled copy is entity/stat-rich.
+    # Re-derive the treatment HERE, on the REAL filled title/subtitle, reusing
+    # plan_job's HONEST miners. This OVERRIDES plan_job's stale pick.
+    #   treatment        "icon-stat" | "split-mosaic" | "split-stat" | "icon-headline"
+    #   icon             curated icon name (icon-stat / icon-headline)
+    #   stat             {"value": str, "label": str} (stat treatments)
+    #   featureEntities  list[str] of REAL named entities (split-mosaic)
+    _assign_treatment_from_filled_copy(out, scene, brand)
     return out
 
 
@@ -3485,6 +3926,16 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
     # not whatever flow the planner's free-text VO happened to narrate.
     run_emphasis = str((plan.get("job") or {}).get("emphasis") or "").strip()
 
+    # Per-brand OPENING style (Design-Fit variety): bold/energetic vibe -> animated
+    # kinetic-statement opening; enterprise/calm -> clean wordmark; unknown -> tie-break.
+    # Read the Design Brief's vibe once before the loop.
+    _vibe = (plan.get("design_brief") or {}).get("brand_vibe") or {}
+    _open_kinetic = _wants_kinetic_open(
+        str(_vibe.get("label") or "").strip().lower(),
+        str(_vibe.get("motion") or "").strip().lower(),
+        _open_variant_for(brand),
+    )
+
     tl_scenes = timeline.get("scenes", [])
     last_idx = len(tl_scenes) - 1
     feature_counter = 0  # 0-based position among explainer/feature scenes (BUG C)
@@ -3511,6 +3962,21 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
             d.setdefault("_text", tl_text)
 
         archetype = style.archetype_for(plan_scene)  # role decides the archetype
+
+        # PER-BRAND OPENING VARIETY (Design-Fit): the opening hero may render as an
+        # animated kinetic-statement with a brand badge instead of the clean wordmark
+        # lockup. style.shape() dispatches on ROLE, so set role="feature" to run the
+        # explainer shaper (which honors data.treatment="kinetic-statement") and mirror
+        # the local `archetype`. Content stays the REAL tagline (kinetic derives its
+        # lines verbatim from the threaded title).
+        if (_open_kinetic and archetype == ARCH_HERO and idx == 0 and last_idx > 0
+                and not _is_closing_title(plan_scene)):
+            plan_scene["role"] = "feature"
+            d["treatment"] = "kinetic-statement"
+            d["brandBadge"] = True
+            if not str(d.get("eyebrow") or "").strip():
+                d["eyebrow"] = str(brand.get("wordmark") or brand.get("name") or "").strip().upper()
+            archetype = ARCH_EXPLAINER
 
         # Thread scene-POSITION hints the shapers use for variety:
         #  - the FINAL title scene is the closing CTA (BUG B), even if its id/role
@@ -3800,6 +4266,22 @@ def run_pipeline(plan_path: str, brand_path: str, style_name: str, out_dir: str,
     # _stage_audio stages them into studio/public/. No-op when nothing was captured.
     wire_captured_assets(plan, out_dir)
     props = build_props(timeline, plan, brand, style_name)
+
+    # BUILD-TIME LOGO STAGING — split-mosaic / logo-wall cards show a grid of REAL
+    # company names (data.featureEntities). Fetch each entity's real brand mark and
+    # stage it as a self-contained data URI on data.entityLogos[i] (index-aligned)
+    # so the headless Remotion worker render needs ZERO render-time network. The
+    # finalized treatment + featureEntities exist only HERE, on props["scenes"]
+    # (build_props -> _shape_cards writes them), and props.json is written below, so
+    # this is the correct (and only) point that sees the final scenes before they
+    # persist. Best-effort: a fetch failure degrades each tile to "" (the name) and
+    # NEVER fails a render. Scenes without a logo treatment are untouched.
+    try:
+        import entity_logos
+        entity_logos.attach_entity_logos(props.get("scenes"))
+    except Exception as e:
+        print("[style_fill] entity logo staging skipped: %s" % e, file=sys.stderr)
+
     _stage_audio(props, out_dir)
     props_path = os.path.join(out_dir, "props.json")
     with open(props_path, "w", encoding="utf-8") as fh:

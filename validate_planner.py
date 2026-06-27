@@ -532,8 +532,8 @@ def call_model(messages, brain=None, meta=None):
             "Content-Type": "application/json",
             "Accept": "application/json",
             # OpenRouter ranking/attribution headers (optional, harmless).
-            "HTTP-Referer": "https://walk.studio",
-            "X-Title": "Walk Studio",
+            "HTTP-Referer": "https://filmostudio.vercel.app",
+            "X-Title": "Filmo",
         },
         method="POST",
     )
@@ -638,8 +638,17 @@ def schema_check(plan, target_duration_s, quality="premium"):
         problems.append("scenes is empty")
     else:
         for i, s in enumerate(scenes):
-            if set(s.keys()) != {"id", "type", "brief", "model", "duration_s", "input_image"}:
+            # The required scene keys plus an OPTIONAL "data" block (only on
+            # motion_graphic feature beats — carries the card TREATMENT the LLM picked:
+            # treatment/icon/stat/featureEntities, the SHARED DATA CONTRACT with the
+            # Remotion ExplainerCard). A scene WITHOUT "data" stays valid.
+            required_keys = {"id", "type", "brief", "model", "duration_s", "input_image"}
+            extra_keys = set(s.keys()) - required_keys - {"data"}
+            if extra_keys or not required_keys.issubset(s.keys()):
                 problems.append(f"scene[{i}] keys are {sorted(s.keys())}")
+            if "data" in s:
+                from plan_schema import validate_scene_data
+                problems.extend(f"scene[{i}].{p}" for p in validate_scene_data(s.get("data")))
             if s.get("type") not in allowed_types:
                 problems.append(f"scene[{i}].type={s.get('type')!r} not allowed")
             if s.get("input_image") is not None:

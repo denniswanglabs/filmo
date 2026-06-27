@@ -7,7 +7,9 @@
 // selected clip, smooth hover lift. The blocks are solid blue with a centered
 // "Scene N" label — they deliberately do NOT render scene screenshots.
 "use client";
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo, useRef } from "react";
+
+const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 const PRETTY = (a) => (a || "scene").replace(/-/g, " ");
 
@@ -29,8 +31,57 @@ const sceneLabel = (s) =>
     PRETTY(s.archetype)
   ).slice(0, 48);
 
-export function TimelineTrack({ props, activeIdx, onSelect, currentFrame, total, fps }) {
+export function TimelineTrack({ props, activeIdx, onSelect, onSeek, currentFrame, total, fps }) {
   const scenes = props?.scenes || [];
+
+  // The inner clip-coordinate box (the `position:relative` div the clips + playhead
+  // are laid out inside). We measure it so a pointer X anywhere on the track maps to
+  // a frame. Click-anywhere jumps the playhead; press-and-drag scrubs live.
+  const laneRef = useRef(null);
+  const draggingRef = useRef(false);
+
+  const totalDurForSeek = Math.max(1, total || 1);
+  const frameFromClientX = useCallback(
+    (clientX) => {
+      const lane = laneRef.current;
+      if (!lane) return null;
+      const r = lane.getBoundingClientRect();
+      if (r.width <= 0) return null;
+      const ratio = clampN((clientX - r.left) / r.width, 0, 1);
+      return clampN(Math.round(ratio * (totalDurForSeek - 1)), 0, totalDurForSeek - 1);
+    },
+    [totalDurForSeek]
+  );
+
+  // Press on the track background → seek immediately, then arm window listeners so
+  // the drag keeps scrubbing even as the pointer leaves the track or crosses clips.
+  // (Clip buttons stop their own pointerdown from reaching here, so clicking a clip
+  // still selects its scene rather than starting a scrub.)
+  const onTrackPointerDown = useCallback(
+    (e) => {
+      if (!onSeek) return;
+      // Only the primary (left) button starts a scrub.
+      if (e.button != null && e.button !== 0) return;
+      const f = frameFromClientX(e.clientX);
+      if (f == null) return;
+      e.preventDefault();
+      draggingRef.current = true;
+      onSeek(f);
+      const onMove = (ev) => {
+        if (!draggingRef.current) return;
+        const nf = frameFromClientX(ev.clientX);
+        if (nf != null) onSeek(nf);
+      };
+      const onUp = () => {
+        draggingRef.current = false;
+        window.removeEventListener("pointermove", onMove, true);
+        window.removeEventListener("pointerup", onUp, true);
+      };
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", onUp, true);
+    },
+    [onSeek, frameFromClientX]
+  );
 
   // The track maps frame-space -> px using flex (the container is full-width); we
   // give each clip a flex-basis proportional to its duration so widths sum to 100%.
@@ -97,7 +148,18 @@ export function TimelineTrack({ props, activeIdx, onSelect, currentFrame, total,
           padding: 6,
         }}
       >
-        <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        <div
+          ref={laneRef}
+          onPointerDown={onTrackPointerDown}
+          style={{ position: "relative", width: "100%", height: "100%", cursor: onSeek ? "ew-resize" : "default" }}
+        >
+          {/* transparent seek surface — fills the whole lane BEHIND the clips so a
+              press anywhere on the track (incl. the gaps between/around clips) maps
+              to a frame. Clips sit at z-index >= 1 and intercept their own clicks to
+              SELECT a scene; this surface (z-index 0) only catches background presses
+              and the window listeners handle dragging across the clips. */}
+          <div style={{ position: "absolute", inset: 0, zIndex: 0 }} aria-hidden="true" />
+
           {/* clips laid out by % of total duration (resolved to px via a ref-free %) */}
           {scenes.map((s, i) => {
             const start = s.in_frame || 0;
@@ -172,6 +234,9 @@ function PctClip({ xPct, wPct, scene, idx, active, onSelect }) {
   return (
     <button
       onClick={() => onSelect(idx)}
+      // Swallow pointerdown so pressing a clip SELECTS the scene (via onClick) instead
+      // of starting a timeline scrub on the seek surface behind it.
+      onPointerDown={(e) => e.stopPropagation()}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       title={sceneLabel(scene)}

@@ -13,6 +13,20 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../lib/auth'
 import { Wordmark } from '../Brand'
 
+// Prefer a real display name (Google account) over the raw email; fall back to the
+// email's local part (before @). Keeps the bar reading as a person, not an address.
+function displayName(user: { email?: string; [k: string]: unknown }): string {
+  const meta = user.user_metadata as Record<string, unknown> | undefined
+  const name =
+    (user.name as string) ||
+    (user.full_name as string) ||
+    (meta?.full_name as string) ||
+    (meta?.name as string)
+  if (typeof name === 'string' && name.trim()) return name.trim()
+  const email = user.email || ''
+  return email.split('@')[0] || email
+}
+
 export default function FloatingNav() {
   const { user, loading, signOut } = useAuth()
   const router = useRouter()
@@ -45,42 +59,37 @@ export default function FloatingNav() {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-3 sm:top-4">
       <nav
-        className={`pointer-events-auto grid w-full max-w-3xl grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-full border px-4 py-2 transition-all duration-300 ${
+        className={`pointer-events-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-full border px-4 py-2 transition-all duration-300 ${
           scrolled
             ? 'border-[#D4E2FB] bg-white/85 shadow-[0_12px_40px_-16px_rgba(30,58,120,0.22)] backdrop-blur-xl'
             : 'border-[#E2ECFB] bg-white/70 backdrop-blur-md'
         }`}
       >
-        {/* Wordmark (left) */}
-        <Link href="/" className="col-start-1 shrink-0 justify-self-start text-base">
-          <Wordmark tone="dark" inkClassName="text-[#0E1320]" />
+        {/* Wordmark (left) — nudged down a hair so it sits optically centered in the pill. */}
+        <Link href="/" className="shrink-0 text-base">
+          <Wordmark tone="dark" inkClassName="text-[#0E1320]" className="translate-y-[1.5px]" />
         </Link>
 
-        {/* Center links — "How it works" routes to its own page. The "Examples"
-            tab was removed: the gallery still lives on the landing, visitors just
-            scroll to it. Hidden on small screens. */}
-        <div className="col-start-2 hidden items-center gap-1 justify-self-center text-sm sm:flex">
+        {/* Right cluster — "How it works" now sits with the auth + CTA on the right.
+            ("Examples" was removed; the gallery still lives on the landing.) */}
+        <div className="flex shrink-0 items-center gap-2 text-sm">
           <button
             type="button"
             onClick={() => router.push('/how-it-works')}
-            className="rounded-full px-3 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
+            className="hidden whitespace-nowrap rounded-full px-3 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320] sm:inline-flex"
           >
             How it works
           </button>
-        </div>
-
-        {/* Auth + CTA (right) */}
-        <div className="col-start-3 flex shrink-0 items-center justify-self-end gap-2 text-sm">
           {loading ? (
             <span className="inline-block h-7 w-20 animate-pulse rounded-full bg-[#EAF1FF]" />
           ) : user ? (
             <>
               <span className="hidden max-w-[160px] truncate text-[#5A6472] lg:inline">
-                {user.email}
+                {displayName(user)}
               </span>
               <button
                 onClick={handleSignOut}
-                className="rounded-full border border-[#D4E2FB] px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
+                className="whitespace-nowrap rounded-full border border-[#D4E2FB] px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
               >
                 Sign out
               </button>
@@ -95,7 +104,7 @@ export default function FloatingNav() {
             <>
               <Link
                 href="/login"
-                className="rounded-full px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
+                className="whitespace-nowrap rounded-full px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
               >
                 Sign in
               </Link>

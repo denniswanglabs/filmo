@@ -19,10 +19,18 @@ import { appleMaskRise, appleRise, breathDrift, EASE_OUT_QUART } from "../motion
 const cueAt = (cues: Cue[], label: string, fallback: number) =>
   cues.find((c) => c.label === label)?.at_frame ?? fallback;
 
-// Resolve a public-relative logo path via staticFile; pass http/leading-slash
-// through. ABSENT theme.logoSrc => corner mark degrades to the wordmark.
-const resolveLogo = (path: string): string =>
-  path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
+// Resolve a public-relative logo path. http/leading-slash pass through. When a
+// `resolve` (the Timeline assetBaseUrl seam) is passed, public-relative names
+// resolve against the hosted bucket so the EDITOR PREVIEW shows the real logo
+// (matches how screenshots/VO/music/walkthrough already resolve); absent it
+// falls back to staticFile (the studio render path). ABSENT theme.logoSrc =>
+// corner mark degrades to the wordmark.
+const resolveLogo = (path: string, resolve?: (p: string) => string): string =>
+  path.startsWith("http") || path.startsWith("/")
+    ? path
+    : resolve
+      ? resolve(path)
+      : staticFile(path);
 
 export const AppleStatement: React.FC<{
   data: SceneData;
@@ -31,7 +39,10 @@ export const AppleStatement: React.FC<{
   durationInFrames: number;
   // OPTIONAL: scene id, threaded from Timeline for click-to-select addressing.
   sceneId?: string;
-}> = ({ data, cues, theme, durationInFrames, sceneId }) => {
+  // OPTIONAL: the Timeline assetBaseUrl seam, so the brand logo resolves from the
+  // hosted bucket in the editor preview (absent in the studio render → staticFile).
+  resolveSrc?: (path: string) => string;
+}> = ({ data, cues, theme, durationInFrames, sceneId, resolveSrc }) => {
   const frame = useCurrentFrame();
 
   // OPTIONAL geometry overrides (data.geo). `data.geo?.KEY ?? LITERAL` so when geo
@@ -178,7 +189,7 @@ export const AppleStatement: React.FC<{
         >
           {logoSrc ? (
             <Img
-              src={resolveLogo(logoSrc)}
+              src={resolveLogo(logoSrc, resolveSrc)}
               style={{ height: "100%", width: "auto", objectFit: "contain", display: "block", opacity: 0.9 }}
             />
           ) : (

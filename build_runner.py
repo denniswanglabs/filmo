@@ -49,11 +49,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "runs")
 BRANDING = os.path.join(HERE, "branding")
 
-# Conversion Read runs on Nous Hermes; planning stays on Nemotron.
-# The ANALYZE (Conversion Read) brain is chosen INDEPENDENTLY of the planner brain
-# so the operator's planner selection (Nemotron, the sponsor showcase) never drags
-# the page diagnosis off Hermes. Override with ANALYZE_BRAIN env if ever needed.
-ANALYZE_BRAIN = os.environ.get("ANALYZE_BRAIN", "hermes")
+# The BRAIN is NVIDIA Nemotron. The Conversion Read runs on Nemotron 550B
+# (`ultra-paid`), same family as planning, chosen INDEPENDENTLY of the planner brain
+# so the operator's planner selection never drags the page diagnosis around. Paid,
+# so no free-tier 429s. analyze.py falls ultra-paid -> super-paid -> minimal_read.
+# (Hermes is the agent harness, not a model call.) Override with ANALYZE_BRAIN env.
+ANALYZE_BRAIN = os.environ.get("ANALYZE_BRAIN", "ultra-paid")
 
 # VO-DRIVEN ENGINE flag (the blank-scenes fix). When ON (default for the dashboard
 # build path), the PICTURE is produced by the VO-driven <Timeline> engine
@@ -281,6 +282,12 @@ def _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN,
     if rp.get("degraded"):
         read["degraded"] = True
     read["hero_screenshot_path"] = rp.get("hero_screenshot_path")
+    # Guarantee the design brief key is present so downstream (plan_job / style_fill)
+    # can always read conversion_read["design_brief"] without a guard. analyze_read /
+    # minimal_read already set it; this defends against an injected analyze_fn (tests)
+    # that returns a Read without one. Empty brief == honest "no corroborated material".
+    if isinstance(read, dict):
+        read.setdefault("design_brief", {"story_shape": {}, "brand_vibe": {}})
     try:
         with open(os.path.join(run_dir, "conversion_read.json"), "w") as f:
             json.dump(read, f, indent=2)

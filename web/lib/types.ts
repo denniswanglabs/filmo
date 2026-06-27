@@ -48,9 +48,11 @@ export interface RunEvent {
   created_at: string
 }
 
+// Ultra (paid 550B) is the default/first option — the flagship plan quality.
+// Super (free 120B) stays selectable for a $0 run.
 export const BRAINS = [
-  { value: 'super-free', label: 'Nemotron 3 Super', note: 'free' },
   { value: 'ultra-paid', label: 'Nemotron 3 Ultra', note: 'paid' },
+  { value: 'super-free', label: 'Nemotron 3 Super', note: 'free' },
 ] as const
 
 export function formatCents(cents: number | null | undefined): string {

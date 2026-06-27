@@ -136,9 +136,15 @@
 }
 .ws-editor-root .ws-backnav:hover { background: var(--bg-2); border-color: var(--line-2); color: var(--text); transform: translateY(-1px); }
 
-/* ---- custom range slider (geometry sliders) ---- */
+/* ---- custom range slider (geometry sliders) ----
+   The thumb (15px) sits on a 4px track via a negative margin-top, and on focus a
+   `0 0 0 5px` glow extends ~5px beyond the thumb on every side. The 22px track
+   height fully contains that vertical overflow so a thumb/glow can never bleed
+   out of the slider row into a neighbouring panel (e.g. the chat input). Keeping
+   the input itself a block element with its own height isolates that overflow. */
 .ws-editor-root input.ws-range {
   -webkit-appearance: none; appearance: none;
+  display: block;
   width: 100%; height: 22px; background: transparent; cursor: pointer; margin: 0;
 }
 .ws-editor-root input.ws-range::-webkit-slider-runnable-track {

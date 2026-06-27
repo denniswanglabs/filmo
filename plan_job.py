@@ -342,6 +342,53 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # beats and the headline_fix opens the video, even if the LLM/template dropped
     # them. No-op when conversion_read is None (flag off) -> behavior unchanged.
     plan = seed_plan_with_read(plan, conversion_read)
+    # VERIFIED-KNOWLEDGE ENRICH (two-pass, runs BEFORE treatment assignment): a focused
+    # Nemotron call surfaces THIS brand's REAL notable stats + named customers/products
+    # (which the planner knows but doesn't reliably echo from generic scraped copy),
+    # then HONESTLY seeds the feature beats so style_fill derives data-rich titles
+    # (split-stat / split-mosaic) instead of bare icon-headlines. Unknown/small brand ->
+    # empty enrich -> seeds NOTHING -> honest icon-headline floor (never fabricates).
+    # VERIFIED-KNOWLEDGE ENRICH + CONTENT-FIT seeding SHARE the feature-beat budget. We
+    # compute enrich first (for the `reserve` below) but SEED story_shape FIRST so the
+    # diverse narrative patterns (process-pipeline / pull-quote) get first pick of the
+    # beats and fire RELIABLY -- the post-fill router already PREFERS them over the
+    # stat/mosaic treatments once their data is on a beat (style_fill 3pp/3d). Then enrich
+    # fills the REMAINING beats. We RESERVE one beat for enrich's single mosaic when the
+    # brand has >= 3 real named customers, so the final mix stays DIVERSE (e.g.
+    # process-pipeline + pull-quote + mosaic) instead of the narrative patterns crowding
+    # out the logo wall. (Previously enrich seeded first and consumed every beat with
+    # mosaic + up to 3 stats, so content-fit beats almost never had room to fire.)
+    enrich = {}
+    try:
+        enrich = enrich_brand_knowledge(_resolved_brand, company_url, brain) or {}
+        if enrich.get("stats") or enrich.get("entities"):
+            print("[planner] verified-knowledge enrich brand=%r stats=%d entities=%d"
+                  % (_resolved_brand, len(enrich.get("stats") or []),
+                     len(enrich.get("entities") or [])), file=sys.stderr)
+    except Exception as e:  # never let enrichment break a build
+        enrich = {}
+        print("[planner] verified-knowledge enrich skipped (%s)" % e, file=sys.stderr)
+    # CONTENT-FIT seeding from the Design Brief's story_shape (process_steps ->
+    # process-pipeline, testimonial -> pull-quote) so each company surfaces the patterns
+    # its REAL story supports. No-op on empty story_shape.
+    try:
+        _story_shape = ((conversion_read or {}).get("design_brief") or {}).get("story_shape") or {}
+        _reserve = 1 if len([e for e in (enrich.get("entities") or [])
+                             if str(e or "").strip()]) >= 3 else 0
+        plan = _seed_feature_beats_from_story_shape(plan, _story_shape, reserve=_reserve)
+    except Exception as e:
+        print("[planner] story_shape seeding skipped (%s)" % e, file=sys.stderr)
+    try:
+        plan = _seed_feature_beats_from_enrichment(plan, enrich)
+    except Exception as e:  # never let enrichment break a build
+        print("[planner] verified-knowledge enrich seed skipped (%s)" % e, file=sys.stderr)
+    # Card-treatment RULES GUARD + HONESTY GUARD (runs for BOTH the LLM and template
+    # paths, while `_company_facts` is still on job so it can verify real data): for
+    # each motion_graphic/explainer-card scene, keep a valid LLM-picked treatment whose
+    # data survives the honesty pass, else assign one deterministically — and STRIP any
+    # stat/featureEntities not backed by real captured brand data (never invent a number
+    # or an entity; when in doubt -> "icon-headline"). MUST run before the pop below.
+    plan = _assign_card_treatments(plan)
     # Drop the internal-only `_wordmark` / `_company_facts` hints before
     # validation/return — `emphasis` stays (a recognized optional job key), but these
     # are private plumbing fields that must not leak into the persisted plan or the
@@ -397,6 +444,11 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # build_runner reads plan["_planner"] into ledger selection. Not a frozen-schema
     # key on `job`/`scenes`/`voiceover`, so the strict planner schema is unaffected;
     # build_runner persists it under plan["selection"] for the dashboard.
+    # Stash the Design Brief (story_shape + brand_vibe) on the plan so build_props can
+    # read brand_vibe for the per-brand opening style + content-fit routing. Always
+    # present (possibly empty) so downstream never needs a guard.
+    plan["design_brief"] = ((conversion_read or {}).get("design_brief")
+                            or {"story_shape": {}, "brand_vibe": {}})
     plan["_planner"] = {
         "plan_source": plan_source,
         "brain": brain,
@@ -563,6 +615,603 @@ def seed_plan_with_read(plan, conversion_read):
         # imperative stage directions aloud. The grounded OUTCOME/proof reaches the
         # VO through headline_fix (opening beat) + the producer's grounded VO pass,
         # so we deliberately do NOT push `fix` into any spoken beat here.
+    return plan
+
+
+# --- Card treatment selection (HYBRID: LLM picks, rules guard) --------------
+# The visual side renders each motion_graphic/explainer-card scene with one of four
+# TREATMENTS (the SHARED DATA CONTRACT with the Remotion ExplainerCard archetype):
+#   "icon-stat"     icon + a real number stat + punchy headline
+#   "split-stat"    a real number stat, no icon-worthy headline
+#   "split-mosaic"  >= 3 real named entities / integrations
+#   "icon-headline" icon + headline, NO number (the HONEST fallback)
+# DORMANT (registered-but-unselected) treatments — the Remotion ExplainerCard can
+# RENDER these, but NO selection logic emits them yet (no _assign_card_treatments /
+# _assign_treatment_from_filled_copy branch sets them). They are listed here ONLY so
+# validation/keep accepts them if/when the orchestrator wires selection later:
+#   "big-number"    ONE dominant stat, full-bleed (needs a real stat)
+#   "logo-wall"     a fuller branded-chip grid of entities (needs >= 3 entities)
+#   "feature-list"  a clean vertical "what you get" list (entities or subtitle)
+# The LLM picks one per scene from the REAL data it has (planner-prompt.md). This is
+# the deterministic RULES GUARD + HONESTY GUARD that runs after the LLM/template:
+#   1. fill in a treatment for any feature scene the LLM left bare, and
+#   2. STRIP any stat / featureEntities NOT backed by real captured brand data, then
+#      force "icon-headline" — NEVER invent a number or an entity (honesty rule).
+_CARD_TREATMENTS = {
+    "icon-stat", "split-mosaic", "split-stat", "icon-headline",
+    # DORMANT — render + validate only; no selection logic emits these yet.
+    "big-number", "logo-wall", "feature-list",
+}
+
+# Curated generic icon names the LLM is told to pick from (the Remotion side defaults
+# any unknown icon name). Kept in sync with the list in planner-prompt.md. Used here
+# only to default a MISSING icon — never to reject one (unknown names pass through).
+_DEFAULT_ICON = "spark"
+_KNOWN_ICONS = {
+    # The 12 curated glyphs in ExplainerCard.tsx ICON_PATHS (Remotion side).
+    "rocket", "spark", "shield", "chart", "users", "bolt",
+    "globe", "dollar", "layers", "sparkles", "target", "clock",
+}
+
+# A real stat needs a real NUMBER. This matches a digit-bearing token (e.g. "135+",
+# "99.999%", "$1T", "10x", "2,000") so a stat.value with no number is rejected.
+_STAT_NUMBER_RE = re.compile(r"\d")
+
+
+def _feature_entities_from_facts(company_facts):
+    """Real named entities/integrations from the resolved COMPANY FACTS, or [].
+
+    The ONLY honest source of named entities today is the brand's real `features`
+    (curated fixture or brand_extract — never invented). Returns the de-duped feature
+    labels so the split-mosaic treatment can be grounded. NEVER fabricates."""
+    facts = company_facts if isinstance(company_facts, dict) else {}
+    out, seen = [], set()
+    for f in (facts.get("features") or []):
+        if isinstance(f, dict):
+            f = f.get("label") or f.get("title") or ""
+        label = str(f or "").strip()
+        key = label.lower()
+        if label and key not in seen:
+            seen.add(key)
+            out.append(label)
+    return out
+
+
+def _stat_is_real(stat, scene, company_facts):
+    """True only when `stat` carries a real NUMBER that appears in real brand text.
+
+    Honesty guard: the pipeline has NO dedicated numeric-stat source, so a stat is
+    trustworthy ONLY when its number is corroborated by text that originated from the
+    real brand — the scene's own brief / threaded VO beat text (written from the real
+    COMPANY FACTS), the tagline, or a feature label. A number the LLM invented out of
+    nowhere has no corroborating source and is REJECTED. Never fabricates."""
+    if not isinstance(stat, dict):
+        return False
+    value = str(stat.get("value") or "").strip()
+    if not value or not _STAT_NUMBER_RE.search(value):
+        return False  # a stat with no number is not a stat
+    # The digit runs that must be corroborated (e.g. "135", "99.999", "1").
+    nums = re.findall(r"\d[\d,\.]*", value)
+    if not nums:
+        return False
+    d = scene.get("data") or {}
+    facts = company_facts if isinstance(company_facts, dict) else {}
+    feat_text = " ".join(
+        (f.get("label") or f.get("title") or "") if isinstance(f, dict) else str(f)
+        for f in (facts.get("features") or [])
+    )
+    corpus = " ".join(str(x or "") for x in (
+        scene.get("brief"), d.get("_text"), d.get("title"), d.get("subtitle"),
+        facts.get("tagline"), feat_text,
+    ))
+    corpus_nums = set(re.findall(r"\d[\d,\.]*", corpus))
+    # Every number in the stat must appear verbatim in the real corpus.
+    return all(n in corpus_nums for n in nums)
+
+
+# Generic words that are NOT named entities (so a comma-separated sentence never
+# gets mistaken for an entity list). Lowercase.
+_ENTITY_STOP = {
+    "the", "a", "an", "and", "or", "with", "for", "from", "to", "of", "in", "on",
+    "every", "weekly", "daily", "apply", "learn", "more", "batch", "founders",
+    "founder", "startups", "startup", "companies", "company", "stories", "story",
+    "insights", "partners", "partner", "alumni", "network", "funding", "new", "best",
+    "build", "builds", "platform", "tools", "tool", "api", "apis", "app", "apps",
+    "cloud", "labs", "inc", "co", "team", "teams", "data", "pay", "payments",
+    "plan", "plans", "suite", "console", "dashboard", "portal",
+}
+
+
+def _mine_named_entities(text, exclude=()):
+    """Conservatively pull a comma/'and'-separated list of PROPER NOUNS from REAL
+    scene text (never invents). Honest fallback so an entity-rich scene like
+    "Airbnb, Stripe, Dropbox founders share..." yields split-mosaic instead of
+    collapsing to icon-headline when the LLM didn't emit structured featureEntities.
+    Returns [] unless it finds a clean list (caller requires >= 3)."""
+    if not text:
+        return []
+    ex = {str(x or "").strip().lower() for x in exclude if x}
+    out, seen = [], set()
+    for part in re.split(r",|\band\b|&", str(text)):
+        m = re.match(r"\s*([A-Z][A-Za-z0-9.]*(?:\s[A-Z][A-Za-z0-9.]*)?)", part)
+        if not m:
+            continue
+        cand = m.group(1).strip()
+        words = cand.split()
+        # "Dropbox founders"/"DoorDash Y" -> drop a trailing generic word OR a stray
+        # single-letter initial (e.g. the "Y" bleeding in from "Y Combinator").
+        if len(words) == 2 and (words[1].lower() in _ENTITY_STOP or len(words[1]) <= 1):
+            cand = words[0]
+        key = cand.lower()
+        if len(cand) >= 2 and key not in ex and key not in _ENTITY_STOP and key not in seen:
+            seen.add(key)
+            out.append(cand)
+    return out
+
+
+# --- VERIFIED-KNOWLEDGE ENRICH (two-pass) ----------------------------------
+# THE PROBLEM THIS SOLVES: the hosted pipeline grounds the planner in the brand's
+# REAL (but generic) scraped homepage copy, so feature cards collapse to bare
+# icon-headlines — even for famous brands whose notable stats / named customers the
+# model plainly knows but does NOT reliably surface from generic marketing copy.
+#
+# THE FIX (honest enrichment, NOT fabrication): a FOCUSED Nemotron call that returns
+# ONLY the brand's most notable REAL stats + REAL named customers/products, which we
+# then deterministically SEED into the feature beats so style_fill derives data-rich
+# titles (split-stat / split-mosaic) instead of bare icon-headlines. The honesty guard
+# is absolute: an UNKNOWN/small brand returns EMPTY arrays -> we seed nothing -> the
+# pipeline honestly degrades to icon-headline (no invented numbers or names, ever).
+
+_ENRICH_SYSTEM = (
+    "You are a careful fact-checker for a video producer. You know real companies. "
+    "Return ONLY strict JSON describing the SPECIFIC company you are given — its most "
+    "notable REAL metrics and its REAL named customers/products/portfolio companies.\n\n"
+    "HONESTY IS ABSOLUTE. Use ONLY facts you are confident are TRUE for THIS EXACT "
+    "company. NEVER fabricate a number or a name. If you do not know real, specific, "
+    "verifiable metrics or named entities for this exact company (e.g. it is small, "
+    "obscure, or unfamiliar to you), return EMPTY arrays. An empty answer is CORRECT "
+    "and expected for most companies. Do NOT pad with generic marketing claims, "
+    "round guesses, or made-up customer names.\n\n"
+    "Output schema (JSON only, no prose, no markdown fence):\n"
+    "{\n"
+    '  "stats": [{"value": "<metric e.g. $500K, $800B+, 135+, 99.99%>", '
+    '"label": "<2-4 words: what it measures>"}],\n'
+    '  "entities": ["<real named customer/product/portfolio company>", ...]\n'
+    "}\n\n"
+    "Rules:\n"
+    "- stats: the 2-3 MOST notable REAL metrics. Each `value` MUST contain a number "
+    "(currency, %, x, a big suffix like B/M/K/T, or a trailing +). `label` is a tight "
+    "phrase, no sentence. Make the metrics DISTINCT — each measuring a DIFFERENT "
+    "dimension (e.g. one scale/reach, one money, one performance); do NOT return two "
+    "near-duplicates like 'users' and 'active users'.\n"
+    "- entities: 4-6 REAL named customers, products, or portfolio companies OF THIS "
+    "company. Proper nouns only (e.g. \"Airbnb\", \"Stripe\"), no generic words.\n"
+    "- Confident only. When unsure -> empty array for that field."
+)
+
+
+def enrich_brand_knowledge(name, url, brain):
+    """FOCUSED Nemotron call -> the brand's verified-knowledge REAL stats + entities.
+
+    Returns {"stats": [{"value","label"}, ...], "entities": [str, ...]} using ONLY
+    facts the model is confident are TRUE for THIS exact company (honesty guard in the
+    prompt). On ANY error, refusal, or empty/garbled response -> {"stats": [],
+    "entities": []} so the caller seeds NOTHING and the pipeline honestly degrades.
+
+    Reuses the SAME OpenRouter call path as the planner (vp.call_model + vp.extract_json)
+    so it runs on the same brain/keys (planner brain = ultra-paid Nemotron). Never raises.
+    """
+    empty = {"stats": [], "entities": []}
+    name = str(name or "").strip()
+    url = str(url or "").strip()
+    if not name and not url:
+        return empty
+    user = (
+        "Company name: %s\n"
+        "Company URL: %s\n\n"
+        "Return the strict JSON object (stats + entities) for THIS exact company. "
+        "If you are not confident in real specific facts for it, return empty arrays."
+        % (name or "(unknown)", url or "(unknown)")
+    )
+    messages = [{"role": "system", "content": _ENRICH_SYSTEM},
+                {"role": "user", "content": user}]
+    try:
+        raw = vp.call_model(messages, brain=brain)
+        obj = vp.extract_json(raw)
+    except Exception:
+        return empty
+    if not isinstance(obj, dict):
+        return empty
+    # --- Parse stats robustly: keep only well-formed {value,label} with a real number.
+    stats = []
+    seen_stat = set()
+    for s in (obj.get("stats") or []):
+        if not isinstance(s, dict):
+            continue
+        value = str(s.get("value") or "").strip()
+        label = str(s.get("label") or "").strip()
+        if not value or not _STAT_NUMBER_RE.search(value):
+            continue  # a stat with no number is not a stat
+        key = value.lower()
+        if key in seen_stat:
+            continue
+        seen_stat.add(key)
+        # Tight label: cap at ~4 words so it threads cleanly into a card title.
+        label = " ".join(label.split()[:4])
+        stats.append({"value": value, "label": label})
+        if len(stats) >= 3:
+            break
+    # --- Parse entities robustly: proper-noun-ish, de-duped, non-generic.
+    entities = []
+    seen_ent = set()
+    for e in (obj.get("entities") or []):
+        cand = str(e or "").strip()
+        if not cand:
+            continue
+        key = cand.lower()
+        # Reject generic words (the same stop-list the entity miner trusts) and dups.
+        if key in _ENTITY_STOP or key in seen_ent:
+            continue
+        # Must read as a proper noun (leading capital / digit), single or double token.
+        if not re.match(r"^[A-Z0-9][A-Za-z0-9.\-]*(?:\s[A-Z0-9][A-Za-z0-9.\-]*)?$", cand):
+            continue
+        seen_ent.add(key)
+        entities.append(cand)
+        if len(entities) >= 6:
+            break
+    return {"stats": stats, "entities": entities}
+
+
+# Detect whether a feature beat ALREADY carries a real number / entity list so the
+# seeder never CLOBBERS data the planner already produced (and never double-seeds).
+def _beat_already_has_stat(scene, beat_text):
+    """True when this feature scene's brief / VO beat text already carries an impressive
+    number (so seeding a stat over it would clobber real planner data)."""
+    d = scene.get("data") if isinstance(scene.get("data"), dict) else {}
+    if isinstance(d.get("stat"), dict) and str(d["stat"].get("value") or "").strip():
+        return True
+    from style_fill import _TITLE_STAT_RE  # the SAME stat regex the title miner uses
+    corpus = " ".join(str(x or "") for x in (
+        scene.get("brief"), beat_text, d.get("title"), d.get("_text")))
+    return bool(_TITLE_STAT_RE.search(corpus))
+
+
+def _beat_already_has_entities(scene, beat_text):
+    """True when this feature scene already carries >= 3 named entities (structured or
+    mineable from its brief / VO beat text), so the seeder won't override it."""
+    d = scene.get("data") if isinstance(scene.get("data"), dict) else {}
+    ents = d.get("featureEntities")
+    if isinstance(ents, list) and len([e for e in ents if str(e or "").strip()]) >= 3:
+        return True
+    corpus = " ".join(str(x or "") for x in (scene.get("brief"), beat_text, d.get("title")))
+    return len(_mine_named_entities(corpus)) >= 3
+
+
+def _seed_feature_beats_from_enrichment(plan, enrich):
+    """Deterministically + HONESTLY seed feature (motion_graphic) beats with the brand's
+    verified-knowledge stats/entities so style_fill derives data-rich card TITLES.
+
+    HOW THE TITLE IS DRIVEN (verified against style_fill): a feature card's title is
+    derived by `_shape_explainer` from `data._text` (the threaded VO beat text) FIRST,
+    then the scene `brief`. The VO beat text is threaded onto the scene by
+    build_timeline._derive_text, which prefers the VO BEAT TEXT (matched by scene_id)
+    over the brief. So to make a beat render a stat / entity-list we set BOTH the
+    scene's `brief` AND the matching voiceover beat's `text` to carry the fact — the
+    beat text wins downstream, and the brief is the fallback when no beat is matched.
+
+    HONESTY / NO-OVERRIDE rules (absolute):
+      - Empty enrich (unknown brand) -> seed NOTHING (the honest icon-headline floor).
+      - NEVER touch a beat that already carries a real stat / entity list.
+      - Seed at most: ONE entity-list beat (needs >= 3 real entities) + up to TWO stat
+        beats (one per available real stat), and never more beats than already exist.
+      - Every seeded fact is a REAL value the enrich pass returned verbatim — no
+        invented numbers or names.
+
+    Mutates + returns `plan`. No-op on falsy / empty enrich. Never raises."""
+    if not isinstance(enrich, dict):
+        return plan
+    stats = [s for s in (enrich.get("stats") or [])
+             if isinstance(s, dict) and str(s.get("value") or "").strip()]
+    entities = [str(e).strip() for e in (enrich.get("entities") or []) if str(e or "").strip()]
+    if not stats and len(entities) < 3:
+        return plan  # nothing honest to seed
+
+    scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
+    feature_scenes = [s for s in scenes if s.get("type") == "motion_graphic"]
+    if not feature_scenes:
+        return plan
+
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+        vo["beats"] = beats
+        plan["voiceover"] = vo
+    beat_by_id = {b.get("scene_id"): b for b in beats if isinstance(b, dict)}
+
+    def _beat_text_for(sid):
+        b = beat_by_id.get(sid)
+        return str(b.get("text") or "").strip() if isinstance(b, dict) else ""
+
+    def _seed_scene(scene, text):
+        """Set BOTH the scene brief and its matching VO beat text to `text` so the
+        downstream title derivation (beat text first, brief fallback) carries the fact."""
+        sid = scene.get("id")
+        scene["brief"] = text
+        b = beat_by_id.get(sid)
+        if isinstance(b, dict):
+            b["text"] = text
+        else:
+            b = {"scene_id": sid, "text": text}
+            beats.append(b)
+            beat_by_id[sid] = b
+
+    # Track which scenes are already data-rich (don't touch) and which are seeded now.
+    # This now ALSO respects the content-fit seeder that runs BEFORE us: a beat already
+    # carrying steps / quote / metrics / compare is a story_shape (process-pipeline /
+    # pull-quote) claim -- enrich must fill the REMAINING beats, never clobber it.
+    consumed = set()
+    for s in feature_scenes:
+        bt = _beat_text_for(s.get("id"))
+        dd = s.get("data") if isinstance(s.get("data"), dict) else {}
+        if (_beat_already_has_stat(s, bt) or _beat_already_has_entities(s, bt)
+                or dd.get("steps") or dd.get("quote") or dd.get("metrics")
+                or dd.get("compare")):
+            consumed.add(id(s))
+
+    # 1) ENTITY-LIST — exactly ONE mosaic total (variety). If a mosaic beat already
+    #    exists (the LLM made one), REUSE it (replace its list with the richer verified
+    #    one) instead of adding a 2nd; else seed a still-generic beat.
+    if len(entities) >= 3:
+        existing_mosaic = next(
+            (s for s in feature_scenes
+             if _beat_already_has_entities(s, _beat_text_for(s.get("id")))), None)
+        target = existing_mosaic or next(
+            (s for s in feature_scenes if id(s) not in consumed), None)
+        if target is not None:
+            _seed_scene(target, ", ".join(entities[:6]))
+            consumed.add(id(target))
+
+    # 2) STAT beats — fill the REMAINING generic beats with DISTINCT stats (we prefer a
+    #    spread of stats over repeated mosaics).
+    for stat in stats[:3]:
+        target = next((s for s in feature_scenes if id(s) not in consumed), None)
+        if target is None:
+            break  # don't exceed the existing feature-beat count
+        value = str(stat.get("value") or "").strip()
+        label = str(stat.get("label") or "").strip()
+        seed_text = ("%s %s" % (value, label)).strip() if label else value
+        _seed_scene(target, seed_text)
+        consumed.add(id(target))
+
+    return plan
+
+
+def _voice_quote(quote):
+    """The VO line for a pull-quote beat = the testimonial itself (trimmed so it never
+    drags), so the narration MATCHES what's on screen and the scene lasts long enough to
+    read -- instead of a 3-word "what customers say" label that flashes by (Dennis's
+    Zapier note). Pull-quote ignores the derived title, so voicing the quote is safe."""
+    words = str(quote or "").split()
+    if not words:
+        return "What customers say"
+    if len(words) <= 18:
+        return quote
+    return " ".join(words[:18]).rstrip(",.;:") + "…"
+
+
+def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0):
+    """CONTENT-FIT seeding (Design Brief): stamp REAL story_shape material onto feature
+    beats so the post-fill router renders the matching pattern -- process_steps ->
+    process-pipeline, testimonial -> pull-quote. Honesty: only real material; empty
+    story_shape -> no-op; never override a beat already carrying data. Never raises.
+
+    `reserve` = feature beats to LEAVE FREE for the enrich pass (its mosaic / stats) so
+    the final mix stays diverse. We claim at most (free - reserve) beats.
+
+    READ TIME: each seeded beat also gets a `duration_s` FLOOR -- build_timeline holds a
+    scene for max(duration_s, VO span), so the floor guarantees the quote / step flow
+    stays on screen long enough to read even when its VO line is short."""
+    if not isinstance(story_shape, dict) or not story_shape:
+        return plan
+    scenes = [s for s in (plan.get("scenes") or []) if isinstance(s, dict)]
+    feature_scenes = [s for s in scenes if s.get("type") == "motion_graphic"]
+    if not feature_scenes:
+        return plan
+    vo = plan.get("voiceover") or {}
+    beats = vo.get("beats")
+    if not isinstance(beats, list):
+        beats = []
+        vo["beats"] = beats
+        plan["voiceover"] = vo
+    beat_by_id = {b.get("scene_id"): b for b in beats if isinstance(b, dict)}
+
+    def _seed_scene(scene, text):
+        sid = scene.get("id")
+        scene["brief"] = text
+        b = beat_by_id.get(sid)
+        if isinstance(b, dict):
+            b["text"] = text
+        else:
+            b = {"scene_id": sid, "text": text}
+            beats.append(b)
+            beat_by_id[sid] = b
+
+    # Don't override a beat that already carries real data (stat/entities/metrics/etc.).
+    consumed = set()
+    for s in feature_scenes:
+        dd = s.get("data") or {}
+        if (dd.get("stat") or dd.get("featureEntities") or dd.get("metrics")
+                or dd.get("steps") or dd.get("quote") or dd.get("compare")):
+            consumed.add(id(s))
+
+    # Claim the FIRST free beat, but only while we'd still leave `reserve` beats for the
+    # enrich pass that runs after us. Returns None once the budget is spent.
+    def _claim_target():
+        free = [s for s in feature_scenes if id(s) not in consumed]
+        return free[0] if len(free) > reserve else None
+
+    # process_steps -> process-pipeline (>= 2 real steps with a title)
+    steps = [s for s in (story_shape.get("process_steps") or [])
+             if isinstance(s, dict) and str(s.get("title") or "").strip()]
+    if len(steps) >= 2:
+        target = _claim_target()
+        if target is not None:
+            seeded = [{"badge": "0%d" % (i + 1), "title": str(x.get("title")).strip(),
+                       "body": str(x.get("body") or "").strip()}
+                      for i, x in enumerate(steps[:4])]
+            target.setdefault("data", {})["steps"] = seeded
+            # READ TIME: a horizontal step flow with drawing connectors needs a hold long
+            # enough to read each card -- ~1.5s per step, floored to 6s, capped at 8s.
+            # Keep the VO line SHORT ("How it works"): process-pipeline renders the
+            # derived title, so a long line would become an ugly headline.
+            target["duration_s"] = max(6, min(8, 2 + len(seeded) + len(seeded) // 2))
+            _seed_scene(target, "How it works")
+            consumed.add(id(target))
+
+    # testimonial -> pull-quote (real quote >= 6 words + attribution)
+    t = story_shape.get("testimonial") or {}
+    quote = str((t or {}).get("quote") or "").strip()
+    who = str((t or {}).get("who") or "").strip()
+    if quote and who and len(quote.split()) >= 6:
+        target = _claim_target()
+        if target is not None:
+            dd = target.setdefault("data", {})
+            dd["quote"] = quote
+            dd["quoteAttribution"] = who
+            # READ TIME: the testimonial must stay on screen long enough to READ (the
+            # Zapier quote flashed because its VO beat was a 3-word label). Floor the hold
+            # to ~the reading time of the visible quote, and VOICE the quote so the
+            # narration matches the screen. Pull-quote ignores the title -> safe.
+            # Word-scaled (~4 wps target): 6w->5s, 18w->8s, 24w+->9s -- so a long real
+            # testimonial (Zapier's 27w joined excerpt) holds 9s, not a brisk 8s.
+            words = len(quote.split())
+            target["duration_s"] = max(5, min(9, 4 + words // 4))
+            _seed_scene(target, _voice_quote(quote))
+            consumed.add(id(target))
+
+    return plan
+
+
+def _assign_card_treatments(plan):
+    """RULES GUARD + HONESTY GUARD over each feature (motion_graphic) scene's data.
+
+    Hybrid backstop to the LLM's per-scene pick (planner-prompt.md):
+      - HONESTY FIRST: strip any `stat` not backed by a real number in real brand
+        text, and any `featureEntities` not present in the real features. Never invent.
+      - If the LLM emitted a valid treatment AND the fields it needs survived the
+        honesty pass, keep it (defaulting a missing icon for the icon treatments).
+      - Otherwise assign deterministically from what's REAL:
+          real stat -> "split-stat"; >= 3 real entities -> "split-mosaic";
+          else "icon-headline" (icon + headline, NO number — the honest floor).
+    Mutates scene["data"] in place; returns the plan. Only touches motion_graphic
+    scenes (the explainer-card archetype) — all other scene types are untouched."""
+    job = plan.get("job") or {}
+    company_facts = job.get("_company_facts") if isinstance(job.get("_company_facts"), dict) else {}
+    real_entities = _feature_entities_from_facts(company_facts)
+
+    for scene in (plan.get("scenes") or []):
+        if not isinstance(scene, dict) or scene.get("type") != "motion_graphic":
+            continue
+        data = scene.get("data")
+        if not isinstance(data, dict):
+            data = {}
+            scene["data"] = data
+
+        # --- HONESTY PASS: drop anything not backed by real data -------------
+        if not _stat_is_real(data.get("stat"), scene, company_facts):
+            data.pop("stat", None)
+        # featureEntities: keep the LLM-named entities CORROBORATED by real brand
+        # text -- the scene's own brief/title/subtitle, the tagline, or feature
+        # labels (the SAME honesty corpus _stat_is_real trusts). Real entities the
+        # LLM surfaced from the captured site (e.g. "Airbnb, Stripe, Dropbox") now
+        # survive; entities invented out of nowhere (absent from every real source)
+        # are still dropped. Never fabricates. (Previously corroborated ONLY against
+        # the `features` list, which excluded real named companies/integrations and
+        # forced honest split-mosaic scenes down to icon-headline.)
+        raw_ents = data.get("featureEntities")
+        if isinstance(raw_ents, list):
+            feat_text = " ".join(
+                (f.get("label") or f.get("title") or "") if isinstance(f, dict) else str(f)
+                for f in (company_facts.get("features") or [])
+            )
+            ent_corpus = " ".join(str(x or "") for x in (
+                scene.get("brief"), data.get("_text"), data.get("title"),
+                data.get("subtitle"), company_facts.get("tagline"), feat_text,
+                " ".join(real_entities),
+            )).lower()
+            kept = []
+            for e in raw_ents:
+                s = str(e or "").strip()
+                if s and s.lower() in ent_corpus:
+                    kept.append(s)
+            if kept:
+                data["featureEntities"] = kept
+            else:
+                data.pop("featureEntities", None)
+
+        # HONEST FALLBACK: if no structured entities survived, mine >=3 proper nouns
+        # from the scene's OWN real title/subtitle (e.g. "Airbnb, Stripe, Dropbox ...")
+        # so a genuinely entity-rich scene gets split-mosaic. Mined from real text only.
+        if not data.get("featureEntities"):
+            mined = _mine_named_entities(
+                " ".join(str(data.get(k) or "") for k in ("title", "subtitle")),
+                exclude=(company_facts.get("wordmark"), company_facts.get("brand"),
+                         (real_entities[0] if real_entities else None)),
+            )
+            if len(mined) >= 3:
+                data["featureEntities"] = mined[:6]
+
+        has_real_stat = isinstance(data.get("stat"), dict) and bool(data.get("stat"))
+        ents = data.get("featureEntities") if isinstance(data.get("featureEntities"), list) else []
+        has_mosaic = len(ents) >= 3
+
+        # --- KEEP a valid LLM pick whose surviving data still supports it -----
+        treatment = data.get("treatment")
+        keep = False
+        if treatment in _CARD_TREATMENTS:
+            if treatment in ("icon-stat", "split-stat"):
+                keep = has_real_stat                 # stat treatments need a real stat
+            elif treatment == "split-mosaic":
+                keep = has_mosaic                    # mosaic needs >= 3 real entities
+            else:  # icon-headline needs nothing beyond an icon (added below)
+                keep = True
+
+        if not keep:
+            # --- DETERMINISTIC ASSIGNMENT from what is REAL ------------------
+            if has_real_stat:
+                treatment = "split-stat"
+            elif has_mosaic:
+                treatment = "split-mosaic"
+            else:
+                treatment = "icon-headline"
+            data["treatment"] = treatment
+
+        # Stat treatments must not keep a now-missing stat; force the honest floor.
+        if treatment in ("icon-stat", "split-stat") and not has_real_stat:
+            treatment = "icon-headline"
+            data["treatment"] = treatment
+        # Mosaic must not keep too-few entities; force the honest floor.
+        if treatment == "split-mosaic" and not has_mosaic:
+            data.pop("featureEntities", None)
+            treatment = "icon-headline"
+            data["treatment"] = treatment
+
+        # icon treatments need a curated icon name; default a missing/blank one.
+        if treatment in ("icon-stat", "icon-headline"):
+            icon = str(data.get("icon") or "").strip()
+            if not icon:
+                data["icon"] = _DEFAULT_ICON
+        else:
+            data.pop("icon", None)  # split treatments don't render an icon
+
+        # Drop fields the FINAL treatment doesn't render so stale stripped-honesty
+        # data never lingers (e.g. a forced icon-headline keeps no stat/entities).
+        if treatment not in ("icon-stat", "split-stat"):
+            data.pop("stat", None)
+        if treatment != "split-mosaic":
+            data.pop("featureEntities", None)
+
     return plan
 
 
