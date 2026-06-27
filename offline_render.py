@@ -2,11 +2,18 @@
 """Offline (no-network) Timeline render from an EXISTING run's plan.json.
 
 Bypasses capture + VO synthesis (the flaky SSL/streaming stages) by feeding
-build_timeline a SYNTHETIC EMPTY alignment, so every scene holds for its
-`duration_s` floor (silent render). This is a deterministic, $0, network-free
-way to VISUALLY verify card layout / read-time / badge changes -- the cards
-render identically with or without audio. NOT a substitute for a hosted gen of
-the production pipeline; it only re-renders an already-planned run.
+build_timeline a SYNTHETIC alignment built from the plan's OWN voiceover beats
+(real per-scene text, zero timing), so every scene holds for its `duration_s`
+floor (silent render) BUT each scene still carries the line it would be narrated
+over. This matters because the title shapers derive the on-screen headline from
+the threaded VO text (`_beat_text` -> `_derive_text` -> scene `_text`): an EMPTY
+alignment would make the opening fall back to its scene-direction `brief`
+("<Brand> wordmark cold-open with kinetic-light canvas") instead of the real
+value-prop headline a production VO gen would show. Threading the plan's VO text
+(no audio, zero span) keeps timing at the `duration_s` floor while making the
+copy FAITHFUL to a hosted gen. Deterministic, $0, network-free; a way to VISUALLY
+verify card layout / read-time / badge / opening copy. NOT a substitute for a
+hosted gen -- it only re-renders an already-planned run, silently.
 
     python3 offline_render.py <run-id>     # reads runs/<run-id>/plan.json
 """
@@ -31,12 +38,21 @@ def main(run_id: str) -> int:
             print("missing %s" % p, file=sys.stderr)
             return 2
 
-    # Synthetic EMPTY alignment -> span_frames/beat_audio_frames = 0 ->
-    # build_timeline length = max(plan_frames(duration_s), media_frames). Silent.
+    # Synthetic alignment: carry the plan's OWN per-scene VO TEXT (so the title
+    # shapers see the real narrated line, not the scene-direction brief) but with
+    # ZERO timing + no audio -> span_frames/beat_audio_frames = 0 -> build_timeline
+    # length = max(plan_frames(duration_s), media_frames). Silent, faithful copy.
+    with open(plan_path, encoding="utf-8") as fh:
+        plan = json.load(fh)
+    plan_beats = ((plan.get("voiceover") or {}).get("beats")) or []
+    beats = [{"scene_id": b.get("scene_id"), "text": str(b.get("text") or "").strip(),
+              "start_s": 0.0, "end_s": 0.0}
+             for b in plan_beats if b.get("scene_id") and str(b.get("text") or "").strip()]
     align_path = os.path.join(run_dir, "vo_alignment.json")
     with open(align_path, "w", encoding="utf-8") as fh:
-        json.dump({"beats": [], "words": [], "total_duration_s": 0.0,
+        json.dump({"beats": beats, "words": [], "total_duration_s": 0.0,
                    "audio_path": None, "lang": "en"}, fh)
+    print("[offline_render] threaded %d VO beat(s) (text-only, zero timing)" % len(beats))
 
     # do_align=False reuses the synthetic alignment; do_render=False -> we render below.
     res = style_fill.run_pipeline(plan_path, brand_path, VO_ENGINE_STYLE, run_dir,
