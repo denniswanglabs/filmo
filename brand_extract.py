@@ -28,9 +28,11 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 
 import remotion_codegen as rc
+from url_guard import assert_public_url, validate_redirect_target
 
 
 # brand_theme.json schema (the style-fill contract this module owns):
@@ -953,24 +955,56 @@ def _parse_html_brand(html):
     return out
 
 
+class _SSRFGuardRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validate EVERY 3xx redirect target before following it, so a public URL
+    that 302s to an internal host (e.g. 169.254.169.254 metadata) is refused
+    mid-chain rather than silently fetched. Raises urllib.error.HTTPError (fails
+    closed) when the new target is non-public."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            validate_redirect_target(newurl)
+        except ValueError as e:
+            raise urllib.error.HTTPError(newurl, code, str(e), headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _build_guarded_opener():
+    """urllib opener that re-checks each redirect hop against the SSRF guard."""
+    return urllib.request.build_opener(_SSRFGuardRedirectHandler())
+
+
 def _live_webfetch(url, prompt):
     """Real default fetcher: bounded stdlib GET + HTML parse -> strict-JSON string
     for `_parse_fetch_payload`. Returns "" on ANY failure so extraction degrades
     gracefully (correct part-A name + clean LIGHT palette + honest-empty copy) and
-    NEVER hangs the build. `prompt` is unused (kept for the injected-fetcher seam)."""
+    NEVER hangs the build. `prompt` is unused (kept for the injected-fetcher seam).
+
+    SSRF: the (normalized) URL AND every redirect hop are validated against the
+    public-host allowlist (url_guard) BEFORE any bytes are fetched. A blocked URL
+    fails closed with a clear stderr log and degrades to "" — never a silent fetch."""
     u = (url or "").strip()
     if not u:
         return ""
     if not u.startswith(("http://", "https://")):
         u = "https://" + u
+    # SSRF guard — refuse private/loopback/link-local/metadata hosts up front. Logged
+    # loudly (not swallowed by the broad except below) so a blocked fetch is visible.
+    try:
+        assert_public_url(u)
+    except ValueError as e:
+        sys.stderr.write("[brand_extract] SSRF guard blocked URL: %s\n" % e)
+        return ""
     try:
         req = urllib.request.Request(u, headers={
             "User-Agent": _FETCH_UA,
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Language": "en-US,en;q=0.9",
         })
-        # urllib follows 3xx redirects by default via HTTPRedirectHandler.
-        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT_S) as resp:
+        # Custom opener re-validates each 3xx hop (default urllib would follow a
+        # redirect into an internal host without re-checking).
+        opener = _build_guarded_opener()
+        with opener.open(req, timeout=_FETCH_TIMEOUT_S) as resp:
             raw = resp.read(_FETCH_MAX_BYTES)
         html = raw.decode("utf-8", "replace")
     except Exception:
