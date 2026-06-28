@@ -1,0 +1,11 @@
+preset:
+  name: filmo-dynamic
+  description: "Per-job target host (rewritten per build)"
+network_policies:
+  filmo-dynamic:
+    name: filmo-dynamic
+    endpoints:
+      - { host: vercel.com, port: 443, access: full }
+      - { host: www.vercel.com, port: 443, access: full }
+    binaries:
+      - { path: "/**" }

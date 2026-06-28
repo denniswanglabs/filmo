@@ -1,0 +1,15 @@
+preset:
+  name: hermes-inference
+  description: "Hermes agent LLM egress (OpenRouter + NVIDIA NIM)"
+network_policies:
+  hermes-inference:
+    name: hermes-inference
+    endpoints:
+      - host: openrouter.ai
+        port: 443
+        access: full
+      - host: integrate.api.nvidia.com
+        port: 443
+        access: full
+    binaries:
+      - { path: "/**" }
