@@ -15,6 +15,12 @@ interface AuthState {
   demoAvailable: boolean
   /** Re-read the session; returns the current user (or null). */
   refresh: () => Promise<AuthUser | null>
+  /**
+   * The current access token (a signed JWT) for authenticating server actions.
+   * Server actions verify it against InsForge — passing the token, not a user id,
+   * is what makes them tamper-proof. Returns null when signed out.
+   */
+  getToken: () => Promise<string | null>
   signOut: () => Promise<void>
   /** Redirect to Google. The browser leaves the page and returns to `redirectTo`. */
   signInWithGoogle: (redirectTo?: string) => Promise<void>
@@ -30,10 +36,38 @@ const AuthContext = createContext<AuthState>({
   loading: true,
   demoAvailable: false,
   refresh: async () => null,
+  getToken: async () => null,
   signOut: async () => {},
   signInWithGoogle: async () => {},
   signInDemo: async () => ({ error: 'not ready' }),
 })
+
+// Read the current access token from the InsForge client. The SDK exposes it on the
+// auth object / its token manager; we probe the known shapes defensively so a minor
+// SDK version bump can't silently break auth.
+async function readAccessToken(): Promise<string | null> {
+  const a = insforge.auth as unknown as {
+    getAccessToken?: () => string | null
+    getSession?: () => { accessToken?: string } | null
+    tokenManager?: { getAccessToken?: () => string | null; getSession?: () => { accessToken?: string } | null }
+  }
+  const probe = () =>
+    a.getAccessToken?.() ??
+    a.getSession?.()?.accessToken ??
+    a.tokenManager?.getAccessToken?.() ??
+    a.tokenManager?.getSession?.()?.accessToken ??
+    null
+  let t = probe()
+  if (t) return t
+  // Token not populated yet (e.g. right after an OAuth return) — force a session read.
+  try {
+    await insforge.auth.getCurrentUser()
+  } catch {
+    /* ignore — fall through */
+  }
+  t = probe()
+  return t ?? null
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -46,6 +80,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false)
     return u
   }, [])
+
+  const getToken = useCallback(async () => readAccessToken(), [])
 
   const signOut = useCallback(async () => {
     await insforge.auth.signOut()
@@ -102,6 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         demoAvailable: !!(DEMO_EMAIL && DEMO_PASSWORD),
         refresh,
+        getToken,
         signOut,
         signInWithGoogle,
         signInDemo,

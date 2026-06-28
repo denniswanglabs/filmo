@@ -1,24 +1,41 @@
 'use server'
-import { adminClient } from '../lib/insforge'
+import { adminClient, verifyUser } from '../lib/insforge'
+
+// Internal: is this ALREADY-VERIFIED user id a developer? (No token check — callers
+// must have verified the token first.) Used to gate /inside reads + real-mode builds.
+async function isDeveloperId(userId: string): Promise<boolean> {
+  if (!userId) return false
+  const db = adminClient()
+  const { data } = await db.database
+    .from('developers')
+    .select('developer')
+    .eq('user_id', userId)
+    .maybeSingle()
+  return !!(data && (data as { developer?: boolean }).developer)
+}
+
+const ALLOWED_BRAINS = new Set(['super-free', 'super-paid', 'ultra-paid'])
 
 // ─────────────────────────── In-browser editor: save ───────────────────────────
 // Persist the editor's edited props into runs.props_edited (a separate jsonb column
 // from the clean, worker-generated `props`, so "revert to original" stays possible).
-// Admin client bypasses RLS — but we scope the write to a single run id (and require
-// a signed-in owner via `userId`, verified against the row) so a user can only save
-// edits to a run they own. The clean `props` column is never touched here.
+// Admin client bypasses RLS — but we derive the caller from a server-verified access
+// token and check it owns the run before writing, so a user can only save edits to a
+// run they own. The clean `props` column is never touched here.
 export async function saveEditedProps(input: {
   runId: string
-  userId: string
+  accessToken: string
   props: unknown
 }): Promise<{ ok: boolean; error?: string }> {
-  if (!input.runId || !input.userId) return { ok: false, error: 'missing runId/userId' }
+  if (!input.runId) return { ok: false, error: 'missing runId' }
+  const me = await verifyUser(input.accessToken)
+  if (!me) return { ok: false, error: 'not signed in' }
   if (input.props == null || typeof input.props !== 'object') {
     return { ok: false, error: 'invalid props' }
   }
   const db = adminClient()
   // Ownership check: the admin client ignores RLS, so verify the run belongs to the
-  // caller before writing (defense-in-depth — the page already RLS-loads the run).
+  // SERVER-VERIFIED caller before writing (the passed token, not a client-set id).
   const { data: run, error: readErr } = await db.database
     .from('runs')
     .select('id, user_id')
@@ -26,7 +43,7 @@ export async function saveEditedProps(input: {
     .maybeSingle()
   if (readErr) return { ok: false, error: 'read: ' + JSON.stringify(readErr) }
   if (!run) return { ok: false, error: 'run not found' }
-  if ((run as { user_id?: string }).user_id !== input.userId) {
+  if ((run as { user_id?: string }).user_id !== me.id) {
     return { ok: false, error: 'not the run owner' }
   }
   const { error } = await db.database
@@ -41,7 +58,7 @@ export async function saveEditedProps(input: {
 // row (status=queued). The Railway worker's claim_next_job picks it up. user_id comes
 // from the signed-in user (the run owner). Returns the new run id + key.
 export async function createBuild(input: {
-  userId: string
+  accessToken: string
   url: string
   goal?: string
   emphasis?: string
@@ -54,26 +71,59 @@ export async function createBuild(input: {
   // real — the render stays $0 mock.
   payMode?: 'auto' | 'human'
 }) {
+  // Identity comes from the verified token, NEVER from the client. The owner of the
+  // build is whoever the token belongs to.
+  const me = await verifyUser(input.accessToken)
+  if (!me) throw new Error('Please sign in to start a build.')
+
+  // Validate the URL is a real http(s) address (defense-in-depth; the worker also
+  // SSRF-guards the fetch, but reject obvious garbage before we enqueue + spend).
+  const rawUrl = (input.url || '').trim()
+  if (!/^https?:\/\/[^\s]+\.[^\s]+/i.test(rawUrl)) throw new Error('Enter a valid website URL.')
+
   const db = adminClient()
+
+  // Rate limit: cap builds per user per window so a scripted loop can't drain the
+  // Nemotron/render budget. Time-based + status-agnostic (stuck rows never wedge it).
+  const windowStart = new Date(Date.now() - 10 * 60_000).toISOString()
+  const { data: recent } = await db.database
+    .from('runs')
+    .select('id')
+    .eq('user_id', me.id)
+    .gte('created_at', windowStart)
+  if (recent && recent.length >= 10) {
+    throw new Error('Too many builds in a short window — give it a minute and try again.')
+  }
+
+  // Whitelist every client-supplied param (never forward raw — the worker trusts these).
+  const quality: 'standard' | 'premium' = input.quality === 'premium' ? 'premium' : 'standard'
+  const brain = input.brain && ALLOWED_BRAINS.has(input.brain) ? input.brain : 'super-free'
+  const mode: 'mock' | 'real' = input.mode === 'real' ? 'real' : 'mock'
+  let payMode: 'auto' | 'human' = input.payMode === 'human' ? 'human' : 'auto'
+
+  // COST GUARD: 'real' mode spends real third-party COGS (Higgsfield/ElevenLabs). Never
+  // let it run for free — force a real (test) Stripe checkout unless the caller is an
+  // operator/developer account. Demo/normal users always run $0 mock anyway.
+  if (mode === 'real' && payMode !== 'human') {
+    const dev = await isDeveloperId(me.id)
+    if (!dev) payMode = 'human'
+  }
+
   const runKey = `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-  const brand = input.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-  const quality = input.quality || 'standard'
-  const brain = input.brain || 'super-free'
-  const mode = input.mode || 'mock'
-  const payMode = input.payMode || 'auto'
+  const brand = rawUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
   const goal = input.goal || 'A 30-second brand explainer'
 
   const { data: runs, error: runErr } = await db.database
     .from('runs')
     .insert([{
-      user_id: input.userId, run_key: runKey, brand, company_url: input.url,
+      user_id: me.id, run_key: runKey, brand, company_url: rawUrl,
       goal, emphasis: input.emphasis || null, quality, brain, mode, status: 'queued',
     }])
     .select()
   if (runErr) throw new Error('runs.insert: ' + JSON.stringify(runErr))
   const runId = runs![0].id
 
-  const params = { company_url: input.url, goal, emphasis: input.emphasis || '', quality, brain, mode, pay_mode: payMode, run_key: runKey, duration: 30 }
+  const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, pay_mode: payMode, run_key: runKey, duration: 30 }
   const { error: jobErr } = await db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }])
   if (jobErr) throw new Error('jobs.insert: ' + JSON.stringify(jobErr))
 
@@ -87,9 +137,11 @@ export async function createBuild(input: {
 // the job type 'rerender'. Ownership is verified against the run before enqueueing.
 export async function requestReRender(input: {
   runId: string
-  userId: string
+  accessToken: string
 }): Promise<{ ok: boolean; error?: string }> {
-  if (!input.runId || !input.userId) return { ok: false, error: 'missing runId/userId' }
+  if (!input.runId) return { ok: false, error: 'missing runId' }
+  const me = await verifyUser(input.accessToken)
+  if (!me) return { ok: false, error: 'not signed in' }
   const db = adminClient()
   const { data: run, error: readErr } = await db.database
     .from('runs')
@@ -99,7 +151,7 @@ export async function requestReRender(input: {
   if (readErr) return { ok: false, error: 'read: ' + JSON.stringify(readErr) }
   if (!run) return { ok: false, error: 'run not found' }
   const r = run as { user_id?: string; run_key?: string; props?: unknown; props_edited?: unknown }
-  if (r.user_id !== input.userId) return { ok: false, error: 'not the run owner' }
+  if (r.user_id !== me.id) return { ok: false, error: 'not the run owner' }
   // Need SOMETHING to render: a saved edit, or the clean props as a fallback.
   const hasProps =
     (r.props_edited && typeof r.props_edited === 'object') ||
@@ -235,7 +287,7 @@ function describeForLLM(props: ChatProps) {
 
 export async function editViaChat(input: {
   runId: string
-  userId: string
+  accessToken: string
   message: string
 }): Promise<{
   ok: boolean
@@ -251,7 +303,9 @@ export async function editViaChat(input: {
   props?: unknown
 }> {
   const msg = (input.message || '').trim()
-  if (!input.runId || !input.userId) return { ok: false, kind: 'error', message: 'Not signed in for this run.' }
+  const me = await verifyUser(input.accessToken)
+  if (!me) return { ok: false, kind: 'error', message: 'Not signed in for this run.' }
+  if (!input.runId) return { ok: false, kind: 'error', message: 'Missing run.' }
   if (!msg) return { ok: false, kind: 'error', message: 'Type what you want to change first.' }
 
   const db = adminClient()
@@ -264,7 +318,7 @@ export async function editViaChat(input: {
   if (readErr) return { ok: false, kind: 'error', message: 'Could not load this run.' }
   if (!run) return { ok: false, kind: 'error', message: 'Run not found.' }
   const r = run as { user_id?: string; props?: unknown; props_edited?: unknown }
-  if (r.user_id !== input.userId) return { ok: false, kind: 'error', message: 'You do not own this run.' }
+  if (r.user_id !== me.id) return { ok: false, kind: 'error', message: 'You do not own this run.' }
 
   const edited = (r.props_edited && typeof r.props_edited === 'object' ? r.props_edited : null) as ChatProps | null
   const clean = (r.props && typeof r.props === 'object' ? r.props : null) as ChatProps | null
@@ -362,10 +416,10 @@ export async function editViaChat(input: {
     return { ok: true, kind: 'noop', message: 'Nothing needed changing for that — the video already matches.' }
   }
 
-  // Persist + enqueue a re-render through the EXISTING backend.
-  const saved = await saveEditedProps({ runId: input.runId, userId: input.userId, props: updated })
+  // Persist + enqueue a re-render through the EXISTING backend (each re-verifies the token).
+  const saved = await saveEditedProps({ runId: input.runId, accessToken: input.accessToken, props: updated })
   if (!saved.ok) return { ok: false, kind: 'error', message: 'Could not save the edit: ' + (saved.error || 'unknown') }
-  const queued = await requestReRender({ runId: input.runId, userId: input.userId })
+  const queued = await requestReRender({ runId: input.runId, accessToken: input.accessToken })
   if (!queued.ok) return { ok: false, kind: 'error', message: 'Saved your edit, but could not start the re-render: ' + (queued.error || 'unknown') }
 
   // Summarize which top-level areas changed for a friendly chat line.
@@ -399,53 +453,55 @@ export async function editViaChat(input: {
  * given signed-in user. Idempotent: re-pairing the same account is a no-op success.
  * Returns only `{ ok }` — never the key or the env value.
  */
-export async function pairDeveloper(input: { key: string; userId: string }): Promise<{ ok: boolean }> {
+export async function pairDeveloper(input: { key: string; accessToken: string }): Promise<{ ok: boolean }> {
   const expected = process.env.DEV_MODE_KEY
   // Reject if the server has no key configured, or the supplied key doesn't match.
   // Constant-ish compare; we intentionally do not branch-log the comparison.
   if (!expected || !input.key || input.key !== expected) return { ok: false }
-  if (!input.userId) return { ok: false }
+  // Only the SERVER-VERIFIED caller can grant THEMSELVES developer — never an arbitrary id.
+  const me = await verifyUser(input.accessToken)
+  if (!me) return { ok: false }
 
   const db = adminClient()
   // Upsert-by-hand (read → insert-or-noop) so re-pairing is safe and we never throw on
-  // a duplicate. The admin key bypasses RLS, so this writes for any signed-in account.
+  // a duplicate.
   const { data: existing } = await db.database
     .from('developers')
     .select('user_id')
-    .eq('user_id', input.userId)
+    .eq('user_id', me.id)
     .maybeSingle()
 
   if (!existing) {
     const { error } = await db.database
       .from('developers')
-      .insert([{ user_id: input.userId, developer: true, source: 'dev_mode_key' }])
+      .insert([{ user_id: me.id, developer: true, source: 'dev_mode_key' }])
     if (error) throw new Error('developers.insert: ' + JSON.stringify(error))
   }
   return { ok: true }
 }
 
-/** Read back the developer flag for a user. Used to gate /inside/[runId]. */
-export async function isDeveloper(userId: string | null | undefined): Promise<boolean> {
-  if (!userId) return false
-  const db = adminClient()
-  const { data } = await db.database
-    .from('developers')
-    .select('developer')
-    .eq('user_id', userId)
-    .maybeSingle()
-  return !!(data && (data as { developer?: boolean }).developer)
+/** Is the SERVER-VERIFIED caller a developer? Used to gate /inside/[runId]. */
+export async function isDeveloper(accessToken: string | null | undefined): Promise<boolean> {
+  const me = await verifyUser(accessToken)
+  if (!me) return false
+  return isDeveloperId(me.id)
 }
 
 /**
  * Admin-client fetch of a run + its run_events, so a developer can view ANY run
- * (including the canonical featured run they don't own). Returns null if not found.
- * Bypasses RLS by design — only reachable behind the isDeveloper() gate in /inside.
+ * (including the canonical featured run they don't own). Returns null if not found
+ * OR if the caller isn't a verified developer. Bypasses RLS by design — so it MUST
+ * server-side gate on isDeveloper (the client gate alone is not a security boundary).
  */
-export async function readInsideRun(runId: string): Promise<{
+export async function readInsideRun(input: { runId: string; accessToken: string }): Promise<{
   run: Record<string, unknown>
   events: Record<string, unknown>[]
 } | null> {
+  const runId = input?.runId
   if (!runId) return null
+  // Server-side authorization: only a verified developer may read arbitrary runs.
+  const me = await verifyUser(input.accessToken)
+  if (!me || !(await isDeveloperId(me.id))) return null
   const db = adminClient()
   const { data: run } = await db.database
     .from('runs')

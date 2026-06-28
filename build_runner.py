@@ -722,8 +722,17 @@ def _payment_gate(led, led_path, run_id, price_cents, currency, job, mode):
     product_name = "%s promo video" % brand
 
     # Create the real test-mode session ($0 — creating a test session never settles).
-    session = stripe_earn.create_checkout_session(
-        run_id, int(price_cents or 0), currency=currency, product_name=product_name)
+    # Guard it: a missing/bad Stripe key or a Stripe 4xx must FAIL the run cleanly, not
+    # leave it parked at awaiting_payment with no Pay button (which strands the user).
+    try:
+        session = stripe_earn.create_checkout_session(
+            run_id, int(price_cents or 0), currency=currency, product_name=product_name)
+    except Exception as e:
+        led.event("error", "could not create Stripe checkout: %s" % e)
+        led.set_phase("checkout_failed")
+        led.set_status("failed")
+        led.write(led_path)
+        return None
 
     earn = {
         "enabled": True,
@@ -746,6 +755,15 @@ def _payment_gate(led, led_path, run_id, price_cents, currency, job, mode):
     led.write(led_path)
 
     simulate = os.environ.get("PRODUCER_SIMULATE_PAID") == "1"
+    # Human-pays flow with no checkout URL = the user can never complete payment. Fail
+    # cleanly rather than poll-to-timeout while the UI shows a Pay button that goes
+    # nowhere. (Simulated-pay doesn't need a URL — it settles below.)
+    if not simulate and not earn.get("checkout_url"):
+        led.event("error", "checkout session has no payment URL — cannot collect payment")
+        led.set_phase("checkout_failed")
+        led.set_status("failed")
+        led.write(led_path)
+        return None
     if simulate:
         # Simulate the CUSTOMER paying the link with Stripe's 4242 test card. With a
         # sk_test_/rk_test_ key this is a REAL test-mode succeeded PaymentIntent

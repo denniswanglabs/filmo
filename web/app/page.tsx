@@ -34,7 +34,7 @@ interface PendingBuild {
 
 export default function Home() {
   const router = useRouter()
-  const { user, loading } = useAuth()
+  const { user, loading, getToken } = useAuth()
 
   // Composer state
   const [url, setUrl] = useState('')
@@ -84,14 +84,21 @@ export default function Home() {
     if (user) void loadRuns()
   }, [user, loadRuns])
 
-  // Kick off a build and navigate to its run page.
+  // Kick off a build and navigate to its run page. Identity travels as the verified
+  // access token (the server derives the owner from it), never a client-set user id.
   const runBuild = useCallback(
-    async (userId: string, p: PendingBuild) => {
+    async (p: PendingBuild) => {
       setError(null)
       setBuilding(true)
       try {
+        const accessToken = await getToken()
+        if (!accessToken) {
+          setBuilding(false)
+          setGateOpen(true)
+          return
+        }
         const { runId } = await createBuild({
-          userId,
+          accessToken,
           url: p.url.trim(),
           quality: p.quality,
           brain: p.brain,
@@ -104,7 +111,7 @@ export default function Home() {
         setBuilding(false)
       }
     },
-    [router],
+    [router, getToken],
   )
 
   const currentPending = useCallback(
@@ -149,13 +156,13 @@ export default function Home() {
     setQuality(p.quality ?? 'standard')
     setBrain(p.brain ?? 'ultra-paid')
     setRequirePay(p.requirePay ?? false)
-    if (user) void runBuild(user.id, p)
+    if (user) void runBuild(p)
   }, [loading, user, runBuild])
 
   function onBuild(e: React.FormEvent) {
     e.preventDefault()
     if (user) {
-      void runBuild(user.id, currentPending())
+      void runBuild(currentPending())
     } else {
       // Logged out: stash the prompt and open the Gmail gate.
       stashPending()
@@ -362,9 +369,9 @@ export default function Home() {
         open={gateOpen}
         onClose={() => setGateOpen(false)}
         onBeforeRedirect={stashPending}
-        onSignedIn={(u) => {
+        onSignedIn={() => {
           setGateOpen(false)
-          void runBuild(u.id, currentPending())
+          void runBuild(currentPending())
         }}
       />
     </div>

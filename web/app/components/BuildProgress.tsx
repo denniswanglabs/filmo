@@ -277,6 +277,11 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
 
   // Human-pays flow: the build is parked awaiting a real Stripe TEST payment.
   const awaitingPayment = run.phase === 'awaiting_payment' && !!run.checkout_url
+  // Parked awaiting payment but the checkout URL hasn't landed yet (still being created,
+  // or creation failed). Show an honest interim state instead of the bare build tracker,
+  // so the user isn't stranded with no Pay button. If creation truly failed, the worker
+  // fails the run and the run page shows the error.
+  const preparingCheckout = run.phase === 'awaiting_payment' && !run.checkout_url
 
   return (
     <div className="mt-6 overflow-hidden rounded-2xl border border-black/5 bg-white shadow-sm">
@@ -311,6 +316,14 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
         {/* Pay CTA — only when the human-pays flow parked the build awaiting a real
             Stripe TEST payment. Prominent, above the stage tracker. */}
         {awaitingPayment && <PayPanel run={run} />}
+        {preparingCheckout && (
+          <div className="mt-5 flex items-center gap-3 rounded-xl border border-[#3B82F6]/30 bg-[#F8FAFF] px-5 py-4 ring-1 ring-inset ring-[#EAF1FF]">
+            <span className="text-[#3B82F6]"><Spinner /></span>
+            <p className="text-sm text-[#0E1320]">
+              Preparing your secure checkout… the Pay button will appear here in a moment.
+            </p>
+          </div>
+        )}
 
         {/* Stage tracker */}
         <ol className="mt-5 space-y-2.5">

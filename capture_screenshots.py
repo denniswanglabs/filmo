@@ -46,6 +46,8 @@ import sys
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
+from url_guard import assert_public_url, is_public_http_url
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 # The dedicated venv that carries Playwright + chromium (see module docstring).
 CAPTURE_PY = os.path.join(HERE, ".venv-capture", "bin", "python")
@@ -1003,6 +1005,20 @@ def _norm_url(url: str) -> str:
     return url
 
 
+def _norm_and_guard_url(url: str) -> str:
+    """Normalize a user-supplied URL, then SSRF-guard it BEFORE any navigation.
+
+    Single validating entry point for the capture sinks. Raises ValueError (fails
+    closed — no page.goto) if the normalized URL points at a private/loopback/
+    link-local/metadata host. See url_guard for the rules.
+    """
+    norm = _norm_url(url)
+    if not norm:
+        raise ValueError("refusing to capture empty URL")
+    assert_public_url(norm)
+    return norm
+
+
 def _is_blocked(page) -> bool:
     """Return True if the current page looks like a bot-block / challenge page.
 
@@ -1431,7 +1447,9 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
     """Real capture in THIS interpreter (requires Playwright). Returns manifest."""
     from playwright.sync_api import sync_playwright
 
-    url = _norm_url(url)
+    # SSRF guard: validate the normalized URL before launching the browser. Fails
+    # closed (raises) so no page.goto ever touches a private/metadata host.
+    url = _norm_and_guard_url(url)
     os.makedirs(out_dir, exist_ok=True)
     shots: List[Dict[str, Any]] = []
 
@@ -1454,6 +1472,39 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
         )
         # Stealth init runs BEFORE every navigation in this context.
         ctx.add_init_script(_STEALTH_INIT_JS)
+
+        # SSRF redirect guard: re-check EVERY request's resolved host so a public
+        # URL that 30x-redirects (or whose page sub-resources point) at a private/
+        # loopback/metadata host is aborted, not fetched. The initial URL was
+        # already validated in `_norm_and_guard_url`; this closes the per-hop /
+        # redirect gap that initial-URL validation alone leaves open.
+        def _guard_route(route):
+            try:
+                target = route.request.url
+            except Exception:
+                target = ""
+            ok, reason = is_public_http_url(target)
+            if not ok:
+                sys.stderr.write(
+                    "[capture] SSRF guard aborted request to %r: %s\n"
+                    % (target, reason))
+                try:
+                    route.abort()
+                except Exception:
+                    pass
+                return
+            try:
+                route.continue_()
+            except Exception:
+                # If continue_ races a closed page, let Playwright handle it.
+                pass
+
+        try:
+            ctx.route("**/*", _guard_route)
+        except Exception as e:
+            # Routing is best-effort hardening; the initial-URL guard still holds.
+            sys.stderr.write("[capture] SSRF route guard not installed: %s\n" % e)
+
         page = ctx.new_page()
 
         def _nav_page(pg, tgt: str) -> bool:
@@ -2629,8 +2680,9 @@ def capture_url(url: str, out_dir: str, max_shots: int = 2) -> Dict[str, Any]:
 
     Returns the manifest dict: {"url","count","shots":[{file,path,url,label,...}],"ok"}.
     Raises RuntimeError if no capture path is available or capture produced nothing.
+    Raises ValueError (fail-closed, before any navigation) if the URL is non-public.
     """
-    url = _norm_url(url)
+    url = _norm_and_guard_url(url)
     os.makedirs(out_dir, exist_ok=True)
 
     # CAPTURE_BACKEND switch (feature-flagged; default "native" is byte-identical
@@ -2687,7 +2739,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "capture venv (.venv-capture/bin/python) or call capture_url() which "
             "re-execs there automatically.\n")
         return 3
-    manifest = _capture_inproc(_norm_url(args.url), args.out_dir, args.max)
+    manifest = _capture_inproc(_norm_and_guard_url(args.url), args.out_dir, args.max)
     print(json.dumps(manifest, indent=2))
     return 0 if manifest.get("ok") else 1
 
