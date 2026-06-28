@@ -1,0 +1,18 @@
+# NVIDIA NIM / inference egress for the in-sandbox work. The egress proxy authorizes by
+# (host, binary) — node is allowed, curl is NOT (test egress with `node -e fetch`, never
+# curl). Every preset MUST carry a `binaries:` block or egress is silently denied.
+preset:
+  name: nim
+  description: "NVIDIA NIM inference endpoint"
+network_policies:
+  nim:
+    name: nim
+    endpoints:
+      - host: integrate.api.nvidia.com
+        port: 443
+        access: full
+        tls: skip
+    binaries:
+      - { path: /usr/local/bin/node* }
+      - { path: /usr/bin/node* }
+      - { path: /sandbox/**/node_modules/.bin/* }

@@ -1,0 +1,33 @@
+# PER-RUN target allowlist TEMPLATE. Filmo reads ARBITRARY user URLs, so unlike walk-ultra's
+# static demo-targets list this is GENERATED per job and RESET each run (so one job's grants
+# never leak into the next — the auto-allowlist security lesson from the Walk Agent work).
+#
+# A small host-side generator fills {{TARGET_HOST}} + {{TARGET_REGISTRABLE}} from the job URL,
+# probes the page for real subresource hosts (src=/href= — fonts/CDNs), and writes the final
+# policy before `conversion_read`. The STAY_ON_DOMAIN rule (top-level navs must stay on the
+# registrable domain) is enforced in the in-sandbox browser route handler, not here — the
+# allowlist is load-bearing for navigation quality, not just security.
+preset:
+  name: target
+  description: "Per-run allowlist for the job's target URL + its subresources"
+network_policies:
+  target:
+    name: target
+    endpoints:
+      - host: "{{TARGET_HOST}}"
+        port: 443
+        access: full
+      # common subresource hosts most marketing sites pull (fonts/CDN). The generator
+      # appends page-probed hosts below this line, then truncates them on the next run.
+      - host: fonts.googleapis.com
+        port: 443
+        access: full
+      - host: fonts.gstatic.com
+        port: 443
+        access: full
+      - host: images.unsplash.com
+        port: 443
+        access: full
+      # --- auto-added (page-probed; reset per run) ---
+    binaries:
+      - { path: "/**" }
