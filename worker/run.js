@@ -397,9 +397,18 @@ async function processJob(job) {
     // Upload the per-scene staged assets (screenshots/VO/music/walkthrough/logo) so
     // the in-browser editor preview resolves REAL media, not just text/layout.
     await uploadRunAssets(runKey).catch((e) => log('  ! uploadRunAssets', String(e)))
-    await setRun(runId, { ...mapped, final_url: url, props })
-    await db.database.from('jobs').update({ status: 'done' }).eq('id', job.id)
-    log(`  delivered run ${runKey} (${url ? 'video uploaded' : 'NO video'})`)
+    if (!url) {
+      // The render finished but the video upload didn't land. Do NOT mark 'delivered'
+      // with a null final_url — that strands the run page on the live "Producing"
+      // tracker forever. Fail it honestly so the UI shows a clear error + retry.
+      await setRun(runId, { ...mapped, status: 'failed', phase: 'upload_failed', final_url: null, props })
+      await db.database.from('jobs').update({ status: 'failed', error: 'video upload failed' }).eq('id', job.id)
+      log(`  FAILED run ${runKey} (render ok but video upload failed)`)
+    } else {
+      await setRun(runId, { ...mapped, final_url: url, props })
+      await db.database.from('jobs').update({ status: 'done' }).eq('id', job.id)
+      log(`  delivered run ${runKey} (video uploaded)`)
+    }
   } else {
     await setRun(runId, { status: 'failed', phase: ledger.phase || 'failed' })
     await db.database.from('jobs').update({ status: 'failed', error: `exit ${code}, ledger ${mapped.status}` }).eq('id', job.id)

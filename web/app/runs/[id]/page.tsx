@@ -157,6 +157,22 @@ export default function RunPage() {
                   </Link>
                 </div>
               </>
+            ) : run.status === 'delivered' && !run.final_url ? (
+              // Delivered but no video URL = the render finished but the upload didn't
+              // land. Don't show the live "Producing" tracker forever — surface it
+              // honestly with a way to retry.
+              <div className="mt-6 rounded-2xl border border-amber/30 bg-amber/[0.06] px-5 py-8 text-center">
+                <p className="font-medium text-ink">The video finished, but the upload didn’t complete.</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  This is usually a transient storage hiccup. Starting a fresh build almost always fixes it.
+                </p>
+                <Link
+                  href="/"
+                  className="mt-4 inline-flex items-center justify-center rounded-lg bg-amber px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+                >
+                  Start a new build
+                </Link>
+              </div>
             ) : run.status === 'failed' ? (
               <div className="mt-6 rounded-2xl border border-red-100 bg-red-50 px-5 py-8 text-center">
                 <p className="font-medium text-red-700">This build failed.</p>
