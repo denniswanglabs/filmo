@@ -10,22 +10,22 @@ const STEPS: readonly Step[] = [
   {
     n: 1,
     title: 'Read your page',
-    body: 'Filmo opens your real product and runs a Conversion Read — scoring promise, proof, specificity, and CTA.',
+    body: 'Filmo opens your real site and runs a Conversion Read on NVIDIA Nemotron — pulling your real name, colors, logo, stats and story, and scoring six dimensions of how the page converts.',
   },
   {
     n: 2,
     title: 'Plan the cut',
-    body: 'Nemotron turns that diagnosis into a scene-by-scene launch storyboard, fixing what the page failed to say.',
+    body: 'Nemotron turns that read into a scene-by-scene storyboard with a voiceover script written from your real facts — never invented copy.',
   },
   {
     n: 3,
-    title: 'Price & produce',
-    body: 'It prices the job, captures your live UI, and animates structured, fully editable scenes.',
+    title: 'Fill the patterns',
+    body: 'Your facts flow into a hand-curated library of designer-made motion patterns — harvested from real Luceo Studio launch films, not improvised per video. The right pattern follows your story: stats become a stat scene, steps a process flow, a quote a pull-quote.',
   },
   {
     n: 4,
-    title: 'Ship the MP4',
-    body: 'You get a finished 1080p video — ready for Product Hunt, X, or your hero section.',
+    title: 'Render & ship',
+    body: 'Remotion renders it with your real logo and an AI voiceover into a finished 1080p MP4 — ready for Product Hunt, X, or your hero section, in minutes.',
   },
 ]
 
@@ -40,15 +40,11 @@ export default function HowItWorks({ showBadge = true }: { showBadge?: boolean }
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">
-          {showBadge && (
-            <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
-              How it works
-            </span>
-          )}
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
+          {showBadge && <span className="eyebrow">How it works</span>}
+          <h2 className="section-title mt-4">
             Four steps, fully autonomous.
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-[#5A6472]">
+          <p className="section-lede mx-auto max-w-xl">
             No brief, no timeline, no editor. Paste your URL and Filmo does the rest.
           </p>
         </Reveal>
@@ -63,7 +59,7 @@ export default function HowItWorks({ showBadge = true }: { showBadge?: boolean }
               as="li"
               key={step.n}
               index={i}
-              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:border-[#B9D2F8]"
+              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:-translate-y-0.5 hover:border-[#B9D2F8] hover:shadow-[0_28px_70px_-34px_rgba(30,58,120,0.28)]"
             >
               <span className="grid h-9 w-9 place-items-center rounded-full bg-amber-soft text-sm font-semibold text-[#2563EB]">
                 {step.n}
@@ -73,6 +69,21 @@ export default function HowItWorks({ showBadge = true }: { showBadge?: boolean }
             </RevealItem>
           ))}
         </RevealGroup>
+
+        {/* "The engine" — the sponsor stack that orchestrates the pipeline above.
+            Accurate framing: Hermes is the agent HARNESS (orchestration runtime),
+            Nemotron is the reasoning BRAIN, NemoClaw is the sandbox the production
+            runs inside, Stripe is TEST-mode payment. No real-charge / metric claims. */}
+        <Reveal className="mx-auto mt-12 max-w-3xl">
+          <p className="rounded-2xl border border-[#D4E2FB] bg-white/70 px-6 py-5 text-center text-sm leading-relaxed text-[#5A6472]">
+            <span className="font-semibold text-[#0E1320]">The engine.</span>{' '}
+            Filmo runs as a Hermes agent that orchestrates this pipeline — reasoning
+            on <span className="font-medium text-[#0E1320]">NVIDIA Nemotron</span>,
+            sealed inside <span className="font-medium text-[#0E1320]">NVIDIA NemoClaw</span>,
+            with <span className="font-medium text-[#0E1320]">Stripe</span> (test mode)
+            for payment.
+          </p>
+        </Reveal>
       </div>
     </section>
   )

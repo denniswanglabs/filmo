@@ -13,7 +13,7 @@ import SiteFooter from '../components/landing/SiteFooter'
 export const metadata = {
   title: 'How it works — Filmo',
   description:
-    'How Filmo turns a URL into a finished launch video: it reads your product, runs a Conversion Read, plans the cut, prices the job, and ships a real MP4.',
+    'How Filmo turns a URL into a finished launch video: it reads your product on NVIDIA Nemotron, plans the cut, fills your real facts into a curated library of designer-made motion patterns, and renders a real MP4 with Remotion.',
 }
 
 export default function HowItWorksPage() {
@@ -25,15 +25,13 @@ export default function HowItWorksPage() {
       <header className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60">
         <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
         <div className="relative z-10 mx-auto max-w-3xl px-5 pb-16 pt-28 text-center sm:pt-36">
-          <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
-            How it works
-          </span>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-[#0E1320] sm:text-5xl">
+          <span className="eyebrow">How it works</span>
+          <h1 className="section-title mt-4 sm:text-5xl sm:leading-[1.08]">
             From a link to a launch video.
           </h1>
-          <p className="mx-auto mt-4 max-w-xl text-lg text-[#5A6472]">
-            Paste your URL and Filmo reads your real product, diagnoses how it converts,
-            plans the cut, prices the job, and ships a finished MP4 — on autopilot.
+          <p className="section-lede mx-auto max-w-xl text-lg">
+            Paste your URL. Filmo reads your product on NVIDIA Nemotron, plans the cut, fills your
+            real facts into a curated library of designer-made patterns, and renders a finished MP4.
           </p>
         </div>
       </header>
