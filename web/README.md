@@ -1,11 +1,11 @@
-# Filmo / Walk Studio — web
+# Filmo — web
 
-Next.js 15 (App Router) frontend for Walk Studio. Paste a URL → the agent reads your
+Next.js 15 (App Router) frontend for Filmo. Paste a URL → the agent reads your
 product, plans the cut, prices the job, takes payment, and ships a finished video.
 Backend is InsForge; the Railway worker drives the pipeline.
 
-- **Live:** https://walkstudioprojects.vercel.app
-- **Stack:** Next.js 15 · React 19 · Tailwind 3.4 · `@insforge/sdk`
+- **Live:** https://filmostudio.vercel.app
+- **Stack:** Next.js 15 · React 19 · Tailwind 3.4 · `@insforge/sdk` · `@remotion/player`
 
 ## Run locally
 
@@ -29,7 +29,7 @@ build — the machinery behind the magic — without cluttering the consumer UI.
 Open the dev link (replace the placeholder with the real key):
 
 ```
-https://walkstudioprojects.vercel.app/inside?key=YOUR_DEV_KEY
+https://filmostudio.vercel.app/inside?key=YOUR_DEV_KEY
 ```
 
 What happens:
@@ -50,7 +50,7 @@ Once paired, open the **featured canonical run** (real data, baked in so the dem
 depends on a live build behaving):
 
 ```
-https://walkstudioprojects.vercel.app/inside/featured-stripe
+https://filmostudio.vercel.app/inside/featured-stripe
 ```
 
 It renders four things:

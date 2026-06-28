@@ -35,8 +35,10 @@ Filmo is an AI Product Launch Producer (hosted SaaS) for the **Hermes × NVIDIA 
 ## Keys / data
 - OpenRouter/ElevenLabs/NVIDIA keys in `~/.hermes/.env`. InsForge admin key in `web/.env.local` (`INSFORGE_API_KEY` bypasses RLS — use `@insforge/sdk createAdminClient` to query `runs`, joined to `auth.users`).
 
-## Current branches
-- `landing-polish` = active web+pipeline work (deployed to Vercel). `hosted-saas` = worker deploy source. `cards` = original treatment branch (merged into landing-polish). `main` = the `hermes-video-agent` worktree.
+## Repo + branches
+- **GitHub repo = `denniswanglabs/filmo`** (renamed from `walk-studio` 2026-06-28; the old URL auto-redirects). Will be flipped PUBLIC for the submission (not yet — scrub internal `*.md` docs first).
+- **★ Rename scope — DO NOT rename these (live infra, would break deploys):** the local dir `walk-studio-hosted`, the Railway **service** `walk-studio-hosted`, and the InsForge storage **bucket** `walk-videos`. Only the GitHub repo name + display/brand text changed to Filmo.
+- Branches: `landing-polish` = active web+pipeline work (deployed to Vercel). `hosted-saas` = worker deploy source (Railway). `cards` = original treatment branch (merged into landing-polish). `main` = the `hermes-video-agent` worktree.
 
 ## Latest handoff
 See the newest `HANDOFF-*.md` in this dir for in-progress state.
