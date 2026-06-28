@@ -1,8 +1,8 @@
 {
-  "name": "worker",
+  "name": "filmo-worker",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Filmo Railway worker: polls InsForge jobs and drives the Python video pipeline.",
+  "main": "run.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

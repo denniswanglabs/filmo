@@ -1,4 +1,4 @@
-# Walk Studio cloud worker image.
+# Filmo cloud worker image.
 # Bundles the python pipeline (build_runner.py + deps) and the Node worker (run.js)
 # into one container for Railway. Standard quality only for v1: Remotion render +
 # Playwright capture + edge-tts VO + whisper word-timing (no NemoClaw, no Higgsfield).
