@@ -80,7 +80,7 @@ export default function InsideRunPage() {
   const params = useParams<{ runId: string }>()
   const runId = params?.runId
   const router = useRouter()
-  const { user, loading } = useAuth()
+  const { user, loading, getToken } = useAuth()
 
   const [gate, setGate] = useState<Gate>('checking')
   const [view, setView] = useState<InsideView | null>(null)
@@ -92,13 +92,14 @@ export default function InsideRunPage() {
       setView(fromFeatured(FEATURED_RUN))
       return
     }
-    const res = await readInsideRun(runId)
+    const accessToken = await getToken()
+    const res = accessToken ? await readInsideRun({ runId, accessToken }) : null
     if (!res) {
       setNotFound(true)
       return
     }
     setView(fromLiveRun(res.run))
-  }, [runId])
+  }, [runId, getToken])
 
   // Gate on the developer flag once auth resolves. Non-developers bounce to /inside.
   useEffect(() => {
@@ -112,7 +113,8 @@ export default function InsideRunPage() {
         }
         return
       }
-      const dev = await isDeveloper(user.id)
+      const accessToken = await getToken()
+      const dev = accessToken ? await isDeveloper(accessToken) : false
       if (cancelled) return
       if (!dev) {
         setGate('denied')
@@ -125,7 +127,7 @@ export default function InsideRunPage() {
     return () => {
       cancelled = true
     }
-  }, [loading, user, router, load])
+  }, [loading, user, router, load, getToken])
 
   if (loading || gate === 'checking') {
     return <div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>

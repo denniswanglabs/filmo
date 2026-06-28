@@ -17,7 +17,7 @@ type Status = 'idle' | 'pairing' | 'ok' | 'rejected' | 'signin'
 function InsideInner() {
   const router = useRouter()
   const search = useSearchParams()
-  const { user, loading, signInWithGoogle } = useAuth()
+  const { user, loading, signInWithGoogle, getToken } = useAuth()
 
   const [key, setKey] = useState('')
   const [status, setStatus] = useState<Status>('idle')
@@ -26,13 +26,19 @@ function InsideInner() {
 
   // Run the server-side validation + pairing for the signed-in user.
   const pair = useCallback(
-    async (rawKey: string, userId: string) => {
+    async (rawKey: string) => {
       const k = rawKey.trim()
       if (!k) return
       setStatus('pairing')
       setError(null)
       try {
-        const { ok } = await pairDeveloper({ key: k, userId })
+        const accessToken = await getToken()
+        if (!accessToken) {
+          setStatus('rejected')
+          setError('Please sign in first, then enter your key.')
+          return
+        }
+        const { ok } = await pairDeveloper({ key: k, accessToken })
         if (ok) {
           setStatus('ok')
           try {
@@ -49,7 +55,7 @@ function InsideInner() {
         setError('Could not reach the pairing service. Try again.')
       }
     },
-    [],
+    [getToken],
   )
 
   // Capture a `?key=` from the URL into the field (so the form reflects a shared link),
@@ -87,7 +93,7 @@ function InsideInner() {
 
     autoRan.current = true
     if (user) {
-      void pair(candidate, user.id)
+      void pair(candidate)
     }
     // If not signed in, we wait for an explicit "Pair" click (or a resume=1 return) so we
     // don't redirect a judge unexpectedly on first paint.
@@ -99,7 +105,7 @@ function InsideInner() {
     const k = key.trim()
     if (!k) return
     if (user) {
-      void pair(k, user.id)
+      void pair(k)
       return
     }
     // Logged out: stash the key and route through Google sign-in, returning to ?resume=1.

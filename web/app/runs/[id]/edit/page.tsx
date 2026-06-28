@@ -21,7 +21,7 @@ export default function EditRunPage() {
   const params = useParams<{ id: string }>()
   const runId = params?.id
   const router = useRouter()
-  const { user, loading } = useAuth()
+  const { user, loading, getToken } = useAuth()
 
   const [run, setRun] = useState<Run | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -30,6 +30,10 @@ export default function EditRunPage() {
   // to "Done — updated preview on the right."
   const [editedRenderSignal, setEditedRenderSignal] = useState(0)
   const lastEditedUrl = useRef<string | null | undefined>(undefined)
+  // A re-render clears edited_url to null first (requestReRender), then writes the new
+  // url. Track that null-clear so we resolve the pending bubble even when the new url is
+  // byte-identical to the old one (an idempotent re-render to the same storage key).
+  const sawEditedNull = useRef(false)
 
   useEffect(() => {
     if (loading || !user || !runId) return
@@ -73,8 +77,15 @@ export default function EditRunPage() {
         lastEditedUrl.current = url
         return
       }
-      if (url && url !== lastEditedUrl.current) {
+      if (url === null) {
+        // The re-render just cleared it; remember so we fire even on an unchanged url.
+        sawEditedNull.current = true
+        return
+      }
+      // url is non-null: a render landed if it changed OR we saw the null-clear since.
+      if (url !== lastEditedUrl.current || sawEditedNull.current) {
         lastEditedUrl.current = url
+        sawEditedNull.current = false
         setEditedRenderSignal((n) => n + 1)
       }
     }, 3000)
@@ -125,9 +136,11 @@ export default function EditRunPage() {
   const handleSave = useCallback(
     async (props: unknown) => {
       if (!run || !user) return { ok: false, error: 'not ready' }
-      return saveEditedProps({ runId: run.id, userId: user.id, props })
+      const accessToken = await getToken()
+      if (!accessToken) return { ok: false, error: 'not signed in' }
+      return saveEditedProps({ runId: run.id, accessToken, props })
     },
-    [run, user]
+    [run, user, getToken]
   )
 
   // Export = persist the current edits, then enqueue a `rerender` job that produces
@@ -135,11 +148,13 @@ export default function EditRunPage() {
   const handleExport = useCallback(
     async (props: unknown) => {
       if (!run || !user) return { ok: false, error: 'not ready' }
-      const saved = await saveEditedProps({ runId: run.id, userId: user.id, props })
+      const accessToken = await getToken()
+      if (!accessToken) return { ok: false, error: 'not signed in' }
+      const saved = await saveEditedProps({ runId: run.id, accessToken, props })
       if (saved.ok === false) return saved
-      return requestReRender({ runId: run.id, userId: user.id })
+      return requestReRender({ runId: run.id, accessToken })
     },
-    [run, user]
+    [run, user, getToken]
   )
 
   // Chat edit = natural-language request -> editViaChat server action (LLM
@@ -148,9 +163,11 @@ export default function EditRunPage() {
   const handleChatEdit = useCallback(
     async (message: string) => {
       if (!run || !user) return { ok: false, kind: 'error' as const, message: 'Not ready.' }
-      return editViaChat({ runId: run.id, userId: user.id, message })
+      const accessToken = await getToken()
+      if (!accessToken) return { ok: false, kind: 'error' as const, message: 'Not signed in.' }
+      return editViaChat({ runId: run.id, accessToken, message })
     },
-    [run, user]
+    [run, user, getToken]
   )
 
   const handleBack = useCallback(() => {
