@@ -352,71 +352,9 @@ class TestProducerFlag(unittest.TestCase):
         without = producer.cmd_estimate(_plan(selection=None))
         self.assertEqual(with_sel, without)
 
-    def test_on_path_standard_drops_media_cogs_prices_in_band(self):
-        os.environ["WS_PREMIUM_MENU"] = "1"
-        on = producer.cmd_estimate(_plan(selection={"quality": "standard", "brain": "super-free"}))
-        self.assertEqual(on["pricing_mode"], "cost_plus")
-        self.assertEqual(on["quality"], "standard")
-        self.assertEqual(on["menu"]["model"], "dynamic_banded")
-        # standard drops the cinematic (22) + VO (30) media cogs; super-free token = 0.
-        self.assertEqual(on["token_cost_cents"], 0)
-        self.assertEqual(on["production_budget_cents"], 0)   # no paid media + 0 token
-        # 2 scenes, 9s total -> base only -> band floor $5.00.
-        self.assertEqual(on["suggested_price_cents"], STD_MIN)
-        self.assertGreaterEqual(on["suggested_price_cents"], on["production_budget_cents"])
-        # The per-scene estimate report is left intact (gate reasoning unchanged).
-        self.assertEqual([s["id"] for s in on["scenes"]], ["a", "t"])
-        self.assertEqual(on["scenes"][0]["est_cost_cents"], 22)
-
-    def test_on_path_premium_keeps_cogs_and_prices_in_premium_band(self):
-        os.environ["WS_PREMIUM_MENU"] = "1"
-        on = producer.cmd_estimate(_plan(selection={"quality": "premium", "brain": "super-free"}))
-        self.assertEqual(on["quality"], "premium")
-        # premium keeps the 52c media spend, floored to the premium cogs_floor (100c);
-        # super-free token = 0 -> budget = 100.
-        self.assertEqual(on["token_cost_cents"], 0)
-        self.assertEqual(on["production_budget_cents"], PREMIUM_COGS_FLOOR)
-        # Price is in the PREMIUM band, strictly above any standard price.
-        self.assertGreaterEqual(on["suggested_price_cents"], PREM_MIN)
-        self.assertLessEqual(on["suggested_price_cents"], PREM_MAX)
-        self.assertGreater(on["suggested_price_cents"], STD_MAX)
-        # SACRED: price covers COGS.
-        self.assertGreaterEqual(on["suggested_price_cents"], on["production_budget_cents"])
-        self.assertNotIn("price_below_cogs_warning", on)
-
-    def test_on_path_premium_paid_brain_folds_token_cogs(self):
-        os.environ["WS_PREMIUM_MENU"] = "1"
-        on = producer.cmd_estimate(_plan(selection={"quality": "premium", "brain": "ultra-paid"}))
-        # Token COGS is non-zero for a paid brain and folds into the budget ceiling.
-        self.assertGreaterEqual(on["token_cost_cents"], 1)
-        # budget = media floor (100) + token cost.
-        self.assertEqual(on["production_budget_cents"], PREMIUM_COGS_FLOOR + on["token_cost_cents"])
-        # Token cost also shows up as a price line item.
-        keys = {li["key"] for li in on["menu"]["line_items"]}
-        self.assertIn("tokens", keys)
-        self.assertGreaterEqual(on["suggested_price_cents"], on["production_budget_cents"])
-
-    def test_on_path_default_selection_when_plan_omits_it(self):
-        os.environ["WS_PREMIUM_MENU"] = "1"
-        on = producer.cmd_estimate(_plan(selection=None))
-        self.assertEqual(on["menu"]["model"], "dynamic_banded")
-        self.assertEqual(on["quality"], "standard")                  # default
-        self.assertGreaterEqual(on["suggested_price_cents"], STD_MIN)
-        self.assertLessEqual(on["suggested_price_cents"], STD_MAX)
-        self.assertEqual(on["production_budget_cents"], 0)
-
-    def test_on_path_price_scales_with_storyboard(self):
-        os.environ["WS_PREMIUM_MENU"] = "1"
-        small = producer.cmd_estimate(_plan(
-            scenes=[{"id": "t", "type": "title", "model": None, "duration_s": 3, "brief": "b"},
-                    {"id": "m", "type": "motion_graphic", "model": None, "duration_s": 4, "brief": "b"}],
-            selection={"quality": "standard", "brain": "super-free"}))
-        big = producer.cmd_estimate(_plan(
-            scenes=[{"id": "s%d" % i, "type": "motion_graphic", "model": None,
-                     "duration_s": 6, "brief": "b"} for i in range(8)],
-            selection={"quality": "standard", "brain": "super-free"}))
-        # More scenes + longer duration -> a higher (or equal-at-ceiling) price.
-        self.assertGreater(big["suggested_price_cents"], small["suggested_price_cents"])
+    # NOTE: the premium "cost-plus menu" was RETIRED — there is now a SINGLE coherent
+    # pricing tier, so the former on-path (WS_PREMIUM_MENU=1) tests were removed.
+    # producer.cmd_estimate is always the single-tier path the two tests above assert.
 
 
 # ===========================================================================

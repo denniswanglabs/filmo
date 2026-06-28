@@ -62,7 +62,6 @@ export async function createBuild(input: {
   url: string
   goal?: string
   emphasis?: string
-  quality?: 'standard' | 'premium'
   brain?: string
   mode?: 'mock' | 'real'
   // Opt-in HUMAN payment: 'auto' (default) lets the worker auto-resolve payment
@@ -96,7 +95,9 @@ export async function createBuild(input: {
   }
 
   // Whitelist every client-supplied param (never forward raw — the worker trusts these).
-  const quality: 'standard' | 'premium' = input.quality === 'premium' ? 'premium' : 'standard'
+  // Single coherent tier: every video is produced the same way. `quality` is pinned to
+  // 'standard' (kept only to satisfy the existing runs/jobs schema + worker param contract).
+  const quality = 'standard' as const
   const brain = input.brain && ALLOWED_BRAINS.has(input.brain) ? input.brain : 'super-free'
   const mode: 'mock' | 'real' = input.mode === 'real' ? 'real' : 'mock'
   let payMode: 'auto' | 'human' = input.payMode === 'human' ? 'human' : 'auto'

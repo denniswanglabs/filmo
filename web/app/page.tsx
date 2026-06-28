@@ -25,7 +25,6 @@ const PENDING_KEY = 'ws_pending_build'
 
 interface PendingBuild {
   url: string
-  quality: 'standard' | 'premium'
   brain: string
   // Opt-in: require a REAL Stripe TEST payment before the build proceeds. Default
   // false so the normal quick demo still auto-pays.
@@ -38,7 +37,6 @@ export default function Home() {
 
   // Composer state
   const [url, setUrl] = useState('')
-  const [quality, setQuality] = useState<'standard' | 'premium'>('standard')
   // Default to the flagship paid Ultra; Super (free) stays selectable in the dropdown.
   const [brain, setBrain] = useState<string>('ultra-paid')
   // Opt-in human-pays toggle (default OFF → normal demo auto-pays).
@@ -98,7 +96,6 @@ export default function Home() {
         const { runId } = await createBuild({
           accessToken,
           url: p.url.trim(),
-          quality: p.quality,
           brain: p.brain,
           mode: 'mock',
           payMode: p.requirePay ? 'human' : 'auto',
@@ -113,8 +110,8 @@ export default function Home() {
   )
 
   const currentPending = useCallback(
-    (): PendingBuild => ({ url, quality, brain, requirePay }),
-    [url, quality, brain, requirePay],
+    (): PendingBuild => ({ url, brain, requirePay }),
+    [url, brain, requirePay],
   )
 
   function stashPending() {
@@ -151,7 +148,6 @@ export default function Home() {
     }
     // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
     setUrl(p.url ?? '')
-    setQuality(p.quality ?? 'standard')
     setBrain(p.brain ?? 'ultra-paid')
     setRequirePay(p.requirePay ?? false)
     if (user) void runBuild(p)
@@ -232,27 +228,7 @@ export default function Home() {
               </div>
             </label>
 
-            <div className="mt-5">
-              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Quality</span>
-              <div className="inline-flex rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] p-0.5">
-                {(['standard', 'premium'] as const).map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => setQuality(q)}
-                    className={`rounded-[7px] px-4 py-1.5 text-sm font-medium capitalize transition ${
-                      quality === q
-                        ? 'bg-amber text-white shadow-sm'
-                        : 'text-[#5A6472] hover:text-[#0E1320]'
-                    }`}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4 border-t border-[#EAF1FF] pt-4">
+            <div className="mt-5 border-t border-[#EAF1FF] pt-4">
               <button
                 type="button"
                 onClick={() => setAdvancedOpen((o) => !o)}

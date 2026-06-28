@@ -1,0 +1,47 @@
+{
+  "_comment": "Minimal hand-authored brand_theme fixture for Stripe, matching the Orinovate fixture shape consumed by style_fill.py. Used for the Linux render smoke test.",
+  "brand": "Stripe",
+  "wordmark": "Stripe",
+  "tagline": "Payments infrastructure for the internet",
+  "palette": {
+    "bg": "#ffffff",
+    "bgCard": "#ffffff",
+    "bgCardRaised": "#f6f9fc",
+    "navy": "#0a2540",
+    "navyBright": "#425466",
+    "accent": "#635bff",
+    "ok": "#00d924",
+    "text": "#0a2540",
+    "textMuted": "#425466",
+    "textDim": "#8898aa",
+    "border": "#e6ebf1"
+  },
+  "fonts": {
+    "fontPrimary": "Inter, system-ui, -apple-system, sans-serif",
+    "fontMono": "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "fontDisplay": "Inter, system-ui, sans-serif"
+  },
+  "features": [
+    {
+      "label": "Payments",
+      "value": "135+",
+      "sub": "Currencies and methods",
+      "accent": true
+    },
+    {
+      "label": "Billing",
+      "sub": "Subscriptions / Invoicing"
+    },
+    {
+      "label": "Connect",
+      "sub": "Marketplaces / Platforms"
+    },
+    {
+      "label": "Radar",
+      "sub": "Fraud prevention / ML"
+    }
+  ],
+  "cta_url": "stripe.com",
+  "logo_src": "/root/filmo-pipeline/branding/stripe-logo.svg",
+  "logo_source": "captured-real-wordmark"
+}
