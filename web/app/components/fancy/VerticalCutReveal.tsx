@@ -4,12 +4,13 @@
 // Filmo: imports swapped from "motion/react" -> "framer-motion" (the package we use)
 // and AnimationOptions -> Transition. Otherwise the registry source verbatim.
 
-import { motion, type Transition } from 'framer-motion'
+import { motion, useReducedMotion, type Transition } from 'framer-motion'
 import {
   forwardRef,
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -69,7 +70,11 @@ const VerticalCutReveal = forwardRef<VerticalCutRevealRef, TextProps>(
   ) => {
     const containerRef = useRef<HTMLSpanElement>(null)
     const text = typeof children === 'string' ? children : children?.toString() || ''
+    const [mounted, setMounted] = useState(false)
+    const reduced = useReducedMotion()
     const [isAnimating, setIsAnimating] = useState(false)
+
+    useLayoutEffect(() => setMounted(true), [])
 
     const splitIntoCharacters = (text: string): string[] => {
       if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
@@ -132,11 +137,11 @@ const VerticalCutReveal = forwardRef<VerticalCutRevealRef, TextProps>(
       reset: () => setIsAnimating(false),
     }))
 
-    useEffect(() => {
-      if (autoStart) {
+    useLayoutEffect(() => {
+      if (mounted && !reduced && autoStart) {
         startAnimation()
       }
-    }, [autoStart, startAnimation])
+    }, [mounted, reduced, autoStart, startAnimation])
 
     const variants = {
       hidden: { y: reverse ? '-100%' : '100%' },
@@ -148,6 +153,8 @@ const VerticalCutReveal = forwardRef<VerticalCutRevealRef, TextProps>(
         },
       }),
     }
+
+    const motionActive = mounted && !reduced
 
     return (
       <span
@@ -186,8 +193,8 @@ const VerticalCutReveal = forwardRef<VerticalCutRevealRef, TextProps>(
                 >
                   <motion.span
                     custom={previousCharsCount + charIndex}
-                    initial="hidden"
-                    animate={isAnimating ? 'visible' : 'hidden'}
+                    initial={motionActive ? 'hidden' : 'visible'}
+                    animate={!motionActive || isAnimating ? 'visible' : 'hidden'}
                     variants={variants}
                     onAnimationComplete={
                       wordIndex === array.length - 1 &&

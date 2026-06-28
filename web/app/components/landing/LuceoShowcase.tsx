@@ -6,7 +6,7 @@
 // Studio customers.
 
 import { useRef } from 'react'
-import { Reveal, RevealGroup, RevealItem, Parallax } from './Motion'
+import { Reveal, RevealGroup, RevealItem, SlidingPanel } from './Motion'
 
 interface Film {
   /** unique key */
@@ -75,7 +75,7 @@ function VideoCard({ film }: { film: Film }) {
     <figure
       onMouseEnter={play}
       onMouseLeave={reset}
-      className="group overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:border-[#B9D2F8]"
+      className="group overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:-translate-y-0.5 hover:border-[#B9D2F8] hover:shadow-[0_28px_70px_-34px_rgba(30,58,120,0.28)]"
     >
       <div className="relative">
         <video
@@ -100,9 +100,9 @@ function VideoCard({ film }: { film: Film }) {
           </span>
         </div>
       </div>
-      <figcaption className="p-5">
-        <p className="font-semibold text-[#0E1320]">{film.title}</p>
-        <p className="mt-1 text-sm text-[#5A6472]">{film.descriptor}</p>
+      <figcaption className="p-5 sm:p-6">
+        <p className="font-semibold tracking-tight text-[#0E1320]">{film.title}</p>
+        <p className="mt-1.5 text-sm leading-relaxed text-[#5A6472]">{film.descriptor}</p>
       </figcaption>
     </figure>
   )
@@ -110,19 +110,15 @@ function VideoCard({ film }: { film: Film }) {
 
 export default function LuceoShowcase() {
   return (
-    <section id="luceo" className="panel panel--dark px-5 py-20 sm:py-24">
-      {/* Blue glass top edge — our signature on the rounded panel lip. */}
-      <span aria-hidden="true" className="panel__edge" />
+    <SlidingPanel id="luceo" className="panel panel--stage px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         {/* Section header */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
-            The taste behind the engine
-          </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
+          <span className="eyebrow">The taste behind the engine</span>
+          <h2 className="section-title mt-4">
             Built on Luceo Studio&rsquo;s launch films.
           </h2>
-          <p className="mx-auto mt-3 text-[#5A6472]">
+          <p className="section-lede mx-auto max-w-lg">
             Filmo takes its cues from the curated film library of Luceo Studio — a real
             launch-film studio. Every generated cut inherits that craft: deliberate pacing, kinetic
             typography, and a studio&rsquo;s eye for making a product feel inevitable.
@@ -131,11 +127,9 @@ export default function LuceoShowcase() {
 
         {/* Film cards */}
         <RevealGroup className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-2">
-          {FILMS.map((film) => (
-            <RevealItem key={film.slug}>
-              <Parallax range={[10, -10]} scaleRange={[0.98, 1]}>
-                <VideoCard film={film} />
-              </Parallax>
+          {FILMS.map((film, i) => (
+            <RevealItem key={film.slug} index={i}>
+              <VideoCard film={film} />
             </RevealItem>
           ))}
         </RevealGroup>
@@ -156,6 +150,6 @@ export default function LuceoShowcase() {
           </a>
         </p>
       </div>
-    </section>
+    </SlidingPanel>
   )
 }

@@ -19,6 +19,7 @@ export function Wordmark({
   className = '',
   tone = 'dark',
   inkClassName,
+  size = 'default',
 }: {
   className?: string
   /** 'dark' = dark ink for LIGHT backgrounds (default); 'light' = near-white ink for DARK backgrounds. */
@@ -26,13 +27,17 @@ export function Wordmark({
   /** Optional exact text-color class for the word; overrides the tone default
    *  (used by callers that need a specific dark-ink hex, e.g. #0E1320). */
   inkClassName?: string
+  /** 'nav' = larger icon + word for the floating landing nav. */
+  size?: 'default' | 'nav'
 }) {
   const inkClass = inkClassName ?? (tone === 'light' ? 'text-white' : 'text-ink')
+  const iconClass = size === 'nav' ? 'h-9 w-9 sm:h-10 sm:w-10' : 'h-7 w-7'
+  const textClass = size === 'nav' ? 'text-[2rem] sm:text-[2.25rem]' : 'text-[1.6rem]'
   return (
-    <span className={`inline-flex items-center gap-1.5 font-semibold tracking-tight ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 font-semibold tracking-tight sm:gap-2 ${className}`}>
       {/* Soft organic mark — abstract, no tile/border (Filmo). Blue dot sits
           centered against the rounded blob; sized to match the enlarged word. */}
-      <svg aria-hidden viewBox="14 13 56 56" className="h-7 w-7 shrink-0">
+      <svg aria-hidden viewBox="14 13 56 56" className={`${iconClass} shrink-0`}>
         <path
           fillRule="evenodd"
           fill="#3B82F6"
@@ -41,7 +46,7 @@ export function Wordmark({
       </svg>
       {/* Enlarged "Filmo" wordmark — explicit size so it reads large in the nav,
           and stays balanced wherever Wordmark is reused (/login, /runs TopBar). */}
-      <span className={`text-[1.6rem] leading-none ${inkClass}`}>Filmo</span>
+      <span className={`${textClass} leading-none ${inkClass}`}>Filmo</span>
     </span>
   )
 }

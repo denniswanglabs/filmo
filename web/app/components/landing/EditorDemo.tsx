@@ -28,7 +28,7 @@
 // JS-driven size pills (titleSize / subSize counted up in the setInterval).
 // `prefers-reduced-motion` freezes a clean, legible mid-edit static frame.
 
-import { Reveal } from './Motion'
+import { Reveal, SlidingPanel } from './Motion'
 import { useEffect, useState } from 'react'
 
 // Beat 4 title edit — char-by-char at ~60 wpm (60*5 keystrokes/min = 5/s = 200ms
@@ -100,16 +100,15 @@ export default function EditorDemo() {
   }, [])
 
   return (
-    <section id="editor-demo" className="panel panel--lit px-5 py-20 sm:py-24">
-      {/* Blue glass top edge — our signature on the rounded panel lip. */}
-      <span aria-hidden="true" className="panel__edge" />
+    <SlidingPanel id="editor-demo" className="panel panel--lit px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-5xl">
         {/* Section header */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
+          <span className="eyebrow">The editor</span>
+          <h2 className="section-title mt-4">
             Yours to fine-tune.
           </h2>
-          <p className="mx-auto mt-3 text-[#5A6472]">
+          <p className="section-lede mx-auto max-w-lg">
             Every cut ships as structured, editable scenes — drag a headline bigger,
             nudge the subtitle, or retype the copy and watch the preview update live.
             No timeline wrangling, no re-render wait.
@@ -698,6 +697,6 @@ export default function EditorDemo() {
           }
         }
       `}</style>
-    </section>
+    </SlidingPanel>
   )
 }

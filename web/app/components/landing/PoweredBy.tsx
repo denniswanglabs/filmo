@@ -35,7 +35,7 @@ const CREDITS: Credit[] = [
 export default function PoweredBy({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2.5 sm:justify-start sm:gap-x-6 sm:gap-y-3">
         <span className="text-xs font-medium uppercase tracking-wide text-[#8A94A6]">
           Powered by
         </span>
@@ -60,8 +60,8 @@ export default function PoweredBy({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="rounded-2xl border border-[#D4E2FB] bg-white/70 px-8 py-7 ring-1 ring-inset ring-[#EAF1FF]">
-      <p className="mb-5 text-center text-sm font-medium uppercase tracking-[0.14em] text-[#8A94A6]">
+    <div className="rounded-2xl border border-[#D4E2FB] bg-white/80 px-8 py-7 ring-1 ring-inset ring-[#EAF1FF] backdrop-blur-sm">
+      <p className="mb-5 text-center text-xs font-medium uppercase tracking-[0.14em] text-[#8A94A6]">
         Powered by
       </p>
       <div className="flex flex-wrap items-center justify-center gap-x-12 gap-y-6">

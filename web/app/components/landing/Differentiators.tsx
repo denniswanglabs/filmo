@@ -88,13 +88,11 @@ export default function Differentiators() {
       <div className="mx-auto max-w-5xl">
         {/* Section header (centered) */}
         <Reveal className="mx-auto max-w-xl text-center">
-          <span className="inline-block rounded-full border border-amber-line bg-amber-soft px-3 py-1 text-xs font-medium text-[#2563EB]">
-            Why Filmo
-          </span>
-          <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0E1320] sm:text-4xl">
+          <span className="eyebrow">Why Filmo</span>
+          <h2 className="section-title mt-4">
             Not another random-pixel generator.
           </h2>
-          <p className="mx-auto mt-3 text-[#5A6472]">
+          <p className="section-lede mx-auto max-w-xl">
             Most AI video tools hallucinate footage. Filmo is grounded in
             your actual product — so the video is true, on-brand, and editable.
           </p>
@@ -105,7 +103,7 @@ export default function Differentiators() {
           {FEATURES.map((f) => (
             <RevealItem
               key={f.title}
-              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:border-[#B9D2F8]"
+              className="rounded-2xl border border-[#D4E2FB] bg-white p-6 shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:-translate-y-0.5 hover:border-[#B9D2F8] hover:shadow-[0_28px_70px_-34px_rgba(30,58,120,0.28)]"
             >
               <span className="grid h-11 w-11 place-items-center rounded-xl bg-amber-soft text-[#2563EB]">
                 <span className="h-6 w-6">{f.icon}</span>

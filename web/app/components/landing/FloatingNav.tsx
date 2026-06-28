@@ -1,20 +1,19 @@
 'use client'
 
-// Hera-style floating pill nav for the DARK landing only. A centered, rounded,
-// translucent-dark bar that floats over the stage and grows more opaque + blurred
-// once the page is scrolled. Filmo wordmark (left), anchor links (center),
-// Sign in / Build CTA (right). Wired to the existing auth (Sign in / Sign out),
-// matching TopBar's behavior — but TopBar itself is untouched (it still serves
-// /runs/[id] in light theme).
-
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../lib/auth'
+import { scrollToHeroComposer } from './Motion'
 import { Wordmark } from '../Brand'
 
-// Prefer a real display name (Google account) over the raw email; fall back to the
-// email's local part (before @). Keeps the bar reading as a person, not an address.
+const NAV_LINKS = [
+  { href: '/#examples', label: 'Examples', kind: 'hash' as const },
+  { href: '/#editor-demo', label: 'Editor', kind: 'hash' as const },
+  { href: '/#lookbook', label: 'Patterns', kind: 'hash' as const },
+  { href: '/how-it-works', label: 'How it works', kind: 'route' as const },
+] as const
+
 function displayName(user: { email?: string; [k: string]: unknown }): string {
   const meta = user.user_metadata as Record<string, unknown> | undefined
   const name =
@@ -27,95 +26,162 @@ function displayName(user: { email?: string; [k: string]: unknown }): string {
   return email.split('@')[0] || email
 }
 
-export default function FloatingNav() {
+function scrollToHash(href: string) {
+  const hash = href.split('#')[1]
+  if (!hash) return
+  const el = document.getElementById(hash)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  window.location.href = href
+}
+
+interface FloatingNavProps {
+  /** When logged in, nav Build stays disabled until URL is valid. Logged-out Build always opens auth. */
+  buildEnabled?: boolean
+  /** Hero-aligned Build: scroll to composer; logged-out visitors also open AuthGate via page.tsx. */
+  onBuildClick?: () => void
+}
+
+export default function FloatingNav({ buildEnabled = true, onBuildClick }: FloatingNavProps) {
   const { user, loading, signOut } = useAuth()
   const router = useRouter()
-  const [scrolled, setScrolled] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 16)
-    onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
+    if (!menuOpen) return
+    const close = () => setMenuOpen(false)
+    window.addEventListener('scroll', close, { passive: true })
+    return () => window.removeEventListener('scroll', close)
+  }, [menuOpen])
 
   async function handleSignOut() {
     await signOut()
-    router.push('/login')
+    router.push('/')
   }
 
-  function jumpToComposer() {
+  function handleBuildClick() {
+    setMenuOpen(false)
+    if (onBuildClick) {
+      onBuildClick()
+      return
+    }
     if (typeof document === 'undefined') return
     const start = document.getElementById('start')
     if (!start) {
-      // Not on the landing (e.g. /how-it-works) — route to the composer there.
       router.push('/#start')
       return
     }
-    start.scrollIntoView({ behavior: 'smooth' })
-    document.getElementById('hero-url')?.focus()
+    scrollToHeroComposer('smooth')
   }
 
+  function handleNavLink(link: (typeof NAV_LINKS)[number]) {
+    if (link.kind === 'route') {
+      router.push(link.href)
+      return
+    }
+    scrollToHash(link.href)
+  }
+
+  const buildActive = user ? buildEnabled : true
+  const buildClass = buildActive
+    ? 'inline-flex min-h-12 items-center rounded-full bg-amber px-6 py-2.5 text-base font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90'
+    : 'inline-flex min-h-12 cursor-not-allowed items-center rounded-full border border-[#D4E2FB] bg-[#EAF1FF] px-6 py-2.5 text-base font-semibold text-[#9AA6B8]'
+
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-3 sm:top-4">
-      <nav
-        className={`pointer-events-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-full border px-4 py-2 transition-all duration-300 ${
-          scrolled
-            ? 'border-[#D4E2FB] bg-white/85 shadow-[0_12px_40px_-16px_rgba(30,58,120,0.22)] backdrop-blur-xl'
-            : 'border-[#E2ECFB] bg-white/70 backdrop-blur-md'
-        }`}
-      >
-        {/* Wordmark (left) — nudged down a hair so it sits optically centered in the pill. */}
-        <Link href="/" className="shrink-0 text-base">
-          <Wordmark tone="dark" inkClassName="text-[#0E1320]" className="translate-y-[1.5px]" />
+    <div className="pointer-events-none fixed inset-x-0 top-3 z-40 px-4 sm:top-5 sm:px-6">
+      <nav className="pointer-events-auto relative mx-auto flex w-full max-w-6xl items-center justify-between py-2">
+        {/* Left — brand */}
+        <Link href="/" className="relative z-10 shrink-0">
+          <Wordmark tone="dark" inkClassName="text-[#0E1320]" size="nav" />
         </Link>
 
-        {/* Right cluster — "How it works" now sits with the auth + CTA on the right.
-            ("Examples" was removed; the gallery still lives on the landing.) */}
-        <div className="flex shrink-0 items-center gap-2 text-sm">
-          <button
-            type="button"
-            onClick={() => router.push('/how-it-works')}
-            className="hidden whitespace-nowrap rounded-full px-3 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320] sm:inline-flex"
-          >
-            How it works
-          </button>
-          {loading ? (
-            <span className="inline-block h-7 w-20 animate-pulse rounded-full bg-[#EAF1FF]" />
-          ) : user ? (
+        {/* Center — true viewport center (desktop). pointer-events on links only. */}
+        <div className="pointer-events-none absolute left-1/2 hidden -translate-x-1/2 items-center gap-7 lg:flex xl:gap-9">
+          {NAV_LINKS.map((link) => (
+            <button
+              key={link.href}
+              type="button"
+              onClick={() => handleNavLink(link)}
+              className="pointer-events-auto whitespace-nowrap text-[17px] font-medium text-[#5A6472] transition hover:text-[#0E1320]"
+            >
+              {link.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Right — auth + CTA (+ mobile menu). Always show Build (never hide behind auth loading). */}
+        <div className="relative z-20 flex shrink-0 items-center justify-end gap-2 sm:gap-3">
+          {/* Mobile / tablet menu — section anchors below lg. */}
+          <div className="relative lg:hidden">
+            <button
+              type="button"
+              aria-expanded={menuOpen}
+              aria-label="Open menu"
+              onClick={() => setMenuOpen((o) => !o)}
+              className="inline-flex h-11 w-11 items-center justify-center text-[#5A6472] transition hover:text-[#0E1320]"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                {menuOpen ? (
+                  <path d="M6 6 L18 18 M18 6 L6 18" strokeLinecap="round" />
+                ) : (
+                  <>
+                    <path d="M4 7 H20" strokeLinecap="round" />
+                    <path d="M4 12 H20" strokeLinecap="round" />
+                    <path d="M4 17 H20" strokeLinecap="round" />
+                  </>
+                )}
+              </svg>
+            </button>
+            {menuOpen && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  className="fixed inset-0 z-40 bg-[#0E1320]/12 backdrop-blur-[1px] lg:hidden"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full z-50 mt-2 min-w-[11.5rem] overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white py-1.5 shadow-[0_16px_48px_-12px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]">
+                  {NAV_LINKS.map((link) => (
+                    <button
+                      key={link.href}
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        handleNavLink(link)
+                      }}
+                      className="block w-full px-4 py-2.5 text-left text-sm text-[#5A6472] transition hover:bg-[#F5F8FF] hover:text-[#0E1320]"
+                    >
+                      {link.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {!loading && user && (
             <>
-              <span className="hidden max-w-[160px] truncate text-[#5A6472] lg:inline">
+              <span className="hidden max-w-[120px] truncate text-base text-[#5A6472] lg:inline xl:max-w-[160px]">
                 {displayName(user)}
               </span>
               <button
                 onClick={handleSignOut}
-                className="whitespace-nowrap rounded-full border border-[#D4E2FB] px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
+                className="hidden whitespace-nowrap text-base text-[#5A6472] transition hover:text-[#0E1320] sm:inline-flex"
               >
                 Sign out
               </button>
-              <button
-                onClick={jumpToComposer}
-                className="rounded-full bg-amber px-4 py-1.5 font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90"
-              >
-                Build
-              </button>
-            </>
-          ) : (
-            <>
-              <Link
-                href="/login"
-                className="whitespace-nowrap rounded-full px-3.5 py-1.5 text-[#5A6472] transition hover:bg-[#EAF1FF] hover:text-[#0E1320]"
-              >
-                Sign in
-              </Link>
-              <button
-                onClick={jumpToComposer}
-                className="rounded-full bg-amber px-4 py-1.5 font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90"
-              >
-                Build
-              </button>
             </>
           )}
+          <button
+            type="button"
+            onClick={handleBuildClick}
+            disabled={user ? !buildEnabled : false}
+            className={buildClass}
+          >
+            Build
+          </button>
         </div>
       </nav>
     </div>

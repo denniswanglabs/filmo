@@ -13,13 +13,14 @@
 
 import {
   motion,
+  useMotionValueEvent,
   useReducedMotion,
   useScroll,
   useSpring,
   useTransform,
   type MotionValue,
 } from 'framer-motion'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 /** True only after the component has mounted on the client. */
 function useMounted(): boolean {
@@ -33,6 +34,22 @@ function useMotionEnabled(): boolean {
   const mounted = useMounted()
   const reduced = useReducedMotion()
   return mounted && !reduced
+}
+
+/** Skip the pinned scroll runway on narrow viewports — same flat hero as reduced motion. */
+function useCompactHero(): boolean {
+  const mounted = useMounted()
+  const [compact, setCompact] = useState(false)
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const update = () => setCompact(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+
+  return mounted && compact
 }
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
@@ -432,46 +449,304 @@ export function ScrubbedHero({ children, className = '' }: ScrubbedHeroProps) {
   )
 }
 
+/** Composer fully visible (3A); page stays fixed through this hold (4B). */
+const HERO_HOLD_END = 0.82
+
+/** Below-the-fold content hidden until hold completes, then fades in. */
+const HERO_UNLOCK_START = HERO_HOLD_END
+const HERO_UNLOCK_END = 0.94
+
+/** Scroll runway (vh). Tall enough that below-fold content cannot physically
+ *  enter the viewport until hold completes: entryProgress ≈ 1 − 100/R, so
+ *  R ≥ 100 / (1 − HERO_HOLD_END). Extra headroom keeps the composer hold readable. */
+const HERO_RUNWAY_VH = Math.ceil(100 / (1 - HERO_HOLD_END) + 24)
+
+/** Title shrink + subhead/composer fade — run in sync (2A). */
+const HERO_SHRINK_END = 0.68
+
+/** Decorative L-shaped viewfinder marks around the hero headline. */
+function HeroCornerBrackets() {
+  const blue = 'border-[#3B82F6]/85'
+  const thickH = 'border-t-4 sm:border-t-[5px]'
+  const thickB = 'border-b-4 sm:border-b-[5px]'
+  const thickL = 'border-l-4 sm:border-l-[5px]'
+  const thickR = 'border-r-4 sm:border-r-[5px]'
+  const arm = 'absolute h-8 w-8 sm:h-10 sm:w-10'
+
+  const corners = [
+    `left-0 top-0 ${thickL} ${thickH} ${blue}`,
+    `right-0 top-0 ${thickR} ${thickH} ${blue}`,
+    `bottom-0 left-0 ${thickB} ${thickL} ${blue}`,
+    `bottom-0 right-0 ${thickB} ${thickR} ${blue}`,
+  ] as const
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute -inset-x-6 -inset-y-10 hidden sm:-inset-x-10 sm:-inset-y-14 md:block md:-inset-x-16 md:-inset-y-20 lg:-inset-x-20 lg:-inset-y-28"
+    >
+      {corners.map((className) => (
+        <span key={className} className={`${arm} ${className}`} />
+      ))}
+    </div>
+  )
+}
+
+export function scrollToHeroComposer(behavior: ScrollBehavior = 'smooth') {
+  if (typeof window === 'undefined') return
+  const start = document.getElementById('start')
+  if (!start) return
+
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const compact = window.matchMedia('(max-width: 767px)').matches
+  const runway = Math.max(0, start.offsetHeight - window.innerHeight)
+  const top =
+    reduced || compact ? start.offsetTop : start.offsetTop + runway * HERO_HOLD_END
+
+  window.scrollTo({ top, behavior })
+  const focusDelay = behavior === 'smooth' ? 500 : 0
+  window.setTimeout(() => document.getElementById('hero-url')?.focus(), focusDelay)
+}
+
 // ---------------------------------------------------------------------------
-// PinnedHero — a MOUNT-driven hero intro. The hero is a normal-flow block (no
-// pin, no scroll runway): on mount the big centered `title` does a one-shot
-// zoom-settle while the `body` (subtitle + composer) snaps in SOLID just after.
-// Once the intro completes there is ZERO coupling to scroll — the hero simply
-// translates off-screen with the document like any section. The title's per-line
-// reveal is carried by the `title` prop's own VerticalCutReveal; here we add only
-// a gentle scale-settle on the title wrapper so the two reads as one calm gesture.
-// Reduced motion / SSR render the settled hero in normal flow, no transforms.
-// (Name kept as PinnedHero for API compatibility with page.tsx.)
+// PinnedHero — scroll-scrubbed intro (1A–4B):
+//   Land: big centered headline only.
+//   Scroll (page fixed): headline shrinks + subhead/composer fade in together.
+//   Hold: composer fully visible; nothing below moves yet.
+//   Then: Powered by / Examples fade in and normal scroll resumes.
+// Reduced motion: flat settled hero, no pin.
 // ---------------------------------------------------------------------------
 interface PinnedHeroProps {
   title: ReactNode
   body: ReactNode
-  /** classes for the centered content column. */
   className?: string
-  /** decoration rendered inside the stage, behind the content (z-0). */
   decoration?: ReactNode
-  /** anchor id placed on the section (e.g. "start" for the nav jump). */
   id?: string
 }
 
-export function PinnedHero({ title, body, className = '', decoration, id }: PinnedHeroProps) {
-  // STATIC, normal-flow hero — intentionally NO scroll pin and NO scroll-tied
-  // opacity/scale. Earlier scroll-reveal versions coupled the composer box's
-  // opacity to scroll progress, which made the box FADE on scroll. That is gone:
-  // the title and the composer box are always fully solid and simply scroll off
-  // with the page like any section. The box never fades, ever. (The title still
-  // carries its own one-shot on-mount reveal via VerticalCutReveal in `title`.)
+export const PinnedHero = forwardRef<HTMLElement, PinnedHeroProps>(function PinnedHero(
+  { title, body, className = '', decoration, id },
+  forwardedRef,
+) {
+  const sectionRef = useRef<HTMLElement | null>(null)
+  const setSectionRef = useCallback(
+    (node: HTMLElement | null) => {
+      sectionRef.current = node
+      if (typeof forwardedRef === 'function') forwardedRef(node)
+      else if (forwardedRef) forwardedRef.current = node
+    },
+    [forwardedRef],
+  )
+
+  const mounted = useMounted()
+  const reduced = useReducedMotion()
+  const compact = useCompactHero()
+  const enabled = mounted && !reduced && !compact
+  const [bodyVisible, setBodyVisible] = useState(false)
+
+  const { scrollYProgress } = useScroll({
+    target: sectionRef,
+    offset: ['start start', 'end start'],
+  })
+
+  const titleScale = useTransform(scrollYProgress, [0, HERO_SHRINK_END], [1.52, 1], { clamp: true })
+  const titleY = useTransform(scrollYProgress, [0, HERO_SHRINK_END], ['22vh', '0vh'], { clamp: true })
+  // Scale grows downward from top-center but doesn't expand layout — reserve the
+  // visual overflow so the in-flow body never collides with the headline.
+  const titleSpacing = useTransform(titleScale, [1, 1.52], [20, 96])
+  // Fade body in as the headline finishes shrinking (tied to scale, not raw progress).
+  const bodyOpacity = useTransform(titleScale, [1.52, 1.12, 1], [0, 0.5, 1])
+  // Tie to titleScale (same component as bodyOpacity) — MotionValues passed as
+  // props into a child motion.div never subscribed, so opacity stuck at 1.
+  // Brackets fully gone by titleScale ~1.25 — before body/composer is fully visible.
+  const bracketOpacity = useTransform(titleScale, [1.52, 1.25, 1.12], [1, 0, 0], {
+    clamp: true,
+  })
+
+  useMotionValueEvent(scrollYProgress, 'change', (v) => {
+    setBodyVisible(v >= HERO_SHRINK_END)
+  })
+
+  // Reduced motion / mobile: flat settled hero, no pin.
+  if (mounted && (reduced || compact)) {
+    return (
+      <section
+        ref={setSectionRef}
+        id={id}
+        className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-16 pt-24 sm:pb-20 sm:pt-28 md:pt-32"
+      >
+        {decoration}
+        <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
+          {title}
+          {body}
+        </div>
+      </section>
+    )
+  }
+
+  // SSR + first client paint: land state (headline only). Body stays in the DOM
+  // but hidden so hydration matches the scroll-scrub path at progress 0.
+  if (!enabled) {
+    return (
+      <section
+        ref={setSectionRef}
+        id={id}
+        className="surface-dots-dark relative min-h-screen overflow-hidden border-b border-[#D4E2FB]/60"
+      >
+        <div className="surface-dots-dark relative min-h-screen overflow-hidden bg-white/80">
+          {decoration}
+          <div
+            className={`relative z-10 mx-auto w-full px-5 pt-28 text-center sm:pt-32 ${className}`}
+          >
+            <div className="relative w-full shrink-0">
+              <HeroCornerBrackets />
+              {title}
+            </div>
+            <div className="pointer-events-none opacity-0" aria-hidden>
+              {body}
+            </div>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section
+      ref={setSectionRef}
       id={id}
-      className="surface-dots-dark relative overflow-hidden border-b border-[#D4E2FB]/60 px-5 pb-20 pt-28 sm:pt-32"
+      className="surface-dots-dark relative border-b border-[#D4E2FB]/60"
+      style={{ height: `${HERO_RUNWAY_VH}vh` }}
     >
-      {decoration}
-      <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
-        {title}
-        {body}
+        <div className="surface-dots-dark sticky top-0 z-20 min-h-screen overflow-hidden bg-white/80">
+        {decoration}
+        <div
+          className={`relative z-10 mx-auto flex h-full w-full flex-col items-center px-5 pt-28 text-center sm:pt-32 ${className}`}
+        >
+          <motion.div
+            className="relative z-10 flex w-full flex-col items-center"
+            style={{ y: titleY, willChange: 'transform' }}
+          >
+            <motion.div
+              className="relative w-full shrink-0"
+              style={{
+                scale: titleScale,
+                marginBottom: titleSpacing,
+                transformOrigin: 'top center',
+                willChange: 'transform, margin',
+              }}
+            >
+              <motion.div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+                style={{ opacity: bracketOpacity, willChange: 'opacity' }}
+              >
+                <HeroCornerBrackets />
+              </motion.div>
+              {title}
+            </motion.div>
+
+            <motion.div
+              className={`w-full shrink-0 ${
+                bodyVisible ? 'pointer-events-auto' : 'pointer-events-none'
+              }`}
+              style={{
+                opacity: bodyOpacity,
+                willChange: 'opacity',
+              }}
+              aria-hidden={!bodyVisible}
+            >
+              {body}
+            </motion.div>
+          </motion.div>
+        </div>
       </div>
     </section>
+  )
+})
+
+/** Hides everything below the hero until the hold phase completes (4B). */
+export function HeroBelowFold({
+  heroRef,
+  children,
+}: {
+  heroRef: RefObject<HTMLElement | null>
+  children: ReactNode
+}) {
+  const mounted = useMounted()
+  const reduced = useReducedMotion()
+  const compact = useCompactHero()
+  const enabled = mounted && !reduced && !compact
+  const [revealed, setRevealed] = useState(false)
+  const { scrollYProgress } = useScroll({
+    target: heroRef,
+    offset: ['start start', 'end start'],
+  })
+  const opacity = useTransform(
+    scrollYProgress,
+    [0, HERO_UNLOCK_START, HERO_UNLOCK_END, 1],
+    [0, 0, 1, 1],
+    { clamp: true },
+  )
+  const y = useTransform(
+    scrollYProgress,
+    [HERO_UNLOCK_START, HERO_UNLOCK_END, 1],
+    [32, 0, 0],
+    { clamp: true },
+  )
+
+  // Once the hold phase completes, keep below-fold content visible. Without this
+  // latch, scrollYProgress can drift or reset after the hero runway ends and
+  // opacity snaps back to 0 — the "page disappears" bug when scrolling further.
+  useMotionValueEvent(scrollYProgress, 'change', (v) => {
+    if (v >= HERO_UNLOCK_END) setRevealed(true)
+  })
+
+  useEffect(() => {
+    if (!enabled || revealed) return
+    const hero = heroRef.current
+    if (!hero) return
+
+    const check = () => {
+      const rect = hero.getBoundingClientRect()
+      if (rect.bottom <= window.innerHeight * 0.2) {
+        setRevealed(true)
+        return
+      }
+      for (const id of ['examples', 'editor-demo', 'lookbook']) {
+        const el = document.getElementById(id)
+        if (!el) continue
+        const top = el.getBoundingClientRect().top
+        if (top < window.innerHeight * 0.9) {
+          setRevealed(true)
+          return
+        }
+      }
+    }
+
+    check()
+    window.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [heroRef, enabled, revealed])
+
+  if (mounted && (reduced || compact)) return <>{children}</>
+  if (revealed) return <>{children}</>
+
+  // SSR + first paint: hidden (matches scroll-scrub land state at progress 0).
+  if (!enabled) {
+    return (
+      <div className="pointer-events-none opacity-0" aria-hidden>
+        {children}
+      </div>
+    )
+  }
+
+  return (
+    <motion.div style={{ opacity, y, willChange: 'transform, opacity' }}>{children}</motion.div>
   )
 }
 

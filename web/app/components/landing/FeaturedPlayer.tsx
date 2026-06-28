@@ -1,25 +1,11 @@
 'use client'
 
-// Featured "watch it" player — a single hero cut (stripe.mp4) that autoplays
-// muted + looping, with a launch-video TIMELINE below it: a row of chapter pills
-// (Intro · Hook · Feature · Proof · Close), a playhead line that tracks the
-// video's currentTime, a decorative waveform strip, and a "Tap for sound" toggle.
-//
-// Our take vs. Hera's onboarding frame: white + light-blue surface, our blue
-// (#3B82F6) active pill instead of red, a different beat set, and a glass frame.
-// Reduced-motion safe: when the user opts out we don't autoplay or raf-animate;
-// the playhead snaps to the static first chapter and the video stays paused on
-// its poster until the visitor presses play via the sound toggle.
-
 import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
 
-// Launch-video beats. Each pill owns a proportional slice of the timeline; the
-// active pill is whichever slice the playhead is currently inside.
 const CHAPTERS = ['Intro', 'Hook', 'Feature', 'Proof', 'Close'] as const
+const POSTER = '/examples/stripe.jpg'
 
-// Decorative waveform — a fixed set of bar heights (0..1). Static + deterministic
-// so SSR and client render identically. Drawn as an inline SVG strip.
 const WAVE = [
   0.3, 0.55, 0.42, 0.7, 0.5, 0.85, 0.62, 0.4, 0.74, 0.5, 0.92, 0.66, 0.48, 0.8,
   0.58, 0.38, 0.7, 0.52, 0.88, 0.6, 0.44, 0.76, 0.54, 0.34, 0.68, 0.5, 0.82,
@@ -31,14 +17,12 @@ export default function FeaturedPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const rafRef = useRef<number | null>(null)
 
-  // 0..1 position of the playhead across the whole timeline.
   const [progress, setProgress] = useState(0)
   const [muted, setMuted] = useState(true)
+  const [playing, setPlaying] = useState(false)
 
-  // Drive the playhead from the video clock via requestAnimationFrame (smoother
-  // than `timeupdate`, which only fires ~4x/s). Skipped under reduced motion.
   useEffect(() => {
-    if (reduced) return
+    if (reduced || !playing) return
     const el = videoRef.current
     if (!el) return
 
@@ -53,21 +37,34 @@ export default function FeaturedPlayer() {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
     }
-  }, [reduced])
+  }, [reduced, playing])
 
-  // Autoplay the muted loop once mounted (motion on). Reduced motion: stay on
-  // the poster until the visitor opts in via the sound toggle.
   useEffect(() => {
     if (reduced) return
     const el = videoRef.current
     if (!el) return
-    void el.play().catch(() => {
-      /* autoplay blocked — poster stays; sound toggle will start it */
-    })
+
+    const onPlaying = () => setPlaying(true)
+    el.addEventListener('playing', onPlaying)
+
+    void el.play()
+      .then(() => setPlaying(true))
+      .catch(() => {
+        /* autoplay blocked — poster + play chip stay up */
+      })
+
+    return () => el.removeEventListener('playing', onPlaying)
   }, [reduced])
 
-  // Which chapter slice the playhead sits in (0..CHAPTERS.length-1).
   const activeIndex = Math.min(CHAPTERS.length - 1, Math.floor(progress * CHAPTERS.length))
+
+  function startPlayback() {
+    const el = videoRef.current
+    if (!el) return
+    void el.play()
+      .then(() => setPlaying(true))
+      .catch(() => {})
+  }
 
   function toggleSound() {
     const el = videoRef.current
@@ -76,32 +73,64 @@ export default function FeaturedPlayer() {
     setMuted(next)
     el.muted = next
     if (!next) {
-      // Unmuting implies the visitor wants to watch — make sure it's playing.
-      void el.play().catch(() => {})
+      void el.play()
+        .then(() => setPlaying(true))
+        .catch(() => {})
     }
   }
 
+  const showPoster = !playing
+
   return (
-    <div className="mx-auto max-w-3xl">
-      {/* Glass frame around the featured cut. */}
+    <div className="w-full">
       <div className="relative overflow-hidden rounded-3xl border border-[#D4E2FB] bg-white p-2.5 shadow-[0_40px_100px_-40px_rgba(30,58,120,0.35)] ring-1 ring-inset ring-[#EAF1FF]">
-        <div className="relative overflow-hidden rounded-2xl bg-[#F5F8FF]">
+        <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-[#0B0F1A]">
+          <img
+            src={POSTER}
+            alt=""
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+              showPoster ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
+
           <video
             ref={videoRef}
             src="/examples/stripe.mp4"
-            poster="/examples/stripe.jpg"
+            poster={POSTER}
             muted={muted}
             loop
             playsInline
             preload="metadata"
-            className="aspect-video w-full object-cover"
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+              showPoster ? 'opacity-0' : 'opacity-100'
+            }`}
           />
 
-          {/* "Tap for sound" toggle, bottom-right over the frame. */}
+          {showPoster && (
+            <>
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0E1320]/50 via-transparent to-[#0E1320]/10"
+              />
+              <button
+                type="button"
+                onClick={startPlayback}
+                aria-label="Play the featured Stripe launch cut"
+                className="absolute inset-0 grid place-items-center"
+              >
+                <span className="grid h-16 w-16 place-items-center rounded-full bg-white/90 shadow-lg ring-1 ring-[#3B82F6]/40 backdrop-blur-sm transition hover:scale-105">
+                  <svg viewBox="0 0 24 24" className="h-7 w-7 translate-x-[2px]" aria-hidden="true">
+                    <path d="M8 5.5 L18 12 L8 18.5 Z" fill="#3B82F6" />
+                  </svg>
+                </span>
+              </button>
+            </>
+          )}
+
           <button
             type="button"
             onClick={toggleSound}
-            className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/80 px-3 py-1.5 text-xs font-medium text-[#0E1320] shadow-sm backdrop-blur-md transition hover:bg-white"
+            className="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/80 px-3 py-1.5 text-xs font-medium text-[#0E1320] shadow-sm backdrop-blur-md transition hover:bg-white"
           >
             <span
               aria-hidden="true"
@@ -122,9 +151,7 @@ export default function FeaturedPlayer() {
           </button>
         </div>
 
-        {/* TIMELINE ----------------------------------------------------------- */}
         <div className="px-2.5 pb-1.5 pt-4 sm:px-3">
-          {/* Chapter pills */}
           <div className="flex flex-wrap items-center gap-1.5">
             {CHAPTERS.map((label, i) => {
               const active = i === activeIndex
@@ -132,11 +159,11 @@ export default function FeaturedPlayer() {
               return (
                 <span
                   key={label}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors duration-200 ${
+                  className={`rounded-full px-2.5 py-1.5 text-[11px] font-medium transition-colors duration-200 sm:px-3 sm:py-1 sm:text-xs ${
                     active
                       ? 'bg-[#3B82F6] text-white shadow-[0_6px_16px_-6px_rgba(59,130,246,0.7)]'
                       : past
-                        ? 'bg-[#E8F0FF] text-[#2563EB]'
+                        ? 'bg-[#E8F0FF] text-[#3B82F6]'
                         : 'bg-[#F2F6FF] text-[#9AA6B8]'
                   }`}
                 >
@@ -149,14 +176,12 @@ export default function FeaturedPlayer() {
             </span>
           </div>
 
-          {/* Playhead track + moving line */}
           <div className="relative mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[#EAF1FF]">
             <div
               className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[#7DAEFB] to-[#3B82F6]"
               style={{ width: `${Math.max(0, Math.min(100, progress * 100))}%` }}
             />
           </div>
-          {/* Playhead knob */}
           <div className="relative h-0">
             <span
               aria-hidden="true"
@@ -165,7 +190,6 @@ export default function FeaturedPlayer() {
             />
           </div>
 
-          {/* Waveform strip (decorative). */}
           <svg
             viewBox="0 0 400 28"
             preserveAspectRatio="none"

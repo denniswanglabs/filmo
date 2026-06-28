@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:clean": "node scripts/dev.mjs --clean",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "dev:next": "next dev"
   },
   "dependencies": {
     "@insforge/sdk": "latest",

@@ -10,10 +10,35 @@ Backend is InsForge; the Railway worker drives the pipeline.
 ## Run locally
 
 ```bash
+# From anywhere (repo lives under Desktop/Hackathons):
+cd ~/Desktop/Projects/Hackathons/walk-studio-hosted/web
+
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # safe start — always use this (http://localhost:3000)
+npm run dev:clean  # nuclear reset — wipes all of .next if dev still breaks
 npm run build      # production build (run before deploy)
 ```
+
+If you're already in the repo root (`walk-studio-hosted/`), `cd web` works too.
+
+**Always use `npm run dev`** (not bare `next dev`). The launcher:
+- Kills stale Node/Next listeners on **:3000** and **:3001**
+- Clears `.next/cache` every start (prevents stale HMR / webpack chunk errors)
+- Auto-deletes a corrupt `.next` when vendor-chunks are missing
+- Pins the bundler to `web/` via `next.config.mjs` (ignores stray `~/package-lock.json`)
+
+### If localhost still breaks
+
+| Symptom | Fix |
+|---------|-----|
+| **Internal Server Error** / `reading 'call'` / vendor-chunks ENOENT | `npm run dev:clean` |
+| Page loads on **:3001** but not `:3000` | `npm run dev` — kills both ports |
+| Warning about workspace root / multiple lockfiles | Fixed in `next.config.mjs`; restart dev |
+| You ran bare `next dev` and things broke | Stop it, then `npm run dev` |
+
+Run dev from **`web/`** only. Avoid `npm run dev:next` unless debugging the launcher itself.
+
+Do not run `npm run build` while the dev server is running — they share `.next` and will corrupt each other.
 
 Env lives in `.env.local` (InsForge URL/keys, demo account, and the developer-mode key).
 

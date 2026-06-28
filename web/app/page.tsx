@@ -13,9 +13,9 @@ import EditorDemo from './components/landing/EditorDemo'
 import PatternLookbook from './components/landing/PatternLookbook'
 import LuceoShowcase from './components/landing/LuceoShowcase'
 import ReadyToCreate from './components/landing/ReadyToCreate'
-import PoweredBy from './components/landing/PoweredBy'
 import SiteFooter from './components/landing/SiteFooter'
-import { PinnedHero } from './components/landing/Motion'
+import LandingBackdrop, { HeroBrandLayer } from './components/landing/LandingBackdrop'
+import { HeroBelowFold, PinnedHero, scrollToHeroComposer } from './components/landing/Motion'
 import VerticalCutReveal from './components/fancy/VerticalCutReveal'
 import { BRAINS, type Run } from '../lib/types'
 
@@ -43,6 +43,7 @@ export default function Home() {
   const [brain, setBrain] = useState<string>('ultra-paid')
   // Opt-in human-pays toggle (default OFF → normal demo auto-pays).
   const [requirePay, setRequirePay] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [building, setBuilding] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -60,10 +61,7 @@ export default function Home() {
       const detail = (e as CustomEvent<{ url?: string }>).detail
       if (!detail?.url) return
       setUrl(detail.url)
-      const start = document.getElementById('start')
-      start?.scrollIntoView({ behavior: 'smooth' })
-      // Focus after the smooth scroll settles so it doesn't fight the animation.
-      window.setTimeout(() => document.getElementById('hero-url')?.focus(), 400)
+      scrollToHeroComposer('smooth')
     }
     window.addEventListener('filmo:seed-composer', onSeed)
     return () => window.removeEventListener('filmo:seed-composer', onSeed)
@@ -170,20 +168,34 @@ export default function Home() {
     }
   }
 
+  function handleNavBuild() {
+    scrollToHeroComposer('smooth')
+    if (user) return
+    stashPending()
+    setGateOpen(true)
+  }
+
   const canBuild = url.trim().length > 3 && !building
+  const heroRef = useRef<HTMLElement>(null)
 
   return (
     <div className="landing-dark min-h-screen">
-      <FloatingNav />
+      <LandingBackdrop />
+      <div className="relative z-[1]">
+      <FloatingNav buildEnabled={canBuild} onBuildClick={handleNavBuild} />
 
       <PinnedHero
+        ref={heroRef}
         id="start"
         className="mx-auto max-w-3xl"
         decoration={
-          <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
+          <>
+            <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
+            <HeroBrandLayer />
+          </>
         }
         title={
-          <div className="mx-auto flex justify-center text-5xl font-semibold leading-[1.03] tracking-tight text-[#0E1320] sm:text-[3.75rem]">
+          <div className="mx-auto flex max-w-full justify-center px-1 text-[clamp(2.25rem,8.5vw,3.25rem)] font-semibold leading-[1.04] tracking-tight text-[#0E1320] sm:px-0 sm:text-[clamp(4.25rem,8vw,5.25rem)] sm:leading-[1.02]">
             <VerticalCutReveal
               splitBy="lines"
               staggerDuration={0.14}
@@ -196,15 +208,15 @@ export default function Home() {
         }
         body={
           <>
-            <p className="mx-auto mt-4 max-w-2xl text-lg text-[#5A6472]">
-              Paste your URL. Filmo reads your real product, diagnoses how it converts, and
-              ships a finished launch video — planned, priced, and produced on autopilot.
+            <p className="section-lede mx-auto mt-4 max-w-xl text-base sm:mt-5 sm:text-lg md:text-[1.125rem]">
+              Paste your URL. Filmo reads your product, plans the cut, prices the job, and ships
+              a finished launch video — on autopilot.
             </p>
 
             {/* Composer card — centered block, left-aligned internals */}
             <form
               onSubmit={onBuild}
-              className="mx-auto mt-6 max-w-2xl rounded-2xl border border-[#D4E2FB] bg-white p-5 text-left shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF]"
+              className="mx-auto mt-8 w-full rounded-2xl border border-[#D4E2FB] bg-white/95 p-5 text-left shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] backdrop-blur-sm sm:rounded-3xl sm:p-6"
             >
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Website URL</span>
@@ -220,79 +232,101 @@ export default function Home() {
               </div>
             </label>
 
-            {/* Controls row */}
-            <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
-              {/* Quality toggle */}
-              <div>
-                <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Quality</span>
-                <div className="inline-flex rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] p-0.5">
-                  {(['standard', 'premium'] as const).map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => setQuality(q)}
-                      className={`rounded-[7px] px-4 py-1.5 text-sm font-medium capitalize transition ${
-                        quality === q
-                          ? 'bg-amber text-white shadow-sm'
-                          : 'text-[#5A6472] hover:text-[#0E1320]'
-                      }`}
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Brain selector (operator-scale) */}
-              <div className="text-right">
-                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[#5A6472]">
-                  Model
-                </span>
-                <select
-                  value={brain}
-                  onChange={(e) => setBrain(e.target.value)}
-                  className="rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] px-2.5 py-1.5 text-sm text-[#0E1320] outline-none focus:border-amber"
-                >
-                  {BRAINS.map((b) => (
-                    <option key={b.value} value={b.value} className="bg-white text-[#0E1320]">
-                      {b.label} ({b.note})
-                    </option>
-                  ))}
-                </select>
+            <div className="mt-5">
+              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Quality</span>
+              <div className="inline-flex rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] p-0.5">
+                {(['standard', 'premium'] as const).map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => setQuality(q)}
+                    className={`rounded-[7px] px-4 py-1.5 text-sm font-medium capitalize transition ${
+                      quality === q
+                        ? 'bg-amber text-white shadow-sm'
+                        : 'text-[#5A6472] hover:text-[#0E1320]'
+                    }`}
+                  >
+                    {q}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Opt-in human-pays toggle. OFF = the demo auto-pays (quick path). ON =
-                the build creates a real Stripe TEST checkout the user pays (card 4242)
-                before production runs. */}
-            <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] px-3.5 py-3 transition hover:border-[#B9D2F8]">
-              <input
-                type="checkbox"
-                checked={requirePay}
-                onChange={(e) => setRequirePay(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-amber"
-              />
-              <span className="min-w-0">
-                <span className="block text-sm font-medium text-[#0E1320]">
-                  Require payment (Stripe test)
-                </span>
-                <span className="block text-xs text-[#5A6472]">
-                  Pay with test card 4242 before the video renders. No real charge.
-                </span>
-              </span>
-            </label>
+            <div className="mt-4 border-t border-[#EAF1FF] pt-4">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((o) => !o)}
+                aria-expanded={advancedOpen}
+                className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-left text-sm font-medium text-[#5A6472] transition hover:text-[#0E1320]"
+              >
+                <span>Advanced</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path d="M6 9 L12 15 L18 9" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              {advancedOpen && (
+                <div className="mt-3 space-y-3 rounded-lg border border-[#EAF1FF] bg-[#FAFCFF] p-3.5">
+                  <div>
+                    <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A94A6]">
+                      Model
+                    </span>
+                    <select
+                      value={brain}
+                      onChange={(e) => setBrain(e.target.value)}
+                      className="w-full rounded-lg border border-[#D4E2FB] bg-white px-2.5 py-1.5 text-sm text-[#0E1320] outline-none focus:border-amber"
+                    >
+                      {BRAINS.map((b) => (
+                        <option key={b.value} value={b.value} className="bg-white text-[#0E1320]">
+                          {b.label} ({b.note})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <label className="flex cursor-pointer items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={requirePay}
+                      onChange={(e) => setRequirePay(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-amber"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm text-[#5A6472]">
+                        Require payment (Stripe test)
+                      </span>
+                      <span className="block text-xs text-[#8A94A6]">
+                        Pay with test card 4242 before render. No real charge.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              )}
+            </div>
 
             {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
             <button
+              type="submit"
               disabled={!canBuild}
-              className="mt-6 w-full rounded-xl bg-amber py-3 font-semibold text-white shadow-[0_10px_30px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              className={`mt-6 w-full rounded-xl py-3 font-semibold transition active:scale-[0.99] ${
+                canBuild
+                  ? 'bg-amber text-white shadow-[0_10px_30px_-10px_rgba(59,130,246,0.6)] hover:opacity-90'
+                  : 'cursor-not-allowed border border-[#D4E2FB] bg-[#EAF1FF] text-[#9AA6B8] shadow-none'
+              }`}
             >
               {building ? 'Starting build…' : 'Build'}
             </button>
               {!user && !loading && (
-                <p className="mt-3 text-center text-xs text-[#5A6472]">
-                  You&rsquo;ll sign in with Google to start — your prompt is saved.
+                <p className="mt-3 text-center text-xs leading-relaxed text-[#8A94A6]">
+                  Sign in with Google to start — your prompt is saved.
                 </p>
               )}
             </form>
@@ -300,20 +334,12 @@ export default function Home() {
         }
       />
 
-      {/* Below the pinned hero — the page scrolls normally from here. */}
-      <main className="relative z-10 mx-auto max-w-3xl px-5 pb-20 pt-12">
-        {/* Sponsor credit — Hermes Hackathon (Nous Research × NVIDIA × Stripe). */}
-        <div>
-          <PoweredBy />
-        </div>
-
-          {/* Recents — only meaningful once signed in. */}
+      <HeroBelowFold heroRef={heroRef}>
+      <main className="relative z-10 mx-auto max-w-3xl px-5 pb-8 pt-8">
           {user && (
-            <section className="mt-12">
+            <section className="mt-4">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[#5A6472]">
-                  Recents
-                </h2>
+                <span className="eyebrow">Recents</span>
                 <button
                   onClick={() => void loadRuns()}
                   className="text-sm text-[#5A6472] transition hover:text-[#0E1320]"
@@ -364,6 +390,8 @@ export default function Home() {
       {/* Closing CTA — deep-navy band, scrolls back to the composer. */}
       <ReadyToCreate />
       <SiteFooter />
+      </HeroBelowFold>
+      </div>
 
       <AuthGate
         open={gateOpen}

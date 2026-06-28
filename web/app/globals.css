@@ -21,8 +21,27 @@ body {
    wrapper paints a clean white base over the <body>.
    ------------------------------------------------------------------------- */
 .landing-dark {
+  position: relative;
   background: #ffffff;
   color: #0e1320;
+  overflow-x: clip;
+}
+
+/* Full-page Filmo branding layer (see LandingBackdrop.tsx). */
+.filmo-backdrop__wash {
+  background:
+    radial-gradient(70% 55% at 50% -8%, rgba(59, 130, 246, 0.16) 0%, transparent 62%),
+    radial-gradient(45% 40% at 92% 18%, rgba(59, 130, 246, 0.12) 0%, transparent 70%),
+    radial-gradient(40% 38% at 8% 78%, rgba(59, 130, 246, 0.1) 0%, transparent 68%);
+}
+
+.filmo-backdrop__blob {
+  opacity: 0.12;
+}
+
+/* Hero-scoped branding — reads clearly through the pinned stage. */
+.filmo-hero-brand .filmo-backdrop__blob {
+  opacity: 0.16;
 }
 
 /* Smooth-scroll anchor targets clear the fixed floating nav (~64px pill + a
@@ -31,8 +50,72 @@ body {
    NOT set scroll-behavior here so the JS scrollIntoView({behavior:'smooth'})
    stays in control (no conflicting global smooth-scroll). */
 #start,
-#examples {
+#examples,
+#editor-demo,
+#lookbook,
+#luceo,
+#how {
   scroll-margin-top: 96px;
+}
+
+/* Lookbook is tall — anchor jumps land on the header, not mid-grid. */
+#lookbook {
+  scroll-margin-top: 120px;
+}
+
+/* Alternate panel surfaces so consecutive sections don't all read identical. */
+.panel--stage {
+  background: #ffffff;
+}
+
+.panel--dotted {
+  background-color: #f5f8ff;
+  background-image: radial-gradient(rgba(59, 130, 246, 0.08) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Landing section typography — cosmetic helpers scoped to the marketing shell. */
+.landing-dark .eyebrow {
+  display: inline-block;
+  border-radius: 9999px;
+  border: 1px solid theme('colors.amber-line');
+  background-color: theme('colors.amber-soft');
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: theme('colors.amber');
+}
+
+.landing-dark .section-title {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  color: #0e1320;
+}
+
+@media (min-width: 640px) {
+  .landing-dark .section-title {
+    font-size: 2.25rem;
+    line-height: 2.5rem;
+  }
+}
+
+.landing-dark .eyebrow--dark {
+  border-color: rgba(59, 130, 246, 0.4);
+  background-color: rgba(59, 130, 246, 0.1);
+  color: #9cc0f8;
+}
+
+.landing-dark .section-lede {
+  margin-top: 0.75rem;
+  color: #5a6472;
+  line-height: 1.625;
+  text-wrap: pretty;
 }
 
 /* Faint blue dotted texture behind the hero stage — soft blue dots on white.
