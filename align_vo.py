@@ -6,10 +6,14 @@ word-level timestamps, with every word mapped back to the scene that owns it.
 The rest of the pivot pipeline (build_timeline.py + the Remotion <Timeline>
 composition) builds the picture FROM this voice, so the picture can never drift.
 
-$0 by default. FREE tier = edge-tts synth (reused from adapters) + local
-whisper-cli for word timing. PREMIUM tier = ElevenLabs text-to-speech with
-per-character timestamps (function shape ONLY here -- never called without an
-explicit premium request AND a key present; otherwise falls back to free).
+ElevenLabs is the DEFAULT VO engine for EVERY video. We try ElevenLabs first (its
+with-timestamps endpoint gives word alignment directly); on ANY failure -- missing
+key, HTTP 401, quota_exceeded, network/timeout, any exception -- we AUTOMATICALLY
+FALL BACK to the FREE path (edge-tts synth + local whisper-cli word timing) so a
+render NEVER fails on VO. The `tier` arg is threaded by the cost-plus menu but no
+longer GATES ElevenLabs; the only opt-out is WS_VO_PROVIDER in {"edge","free"}.
+The run artifact records which engine actually ran (vo_engine) and whether it fell
+back (vo_fallback) so an out-of-credits ElevenLabs is visible/diagnosable.
 
 CLI:
   python3 align_vo.py --beats-file beats.json \\
@@ -19,12 +23,15 @@ CLI:
 beats.json: ordered per-scene VO segments -- [{scene_id, text}, ...] -- the same
 shape the planner already emits under voiceover.beats (see plan_schema.resolve_vo_beats).
 
-Output contract (vo_alignment.json), EXACTLY:
+Output contract (vo_alignment.json):
   {
     "audio_path": "runs/<id>/voiceover.mp3",
     "lang": "en",
     "voice": "<resolved voice>",
     "tier": "free",
+    "vo_engine": "edge-tts",       # which engine actually ran ("elevenlabs"|"edge-tts")
+    "vo_fallback": true,           # true when ElevenLabs was tried but failed/keyless
+    "vo_fallback_reason": "...",   # WHY it fell back (null when ElevenLabs ran)
     "total_duration_s": 3.21,
     "words": [{"word": "Stripe", "start_s": 0.24, "end_s": 0.39,
                "beat_scene_id": "title-open"}, ...],
@@ -122,15 +129,24 @@ def synth_full_script(script, voice, out_path, tier, *, synth_fn=None,
                       elevenlabs_key=None):
     """Render the whole concatenated script to ONE audio file.
 
-    FREE (default): reuse adapters.synthesize_voiceover (edge-tts). Returns
-    (audio_path, resolved_voice, "free", el_alignment=None).
+    ElevenLabs is the DEFAULT VO engine for EVERY video (independent of tier):
+    whenever an API key is present we TRY ElevenLabs FIRST (its with-timestamps
+    endpoint yields word alignment directly, so whisper is skipped). On ANY
+    ElevenLabs failure -- missing key, HTTP 401, quota_exceeded, network/timeout,
+    or any other exception -- we AUTOMATICALLY FALL BACK to the FREE path
+    (edge-tts synth + local whisper-cli alignment) so the render NEVER fails on
+    VO. ElevenLabs is currently out of credits, so in practice the fallback fires;
+    the returned `vo_engine`/`vo_fallback`/`fallback_reason` make that visible.
 
-    PREMIUM: only when tier == "premium" AND a key is present do we take the
-    ElevenLabs with-timestamps path (which yields alignment directly, so whisper
-    is skipped). If premium is requested WITHOUT a key, log a warning and fall
-    back to free. NOTE: the ElevenLabs call itself is NOT invoked here in this
-    build (no key, no spend) -- _elevenlabs_synth_with_timestamps is shape-only
-    and raises if reached so a test cannot silently spend.
+    `tier` is kept (the cost-plus menu threads it from style_fill) but it no
+    longer GATES ElevenLabs -- ElevenLabs is tried by default at any tier. The
+    only opt-out is an explicit WS_VO_PROVIDER in {"edge", "free"}, which forces
+    the $0 edge-tts + whisper path (used for debugging / a deliberate free build).
+
+    Returns a dict:
+      {"audio_path", "voice", "tier", "alignment" (None unless ElevenLabs ran),
+       "vo_engine" ("elevenlabs" | "edge-tts"), "vo_fallback" (bool),
+       "fallback_reason" (str | None)}.
 
     `synth_fn` is injectable for tests (defaults to adapters.synthesize_voiceover).
     """
@@ -139,36 +155,72 @@ def synth_full_script(script, voice, out_path, tier, *, synth_fn=None,
     if key is None:
         key = os.environ.get("ELEVENLABS_API_KEY")
 
-    # PROVIDER SWITCH (independent of quality/tier): WS_VO_PROVIDER=elevenlabs
-    # forces the ElevenLabs with-timestamps path even on a `tier="free"` /
-    # `--quality standard` build (Higgsfield stays OFF — only the VO engine
-    # changes). Default/empty/"edge"/"free" keeps the $0 edge-tts + whisper path.
+    # PROVIDER DECISION: ElevenLabs is the DEFAULT for every video. An explicit
+    # WS_VO_PROVIDER in {"edge","free"} is the ONLY opt-out (forces $0 edge-tts +
+    # whisper). Any other value (including unset/empty/"elevenlabs") keeps the
+    # ElevenLabs-first default. We do NOT gate on `tier` -- ElevenLabs is tried
+    # regardless of free/premium so EVERY video defaults to the premium voice.
     provider = (os.environ.get("WS_VO_PROVIDER") or "").strip().lower()
-    want_elevenlabs = provider == "elevenlabs" or tier == "premium"
+    # `want_elevenlabs` = "ElevenLabs is the default AND was not explicitly opted
+    # out". It drives vo_fallback: a free render is a FALLBACK only when ElevenLabs
+    # WAS the intended engine. WS_VO_PROVIDER in {"edge","free"} is the only opt-out.
+    want_elevenlabs = provider not in ("edge", "free")
+    # TEST SEAM: an explicitly-injected synth_fn (deterministic $0 unit tests) must
+    # never make a real ElevenLabs HTTP call, even if a real ELEVENLABS_API_KEY is
+    # in the ambient env. We still treat ElevenLabs as the intended default (so the
+    # recorded vo_fallback semantics are honest); we just skip the network attempt
+    # and record the no-key/seam reason. A test that DOES want to drive the
+    # ElevenLabs branch passes elevenlabs_key explicitly.
+    skip_real_call = synth_fn is not None and elevenlabs_key is None
 
-    if want_elevenlabs and key:
-        # Premium path: ElevenLabs returns char/word timestamps with the audio.
-        # On any failure, fall through to the free edge-tts + whisper path below
-        # (the caller never blocks a paid render on a VO-provider outage).
-        try:
-            info = _elevenlabs_synth_with_timestamps(script, voice, out_path, key)
-            return out_path, info.get("voice", voice), "premium", info.get("alignment")
-        except Exception as e:
+    fallback_reason = None
+    if want_elevenlabs:
+        # ElevenLabs-first. On ANY failure we fall through to the free path below
+        # (a render NEVER blocks on a VO-provider outage / out-of-credits / no key).
+        if not key or skip_real_call:
+            fallback_reason = (
+                "no ELEVENLABS_API_KEY (set it in ~/.hermes/.env or env)" if not key
+                else "test seam: synth_fn injected, skipping ElevenLabs HTTP call")
             sys.stderr.write(
-                "align_vo: WARNING ElevenLabs synth failed (%s); "
-                "falling back to FREE (edge-tts + whisper).\n" % e)
+                "align_vo: WARNING ElevenLabs is the default VO but unavailable "
+                "(%s); falling back to FREE (edge-tts + whisper).\n" % fallback_reason)
+        else:
+            try:
+                info = _elevenlabs_synth_with_timestamps(script, voice, out_path, key)
+                return {
+                    "audio_path": out_path,
+                    "voice": info.get("voice", voice),
+                    "tier": tier,
+                    "alignment": info.get("alignment"),
+                    "vo_engine": "elevenlabs",
+                    "vo_fallback": False,
+                    "fallback_reason": None,
+                }
+            except Exception as e:
+                # 401, quota_exceeded, network/timeout, decode, missing-audio, etc.
+                fallback_reason = "ElevenLabs failed: %s" % e
+                sys.stderr.write(
+                    "align_vo: WARNING ElevenLabs synth failed (%s); "
+                    "falling back to FREE (edge-tts + whisper).\n" % e)
 
-    if want_elevenlabs and not key:
-        sys.stderr.write(
-            "align_vo: WARNING ElevenLabs VO requested (WS_VO_PROVIDER/tier) but no "
-            "ELEVENLABS_API_KEY; falling back to FREE (edge-tts + whisper).\n")
-
+    # FREE fallback path: edge-tts synth (whisper-cli does the alignment in align()).
     fn = synth_fn
     if fn is None:
         import adapters
         fn = adapters.synthesize_voiceover
     info = fn(script, voice, out_path, "edge")
-    return out_path, info.get("voice", voice), "free", None
+    return {
+        "audio_path": out_path,
+        "voice": info.get("voice", voice),
+        "tier": tier,
+        "alignment": None,
+        "vo_engine": "edge-tts",
+        # vo_fallback is True only when ElevenLabs was attempted-and-failed (or
+        # had no key). A deliberate WS_VO_PROVIDER=edge/free build is NOT a
+        # fallback -- it's the explicitly requested free engine.
+        "vo_fallback": want_elevenlabs,
+        "fallback_reason": fallback_reason,
+    }
 
 
 def _resolve_elevenlabs_voice_id(voice):
@@ -463,10 +515,17 @@ def align(beats, out_path, *, tier="free", lang="en", voice=None,
         raise AlignError("no usable beats (every beat had empty scene_id/text)")
     script = " ".join(b["text"] for b in clean_beats).strip()
 
-    audio_path, resolved_voice, real_tier, el_alignment = synth_full_script(
+    synth = synth_full_script(
         script, voice, out_path.rsplit(".", 1)[0] + ".audio.mp3"
         if out_path.endswith(".json") else out_path,
         tier, synth_fn=synth_fn, elevenlabs_key=elevenlabs_key)
+    audio_path = synth["audio_path"]
+    resolved_voice = synth["voice"]
+    real_tier = synth["tier"]
+    el_alignment = synth["alignment"]
+    vo_engine = synth["vo_engine"]
+    vo_fallback = synth["vo_fallback"]
+    vo_fallback_reason = synth["fallback_reason"]
     # Normalize: audio sits beside the alignment json as voiceover.mp3.
     audio_final = os.path.join(os.path.dirname(os.path.abspath(out_path)),
                                "voiceover.mp3")
@@ -477,8 +536,10 @@ def align(beats, out_path, *, tier="free", lang="en", voice=None,
     elif os.path.exists(audio_path):
         audio_path = audio_final
 
-    # Word timestamps: premium = parse ElevenLabs alignment; free = whisper-cli.
-    if real_tier == "premium" and el_alignment is not None:
+    # Word timestamps: if ElevenLabs ran it returned char/word alignment directly
+    # (no whisper needed); on the free fallback (the common case while ElevenLabs
+    # is out of credits) whisper-cli derives the timings from the edge-tts audio.
+    if vo_engine == "elevenlabs" and el_alignment is not None:
         hyp_words = parse_elevenlabs_alignment(el_alignment)
     else:
         wfn = whisper_fn or whisper_words
@@ -497,6 +558,14 @@ def align(beats, out_path, *, tier="free", lang="en", voice=None,
         "lang": lang,
         "voice": resolved_voice,
         "tier": real_tier,
+        # VO ENGINE PROVENANCE (run artifact, NOT a plan key): which engine
+        # actually produced this audio and whether it FELL BACK from the default
+        # ElevenLabs to free edge-tts. These live on vo_alignment.json — a per-run
+        # artifact written beside the audio — so they are 100% safe re:
+        # plan_schema.allowed_top (they never touch the plan top level).
+        "vo_engine": vo_engine,            # "elevenlabs" | "edge-tts"
+        "vo_fallback": vo_fallback,        # True when ElevenLabs was tried but failed
+        "vo_fallback_reason": vo_fallback_reason,  # WHY it fell back (for diagnosis)
         "total_duration_s": total,
         "words": words,
         "beats": out_beats,

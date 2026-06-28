@@ -126,7 +126,13 @@ class TestMapping(unittest.TestCase):
                                  whisper_fn=_whisper_returning(hyp))
             self.assertEqual(set(res.keys()), {
                 "audio_path", "lang", "voice", "tier", "total_duration_s",
-                "words", "beats"})
+                "words", "beats",
+                # VO engine provenance (run artifact; safe re: plan allowed_top).
+                "vo_engine", "vo_fallback", "vo_fallback_reason"})
+            # With no ElevenLabs key (the test injects synth_fn) the free path
+            # runs and is recorded as a fallback from the ElevenLabs default.
+            self.assertEqual(res["vo_engine"], "edge-tts")
+            self.assertTrue(res["vo_fallback"])
             # audio relocated to voiceover.mp3 beside the alignment json.
             self.assertTrue(res["audio_path"].endswith("voiceover.mp3"))
             self.assertTrue(os.path.exists(res["audio_path"]))
@@ -139,26 +145,55 @@ class TestMapping(unittest.TestCase):
                                  {"scene_id", "start_s", "end_s", "text"})
 
 
-class TestPremiumFallback(unittest.TestCase):
-    def test_premium_without_key_falls_back_to_free(self):
-        beats = [{"scene_id": "s1", "text": "premium please"}]
-        hyp = [{"word": "premium", "start_s": 0.0, "end_s": 0.5},
+class TestElevenLabsDefaultAndFallback(unittest.TestCase):
+    def test_no_key_falls_back_to_free_and_records_engine(self):
+        # ElevenLabs is the DEFAULT for every video, but with no key the render
+        # must AUTO-FALL-BACK to free edge-tts + whisper and record that it did.
+        beats = [{"scene_id": "s1", "text": "default please"}]
+        hyp = [{"word": "default", "start_s": 0.0, "end_s": 0.5},
                {"word": "please", "start_s": 0.5, "end_s": 1.0}]
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "vo_alignment.json")
-            # No key passed and none in env -> must fall back to free tier.
             old = os.environ.pop("ELEVENLABS_API_KEY", None)
             try:
                 res = align_vo.align(
-                    beats, out, tier="premium", synth_fn=_fake_synth,
+                    beats, out, tier="free", synth_fn=_fake_synth,
                     whisper_fn=_whisper_returning(hyp), elevenlabs_key=None)
             finally:
                 if old is not None:
                     os.environ["ELEVENLABS_API_KEY"] = old
-            self.assertEqual(res["tier"], "free")
+            self.assertEqual(res["vo_engine"], "edge-tts")
+            self.assertTrue(res["vo_fallback"])
+            self.assertIsNotNone(res["vo_fallback_reason"])
 
-    def test_premium_synth_is_shape_only_never_spends(self):
-        # Even WITH a key, the premium synth must not silently spend -- it raises.
+    def test_explicit_free_provider_is_not_a_fallback(self):
+        # WS_VO_PROVIDER=edge is an explicit opt-out, NOT a fallback: the free
+        # engine was requested, so vo_fallback must be False.
+        beats = [{"scene_id": "s1", "text": "free on purpose"}]
+        hyp = [{"word": "free", "start_s": 0.0, "end_s": 0.3},
+               {"word": "on", "start_s": 0.3, "end_s": 0.5},
+               {"word": "purpose", "start_s": 0.5, "end_s": 0.9}]
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "vo_alignment.json")
+            old_prov = os.environ.get("WS_VO_PROVIDER")
+            os.environ["WS_VO_PROVIDER"] = "edge"
+            try:
+                res = align_vo.align(
+                    beats, out, tier="free", synth_fn=_fake_synth,
+                    whisper_fn=_whisper_returning(hyp), elevenlabs_key=None)
+            finally:
+                if old_prov is None:
+                    os.environ.pop("WS_VO_PROVIDER", None)
+                else:
+                    os.environ["WS_VO_PROVIDER"] = old_prov
+            self.assertEqual(res["vo_engine"], "edge-tts")
+            self.assertFalse(res["vo_fallback"])
+            self.assertIsNone(res["vo_fallback_reason"])
+
+    def test_elevenlabs_synth_is_shape_only_never_spends(self):
+        # The ElevenLabs synth makes a REAL HTTP call; with a bogus key it must
+        # raise AlignError (so synth_full_script catches it and falls back) and
+        # never silently succeed/spend.
         with self.assertRaises(align_vo.AlignError):
             align_vo._elevenlabs_synth_with_timestamps(
                 "x", "Adam", "/tmp/none.mp3", "FAKE_KEY")

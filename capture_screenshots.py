@@ -1136,6 +1136,32 @@ _LOGO_SVG_SELECTORS = (
 )
 
 
+def _sanitize_logo_svg(html: str) -> str:
+    """Make a captured inline-<svg> render-safe as a standalone <Img src=...>.
+
+    A site logo's <svg> often paints its glyphs with a CSS custom property
+    (e.g. fill="var(--hds-color-text-solid)") or "currentColor". Those resolve
+    against the LIVE page's CSS cascade, which does NOT exist when Remotion loads
+    the SVG file through an <Img> tag -> the glyphs paint with no colour and the
+    logo renders as an invisible/empty box (the exact opener-logo gap). Replace any
+    such non-resolvable paint with a concrete dark ink so the wordmark always shows.
+    Honest: we only swap unresolvable CSS-var/currentColor paints; real hex/named
+    colours captured from the page are left untouched."""
+    if not html:
+        return html
+    ink = '#0a2540'  # neutral dark ink; reads on the light bookend surface
+    # fill/stroke="var(--...)" (with optional fallback) -> ink
+    html = _re.sub(r'(fill|stroke)="var\(--[^"]*\)"', r'\1="%s"' % ink, html)
+    # fill/stroke="currentColor" (case-insensitive) -> ink
+    html = _re.sub(r'(fill|stroke)="currentColor"', r'\1="%s"' % ink,
+                  html, flags=_re.IGNORECASE)
+    # inline style: fill:var(--...) / stroke:var(--...) / currentColor -> ink
+    html = _re.sub(r'(fill|stroke)\s*:\s*var\(--[^;")]*\)', r'\1:%s' % ink, html)
+    html = _re.sub(r'(fill|stroke)\s*:\s*currentColor', r'\1:%s' % ink,
+                  html, flags=_re.IGNORECASE)
+    return html
+
+
 def _logo_svg_outer_html(page) -> Optional[str]:
     """Return the outerHTML of the first plausible inline site-logo <svg>, or None.
 
@@ -1171,6 +1197,9 @@ def _logo_svg_outer_html(page) -> Optional[str]:
     if "xmlns" not in html[:200]:
         html = html.replace(
             "<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+    # Swap unresolvable CSS-var/currentColor paints for a concrete ink so the logo
+    # renders visible when Remotion loads it as a standalone <Img> (see helper).
+    html = _sanitize_logo_svg(html)
     return html
 
 

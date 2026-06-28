@@ -4334,7 +4334,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     choices=sorted(STYLES), help="curated style template")
     ap.add_argument("--out", required=True, help="run output dir (runs/<id>/)")
     ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--tier", default="free", choices=["free", "premium"])
+    # SINGLE coherent tier for ALL videos: no premium/free fork. `--tier` is kept
+    # only for back-compat of existing invocations; the one accepted value is "free"
+    # (the value threaded into align_vo for VO-provider selection, which TASK C owns).
+    ap.add_argument("--tier", default="free", choices=["free"])
     ap.add_argument("--no-align", action="store_true",
                     help="reuse existing vo_alignment.json in --out (skip synth)")
     ap.add_argument("--render", action="store_true",
