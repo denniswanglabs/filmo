@@ -1,0 +1,960 @@
+// Filmo CURATED claimer — runs on the Hetzner VM host.
+//
+// Polls InsForge `jobs` (atomic claim_next_job), runs the CURATED python
+// build_runner.py pipeline (real screenshots via Playwright .venv-capture + real
+// logos via _sanitize_logo_svg + the curated pattern library) as a subprocess,
+// streams its ledger events into `run_events`, uploads the finished MP4 +
+// per-scene assets to the walk-videos bucket, and marks the run delivered with a
+// `hetzner-curated` producer tag.
+//
+// This is the proven Railway `worker/run.js` produce+ship path (build_runner is
+// untouched), with two host-side additions:
+//   1. An SSRF guard (refuse private/internal/metadata target URLs BEFORE any
+//      egress) — ported from the previous VM worker.js.
+//   2. A `hetzner-curated` producer tag so a delivered run is provably from the VM:
+//      - jobs.claimed_by  = WORKER_ID (`hetzner-curated-<host>-<pid>`)
+//      - runs.props.producer = 'hetzner-curated' (the `producer` column does not
+//        exist in this schema; props is a jsonb that the editor already reads)
+//      - a `run_events` line  "Produced on Hetzner VM (producer=hetzner-curated)."
+//
+// VO: ElevenLabs is the DEFAULT. We set WS_VO_PROVIDER=elevenlabs so align_vo.py
+// tries ElevenLabs first and AUTOMATICALLY falls back to the free edge-tts +
+// whisper path on any ElevenLabs failure (401 / quota_exceeded / no key), so a
+// render never fails on VO. vo_alignment.json records which engine actually ran.
+//
+// Run:
+//   export $(cat /root/.insforge-key)            # INSFORGE_API_KEY=ik_...
+//   export INSFORGE_URL=https://jd3mdkqr.ap-southeast.insforge.app
+//   export $(cat /root/.orkey)                   # OPENROUTER_API_KEY=...
+//   node curated-claimer.js                      # daemon: claim oldest queued job in a loop
+//   node curated-claimer.js --once <run_key>     # process ONE specific run_key (test, no claim)
+//   node curated-claimer.js --url <URL>          # enqueue a test job for URL + process it
+import { createAdminClient } from '@insforge/sdk'
+import { spawn } from 'node:child_process'
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { hostname } from 'node:os'
+import dns from 'node:dns/promises'
+import net from 'node:net'
+import { fileURLToPath } from 'node:url'
+
+const BASE_URL = process.env.INSFORGE_URL || 'https://jd3mdkqr.ap-southeast.insforge.app'
+const API_KEY = process.env.INSFORGE_API_KEY
+const BUCKET = process.env.WALK_BUCKET || 'walk-videos'
+const PIPELINE_DIR = process.env.PIPELINE_DIR || '/root/filmo-pipeline'
+const PYTHON_BIN = process.env.PYTHON_BIN || '/root/filmo-venv/bin/python'
+const POLL_MS = Number(process.env.POLL_MS || 4000)
+const LEDGER_POLL_MS = Number(process.env.LEDGER_POLL_MS || 2000)
+const PRODUCER = process.env.PRODUCER || 'hetzner-curated'
+const WORKER_ID = process.env.WORKER_ID || `${PRODUCER}-${hostname()}-${process.pid}`
+const RENDER_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS || 1500000) // 25 min ceiling
+
+// ── M2 Phase C: reversible Hermes-mode cutover ──────────────────────────────
+// CLAIMER_MODE selects how the produce step runs:
+//   'direct' (DEFAULT, SAFE LIVE PATH): the deterministic build_runner.py render
+//            below — unchanged. This is what the live filmo-claimer daemon runs.
+//   'hermes': the produce step is CONDUCTED by the Hermes agent inside the
+//            NemoClaw sandbox (it drives the 5 filmo-host MCP tools end-to-end:
+//            conversion_read -> plan -> price -> gate -> produce_and_ship, which
+//            captures, renders, and uploads -> final_url). We parse the
+//            `Shipped: <final_url>` line and mark the run delivered with
+//            producer=hetzner-hermes. On ANY Hermes failure/timeout we FALL BACK
+//            to the deterministic build_runner path, so a render NEVER fails.
+const CLAIMER_MODE = (process.env.CLAIMER_MODE || 'direct').trim().toLowerCase()
+const HERMES_PRODUCER = process.env.HERMES_PRODUCER || 'hetzner-hermes'
+const HERMES_SANDBOX = process.env.HERMES_SANDBOX || 'filmo'
+const HERMES_SKILL = process.env.HERMES_SKILL || 'filmo-producer'
+const HERMES_BUDGET_CENTS = Number(process.env.HERMES_BUDGET_CENTS || 5000)
+const HERMES_TIMEOUT_S = Number(process.env.HERMES_TIMEOUT_S || 900) // nemoclaw exec --timeout
+const NEMOCLAW_BIN = process.env.NEMOCLAW_BIN || 'nemoclaw'
+
+// ── Pre-conduct Stripe TEST payment gate (human-pays) ───────────────────────
+// When a claimed job has pay_mode==='human' AND payments are required, the customer
+// must pay a REAL Stripe TEST Checkout (4242 card) BEFORE we conduct. TEST-mode only;
+// gate.py reuses stripe_earn._assert_test_key (refuses live/missing keys, asserts
+// livemode==false). Charge the price the conduct would charge: HERMES_PRICE_CAP_CENTS
+// ($10) — every conduct price is capped to it and the gate always proceeds, so the cap
+// IS the honest quote. REVERSIBILITY: set PAYMENTS_REQUIRED=false (env) to bypass the
+// gate entirely (instant auto-proceed) without touching code or the website.
+const PAYMENTS_REQUIRED = String(process.env.PAYMENTS_REQUIRED ?? 'true').trim().toLowerCase() !== 'false'
+const GATE_PRICE_CENTS = Number(process.env.HERMES_PRICE_CAP_CENTS || 1000)
+const GATE_CURRENCY = process.env.GATE_CURRENCY || 'usd'
+const PAYMENT_TIMEOUT_MS = Number(process.env.PAYMENT_TIMEOUT_MS || 15 * 60 * 1000) // mirror build_runner 15 min
+const PAYMENT_POLL_MS = Number(process.env.PAYMENT_POLL_MS || 2500)                 // mirror build_runner 2.5s
+// Public base for the success/cancel return (the live run page). Env-driven.
+const FILMO_PUBLIC_BASE = (process.env.FILMO_PUBLIC_BASE || 'https://filmostudio.vercel.app').replace(/\/+$/, '')
+// gate.py sits beside this ESM file; resolve it via import.meta (no __dirname in ESM).
+const GATE_PY = process.env.GATE_PY || fileURLToPath(new URL('./gate.py', import.meta.url))
+
+if (!BASE_URL || !API_KEY) { console.error('FATAL: INSFORGE_URL / INSFORGE_API_KEY required (export $(cat /root/.insforge-key))'); process.exit(1) }
+const db = createAdminClient({ baseUrl: BASE_URL, apiKey: API_KEY })
+
+const log = (...a) => console.log(new Date().toISOString(), ...a)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// ── InsForge resilience: bounded fast-timeout + retry around EVERY InsForge call ──
+// A single blocked InsForge call (a 30s gateway timeout on runs.update, or a hung
+// storage upload) must NEVER freeze the single-threaded worker — that wedge cost us
+// a live conduct. Every InsForge db/storage call below is wrapped in `ifCall`, which:
+//   1. Races each attempt against IF_TIMEOUT_MS (default 10s) — the SDK's thenable
+//      query builders have no AbortController, so a Promise.race timeout is the only
+//      universal bound. The underlying request may keep running in the background,
+//      but the WORKER stops waiting at 10s and moves on (the loop never blocks).
+//   2. Retries IF_ATTEMPTS times (default 4) with 500ms→1s→2s backoff on a returned
+//      `{error}` OR a thrown error OR a timeout — so a transient blip self-heals.
+//   3. Caps TOTAL time at ~IF_TIMEOUT_MS*attempts + backoff (~40s+3.5s), then returns
+//      cleanly. It NEVER hangs and NEVER throws: it returns the SDK's own
+//      `{ data, error }` shape (with a synthetic timeout error on exhaustion), so the
+//      existing `const { data, error } = await db…` destructuring at every call site
+//      keeps working unchanged. Tune via env: IF_TIMEOUT_MS / IF_ATTEMPTS / IF_BACKOFF_MS.
+const IF_TIMEOUT_MS = Number(process.env.IF_TIMEOUT_MS || 10000)
+const IF_ATTEMPTS = Number(process.env.IF_ATTEMPTS || 4)
+const IF_BACKOFF_MS = Number(process.env.IF_BACKOFF_MS || 500)
+
+class IfTimeout extends Error {}
+
+// Race a thenable op against a per-attempt timeout. Resolves the op's value, or
+// rejects with IfTimeout once ms elapses (the op keeps running but is abandoned).
+function withTimeout(op, ms, label) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const t = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new IfTimeout(`InsForge ${label} timed out after ${ms}ms`))
+    }, ms)
+    Promise.resolve(op()).then(
+      (v) => { if (settled) return; settled = true; clearTimeout(t); resolve(v) },
+      (e) => { if (settled) return; settled = true; clearTimeout(t); reject(e) },
+    )
+  })
+}
+
+// Bounded retry wrapper for an InsForge `{data,error}` thenable. NEVER hangs (each
+// attempt is timeout-bounded) and NEVER throws (returns {data,error}). On a returned
+// error / thrown error / timeout it retries with backoff up to IF_ATTEMPTS, then
+// returns the last {data,error} (synthesizing an error on a final timeout).
+async function ifCall(label, op, { attempts = IF_ATTEMPTS, timeoutMs = IF_TIMEOUT_MS, baseDelayMs = IF_BACKOFF_MS } = {}) {
+  let last = { data: null, error: { message: `InsForge ${label}: no attempt ran` } }
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await withTimeout(op, timeoutMs, label)
+      if (res && !res.error) return res
+      last = res || { data: null, error: { message: `InsForge ${label}: empty result` } }
+    } catch (e) {
+      const timedOut = e instanceof IfTimeout
+      last = { data: null, error: { message: String((e && e.message) || e), timeout: timedOut } }
+    }
+    if (i < attempts - 1) {
+      log(`  ~ InsForge ${label} attempt ${i + 1}/${attempts} failed (${(last.error && last.error.message) || 'err'}); retrying`)
+      await sleep(baseDelayMs * 2 ** i) // 500, 1000, 2000…
+    }
+  }
+  log(`  ! InsForge ${label} exhausted after ${attempts} attempts: ${(last.error && last.error.message) || 'unknown'}`)
+  return last
+}
+
+// ── resilience: never let one stray rejection/exception kill the poll loop ──
+process.on('unhandledRejection', (reason) => {
+  try { log('!! unhandledRejection (kept alive)', String(reason && reason.stack || reason)) } catch {}
+})
+process.on('uncaughtException', (err) => {
+  try { log('!! uncaughtException (kept alive)', String(err && err.stack || err)) } catch {}
+})
+
+// ───────────────────────────── SSRF guard (Node) ────────────────────────────
+// Parse the host; resolve EVERY A/AAAA record; reject if ANY address is private/
+// loopback/link-local/reserved/multicast/unspecified — 10/8, 172.16/12,
+// 192.168/16, 127/8, 169.254/16 (incl. 169.254.169.254 metadata), ::1, fc00::/7,
+// fe80::/10, IPv4-mapped-IPv6, and the literal `localhost`. Throws on any unsafe
+// or unresolvable host so the caller fails the job BEFORE any egress/build.
+const BLOCKED_HOSTNAMES = new Set(['localhost', 'localhost.localdomain', 'ip6-localhost', 'ip6-loopback'])
+
+function ipBytes(ip) {
+  if (net.isIPv4(ip)) return ip.split('.').map((o) => Number(o))
+  if (net.isIPv6(ip)) {
+    let s = ip.split('%')[0]
+    let v4tail = null
+    const lastColon = s.lastIndexOf(':')
+    if (s.slice(lastColon + 1).includes('.')) { v4tail = s.slice(lastColon + 1); s = s.slice(0, lastColon + 1) + '0:0' }
+    const halves = s.split('::')
+    const head = halves[0] ? halves[0].split(':') : []
+    const tail = halves.length > 1 && halves[1] ? halves[1].split(':') : []
+    const missing = 8 - head.length - tail.length
+    const groups = [...head, ...Array(Math.max(0, missing)).fill('0'), ...tail]
+    const bytes = []
+    for (const g of groups) { const n = parseInt(g || '0', 16); bytes.push((n >> 8) & 0xff, n & 0xff) }
+    if (v4tail) { bytes.splice(12, 4, ...v4tail.split('.').map((o) => Number(o))) }
+    return bytes.length === 16 ? bytes : null
+  }
+  return null
+}
+
+function isBlockedIp(ipStr) {
+  const ip = (ipStr || '').split('%')[0]
+  const b = ipBytes(ip)
+  if (!b) return true
+  if (b.length === 4) {
+    const [a, c] = b
+    if (a === 10) return true
+    if (a === 172 && c >= 16 && c <= 31) return true
+    if (a === 192 && c === 168) return true
+    if (a === 127) return true
+    if (a === 169 && c === 254) return true
+    if (a === 100 && c >= 64 && c <= 127) return true
+    if (a === 0) return true
+    if (a >= 224) return true
+    return false
+  }
+  const allZero = b.every((x) => x === 0)
+  if (allZero) return true
+  if (b.slice(0, 15).every((x) => x === 0) && b[15] === 1) return true
+  if (b[0] === 0xff) return true
+  if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return true
+  if ((b[0] & 0xfe) === 0xfc) return true
+  const first10Zero = b.slice(0, 10).every((x) => x === 0)
+  if (first10Zero && b[10] === 0xff && b[11] === 0xff) return isBlockedIp(b.slice(12).join('.'))
+  if (first10Zero && b[10] === 0 && b[11] === 0) return isBlockedIp(b.slice(12).join('.'))
+  if (ip === 'fd00:ec2::254') return true
+  return false
+}
+
+async function assertPublicUrl(rawUrl) {
+  let u = String(rawUrl || '').trim()
+  if (!u) throw new Error('empty URL')
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u
+  let parsed
+  try { parsed = new URL(u) } catch (e) { throw new Error('unparseable URL: ' + String(e && e.message || e)) }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported scheme: ' + parsed.protocol)
+  const host = (parsed.hostname || '').replace(/^\[|\]$/g, '')
+  if (!host) throw new Error('URL has no host')
+  const low = host.toLowerCase().replace(/\.$/, '')
+  if (BLOCKED_HOSTNAMES.has(low)) throw new Error(`blocked hostname: ${host}`)
+  if (net.isIP(low)) {
+    if (isBlockedIp(low)) throw new Error(`blocked IP literal: ${host}`)
+    return { url: u, host: low }
+  }
+  let addrs
+  try { addrs = await dns.lookup(low, { all: true }) }
+  catch (e) { throw new Error(`could not resolve host ${host}: ${String(e && e.code || e)}`) }
+  if (!addrs || !addrs.length) throw new Error(`host ${host} resolved to no addresses`)
+  for (const a of addrs) {
+    if (isBlockedIp(a.address)) throw new Error(`host ${host} resolves to a blocked address ${a.address}`)
+  }
+  return { url: u, host: low }
+}
+
+// ── actor classification (mirrors the Railway worker): tag each ledger line ──
+const NEMOTRON_CUES = ['storyboard decided', 'planner', 'brain=', 'llm plan', 'nemotron', 'plan unavailable', 'falling back to deterministic', 're-planned']
+const STRIPE_CUES = ['payment link', 'issuing', 'spending_limit', 'spending limit', 'authorization', 'authoriz', 'provision', 'earn', 'cardholder', 'virtual card', ' card ', 'charge', 'payout', 'checkout']
+function classifyActor(msg) {
+  const m = (msg || '').toLowerCase()
+  if (NEMOTRON_CUES.some((c) => m.includes(c))) return 'nemotron'
+  if (STRIPE_CUES.some((c) => m.includes(c))) return 'stripe'
+  return 'hermes'
+}
+
+function readLedger(runKey) {
+  const p = join(PIPELINE_DIR, 'runs', runKey, 'ledger.json')
+  if (!existsSync(p)) return null
+  try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null }
+}
+
+function readProps(runKey) {
+  const p = join(PIPELINE_DIR, 'runs', runKey, 'props.json')
+  if (!existsSync(p)) return null
+  try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null }
+}
+
+async function syncEvents(runId, ledger, lastSeq) {
+  const events = (ledger && ledger.events) || []
+  const fresh = events.filter((e) => (e.seq || 0) > lastSeq)
+  if (!fresh.length) return lastSeq
+  const rows = fresh.map((e) => ({
+    run_id: runId, seq: e.seq, level: e.level || 'info',
+    actor: classifyActor(e.msg), msg: e.msg || '',
+  }))
+  const { error } = await ifCall('run_events.insert', () => db.database.from('run_events').insert(rows))
+  if (error) { log('  ! run_events.insert', JSON.stringify(error)); return lastSeq }
+  return Math.max(lastSeq, ...fresh.map((e) => e.seq || 0))
+}
+
+function mapLedgerToRun(ledger) {
+  const pnl = ledger.pnl || {}
+  const pricing = ledger.pricing || {}
+  const num = (...vals) => { for (const v of vals) if (typeof v === 'number') return v; return null }
+  return {
+    status: (ledger.status === 'completed_with_warnings' ? 'delivered' : ledger.status) || 'failed',
+    phase: ledger.phase || null,
+    price_cents: num(pnl.price_cents, pricing.price_cents, pnl.price, pricing.price),
+    cogs_cents: num(pnl.cogs_cents, pnl.spent_cents, pricing.cogs_cents, pnl.cogs),
+    margin: num(pnl.margin, pnl.net_margin),
+    plan: ledger.plan || null,
+    selection: ledger.selection || null,
+    checkout_url: (ledger.earn || {}).checkout_url || null,
+  }
+}
+
+// Idempotent upload: InsForge storage does NOT overwrite — remove the key first.
+// Both the remove and the upload are bounded+retried (ifCall) so a hung storage
+// call can never freeze the worker — this is the call that wedged a conduct for
+// ~10min. TIMEOUT ASYMMETRY (Helsinki VM ↔ Singapore InsForge, ~140ms RTT,
+// 1.3–3.8 MB/s upload): the remove is a tiny request (SHORT timeout, a 404 is
+// fine); the UPLOAD moves multi-MB cross-region, so it gets a LONG per-attempt
+// timeout (UPLOAD_TIMEOUT_MS, default 150s) — a short bound would ABORT a healthy
+// large upload mid-flight. The SDK uses Node's undici fetch, which keep-alives /
+// pools connections per origin by default, so steady-state calls reuse the warm
+// connection (the ~0.8s cold-TLS penalty only hits the first call after restart).
+const UPLOAD_TIMEOUT_MS = Number(process.env.UPLOAD_TIMEOUT_MS || 150000)
+async function putObject(key, blob) {
+  await ifCall(`storage.remove ${key}`, () => db.storage.from(BUCKET).remove([key]),
+    { attempts: 2, timeoutMs: 8000 })
+  const { data, error } = await ifCall(`storage.upload ${key}`, () => db.storage.from(BUCKET).upload(key, blob),
+    { attempts: 3, timeoutMs: UPLOAD_TIMEOUT_MS })
+  if (error) { log(`  ! storage.upload ${key}`, JSON.stringify(error)); return null }
+  return data?.url || null
+}
+
+// InsForge gateway HARD-REJECTS bodies over ~20-30MB with HTTP 413 (deterministic,
+// independent of timeout/plan). Guard at UPLOAD_MAX_BYTES (default 18MB, safely under
+// the ceiling): a normal 30s 1080p render is ~5-7MB so this never trips in practice,
+// but a long/4K cut could. Over the cap we DON'T attempt (a 413 would just fail) and
+// signal the caller to keep the local file + mark the run retryable — never lose it.
+const UPLOAD_MAX_BYTES = Number(process.env.UPLOAD_MAX_BYTES || 18 * 1024 * 1024)
+
+async function uploadVideo(runKey, name = 'final.mp4') {
+  const p = join(PIPELINE_DIR, 'runs', runKey, name)
+  if (!existsSync(p)) return null
+  const buf = readFileSync(p)
+  if (buf.length > UPLOAD_MAX_BYTES) {
+    log(`  ! ${name} is ${(buf.length / 1048576).toFixed(1)}MB > ${(UPLOAD_MAX_BYTES / 1048576).toFixed(0)}MB cap — skipping upload (would 413); video preserved at ${p}`)
+    return null // caller treats null as upload-failed → keeps file, marks retryable
+  }
+  const blob = new Blob([buf], { type: 'video/mp4' })
+  return putObject(`${runKey}/${name}`, blob)
+}
+
+// ── per-scene asset upload (so the editor preview shows REAL media) ────────────
+const STUDIO_PUBLIC = join(PIPELINE_DIR, 'studio', 'public')
+const CONTENT_TYPE = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+  '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+  '.mp4': 'video/mp4', '.json': 'application/json',
+}
+const ctypeFor = (name) => CONTENT_TYPE['.' + (name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream'
+
+function stagedAssetNames(runKey) {
+  if (!existsSync(STUDIO_PUBLIC)) return []
+  try { return readdirSync(STUDIO_PUBLIC).filter((f) => f.includes(runKey)) } catch { return [] }
+}
+
+async function uploadRunAssets(runKey) {
+  const names = stagedAssetNames(runKey)
+  let ok = 0
+  for (const name of names) {
+    try {
+      const blob = new Blob([readFileSync(join(STUDIO_PUBLIC, name))], { type: ctypeFor(name) })
+      const url = await putObject(`${runKey}/${name}`, blob)
+      if (url) ok++
+    } catch (e) { log(`  ! asset read ${name}`, String(e)) }
+  }
+  log(`  staged ${ok}/${names.length} per-scene assets to ${runKey}/`)
+  return ok
+}
+
+// runs.update — THE call that wedged the worker (a 30s InsForge timeout right after
+// "PAID … proceeding to conduct"). Now bounded+retried so it can never block >~40s.
+async function setRun(runId, patch) {
+  const { error } = await ifCall('runs.update', () => db.database.from('runs').update(patch).eq('id', runId))
+  if (error) log('  ! runs.update', JSON.stringify(error))
+}
+
+// jobs.update — bounded+retried mirror of setRun. Marking a job done/failed must
+// never block the loop; if it ultimately fails we log (the wall-clock guard in
+// processJob still returns the loop to polling regardless).
+async function setJob(jobId, patch) {
+  const { error } = await ifCall('jobs.update', () => db.database.from('jobs').update(patch).eq('id', jobId))
+  if (error) log('  ! jobs.update', JSON.stringify(error))
+}
+
+async function emit(runId, msg, actor = 'hermes', level = 'info') {
+  if (!runId) return
+  const seq = Date.now() % 1000000000
+  const { error } = await ifCall('run_events.insert(emit)',
+    () => db.database.from('run_events').insert([{ run_id: runId, seq, level, actor, msg }]))
+  if (error) log('  ! emit', JSON.stringify(error))
+}
+
+// Stamp the producer onto the run's props (jsonb) — the schema has no `producer`
+// column, so props.producer is the durable per-run producer tag the site can read.
+function tagProducer(props) {
+  const base = (props && typeof props === 'object') ? props : {}
+  return { ...base, producer: PRODUCER, produced_on: 'hetzner-vm' }
+}
+
+// ─────────────────────── Hermes-mode produce (Phase C) ───────────────────────
+// Conduct the produce step through the Hermes agent in the NemoClaw sandbox.
+// Hermes drives the 5 filmo-host MCP tools end-to-end; produce_and_ship renders
+// AND uploads to InsForge, returning a final_url. We parse `Shipped: <final_url>`.
+// Returns { ok, finalUrl, sceneCount, declined, raw } — NEVER throws (so the
+// caller can fall back deterministically on any failure).
+function runHermesConduct(url, goal, budgetCents, runId) {
+  return new Promise((resolve) => {
+    // Single-line prompt the filmo-producer skill conducts. The skill instructs
+    // Hermes to thread the plan_id HANDLE (not the full plan) between tools, which
+    // eliminates the unicode (u2014) corruption and cuts token cost. The run_id is
+    // threaded into EVERY tool call so each MCP tool emits a run_events row (the
+    // LIVE "watch the agent work" feed), sponsor-tagged via the actor column.
+    const prompt =
+      `Conduct the curated Filmo pipeline end-to-end for url=${url} ` +
+      `with goal=${JSON.stringify(goal)} and budget_cents=${budgetCents}. ` +
+      `Pass run_id=${runId} to EVERY one of the five filmo-host MCP tools so the ` +
+      `live activity feed records each step. ` +
+      `Call the five tools exactly once each in order ` +
+      `(conversion_read, plan, price, gate, produce_and_ship). Pass the plan_id ` +
+      `handle (not the full plan) from plan into price and produce_and_ship. ` +
+      `End with the Shipped line containing the final_url.`
+    // Inner sandbox script: source the OpenRouter key, run hermes headless (-Q),
+    // preload the filmo-producer skill, print the agent's final lines. We pass the
+    // ENTIRE inner script (prompt included) as a SINGLE base64 argv token and
+    // decode+run it inside the sandbox. This is the proven Phase B pattern: it
+    // eliminates ALL nested-quote fragility across the node->nemoclaw->openshell->
+    // bash layers (a mangled `-q` arg made hermes hang on interactive input —
+    // the observed "session alive, zero MCP calls" wedge). The base64 blob is
+    // opaque to every shell layer, so the prompt reaches `hermes -q` verbatim.
+    // PER-JOB HYGIENE: wipe the agent's writable, job-carrying state in
+    // /sandbox/.hermes BEFORE each conduct so one job cannot contaminate the next
+    // (e.g. a prompt-injected job planting poisoned memory/session/db state). We
+    // remove ONLY the mutable contamination surface — sessions, the session DB,
+    // memories, logs, and caches — and PRESERVE config + credentials (.env,
+    // config.yaml, auth.json, SOUL.md, bin/, skills/) so the conduct still runs.
+    const hygiene =
+      `for d in sessions memories logs cache audio_cache image_cache; do ` +
+      `rm -rf "/sandbox/.hermes/$d" 2>/dev/null; done; ` +
+      `rm -f /sandbox/.hermes/state.db /sandbox/.hermes/.skills_prompt_snapshot.json 2>/dev/null; ` +
+      `true\n`
+    const inner =
+      `export HOME=/sandbox\n` +
+      `set -a; [ -f /sandbox/.orkey ] && . /sandbox/.orkey; set +a\n` +
+      `cd /sandbox\n` +
+      hygiene +
+      `hermes chat -Q -s ${HERMES_SKILL} -q ${shquote(prompt)} 2>&1 | tail -60\n`
+    const b64 = Buffer.from(inner, 'utf8').toString('base64')
+    // nemoclaw exec uses its OWN --timeout bound (do NOT wrap in a host timeout).
+    // The single-quoted b64 has no special chars, so this argv is quote-safe.
+    const decodeCmd = `echo ${b64} | base64 -d | bash`
+    const args = [HERMES_SANDBOX, 'exec', '--no-tty', '--timeout', String(HERMES_TIMEOUT_S),
+                  '--', 'bash', '-c', decodeCmd]
+    let out = ''
+    let done = false
+    // CRITICAL: stdin MUST be /dev/null ('ignore'). node's default spawn gives the
+    // child an open stdin pipe; `nemoclaw exec` then waits on that stdin and hangs
+    // forever (observed: session alive, zero MCP calls, never returns). Ignoring
+    // stdin makes the exec return as it does from an interactive shell.
+    const child = spawn(NEMOCLAW_BIN, args, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    child.stdout.on('data', (d) => { out += d.toString(); try { process.stdout.write(`  [hermes] ${d}`) } catch {} })
+    child.stderr.on('data', (d) => { out += d.toString(); try { process.stderr.write(`  [hermes!] ${d}`) } catch {} })
+    child.on('error', (e) => { if (done) return; done = true; resolve({ ok: false, error: 'spawn error: ' + String(e), raw: out }) })
+    child.on('close', (code) => {
+      if (done) return; done = true
+      // Parse the conductor's final lines. Success: `Shipped: <url> (N scenes).`
+      const shipped = out.match(/Shipped:\s*(\S+)\s*(?:\((\d+)\s*scenes?\))?/i)
+      const declined = /Gate declined/i.test(out)
+      if (shipped && /^https?:\/\//i.test(shipped[1])) {
+        resolve({ ok: true, finalUrl: shipped[1].replace(/[.,)]+$/, ''), sceneCount: shipped[2] ? Number(shipped[2]) : null, raw: out })
+      } else if (declined) {
+        resolve({ ok: false, declined: true, error: 'gate declined', raw: out })
+      } else {
+        resolve({ ok: false, error: `no Shipped line (exit ${code})`, raw: out })
+      }
+    })
+  })
+}
+
+// POSIX single-quote a string for safe embedding in `bash -lc '...'`.
+function shquote(s) { return `'` + String(s).replace(/'/g, `'\\''`) + `'` }
+
+// Deliver a Hermes-produced run: stamp final_url + producer=hetzner-hermes,
+// mark the job done, emit a producer line. Returns true on success.
+async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0) {
+  // Preserve any keys the MCP tools already wrote onto runs.props (the FILMSTRIP
+  // scenes[] + scene_thumbs{} mirror is patched there mid-conduct). The Hermes
+  // path's local runs/<runKey>/props.json may not exist (the render ran inside
+  // the MCP tool under a different run_key), so DON'T start from the local file:
+  // fetch the live runs.props column and merge the producer tags into it. This
+  // keeps the durable, no-parse filmstrip source intact instead of clobbering it.
+  let existingProps = {}
+  const { data: cur } = await ifCall('runs.select(props)',
+    () => db.database.from('runs').select('props').eq('id', runId).maybeSingle())
+  if (cur && cur.props && typeof cur.props === 'object') existingProps = cur.props
+  const localProps = readProps(runKey) || {}
+  const props = { ...localProps, ...existingProps, producer: HERMES_PRODUCER, produced_on: 'hetzner-vm', conducted_by: 'hermes' }
+  // The ledger may not exist (the render happened inside the MCP tool, not via
+  // build_runner), so map conservatively and trust the agent's final_url.
+  const ledger = readLedger(runKey) || {}
+  const mapped = mapLedgerToRun(ledger)
+  await setRun(runId, { ...mapped, status: 'delivered', phase: 'delivered', final_url: finalUrl, props })
+  await setJob(job.id, { status: 'done' })
+  const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
+  await emit(runId, `Conducted by Hermes on Hetzner VM (producer=${HERMES_PRODUCER})${sceneCount ? `, ${sceneCount} scenes` : ''}. ${totalSec}s total.`, 'hermes')
+  log(`  DELIVERED run ${runKey} -> ${finalUrl}  [${totalSec}s, producer=${HERMES_PRODUCER}, conducted_by=hermes]`)
+  return true
+}
+
+// ── Pre-conduct Stripe TEST payment gate helpers ────────────────────────────
+// Run gate.py create/status as a subprocess; resolve its parsed JSON. NEVER throws.
+// gate.py imports stripe_earn from PIPELINE_DIR and reads the TEST key from
+// ~/.hermes/.env (so pass PIPELINE_DIR + HOME). It NEVER prints the key.
+function runGatePy(args) {
+  return new Promise((resolve) => {
+    const child = spawn(PYTHON_BIN, [GATE_PY, ...args],
+      { cwd: PIPELINE_DIR, env: { ...process.env, PIPELINE_DIR, HOME: process.env.HOME || '/root' },
+        stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = '', err = ''
+    child.stdout.on('data', (d) => { out += d.toString() })
+    child.stderr.on('data', (d) => { err += d.toString() })
+    child.on('error', (e) => resolve({ ok: false, error: 'spawn: ' + String(e) }))
+    child.on('close', (code) => {
+      const body = (out.trim() || err.trim())
+      let parsed = null; try { parsed = JSON.parse(body) } catch {}
+      if (code === 0 && parsed && !parsed.error) resolve({ ok: true, ...parsed })
+      else resolve({ ok: false, error: (parsed && parsed.error) || `gate.py exit ${code}`, raw: body })
+    })
+  })
+}
+
+// Pre-conduct payment gate. Creates a Stripe TEST Checkout, parks the run at
+// awaiting_payment with checkout_url + price (so the run page shows the Pay button),
+// then polls get_session_status until 'paid' or timeout. Returns true when paid;
+// false on create-failure / timeout (caller must NOT proceed to produce). On any
+// non-paid outcome the run + job are left in a clean failed state.
+async function paymentGate(job, runId, runKey, safeUrl) {
+  const priceCents = GATE_PRICE_CENTS
+  const brand = String(safeUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0] || 'your product'
+  const productName = `${brand} promo video`
+  const successUrl = `${FILMO_PUBLIC_BASE}/runs/${runId}?paid=1`
+  const cancelUrl = `${FILMO_PUBLIC_BASE}/runs/${runId}?cancelled=1`
+  await emit(runId, `Payment gate: creating Stripe TEST checkout for $${(priceCents/100).toFixed(2)}\u2026`, 'stripe')
+  const created = await runGatePy(['create', '--run-id', String(runId), '--amount-cents', String(priceCents),
+    '--currency', GATE_CURRENCY, '--product-name', productName, '--success-url', successUrl, '--cancel-url', cancelUrl])
+  if (!created.ok || !created.checkout_url) {
+    await setRun(runId, { status: 'failed', phase: 'checkout_failed' })
+    await setJob(job.id, { status: 'failed', error: 'checkout create failed: ' + (created.error || 'no url') })
+    await emit(runId, `Could not create Stripe checkout (${created.error || 'no url'}).`, 'stripe', 'error')
+    log(`  CHECKOUT FAILED run ${runKey}: ${created.error}`)
+    return false
+  }
+  // Park the run so the run page's PayPanel renders: phase + checkout_url + price.
+  await setRun(runId, { status: 'running', phase: 'awaiting_payment', price_cents: priceCents, checkout_url: created.checkout_url })
+  await emit(runId, `Awaiting payment \u2014 Stripe TEST Checkout ${created.session_id} ($${(priceCents/100).toFixed(2)}). Pay with test card 4242.`, 'stripe')
+  log(`  awaiting payment run ${runKey}: ${created.checkout_url} (livemode=${created.livemode})`)
+
+  const deadline = Date.now() + PAYMENT_TIMEOUT_MS
+  let lastStatus = created.payment_status || 'unpaid'
+  for (;;) {
+    const st = await runGatePy(['status', '--session', created.session_id])
+    const status = (st.ok && st.payment_status) ? st.payment_status : lastStatus
+    lastStatus = status
+    if (status === 'paid' || status === 'no_payment_required') {
+      await setRun(runId, { phase: 'planning' }) // clear awaiting_payment so the UI advances
+      await emit(runId, `Payment received ($${(priceCents/100).toFixed(2)}, test 4242). Releasing production.`, 'stripe')
+      log(`  PAID run ${runKey} \u2014 proceeding to conduct`)
+      return true
+    }
+    if (Date.now() >= deadline) {
+      await setRun(runId, { status: 'failed', phase: 'payment_timeout' })
+      await setJob(job.id, { status: 'failed', error: 'payment gate timed out (no payment received)' })
+      await emit(runId, `Payment gate timed out after ${(PAYMENT_TIMEOUT_MS/60000)|0} min \u2014 no payment received; build cancelled.`, 'stripe', 'warn')
+      log(`  PAYMENT TIMEOUT run ${runKey}`)
+      return false
+    }
+    await sleep(PAYMENT_POLL_MS)
+  }
+}
+
+// ───────────────────────── re-render (editor Export #87) ─────────────────────
+// A `rerender` job re-renders the run's EDITED props (runs.props_edited, durable in
+// InsForge) into a NEW edited.mp4. It SKIPS capture/plan/price/SSRF-gate (those ran
+// for the original build) and NEVER calls assertPublicUrl. Ported from worker/run.js.
+const STUDIO_DIR = join(PIPELINE_DIR, 'studio')
+
+// Download every bucket object under <runKey>/ into studio/public/ so the render
+// resolves the per-scene assets via staticFile. Skips final.mp4 / edited.mp4 / json.
+async function downloadRunAssets(runKey) {
+  if (!existsSync(STUDIO_PUBLIC)) mkdirSync(STUDIO_PUBLIC, { recursive: true })
+  let objs = []
+  {
+    const { data, error } = await ifCall('storage.list',
+      () => db.storage.from(BUCKET).list({ prefix: `${runKey}/`, limit: 200 }))
+    if (error) { log('  ! list assets', JSON.stringify(error)); return 0 }
+    objs = (data && data.data) || data || []
+  }
+  let ok = 0
+  for (const o of objs) {
+    const key = o.key || o.name
+    if (!key) continue
+    const base = key.split('/').pop()
+    if (!base || base === 'final.mp4' || base === 'edited.mp4' || base.endsWith('.json')) continue
+    try {
+      const { data: blob, error } = await ifCall(`storage.download ${key}`,
+        () => db.storage.from(BUCKET).download(key), { attempts: 3, timeoutMs: 120000 })
+      if (error || !blob) { log(`  ! download ${key}`, JSON.stringify(error)); continue }
+      const buf = Buffer.from(await blob.arrayBuffer())
+      writeFileSync(join(STUDIO_PUBLIC, base), buf)
+      ok++
+    } catch (e) { log(`  ! download ${key}`, String(e)) }
+  }
+  log(`  pulled ${ok}/${objs.length} assets into studio/public for ${runKey}`)
+  return ok
+}
+
+// Render the Timeline composition with the given abs props path into outPath.
+// Mirrors worker/run.js runRender (same remotion invocation + cwd + PATH).
+function runRender(absPropsPath, outPath) {
+  return new Promise((resolve) => {
+    const env = {
+      ...process.env,
+      PATH: join(STUDIO_DIR, 'node_modules', '.bin') + (process.env.PATH ? ':' + process.env.PATH : ''),
+    }
+    const args = ['render', 'src/index.ts', 'Timeline', outPath,
+      '--codec=h264', '--concurrency=50%', `--props=${absPropsPath}`]
+    const child = spawn('remotion', args, { cwd: STUDIO_DIR, env })
+    child.on('error', (e) => { log('  ! remotion spawn', String(e)); resolve(1) })
+    child.stdout.on('data', (d) => { try { process.stdout.write(`  [rmx] ${d}`) } catch {} })
+    child.stderr.on('data', (d) => { try { process.stderr.write(`  [rmx!] ${d}`) } catch {} })
+    child.on('close', (c) => resolve(c))
+  })
+}
+
+async function failRerenderJob(job, reason) {
+  log(`  RERENDER FAILED ${job.id}: ${reason}`)
+  await setJob(job.id, { status: 'failed', error: String(reason) })
+}
+
+async function processReRender(job) {
+  const p = job.params || {}
+  const runId = job.run_id
+  const runKey = p.run_key || p.runKey
+  log(`claimed RERENDER job ${job.id} -> run ${runKey}`)
+  await setRun(runId, { phase: 'rerendering' })
+  await emit(runId, 'Edit export: re-rendering your edited video…', 'hermes')
+
+  // Pull the edited props (durable). Fall back to clean props if no edit was saved.
+  const { data: run, error } = await ifCall('runs.select(rerender)',
+    () => db.database.from('runs').select('props, props_edited').eq('id', runId).maybeSingle())
+  if (error || !run) { log('  ! rerender: run not found', JSON.stringify(error)); await failRerenderJob(job, 'run not found'); await emit(runId, 'Re-render failed: run not found.', 'hermes', 'error'); return }
+  const edited = run.props_edited && Array.isArray(run.props_edited.scenes) ? run.props_edited : run.props
+  if (!edited || !Array.isArray(edited.scenes)) { await failRerenderJob(job, 'no edited props'); await emit(runId, 'Re-render failed: nothing to render.', 'hermes', 'error'); return }
+
+  // Make a working copy; strip the hosted asset base so the render reads local
+  // studio/public files via staticFile (we download the run's assets below).
+  const props = structuredClone(edited)
+  delete props.assetBaseUrl
+
+  // Pull the run's per-scene assets back into studio/public for the render.
+  await downloadRunAssets(runKey)
+
+  const propsPath = join(PIPELINE_DIR, 'runs', runKey, 'props.edited.json')
+  try {
+    mkdirSync(join(PIPELINE_DIR, 'runs', runKey), { recursive: true })
+    writeFileSync(propsPath, JSON.stringify(props, null, 2))
+  } catch (e) { await failRerenderJob(job, 'write props: ' + e); await emit(runId, 'Re-render failed: could not stage props.', 'hermes', 'error'); return }
+
+  const outPath = join(PIPELINE_DIR, 'runs', runKey, 'edited.mp4')
+  await emit(runId, 'Rendering edited cut…', 'hermes')
+  const code = await runRender(propsPath, outPath)
+  if (code !== 0 || !existsSync(outPath)) { await failRerenderJob(job, `remotion exit ${code}`); await emit(runId, 'Re-render failed during rendering.', 'hermes', 'error'); return }
+
+  const url = await uploadVideo(runKey, 'edited.mp4')
+  await setRun(runId, { edited_url: url, phase: 'delivered', status: 'delivered' })
+  await setJob(job.id, { status: 'done' })
+  await emit(runId, 'Edited video ready.', 'hermes')
+  log(`  RERENDER delivered run ${runKey} (${url ? 'uploaded' : 'NO video'})`)
+}
+
+// ───────────────────────────── processJob ─────────────────────────────
+async function processJob(job) {
+  const p = job.params || {}
+  const runId = job.run_id
+  const runKey = p.run_key || p.runKey
+  // #87 EXPORT FIX: a rerender job (editor Export) re-renders edited props only —
+  // SKIP capture/plan/price AND the SSRF assertPublicUrl gate (those ran for the
+  // original build). Must branch BEFORE the url read below.
+  if (job.type === 'rerender' || p.from === 'props_edited') {
+    return processReRender(job)
+  }
+  const url = p.company_url || p.url
+  const t0 = Date.now()
+  const activeProducer = CLAIMER_MODE === 'hermes' ? HERMES_PRODUCER : PRODUCER
+  log(`claimed job ${job.id} -> run ${runKey} (${url}) [mode=${CLAIMER_MODE}, producer=${activeProducer}]`)
+  await setRun(runId, { status: 'running', phase: 'planning' })
+
+  // 0) SECURITY: SSRF guard FIRST — refuse private/internal/metadata targets
+  //    BEFORE any egress / pipeline subprocess is spawned.
+  let safeUrl = url
+  try {
+    const safe = await assertPublicUrl(url)
+    safeUrl = safe.url
+    log(`  ssrf guard ok: ${safe.host} is public`)
+  } catch (e) {
+    const reason = 'unsafe url: ' + String(e && e.message || e)
+    await setRun(runId, { status: 'failed', phase: 'blocked_url' })
+    await setJob(job.id, { status: 'failed', error: reason })
+    await emit(runId, reason, 'hermes', 'error')
+    log(`  BLOCKED run ${runKey}: ${reason}`)
+    return
+  }
+
+  // 0.4) PAYMENT GATE (human-pays): collect a REAL Stripe TEST payment BEFORE any
+  //      produce. Fires only when PAYMENTS_REQUIRED (default true) AND
+  //      pay_mode==='human'; auto jobs and a PAYMENTS_REQUIRED=false bypass go
+  //      straight to conduct. On create-fail / timeout the run is already marked
+  //      failed inside paymentGate \u2014 we return (NEVER conduct an unpaid job).
+  //      `paidViaGate` lets the deterministic FALLBACK path below auto-resolve its
+  //      own build_runner._payment_gate (PRODUCER_SIMULATE_PAID=1) so a fallback
+  //      after the gate can NEVER charge a second time.
+  let paidViaGate = false
+  if (PAYMENTS_REQUIRED && (p.pay_mode || 'auto') === 'human') {
+    const paid = await paymentGate(job, runId, runKey, safeUrl)
+    if (!paid) return
+    paidViaGate = true
+  }
+
+  // 0.5) HERMES MODE (Phase C): conduct the produce step via the Hermes agent.
+  //      On ANY failure/timeout, FALL BACK to the deterministic path below.
+  if (CLAIMER_MODE === 'hermes') {
+    try {
+      await emit(runId, 'Conducting produce step via Hermes agent (NemoClaw sandbox)…', 'hermes')
+      await setRun(runId, { phase: 'hermes_conducting' })
+      const goal = p.goal || 'A 30-second brand explainer'
+      const res = await runHermesConduct(safeUrl, goal, HERMES_BUDGET_CENTS, runId)
+      if (res.ok && res.finalUrl) {
+        await deliverHermesRun(job, runId, runKey, res.finalUrl, res.sceneCount, t0)
+        return
+      }
+      if (res.declined) {
+        // The gate declined autonomously — a correct money outcome, not a render
+        // failure. Mark the job failed with the decline reason; do NOT fall back.
+        await setRun(runId, { status: 'failed', phase: 'gate_declined' })
+        await setJob(job.id, { status: 'failed', error: 'hermes gate declined (over budget)' })
+        await emit(runId, 'Hermes gate declined: price exceeds budget. No video produced.', 'hermes', 'warn')
+        log(`  DECLINED run ${runKey} (hermes gate declined)`)
+        return
+      }
+      log(`  ! hermes mode failed (${res.error}); falling back to deterministic build_runner`)
+      await emit(runId, `Hermes conduct failed (${res.error}); falling back to deterministic render.`, 'hermes', 'warn')
+    } catch (e) {
+      log(`  ! hermes mode threw (${String(e)}); falling back to deterministic build_runner`)
+      await emit(runId, `Hermes conduct error; falling back to deterministic render.`, 'hermes', 'warn')
+    }
+    // fall through to the deterministic path (render NEVER fails)
+  }
+
+  // 1) spawn the CURATED pipeline (build_runner.py --mode mock = real screenshots
+  //    + real logos + curated pattern library; $0 free VO via edge-tts+whisper).
+  const args = ['build_runner.py',
+    '--url', url,
+    '--goal', p.goal || 'A 30-second brand explainer',
+    '--run-id', runKey,
+    '--mode', p.mode || 'mock',
+    '--quality', p.quality || 'standard',
+    '--brain', p.brain || 'super-free',
+    '--duration', String(p.duration || 30)]
+  if (p.emphasis) args.push('--emphasis', p.emphasis)
+  // ElevenLabs is the DEFAULT VO: set WS_VO_PROVIDER=elevenlabs so the pipeline
+  // (align_vo.py) tries ElevenLabs FIRST. On ANY ElevenLabs failure (401 /
+  // quota_exceeded / network / no key) align_vo AUTOMATICALLY falls back to the
+  // free edge-tts + whisper path, so a render NEVER fails on VO. The resulting
+  // run records vo_engine / vo_fallback / vo_fallback_reason in vo_alignment.json.
+  const env = { ...process.env }
+  env.WS_VO_PROVIDER = 'elevenlabs'
+  // Auto-resolve the Stripe TEST payment gate for the mock demo (no human-pays).
+  // Auto-resolve the deterministic-fallback payment gate when: the original build
+  // was an auto/mock job (no human-pays), OR the pre-conduct gate ABOVE already
+  // collected real payment (paidViaGate) \u2014 in the latter case the fallback must
+  // NOT create a SECOND checkout, so we simulate-resolve it (zero double-charge).
+  if ((p.mode || 'mock') === 'mock' && (p.pay_mode !== 'human' || paidViaGate)) env.PRODUCER_SIMULATE_PAID = '1'
+
+  const child = spawn(PYTHON_BIN, args, { cwd: PIPELINE_DIR, env })
+  child.on('error', (e) => log(`  ! spawn error ${runKey}`, String(e)))
+  child.stdout.on('data', (d) => { try { process.stdout.write(`  [py] ${d}`) } catch {} })
+  child.stderr.on('data', (d) => { try { process.stderr.write(`  [py!] ${d}`) } catch {} })
+
+  // stream ledger events while the build runs
+  let lastSeq = 0
+  let alive = true
+  const streamer = (async () => {
+    while (alive) {
+      try {
+        const led = readLedger(runKey)
+        if (led) {
+          lastSeq = await syncEvents(runId, led, lastSeq)
+          if (led.phase) {
+            const patch = { phase: led.phase }
+            const checkoutUrl = led.earn && led.earn.checkout_url
+            if (checkoutUrl) patch.checkout_url = checkoutUrl
+            await setRun(runId, patch)
+          }
+        }
+      } catch (e) { log('  ! streamer iter', String(e)) }
+      await sleep(LEDGER_POLL_MS)
+    }
+  })()
+
+  // hard render ceiling so a wedged build can't pin the daemon forever
+  const renderTimer = setTimeout(() => { try { child.kill('SIGKILL') } catch {}; log('  ! render timeout (killed)') }, RENDER_TIMEOUT_MS)
+  const code = await new Promise((res) => child.on('close', res))
+  clearTimeout(renderTimer)
+  alive = false
+  await streamer
+
+  const ledger = readLedger(runKey) || {}
+  await syncEvents(runId, ledger, lastSeq)   // final flush
+  const mapped = mapLedgerToRun(ledger)
+
+  if (code === 0 && (mapped.status === 'delivered' || mapped.status === 'completed_with_warnings')) {
+    // SHIP. uploadVideo -> putObject -> ifCall is BOUNDED (each attempt timeout-capped,
+    // 3 attempts), so the mp4 upload can never hang the worker (this is the call that
+    // pinned a conduct ~10min). The rendered mp4 lives at runs/<runKey>/final.mp4 and
+    // is NEVER deleted here — so on an upload failure we mark the run RETRYABLE and
+    // keep the file, instead of stranding a finished video.
+    const finalUrl = await uploadVideo(runKey, 'final.mp4')
+    const props = tagProducer(readProps(runKey))   // stamp producer into props jsonb
+    await uploadRunAssets(runKey).catch((e) => log('  ! uploadRunAssets', String(e)))
+    if (!finalUrl) {
+      const localPath = join(PIPELINE_DIR, 'runs', runKey, 'final.mp4')
+      const haveVideo = existsSync(localPath)
+      // Mark FAILED-but-retryable: phase=upload_failed, ship_retryable=true, and the
+      // on-disk path so the video can be re-shipped (it is NOT lost). The render
+      // succeeded — only the InsForge upload didn't — so the file is the source of truth.
+      const retryProps = { ...props, ship_retryable: haveVideo, local_video_path: haveVideo ? localPath : null }
+      await setRun(runId, { ...mapped, status: 'failed', phase: 'upload_failed', final_url: null, props: retryProps })
+      await setJob(job.id, { status: 'failed', error: `video upload failed (render OK; mp4 preserved at ${localPath} for re-ship)` })
+      await emit(runId, `Render finished but the upload to storage failed after retries. Your video is safe on the worker and can be re-shipped (no re-render needed).`, 'hermes', 'warn')
+      log(`  UPLOAD FAILED run ${runKey} (render ok, mp4 preserved at ${localPath}, ship_retryable=${haveVideo})`)
+    } else {
+      await setRun(runId, { ...mapped, final_url: finalUrl, props })
+      await setJob(job.id, { status: 'done' })
+      const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
+      await emit(runId, `Produced on Hetzner VM (producer=${PRODUCER}). ${totalSec}s total.`, 'hermes')
+      log(`  DELIVERED run ${runKey} -> ${finalUrl}  [${totalSec}s, producer=${PRODUCER}, claimed_by=${WORKER_ID}]`)
+    }
+  } else {
+    await setRun(runId, { status: 'failed', phase: ledger.phase || 'failed' })
+    await setJob(job.id, { status: 'failed', error: `exit ${code}, ledger ${mapped.status}` })
+    log(`  FAILED run ${runKey} (exit ${code}, ledger ${mapped.status})`)
+  }
+}
+
+// ── SAFE test path: process a SPECIFIC queued run_key without claim_next_job ──
+async function processOne(runKey) {
+  const { data: run, error: rErr } = await ifCall('runs.select(processOne)',
+    () => db.database.from('runs').select('id, run_key, status').eq('run_key', runKey).maybeSingle())
+  if (rErr || !run) { log(`processOne: run not found for run_key=${runKey}`, JSON.stringify(rErr)); return }
+  const { data: jobs, error: jErr } = await ifCall('jobs.select(processOne)',
+    () => db.database.from('jobs').select('*').eq('run_id', run.id).order('id', { ascending: true }))
+  if (jErr) { log('processOne: jobs query error', JSON.stringify(jErr)); return }
+  const job = (jobs || []).find((j) => j.status === 'queued' || j.status === 'claimed') || (jobs || [])[0]
+  if (!job) { log(`processOne: no job for run_key=${runKey}`); return }
+  await setJob(job.id, { status: 'claimed', claimed_by: WORKER_ID, claimed_at: new Date().toISOString() })
+  return processJob({ ...job, status: 'claimed' })
+}
+
+// ── SAFE test enqueue: mirror the website's runs+jobs insert (enqueue.js) ──
+async function enqueueTestJob(companyUrl = 'https://stripe.com') {
+  const runKey = `cloud-${Date.now()}`
+  const userId = process.env.ENQ_USER_ID || '90923fa8-41da-47f2-8d45-81a7dbd3405f'
+  const host = String(companyUrl || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') || companyUrl
+  const goal = process.env.ENQ_GOAL || 'A 30-second brand explainer'
+  const emphasis = process.env.ENQ_EMPHASIS || 'accept payments in one integration'
+  const runRow = { user_id: userId, run_key: runKey, brand: host, company_url: companyUrl, goal, emphasis, quality: 'standard', brain: 'super-free', mode: 'mock', status: 'queued' }
+  const { data: runRows, error: runErr } = await ifCall('runs.insert(enqueue)',
+    () => db.database.from('runs').insert([runRow]).select())
+  if (runErr) { log('enqueue runs.insert', JSON.stringify(runErr)); process.exit(1) }
+  const runId = runRows[0].id
+  const params = { company_url: companyUrl, goal, emphasis, quality: 'standard', brain: 'super-free', mode: 'mock', run_key: runKey, duration: 30 }
+  const { error: jobErr } = await ifCall('jobs.insert(enqueue)',
+    () => db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }]))
+  if (jobErr) { log('enqueue jobs.insert', JSON.stringify(jobErr)); process.exit(1) }
+  log(`enqueued test job: run ${runKey} (${runId}) for ${companyUrl}`)
+  return runKey
+}
+
+// Job wall-clock ceiling. The conduct is bounded by nemoclaw --timeout (15min) and
+// the deterministic render by RENDER_TIMEOUT_MS (25min); this is a BELT-AND-SUSPENDERS
+// outer bound so that even if some unforeseen await hangs (an InsForge path, a child
+// that ignores its kill, etc.) the daemon ALWAYS returns to polling. Set above both
+// inner ceilings so it only fires on a true wedge, never on a healthy long render.
+const JOB_WALLCLOCK_MS = Number(process.env.JOB_WALLCLOCK_MS || 30 * 60 * 1000) // 30 min
+
+// Run processJob bounded by the wall-clock ceiling. processJob still owns its own
+// child kill + per-call ifCall bounds; this only guarantees the LOOP unblocks. The
+// abandoned processJob (if any) keeps running in the background but cannot pin the
+// poll loop — the next claim proceeds. NEVER throws.
+async function runJobBounded(job) {
+  let timer
+  const guard = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      log(`  !! job wall-clock guard fired after ${(JOB_WALLCLOCK_MS / 60000) | 0}min (job ${job.id}); returning to polling`)
+      resolve('wallclock')
+    }, JOB_WALLCLOCK_MS)
+  })
+  try {
+    await Promise.race([
+      processJob(job).catch((e) => log('processJob threw', String(e && e.stack || e))),
+      guard,
+    ])
+  } finally { clearTimeout(timer) }
+}
+
+// ───────────────────────────── daemon loop ─────────────────────────────
+async function main() {
+  log(`Filmo curated claimer up — ${WORKER_ID}`)
+  log(`  insforge: ${BASE_URL}`)
+  log(`  pipeline: ${PIPELINE_DIR}  (build_runner.py --mode mock, curated)`)
+  log(`  mode: ${CLAIMER_MODE}${CLAIMER_MODE === 'hermes' ? ` (conduct via ${HERMES_SANDBOX}/${HERMES_SKILL}, fallback=direct)` : ' (deterministic build_runner)'}`)
+  log(`  producer: ${CLAIMER_MODE === 'hermes' ? HERMES_PRODUCER : PRODUCER}`)
+  log(`  resilience: InsForge calls bounded ${IF_TIMEOUT_MS}ms x${IF_ATTEMPTS}; job wall-clock ${(JOB_WALLCLOCK_MS / 60000) | 0}min`)
+  for (;;) {
+    let job = null
+    // claim_next_job is the FIRST InsForge call each loop — bound it so a hung claim
+    // can never freeze the daemon before it even has a job.
+    const { data, error } = await ifCall('rpc.claim_next_job',
+      () => db.database.rpc('claim_next_job', { p_worker: WORKER_ID }))
+    if (error) log('claim error', JSON.stringify(error))
+    else job = data
+
+    if (job && job.id) {
+      await runJobBounded(job)
+    } else {
+      log('poll: queue empty')
+      try { await sleep(POLL_MS) } catch {}
+    }
+  }
+}
+
+async function supervise() {
+  for (;;) {
+    try { await main() }
+    catch (e) { log('!! main() exited (restarting in 5s)', String(e && e.stack || e)); await sleep(5000) }
+  }
+}
+
+// ───────────────────────────── entrypoint ─────────────────────
+const argv = process.argv.slice(2)
+;(async () => {
+  if (argv[0] === '--once') {
+    const rk = argv[1]
+    if (!rk) { console.error('usage: node curated-claimer.js --once <run_key>'); process.exit(1) }
+    await processOne(rk)
+    process.exit(0)
+  } else if (argv[0] === '--url') {
+    const u = argv[1]
+    if (!u) { console.error('usage: node curated-claimer.js --url <URL>'); process.exit(1) }
+    const rk = await enqueueTestJob(u)
+    await processOne(rk)
+    process.exit(0)
+  } else {
+    supervise()
+  }
+})()
