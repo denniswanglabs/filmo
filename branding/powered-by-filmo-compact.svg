@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Matches live landing: PoweredBy compact (Examples + footer) -->
+<svg width="577" height="18" viewBox="0 0 577 18" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="Powered by Hermes, NVIDIA Nemotron, and Stripe">
+  <defs>
+    <style>
+      .by { font: 500 12px ui-sans-serif, system-ui, -apple-system, 'Hanken Grotesk', sans-serif; fill: #8A94A6; letter-spacing: 0.025em; text-transform: uppercase; }
+      .line { font: 400 12px ui-sans-serif, system-ui, -apple-system, 'Hanken Grotesk', sans-serif; fill: #5A6472; }
+      .sub { fill: #9AA6B8; }
+    </style>
+  </defs>
+  <text x="0" y="13" class="by">Powered by</text>
+  <g transform="translate(106 0)">
+    <image href="brands/hermes.svg" x="0" y="0" width="18" height="18" opacity="0.8"/>
+    <text x="26" y="13" class="line">Hermes<tspan class="sub"> &#183; Nous Research</tspan></text>
+  </g>
+  <g transform="translate(295 0)">
+    <image href="brands/nvidia.svg" x="0" y="0" width="18" height="18" opacity="0.8"/>
+    <text x="26" y="13" class="line">NVIDIA<tspan class="sub"> &#183; Nemotron</tspan></text>
+  </g>
+  <g transform="translate(451 0)">
+    <image href="brands/stripe.svg" x="0" y="0" width="18" height="18" opacity="0.8"/>
+    <text x="26" y="13" class="line">Stripe<tspan class="sub"> &#183; Payments</tspan></text>
+  </g>
+</svg>
