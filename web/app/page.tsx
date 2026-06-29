@@ -23,8 +23,8 @@ const PENDING_KEY = 'ws_pending_build'
 interface PendingBuild {
   url: string
   brain: string
-  // Opt-in: require a REAL Stripe TEST payment before the build proceeds. Default
-  // false so the normal quick demo still auto-pays.
+  // Require a REAL Stripe TEST payment (4242 card) before the build proceeds.
+  // Default TRUE (the gate is the default path); per-build untickable to auto-pay.
   requirePay: boolean
 }
 
@@ -47,8 +47,9 @@ export default function Home() {
   const [url, setUrl] = useState('')
   // Default to the flagship paid Ultra; Super (free) stays selectable in the dropdown.
   const [brain, setBrain] = useState<string>('ultra-paid')
-  // Opt-in human-pays toggle (default OFF → normal demo auto-pays).
-  const [requirePay, setRequirePay] = useState(false)
+  // Human-pays toggle (default ON → a real Stripe TEST checkout, 4242 card, is the
+  // default gate before production). Untick it per-build to fall back to auto-pay.
+  const [requirePay, setRequirePay] = useState(true)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [building, setBuilding] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -146,7 +147,7 @@ export default function Home() {
     // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
     setUrl(p.url ?? '')
     setBrain(p.brain ?? 'ultra-paid')
-    setRequirePay(p.requirePay ?? false)
+    setRequirePay(p.requirePay ?? true)
     // Auto-resume the build only when we returned signed-in AND the stashed URL is real.
     // A blank/garbage stash (e.g. the nav "Build" button opened the gate with an empty
     // composer) must NOT auto-fire createBuild — that would throw server-side and crash
