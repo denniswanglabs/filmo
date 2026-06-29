@@ -33,6 +33,7 @@ Watchable pacing: sets PRODUCER_PACE so scene state-changes don't blink past.
 
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -317,6 +318,61 @@ def _capture_screenshots_for_run(url, run_dir):
     return adapters.generate_screenshots(url, shots_dir, mode="mock", max_shots=2)
 
 
+def _try_unlink(path):
+    """Best-effort remove of a temp/partial file; never raises."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _validate_rendered_mp4(path, min_bytes=10000):
+    """True only if `path` is a non-trivial, decodable video.
+
+    Two gates: (1) size > min_bytes (a 0-byte / truncated exit-0 render fails),
+    and (2) an ffprobe duration probe that returns a positive number of seconds.
+    If ffprobe is unavailable (not installed / not on PATH), we degrade to the
+    size check alone rather than rejecting a real render. Never raises.
+    """
+    try:
+        if not os.path.exists(path) or os.path.getsize(path) <= min_bytes:
+            return False
+    except OSError:
+        return False
+    import subprocess as _sp
+    try:
+        out = _sp.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=30, check=False)
+    except FileNotFoundError:
+        # ffprobe not on PATH — size check already passed, accept.
+        return True
+    except Exception:
+        return False
+    try:
+        return float((out.stdout or "").strip()) > 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _safe_run_id(run_id):
+    """sec-C2: sanitize a run-id before it is used as a path component.
+
+    `run_id` becomes runs/<run_id>/… — used verbatim it lets a crafted value
+    (../../etc/cron.d/x, /abs/path, …) escape the runs dir and write as root.
+    Reduce to a safe slug: keep [A-Za-z0-9._-], map everything else to '-',
+    strip any leading dots/dashes, and reject the pure-dot traversal tokens.
+    Always returns a non-empty, path-safe token.
+    """
+    raw = str(run_id or "").strip()
+    slug = re.sub(r"[^A-Za-z0-9._-]", "-", raw).lstrip(".-")
+    if slug in ("", ".", ".."):
+        slug = "run"
+    return slug[:128]
+
+
 def _run_vo_engine(plan, run_id, url, run_dir):
     """Produce the PICTURE via the VO-driven <Timeline> engine and replace the
     run's final.mp4 with it. NEVER-BLANK by construction (ExplainerCard floor).
@@ -389,22 +445,42 @@ def _run_vo_engine(plan, run_id, url, run_dir):
 
     # Render the Timeline composition with the props into the run's final.mp4 — the
     # exact path the dashboard/stitch already point at, so nothing downstream changes.
+    #
+    # bug-C1 FIX: NEVER overwrite the already-verified final.mp4 with an unvalidated
+    # render. A returncode-0 exit can still leave a 0-byte / truncated file (disk
+    # full, killed encoder, etc.), and the old code shipped that as "delivered".
+    # Render to a temp path, validate it (non-trivial size + an ffprobe duration
+    # check), and only then os.replace() over the verified picture. On ANY failure
+    # the verified picture from orchestrate is left untouched.
+    # NOTE: the temp name must still end in .mp4 — Remotion's validateOutputFilename
+    # rejects an h264+aac output whose extension isn't mp4/mkv/mov (so "final.mp4.tmp"
+    # would fail the render outright). Use "final.tmp.mp4".
     final = os.path.join(run_dir, "final.mp4")
+    tmp = os.path.join(run_dir, "final.tmp.mp4")
     studio = style_fill.STUDIO_DIR
     abs_props = os.path.abspath(props_path)
     env = dict(os.environ, PATH=os.path.join(studio, "node_modules", ".bin")
                + os.pathsep + os.environ.get("PATH", ""))
     import subprocess
-    cmd = ["remotion", "render", "src/index.ts", "Timeline", os.path.abspath(final),
+    cmd = ["remotion", "render", "src/index.ts", "Timeline", os.path.abspath(tmp),
            "--codec=h264", "--concurrency=50%", "--props=%s" % abs_props]
     r = subprocess.run(cmd, cwd=studio, env=env)
-    if r.returncode != 0 or not os.path.exists(final):
+    if r.returncode != 0 or not os.path.exists(tmp):
+        _try_unlink(tmp)
         return None, vo_provenance
+    if not _validate_rendered_mp4(tmp):
+        print("[build_runner] VO-ENGINE render failed validation (%s) — keeping the "
+              "verified picture" % tmp, file=sys.stderr)
+        _try_unlink(tmp)
+        return None, vo_provenance
+    # Atomic swap: the verified picture is only destroyed AFTER the new one validates.
+    os.replace(tmp, final)
     return final, vo_provenance
 
 
 def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="standard",
         quality="standard", brain="super-free", emphasis=""):
+    run_id = _safe_run_id(run_id)  # sec-C2: path-traversal hardening on the run dir
     run_dir = os.path.join(RUNS, run_id)
     os.makedirs(run_dir, exist_ok=True)
     led_path = os.path.join(run_dir, "ledger.json")
@@ -707,11 +783,22 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
                     disk_led.event("info", "VO-ENGINE: rendered never-blank <Timeline> "
                                    "picture -> final.mp4 (WS_VO_ENGINE on)")
                 else:
+                    # H5: the engine couldn't produce/validate a picture. Non-fatal
+                    # (the legacy picture still ships), but stamp it durably + warn so
+                    # a silent degrade is observable instead of looking like a clean run.
+                    print("[build_runner] WARN VO-ENGINE render unavailable — kept the "
+                          "legacy picture for run %s" % run_id, file=sys.stderr)
+                    disk_led.data["vo_engine_failed"] = True
                     disk_led.event("info", "VO-ENGINE: engine render unavailable — kept the "
                                    "legacy picture for this run")
                 disk_led.data["stage"] = None  # render finished — clear the advisory
                 disk_led.write(led_path)
             except Exception as e:  # never let the picture step fail a delivered run
+                # H5: the engine threw — non-fatal (legacy picture ships) but stamp +
+                # warn so the failure is observable in logs and on the ledger.
+                print("[build_runner] WARN VO-ENGINE raised (%s) — kept the legacy "
+                      "picture for run %s" % (e, run_id), file=sys.stderr)
+                disk_led.data["vo_engine_failed"] = True
                 disk_led.event("info", "VO-ENGINE: skipped (%s) — kept the legacy picture" % e)
                 disk_led.data["stage"] = None
                 disk_led.write(led_path)
@@ -773,6 +860,23 @@ def _payment_gate(led, led_path, run_id, price_cents, currency, job, mode):
     product_name = "%s promo video" % brand
 
     simulate = os.environ.get("PRODUCER_SIMULATE_PAID") == "1"
+
+    # H3: price_cents is the SOURCE OF TRUTH for what Stripe charges — it must be a
+    # positive integer before we create a checkout. A None / 0 / negative / non-int
+    # price would mint a $0 (or bogus) Checkout Session and ship a "delivered" video
+    # the customer never paid for. A real (non-simulate) build with a bad price FAILS
+    # cleanly; the $0 simulate dev path is allowed to proceed (it never settles money).
+    try:
+        price_ok = isinstance(price_cents, int) and not isinstance(price_cents, bool) \
+            and price_cents > 0
+    except Exception:
+        price_ok = False
+    if not price_ok and not simulate:
+        led.event("error", "refusing checkout: invalid price_cents=%r" % (price_cents,))
+        led.set_phase("checkout_failed")
+        led.set_status("failed")
+        led.write(led_path)
+        return None
 
     # Create the real test-mode session ($0 — creating a test session never settles).
     # Guard it: a missing/bad Stripe key or a Stripe 4xx must FAIL the run cleanly, not
