@@ -100,7 +100,21 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
   const [mobilePanel, setMobilePanel] = useState("inspector");
 
   const playerRef = useRef(null);
+  // The preview stage is rendered in two different sibling JSX trees (the desktop
+  // split layout and the mobile stacked layout). Crossing the 768px breakpoint
+  // unmounts one tree and mounts the other, so React hands us a BRAND-NEW
+  // `.ws-stage` DOM node. A plain ref would update silently and the selection
+  // effect (which binds delegated listeners to the node) would never re-run,
+  // orphaning click/hover/dblclick on the detached node. A state-backed callback
+  // ref makes a node swap trigger a re-render so the effect re-binds to the live
+  // node. We keep `stageRef` (a plain ref) for the synchronous reads the overlay /
+  // inline editor / drag geometry do, and surface `stageEl` (state) for effects.
   const stageRef = useRef(null);
+  const [stageEl, setStageEl] = useState(null);
+  const setStageNode = useCallback((node) => {
+    stageRef.current = node;
+    setStageEl(node);
+  }, []);
   const propsRef = useRef(props);
   useEffect(() => {
     propsRef.current = props;
@@ -236,7 +250,9 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     }
   }, [editing, selected]);
 
-  usePreviewSelection(stageRef, {
+  // Pass the live stage NODE (state) — not just the ref — so the hook's listener
+  // effect re-binds when the node is swapped out on a mobile<->desktop layout flip.
+  usePreviewSelection(stageEl, {
     enabled: !!props,
     onPick: selectElement,
     onHover: (el) =>
@@ -337,7 +353,7 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
       }}
     >
       <div
-        ref={stageRef}
+        ref={setStageNode}
         className="ws-stage"
         style={
           isMobile

@@ -1,7 +1,7 @@
 // Hera-style CLICK-TO-SELECT: select a visual element by clicking it inside the
 // live @remotion/player preview. This file owns two pieces:
 //
-//   1) usePreviewSelection(stageRef, { onPick, enabled })
+//   1) usePreviewSelection(stageNode, { onPick, enabled })
 //        Attaches delegated pointer handlers on the Player's stage container.
 //        On click it finds the nearest `[data-scene-id]` ancestor of the click
 //        target, reads its `data-scene-id` + `data-field`, and calls onPick.
@@ -62,7 +62,13 @@ export const INLINE_TEXT_FIELDS = new Set([
 //   onHover(el|null)            reports the hovered selectable,
 //   onActivate({sceneId,field}) fires on a double-click of an editable element
 //                               (App routes text fields into inline-edit mode).
-export function usePreviewSelection(stageRef, { onPick, onHover, onActivate, enabled = true }) {
+//
+// `stage` is the live stage DOM NODE (or null before mount). The caller passes a
+// state-backed node (NOT a ref) so a node SWAP — which happens whenever the editor
+// crosses the 768px breakpoint and remounts the preview into the other layout's
+// JSX tree — re-runs this effect and re-binds the listeners onto the new node.
+// Binding to a stale node (the bug this fixes) silently kills click-to-select.
+export function usePreviewSelection(stage, { onPick, onHover, onActivate, enabled = true }) {
   const onPickRef = useRef(onPick);
   const onHoverRef = useRef(onHover);
   const onActivateRef = useRef(onActivate);
@@ -71,7 +77,6 @@ export function usePreviewSelection(stageRef, { onPick, onHover, onActivate, ena
   onActivateRef.current = onActivate;
 
   useEffect(() => {
-    const stage = stageRef.current;
     if (!stage || !enabled) return;
 
     const handleClick = (e) => {
@@ -145,7 +150,7 @@ export function usePreviewSelection(stageRef, { onPick, onHover, onActivate, ena
       stage.removeEventListener("pointerleave", handleLeave, true);
       stage.removeEventListener("dragstart", handleDragStart, true);
     };
-  }, [stageRef, enabled]);
+  }, [stage, enabled]);
 }
 
 // Track a single element's box (by data-scene-id + data-field) inside the stage,
