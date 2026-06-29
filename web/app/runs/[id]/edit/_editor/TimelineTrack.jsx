@@ -53,11 +53,11 @@ export function TimelineTrack({ props, activeIdx, onSelect, onSeek, currentFrame
     [totalDurForSeek]
   );
 
-  // Arm a live scrub: seek to the pointer's frame now, then bind window-level
-  // pointermove/up so the drag keeps scrubbing even as the pointer leaves the track
-  // or crosses clips/handles. Shared by BOTH entry points — pressing the track
-  // background AND grabbing the playhead knob — so they scrub identically.
-  const startScrub = useCallback(
+  // Press on the track background → seek immediately, then arm window listeners so
+  // the drag keeps scrubbing even as the pointer leaves the track or crosses clips.
+  // (Clip buttons stop their own pointerdown from reaching here, so clicking a clip
+  // still selects its scene rather than starting a scrub.)
+  const onTrackPointerDown = useCallback(
     (e) => {
       if (!onSeek) return;
       // Only the primary (left) button starts a scrub.
@@ -65,10 +65,6 @@ export function TimelineTrack({ props, activeIdx, onSelect, onSeek, currentFrame
       const f = frameFromClientX(e.clientX);
       if (f == null) return;
       e.preventDefault();
-      // Keep receiving moves even if the finger/cursor slips off the tiny handle.
-      try {
-        e.currentTarget.setPointerCapture?.(e.pointerId);
-      } catch {}
       draggingRef.current = true;
       onSeek(f);
       const onMove = (ev) => {
@@ -85,22 +81,6 @@ export function TimelineTrack({ props, activeIdx, onSelect, onSeek, currentFrame
       window.addEventListener("pointerup", onUp, true);
     },
     [onSeek, frameFromClientX]
-  );
-
-  // Press on the track background → start a scrub. (Clip buttons stop their own
-  // pointerdown from reaching here, so clicking a clip still selects its scene
-  // rather than starting a scrub.)
-  const onTrackPointerDown = startScrub;
-  // Grabbing the playhead knob → start the SAME scrub. stopPropagation so the press
-  // doesn't ALSO fire the track-background handler (it would be redundant, but keep
-  // a single drag session). The knob seeks-to-cursor on grab like the track does;
-  // since the knob already sits at the playhead, that's a no-op jump, then drag.
-  const onPlayheadPointerDown = useCallback(
-    (e) => {
-      e.stopPropagation();
-      startScrub(e);
-    },
-    [startScrub]
   );
 
   // The track maps frame-space -> px using flex (the container is full-width); we
@@ -200,11 +180,7 @@ export function TimelineTrack({ props, activeIdx, onSelect, onSeek, currentFrame
             );
           })}
 
-          {/* ---- live playhead + GRABBABLE knob ----
-                 The vertical line stays pointer-transparent (so it never blocks a
-                 click meant for a clip beneath it); the KNOB at its top is a real
-                 grab target (pointerEvents:auto, cursor:ew-resize) that starts a
-                 live scrub on pointerdown via onPlayheadPointerDown. */}
+          {/* ---- live playhead ---- */}
           <div
             style={{
               position: "absolute",
@@ -219,51 +195,19 @@ export function TimelineTrack({ props, activeIdx, onSelect, onSeek, currentFrame
               borderRadius: 2,
             }}
           >
-            {/* The grab handle: a rounded knob with a downward nub that reads as a
-                draggable playhead head. Sits above the track, hangs over the line. */}
-            <div
-              onPointerDown={onSeek ? onPlayheadPointerDown : undefined}
-              title="Drag to scrub"
-              role="slider"
-              aria-label="Scrub playhead"
-              aria-valuemin={0}
-              aria-valuemax={totalDur}
-              aria-valuenow={Math.round(currentFrame)}
+            <span
               style={{
                 position: "absolute",
-                top: -13,
+                top: -4,
                 left: "50%",
                 transform: "translateX(-50%)",
-                width: 18,
-                height: 18,
+                width: 10,
+                height: 10,
                 borderRadius: "50%",
                 background: "var(--accent)",
-                border: "2px solid #fff",
-                boxShadow: "0 1px 3px rgba(20,23,28,.30), 0 0 10px 1px var(--accent-glow-strong)",
-                cursor: onSeek ? "ew-resize" : "default",
-                pointerEvents: onSeek ? "auto" : "none",
-                // touch-action:none so a finger drag scrubs instead of scrolling the page.
-                touchAction: "none",
-                zIndex: 1,
+                boxShadow: "0 0 8px 1px var(--accent-glow-strong)",
               }}
-            >
-              {/* a tiny triangle nub pointing down into the track, so the knob
-                  reads as a playhead head rather than a stray dot */}
-              <span
-                style={{
-                  position: "absolute",
-                  bottom: -4,
-                  left: "50%",
-                  transform: "translateX(-50%) rotate(45deg)",
-                  width: 7,
-                  height: 7,
-                  background: "var(--accent)",
-                  borderRight: "2px solid #fff",
-                  borderBottom: "2px solid #fff",
-                  pointerEvents: "none",
-                }}
-              />
-            </div>
+            />
           </div>
         </div>
       </div>
