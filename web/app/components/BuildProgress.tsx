@@ -218,10 +218,11 @@ function BuildChat({ run, events }: { run: Run; events: RunEvent[] }) {
 }
 
 // Pay affordance — shown only when the human-pays flow has parked the build at
-// 'awaiting_payment' AND a Stripe TEST checkout URL is on the run. Opens Stripe's
-// hosted test checkout in a new tab; once the human pays (test card 4242), the
-// pipeline's payment gate resolves and the build continues. The page already polls
-// run status, so no extra polling is needed here. Landing tokens: white surface,
+// 'awaiting_payment' AND a Stripe TEST checkout URL is on the run. Redirects THIS
+// tab to Stripe's hosted test checkout (same-tab, not a new tab — the InsForge
+// session lives in per-tab sessionStorage, so a new tab returns logged-out); once
+// the human pays (test card 4242), Stripe's success_url returns to this run page
+// and the pipeline's payment gate resolves so the build continues. Landing tokens: white surface,
 // ink #0E1320, blue accent (#3B82F6). No emojis — SVG lock mark only.
 function PayPanel({ run }: { run: Run }) {
   const price = formatCents(run.price_cents)
@@ -249,10 +250,12 @@ function PayPanel({ run }: { run: Run }) {
         </div>
       </div>
 
+      {/* SAME-TAB redirect (NOT target="_blank"). The InsForge session lives in
+          per-tab sessionStorage, so a new tab would return from Stripe logged-out
+          and the run page would show its sign-in gate. Redirecting this tab keeps
+          the session through the round-trip; Stripe's success_url returns here. */}
       <a
         href={run.checkout_url ?? '#'}
-        target="_blank"
-        rel="noreferrer"
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#3B82F6] py-3 font-semibold text-white shadow-[0_10px_30px_-10px_rgba(59,130,246,0.6)] transition hover:bg-[#2f6fe0]"
       >
         Pay {price}
@@ -260,7 +263,7 @@ function PayPanel({ run }: { run: Run }) {
       </a>
 
       <p className="mt-2.5 text-center text-[11px] text-[#5A6472]">
-        Stripe test checkout — no real charge. Opens in a new tab.
+        Stripe test checkout — no real charge. You&rsquo;ll return here automatically after paying.
       </p>
     </div>
   )
