@@ -3,41 +3,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
 
-const CHAPTERS = ['Intro', 'Hook', 'Feature', 'Proof', 'Close'] as const
 const POSTER = '/hero-demo-poster.jpg'
-
-const WAVE = [
-  0.3, 0.55, 0.42, 0.7, 0.5, 0.85, 0.62, 0.4, 0.74, 0.5, 0.92, 0.66, 0.48, 0.8,
-  0.58, 0.38, 0.7, 0.52, 0.88, 0.6, 0.44, 0.76, 0.54, 0.34, 0.68, 0.5, 0.82,
-  0.6, 0.46, 0.72, 0.56, 0.4, 0.78, 0.52, 0.9, 0.64, 0.42, 0.7, 0.5, 0.6,
-]
 
 export default function FeaturedPlayer() {
   const reduced = useReducedMotion()
   const videoRef = useRef<HTMLVideoElement>(null)
-  const rafRef = useRef<number | null>(null)
 
-  const [progress, setProgress] = useState(0)
   const [muted, setMuted] = useState(true)
   const [playing, setPlaying] = useState(false)
-
-  useEffect(() => {
-    if (reduced || !playing) return
-    const el = videoRef.current
-    if (!el) return
-
-    const tick = () => {
-      const d = el.duration
-      if (d && Number.isFinite(d) && d > 0) {
-        setProgress(Math.min(1, el.currentTime / d))
-      }
-      rafRef.current = requestAnimationFrame(tick)
-    }
-    rafRef.current = requestAnimationFrame(tick)
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
-    }
-  }, [reduced, playing])
 
   useEffect(() => {
     if (reduced) return
@@ -55,8 +28,6 @@ export default function FeaturedPlayer() {
 
     return () => el.removeEventListener('playing', onPlaying)
   }, [reduced])
-
-  const activeIndex = Math.min(CHAPTERS.length - 1, Math.floor(progress * CHAPTERS.length))
 
   function startPlayback() {
     const el = videoRef.current
@@ -150,71 +121,6 @@ export default function FeaturedPlayer() {
             </span>
             {muted ? 'Tap for sound' : 'Sound on'}
           </button>
-        </div>
-
-        <div className="px-2.5 pb-1.5 pt-4 sm:px-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {CHAPTERS.map((label, i) => {
-              const active = i === activeIndex
-              const past = i < activeIndex
-              return (
-                <span
-                  key={label}
-                  className={`rounded-full px-2.5 py-1.5 text-[11px] font-medium transition-colors duration-200 sm:px-3 sm:py-1 sm:text-xs ${
-                    active
-                      ? 'bg-[#3B82F6] text-white shadow-[0_6px_16px_-6px_rgba(59,130,246,0.7)]'
-                      : past
-                        ? 'bg-[#E8F0FF] text-[#3B82F6]'
-                        : 'bg-[#F2F6FF] text-[#9AA6B8]'
-                  }`}
-                >
-                  {label}
-                </span>
-              )
-            })}
-            <span className="ml-auto font-mono text-[11px] tabular-nums text-[#9AA6B8]">
-              {String(activeIndex + 1).padStart(2, '0')} / {String(CHAPTERS.length).padStart(2, '0')}
-            </span>
-          </div>
-
-          <div className="relative mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[#EAF1FF]">
-            <div
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[#7DAEFB] to-[#3B82F6]"
-              style={{ width: `${Math.max(0, Math.min(100, progress * 100))}%` }}
-            />
-          </div>
-          <div className="relative h-0">
-            <span
-              aria-hidden="true"
-              className="absolute -top-[7px] z-10 h-2.5 w-2.5 -translate-x-1/2 rounded-full border-2 border-white bg-[#3B82F6] shadow-[0_2px_8px_rgba(59,130,246,0.6)]"
-              style={{ left: `${Math.max(0, Math.min(100, progress * 100))}%` }}
-            />
-          </div>
-
-          <svg
-            viewBox="0 0 400 28"
-            preserveAspectRatio="none"
-            className="mt-3 h-7 w-full"
-            aria-hidden="true"
-          >
-            {WAVE.map((h, i) => {
-              const x = (i / WAVE.length) * 400
-              const barH = 4 + h * 20
-              const lit = i / WAVE.length <= progress
-              return (
-                <rect
-                  key={i}
-                  x={x}
-                  y={(28 - barH) / 2}
-                  width={400 / WAVE.length - 2.5}
-                  height={barH}
-                  rx={1.5}
-                  fill={lit ? '#3B82F6' : '#D4E2FB'}
-                  fillOpacity={lit ? 0.85 : 0.7}
-                />
-              )
-            })}
-          </svg>
         </div>
       </div>
     </div>
