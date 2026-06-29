@@ -128,7 +128,10 @@ class TestMapping(unittest.TestCase):
                 "audio_path", "lang", "voice", "tier", "total_duration_s",
                 "words", "beats",
                 # VO engine provenance (run artifact; safe re: plan allowed_top).
-                "vo_engine", "vo_fallback", "vo_fallback_reason"})
+                "vo_engine", "vo_fallback", "vo_fallback_reason",
+                # Scene-aligned VO provenance (run artifact). With an INJECTED
+                # synth_fn the per-beat synth is skipped, so these are False / [].
+                "vo_aligned", "vo_beat_files"})
             # With no ElevenLabs key (the test injects synth_fn) the free path
             # runs and is recorded as a fallback from the ElevenLabs default.
             self.assertEqual(res["vo_engine"], "edge-tts")

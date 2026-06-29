@@ -43,6 +43,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -553,6 +554,79 @@ def align(beats, out_path, *, tier="free", lang="en", voice=None,
 
     total = round(max((w["end_s"] for w in words), default=0.0), 3)
     out_beats = _beats_from_words(words, clean_beats)
+
+    # PER-BEAT (SCENE-ALIGNED) VO — the headline fix for the hosted/MCP drift +
+    # trailing-silence bug. The single continuous voiceover.mp3 above is anchored at
+    # t=0, but build_timeline lays scenes contiguously and (when no per-beat file is
+    # found) GROWS the picture to job.target_duration_s, so a t=0 track no longer
+    # lands each line on its scene (picture runs ahead of the voice -> cumulative
+    # drift) and the picture outruns the VO (-> trailing silence).
+    #
+    # build_timeline._scene_audio resolves a SEPARATE per-beat file
+    # `voiceover.beat{NN}.mp3` (NN = the non-cut scene_index, which parallels
+    # clean_beats / out_beats order) and (a) plays it at the scene's OWN in_frame and
+    # (b) uses its real speech length as the VO-FIT floor so each scene is exactly its
+    # beat. style_fill.run_pipeline then turns honor_plan_durations OFF when aligned
+    # so the picture lands == the VO span (no drift, no trailing silence). Emit those
+    # segments HERE so scene.audio.src is populated and the floor is armed.
+    #
+    # Provider mirrors the engine that ACTUALLY produced the continuous track (so we
+    # never trigger a second paid ElevenLabs call and the segments match the audio):
+    # ElevenLabs only when it really ran, otherwise the free edge path. Best-effort:
+    # any failure here NEVER breaks alignment/render — it degrades to the old
+    # single-track behavior (scene.audio stays None, the continuous track is the
+    # fallback). The injected-synth test seam (deterministic $0 unit tests) skips the
+    # real per-beat synth entirely.
+    #
+    # IMPORTANT: out_beats[i].start_s is the beat's start WITHIN the continuous track
+    # (whisper/ElevenLabs word timing). We pass start_s=0.0 to the aligned synth so
+    # each segment is written as a STANDALONE beat file at t=0 — build_timeline lays
+    # them down at each scene's in_frame, so the per-beat files must NOT carry the
+    # continuous-track offset (otherwise every scene's audio would start late by its
+    # cumulative offset). The mixed full-length track the aligned synth ALSO writes is
+    # discarded (we keep the original voiceover.mp3 with its real word timing).
+    vo_beat_files = []
+    vo_aligned = False
+    if synth_fn is None:
+        try:
+            import adapters
+            beat_provider = "elevenlabs" if vo_engine == "elevenlabs" else "edge"
+            # Each beat is synthesized as a STANDALONE file at t=0 (start_s=0.0);
+            # build_timeline lays it down at the scene's own in_frame, so the per-beat
+            # file must NOT carry the continuous-track offset.
+            aligned_beats = [
+                {"scene_id": ob["scene_id"], "text": cb["text"], "start_s": 0.0}
+                for ob, cb in zip(out_beats, clean_beats)
+            ]
+            # Pass out_path == voiceover.mp3 so the per-beat segments are named exactly
+            # voiceover.beat{NN}.mp3 (base = stem of out_path) — precisely where
+            # build_timeline._scene_audio resolves them. The adapter ALSO writes a
+            # mixed full-length track to out_path; with every beat at t=0 that mix is
+            # an overlapping cacophony AND it would clobber the real word-timed
+            # voiceover.mp3. So we back up voiceover.mp3 first and RESTORE it after —
+            # we keep only the per-beat segment files, never the mix.
+            bak = audio_final + ".prealign.bak"
+            try:
+                if os.path.exists(audio_final):
+                    shutil.copy2(audio_final, bak)
+                aligned = adapters.synthesize_voiceover_aligned(
+                    aligned_beats, resolved_voice, audio_final, beat_provider)
+                vo_beat_files = [seg.get("path") for seg in aligned.get("segments", [])]
+            finally:
+                # Restore the real continuous voiceover.mp3 (the composition fallback /
+                # the track whose word timing produced `words` above).
+                if os.path.exists(bak):
+                    os.replace(bak, audio_final)
+            # Only claim aligned if EVERY non-cut beat has a real per-beat file where
+            # build_timeline will look for it.
+            vo_aligned = bool(vo_beat_files) and all(
+                f and os.path.exists(f) for f in vo_beat_files)
+        except Exception as e:  # synth/ffmpeg/probe failure — non-fatal
+            sys.stderr.write(
+                "align_vo: WARNING per-beat (scene-aligned) VO synth failed "
+                "(%s); the continuous voiceover.mp3 is the fallback (scenes will "
+                "use the single track, no per-beat files).\n" % e)
+
     return {
         "audio_path": audio_path,
         "lang": lang,
@@ -566,6 +640,13 @@ def align(beats, out_path, *, tier="free", lang="en", voice=None,
         "vo_engine": vo_engine,            # "elevenlabs" | "edge-tts"
         "vo_fallback": vo_fallback,        # True when ElevenLabs was tried but failed
         "vo_fallback_reason": vo_fallback_reason,  # WHY it fell back (for diagnosis)
+        # SCENE-ALIGNED VO PROVENANCE (run artifact): vo_aligned is True when the
+        # per-beat voiceover.beat{NN}.mp3 segments were emitted (so each scene plays
+        # its OWN line at its in_frame and the VO-FIT floor is armed); vo_beat_files
+        # lists those segment paths in beat/scene order. When False the run degraded
+        # to the single continuous track (the deterministic fallback).
+        "vo_aligned": vo_aligned,
+        "vo_beat_files": vo_beat_files,
         "total_duration_s": total,
         "words": words,
         "beats": out_beats,
