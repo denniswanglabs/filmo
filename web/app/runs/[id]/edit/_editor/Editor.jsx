@@ -644,8 +644,12 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
         </div>
       ) : (
         /* --------------------------------------------------- DESKTOP LAYOUT */
-        <div style={{ display: "flex", flex: 1, minHeight: 0, padding: "12px 14px 14px", gap: 14 }}>
-          {/* ------------------------------ LEFT: INSPECTOR RAIL */}
+        /* row-reverse: DOM order is unchanged (stage node stays mounted so the
+           state-backed callback ref / usePreviewSelection binding survives), only
+           the visual order flips — inspector rail renders on the RIGHT, preview
+           on the LEFT. */
+        <div style={{ display: "flex", flexDirection: "row-reverse", flex: 1, minHeight: 0, padding: "12px 14px 14px", gap: 14 }}>
+          {/* ------------------------------ RIGHT: INSPECTOR RAIL */}
           <aside
             className="ws-glass"
             style={{
@@ -665,7 +669,7 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>{inspectorBody}</div>
           </aside>
 
-          {/* ------------------------ RIGHT: PREVIEW CANVAS + TIMELINE */}
+          {/* ------------------------ LEFT: PREVIEW CANVAS + TIMELINE */}
           <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", gap: 14, position: "relative" }}>
             <div
               style={{
