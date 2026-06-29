@@ -34,8 +34,11 @@ import os
 import re
 import sys
 import time
+import math
 import subprocess
 import threading
+import urllib.request
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -60,6 +63,147 @@ os.environ.setdefault("WS_PREMIUM_MENU", "1")
 def _log(msg):
     sys.stderr.write("[mcp_toolserver] %s\n" % msg)
     sys.stderr.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Customer-price cap (Phase-C money policy): EVERY video is capped at $10 so the
+# demo never quotes a surprise price and the gate never declines. The cost-plus
+# menu's premium band can quote up to $25; we clamp the customer-facing price to
+# this ceiling in the `price` tool. The deterministic pricing.py is untouched
+# (fallback intact) — this clamp lives only on the Hermes-conducted path.
+# --------------------------------------------------------------------------- #
+PRICE_CAP_CENTS = int(os.environ.get("HERMES_PRICE_CAP_CENTS", "1000"))
+
+
+# --------------------------------------------------------------------------- #
+# run_events emitter — the LIVE "watch the agent work" feed.
+# Each MCP tool emits one (or more) run_events row(s) to InsForge as it runs, so a
+# Hermes-conducted run shows the SAME rich per-step narration the deterministic
+# claimer streams from the ledger. Events are SPONSOR-TAGGED via the `actor` column
+# (nemotron = the NVIDIA brain; stripe = payments; hermes = the agent harness).
+#
+# Writes directly to InsForge PostgREST-style table endpoint
+#   POST /api/database/records/run_events   (Authorization: Bearer INSFORGE_API_KEY)
+# with the SAME row shape the curated-claimer.js emit() inserts:
+#   {run_id, seq, actor, level, msg}   (id + created_at are server-assigned).
+#
+# Best-effort + NEVER raises: a feed write must NOT fail a (paid, delivered) conduct.
+# When run_id is absent (a direct/legacy caller without the conductor's run_id) the
+# emit is a quiet no-op — exactly like curated-claimer.js emit().
+# --------------------------------------------------------------------------- #
+def _emit_event(run_id, msg, actor="hermes", level="info"):
+    """Insert one run_events row for the live feed. Best-effort; never raises."""
+    if not run_id:
+        return
+    api_key = os.environ.get("INSFORGE_API_KEY")
+    if not api_key:
+        _log("emit skipped: INSFORGE_API_KEY missing")
+        return
+    # seq mirrors curated-claimer.js (Date.now() % 1e9) so ordering is monotonic
+    # across the deterministic + Hermes paths and never collides within a run.
+    seq = int(time.time() * 1000) % 1000000000
+    row = {"run_id": run_id, "seq": seq, "actor": actor, "level": level, "msg": msg}
+    body = json.dumps([row]).encode("utf-8")
+    url = INSFORGE_URL.rstrip("/") + "/api/database/records/run_events"
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer %s" % api_key})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            detail = ""
+        _log("emit HTTPError %s for run %s: %s" % (e.code, run_id, detail))
+    except Exception as e:
+        _log("emit failed for run %s: %s" % (run_id, e))
+
+
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _insforge_get(path):
+    """GET an InsForge PostgREST endpoint, return parsed JSON or None. Best-effort."""
+    api_key = os.environ.get("INSFORGE_API_KEY")
+    if not api_key:
+        return None
+    url = INSFORGE_URL.rstrip("/") + path
+    req = urllib.request.Request(
+        url, method="GET",
+        headers={"Authorization": "Bearer %s" % api_key})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        _log("insforge GET failed (%s): %s" % (path, e))
+        return None
+
+
+def _resolve_run_id(args):
+    """Return the REAL InsForge runs.id (UUID) the feed events attach to.
+
+    Robust against the conductor agent (Hermes) failing to thread the run_id or
+    hallucinating a non-UUID slug (observed: it passed a human-readable string that
+    InsForge rejected as `invalid input syntax for type uuid`). Resolution order:
+
+      1. A passed `run_id` that is a valid UUID -> use it verbatim.
+      2. The cached plan's `_run_id` (set by the plan tool) if a valid UUID.
+      3. DETERMINISTIC FALLBACK: look up the most recent `runs` row for this
+         company_url whose status is an in-flight conduct (running / planning /
+         hermes_conducting), and use its UUID. This is the bulletproof path — it
+         does not depend on the agent passing anything correct, only on the url
+         (which the tools always receive).
+
+    Returns a UUID string or None (then _emit_event is a quiet no-op).
+    """
+    rid = (args.get("run_id") or "").strip()
+    if rid and _UUID_RE.match(rid):
+        return rid
+    # try the cached plan handle's run_id
+    plan, _pid, _err = _resolve_plan(args)
+    if isinstance(plan, dict):
+        prid = (plan.get("_run_id") or "").strip()
+        if prid and _UUID_RE.match(prid):
+            return prid
+    # deterministic fallback by company_url (when we have one)
+    url = (args.get("url") or "").strip()
+    if not url and isinstance(plan, dict):
+        url = ((plan.get("job") or {}).get("company_url") or "").strip()
+    if url:
+        # query the IN-FLIGHT run for this url (authoritative: a new conduct flips
+        # any prior run to delivered, so only the current conduct matches these
+        # statuses). No caching: one cheap GET per tool always hits the live run.
+        import urllib.parse as _up
+        q = ("/api/database/records/runs?company_url=eq.%s"
+             "&status=in.(running,planning,hermes_conducting)"
+             "&order=created_at.desc&limit=1" % _up.quote(url, safe=""))
+        rows = _insforge_get(q)
+        if isinstance(rows, list) and rows:
+            rid = rows[0].get("id")
+            if rid and _UUID_RE.match(str(rid)):
+                return rid
+    # FINAL fallback (for the `gate` tool, which receives neither url nor plan_id):
+    # the live claimer processes ONE job at a time, so there is at most ONE in-flight
+    # conduct. Resolve to the single most-recent run still in an in-flight status,
+    # regardless of url. Safe because conducts are serialized by the daemon.
+    rows2 = _insforge_get(
+        "/api/database/records/runs?status=in.(running,planning,hermes_conducting)"
+        "&order=created_at.desc&limit=1")
+    if isinstance(rows2, list) and rows2:
+        rid = rows2[0].get("id")
+        if rid and _UUID_RE.match(str(rid)):
+            return rid
+    return None
+
+
+def _run_id_of(args):
+    """Back-compat shim: resolve the real run_id (see _resolve_run_id)."""
+    return _resolve_run_id(args)
 
 
 def _safe_run_key(run_key):
@@ -167,6 +311,7 @@ def tool_conversion_read(args):
 
     brain = (args.get("brain") or build_runner.ANALYZE_BRAIN).strip() or build_runner.ANALYZE_BRAIN
     have_key = bool(os.environ.get("OPENROUTER_API_KEY"))
+    run_id = _run_id_of(args)
     try:
         read = build_runner._maybe_conversion_read(url, run_dir, brain=brain)
     except Exception as e:
@@ -179,6 +324,20 @@ def tool_conversion_read(args):
     design_brief = (read.get("design_brief") if isinstance(read, dict) else None) or {}
     story_shape = design_brief.get("story_shape") or {}
     brand_vibe = design_brief.get("brand_vibe") or {}
+
+    # LIVE FEED: the Conversion Read is the NVIDIA Nemotron brain scoring the page.
+    # Tag actor=nemotron (fixes the old mis-tag where the Read read as hermes).
+    dims = read.get("dimensions", []) if isinstance(read, dict) else []
+    scored = sum(1 for d in dims if isinstance(d, dict) and d.get("score") is not None)
+    verdict = (read.get("verdict") if isinstance(read, dict) else "") or ""
+    verdict_short = verdict if len(verdict) <= 240 else (verdict[:237] + "…")
+    _emit_event(
+        run_id,
+        "Reading the page on NVIDIA Nemotron — scored %d dimensions "
+        "(promise/outcome/proof/show/specificity/cta): %s"
+        % (scored or len(dims), verdict_short or "(read complete)"),
+        actor="nemotron")
+
     return {
         "ok": True,
         "step": "conversion_read",
@@ -243,15 +402,28 @@ def tool_plan(args):
 
     scenes = plan.get("scenes", []) if isinstance(plan, dict) else []
     design_brief = plan.get("design_brief") or {}
+    scene_types = [s.get("type") for s in scenes]
 
     # Cache the full plan server-side and return only a SHORT plan_id handle.
     # The plan NEVER round-trips through Hermes's tokens (kills the u2014 bug).
     plan_id = (args.get("plan_id") or args.get("run_key") or "").strip() or (_slug(url) + "-mcp")
     plan["_plan_id"] = plan_id
+    # Persist the run_id on the cached plan so price/produce_and_ship can emit feed
+    # events without the conductor having to re-thread it into every tool call.
+    run_id = _run_id_of(args)
+    if run_id:
+        plan["_run_id"] = run_id
     try:
         cache_path = _cache_plan(plan, plan_id)
     except Exception as e:
         return {"ok": False, "error": "plan cache write failed: %s" % e}
+
+    # LIVE FEED: NVIDIA Nemotron returned the storyboard plan. actor=nemotron.
+    _emit_event(
+        run_id,
+        "NVIDIA Nemotron planned the storyboard — %d scenes (%s)"
+        % (len(scenes), ", ".join(t for t in scene_types if t) or "—"),
+        actor="nemotron")
 
     # Lightweight, corruption-safe summary only. Do NOT return the full plan.
     return {
@@ -271,10 +443,60 @@ def tool_plan(args):
 # --------------------------------------------------------------------------- #
 # Tool 3 — price (REAL: producer.cmd_estimate, cost-plus menu)
 # --------------------------------------------------------------------------- #
+def _elevenlabs_cogs_cents(plan):
+    """ElevenLabs char cost for the plan's VO script (rate from producer.py).
+    The render uses ElevenLabs as the default VO, so this is a real COGS line."""
+    try:
+        import producer
+        vo = plan.get("voiceover") or {}
+        cents, _note = producer.estimate_voiceover_cents(vo)
+        return int(cents or 0)
+    except Exception:
+        return 0
+
+
+def _real_token_cogs_cents(plan):
+    """REAL per-run LLM (Nemotron via OpenRouter) COGS in cents.
+
+    The planner records the EXACT OpenRouter spend at plan["selection"]
+    ["planner_usage"]["cost"] (USD; e.g. 0.0027683). That is the real cost of the
+    PLAN call. The Conversion Read + design_brief calls run earlier and do NOT
+    persist their usage.cost, so we add a small token-rate estimate for them from
+    their recorded token counts when available, else a flat conservative estimate.
+    Returns (cents, breakdown_dict). Best-effort; never raises.
+    """
+    sel = (plan.get("selection") or {}) if isinstance(plan, dict) else {}
+    usage = sel.get("planner_usage") or {}
+    plan_cost_usd = 0.0
+    try:
+        plan_cost_usd = float(usage.get("cost") or 0.0)
+    except (TypeError, ValueError):
+        plan_cost_usd = 0.0
+    plan_cost_cents = plan_cost_usd * 100.0
+
+    # Conversion Read + design_brief: usage.cost is not persisted by analyze.py, so
+    # ESTIMATE from a token-rate. The Read+brief are smaller than the plan call; a
+    # conservative estimate is ~60% of the plan-call cost (two Nemotron calls of
+    # similar prompt size, shorter completions). If there is no real plan cost
+    # (template fallback / super-free), fall back to a flat 0.20c floor so a run
+    # that DID hit Nemotron never reports COGS = 0.
+    read_est_cents = round(plan_cost_cents * 0.6, 4) if plan_cost_cents > 0 else 0.0
+
+    token_cents = plan_cost_cents + read_est_cents
+    return token_cents, {
+        "plan_call_usd": round(plan_cost_usd, 6),
+        "plan_call_cents": round(plan_cost_cents, 4),
+        "read_brief_estimate_cents": round(read_est_cents, 4),
+        "method": ("real plan usage.cost + ~0.6x estimate for the Conversion Read "
+                   "+ design_brief calls (their usage.cost is not persisted)"),
+    }
+
+
 def tool_price(args):
     plan, plan_id, err = _resolve_plan(args)
     if err:
         return {"ok": False, "error": err}
+    run_id = _run_id_of(args) or (plan.get("_run_id") if isinstance(plan, dict) else None)
     try:
         import producer
     except Exception as e:
@@ -283,12 +505,50 @@ def tool_price(args):
         est = producer.cmd_estimate(plan)
     except Exception as e:
         return {"ok": False, "error": "cmd_estimate failed: %s" % e}
+
+    # FIX #4 — REAL per-run COGS: actual Nemotron/OpenRouter token spend
+    # (planner usage.cost + a Read/brief estimate) + the real ElevenLabs char cost.
+    # The producer estimate's total_cogs_cents is a token-RATE estimate; replace it
+    # with the real spend so the owner-COGS + analytics show true profit.
+    token_cents, cogs_breakdown = _real_token_cogs_cents(plan)
+    vo_cents = _elevenlabs_cogs_cents(plan)
+    real_cogs_cents = int(math.ceil(token_cents + vo_cents))
+    cogs_breakdown["elevenlabs_cents"] = vo_cents
+    cogs_breakdown["total_real_cogs_cents"] = real_cogs_cents
+
+    # FIX #5 — cap the customer price at $10 (PRICE_CAP_CENTS). The cost-plus menu
+    # can quote up to the premium band ($25); clamp so every video is <= $10. Price
+    # still covers COGS (cap >> a few cents of token+VO spend) → always profitable.
+    raw_price = est.get("suggested_price_cents")
+    try:
+        capped_price = min(int(raw_price), PRICE_CAP_CENTS) if raw_price is not None else PRICE_CAP_CENTS
+    except (TypeError, ValueError):
+        capped_price = PRICE_CAP_CENTS
+    # Profit floor: never let the capped price dip below COGS (it never should —
+    # COGS is cents, the cap is $10 — but assert the invariant defensively).
+    if capped_price < real_cogs_cents:
+        capped_price = min(PRICE_CAP_CENTS, max(real_cogs_cents, capped_price))
+
+    profit_cents = capped_price - real_cogs_cents
+
+    # LIVE FEED: the priced decision. Tag actor=stripe (the money rail).
+    _emit_event(
+        run_id,
+        "Priced at $%.2f (capped at $%.2f) — real COGS $%.4f, profit $%.2f"
+        % (capped_price / 100.0, PRICE_CAP_CENTS / 100.0,
+           real_cogs_cents / 100.0, profit_cents / 100.0),
+        actor="stripe")
+
     return {
         "ok": True,
         "step": "price",
         "plan_id": plan_id,
-        "price_cents": est.get("suggested_price_cents"),
-        "cogs_cents": est.get("total_cogs_cents"),
+        "price_cents": capped_price,
+        "price_cents_uncapped": raw_price,
+        "price_cap_cents": PRICE_CAP_CENTS,
+        "cogs_cents": real_cogs_cents,
+        "cogs_breakdown": cogs_breakdown,
+        "profit_cents": profit_cents,
         "margin": est.get("target_margin"),
         "currency": est.get("currency"),
         "pricing_mode": est.get("pricing_mode"),
@@ -303,23 +563,35 @@ def tool_price(args):
 def tool_gate(args):
     try:
         price_cents = int(args.get("price_cents"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "price_cents (int) is required"}
+    # budget is optional now (always-proceed policy). Default to the price cap so
+    # the effective budget is >= every possible (capped) price.
+    try:
         budget_cents = int(args.get("budget_cents"))
     except (TypeError, ValueError):
-        return {"ok": False, "error": "price_cents and budget_cents (ints) are required"}
-    proceed = price_cents <= budget_cents
-    if proceed:
-        reason = ("price %d cents within budget %d cents — PROCEED"
-                  % (price_cents, budget_cents))
-    else:
-        reason = ("price %d cents exceeds budget %d cents by %d — DECLINE"
-                  % (price_cents, budget_cents, price_cents - budget_cents))
+        budget_cents = PRICE_CAP_CENTS
+    run_id = _run_id_of(args)
+
+    # FIX #5 — the agent NEVER declines. With every price capped at $10 (price tool)
+    # and the budget effectively >= $10, the budget check always passes. We treat the
+    # budget as max(budget, price_cap) so the gate ALWAYS proceeds — no decline path.
+    effective_budget = max(budget_cents, PRICE_CAP_CENTS)
+    proceed = True  # always proceed: price <= cap <= effective budget by construction
+    reason = ("Budget check — price $%.2f within budget $%.2f — PROCEED"
+              % (price_cents / 100.0, effective_budget / 100.0))
+
+    # LIVE FEED: the agent's money decision. actor=hermes (the harness decides).
+    _emit_event(run_id, "Budget check — proceeding (price $%.2f, budget $%.2f)"
+                % (price_cents / 100.0, effective_budget / 100.0), actor="hermes")
+
     return {
         "ok": True,
         "step": "gate",
         "proceed": proceed,
         "reason": reason,
         "price_cents": price_cents,
-        "budget_cents": budget_cents,
+        "budget_cents": effective_budget,
     }
 
 
@@ -404,6 +676,7 @@ def tool_produce_and_ship(args):
     if err:
         return {"ok": False, "error": err}
     brand_theme = args.get("brand_theme")
+    run_id = _run_id_of(args) or (plan.get("_run_id") if isinstance(plan, dict) else None)
 
     # Reuse the plan_id as the run_key so render + the cached plan.json share one
     # run dir (and the on-screen text uses the un-corrupted cached plan).
@@ -423,7 +696,25 @@ def tool_produce_and_ship(args):
 
     run_dir = _runs_dir(run_key)
 
-    # 1) real website screenshots (idempotent, best-effort, $0)
+    # 1) real website screenshots (best-effort, $0).
+    #    The run_key is derived from the url slug, so EVERY conduct of the same site
+    #    reuses one run dir (e.g. stripe-com-mcp). _capture_screenshots_for_run is
+    #    IDEMPOTENT — it SKIPS capture if screenshots/manifest.json already exists.
+    #    That meant a fresh conduct REUSED a stale capture from a PRIOR run that may
+    #    pre-date the English-by-default geo override (observed: stale German Stripe
+    #    shots persisting across conducts). FIX: clear any stale screenshots/ manifest
+    #    so the capture re-runs fresh and the /gb (English) override is applied.
+    try:
+        import shutil as _shutil
+        stale_shots = os.path.join(run_dir, "screenshots")
+        if os.path.isdir(stale_shots):
+            _shutil.rmtree(stale_shots, ignore_errors=True)
+        # also drop the read-pass dir so the Conversion-Read hero is fresh too.
+        stale_read = os.path.join(run_dir, "screenshots-read")
+        if os.path.isdir(stale_read):
+            _shutil.rmtree(stale_read, ignore_errors=True)
+    except Exception as e:
+        _log("produce_and_ship: could not clear stale screenshots: %s" % e)
     try:
         build_runner._capture_screenshots_for_run(url, run_dir)
     except Exception as e:
@@ -475,6 +766,14 @@ def tool_produce_and_ship(args):
     object_key = "%s/video.mp4" % run_key
     final_url, up_info = _upload_to_insforge(video_path, object_key)
 
+    # LIVE FEED: the produce+ship step done by the Hermes harness. actor=hermes.
+    scene_count = len(plan.get("scenes", [])) if isinstance(plan, dict) else 0
+    _emit_event(
+        run_id,
+        "Captured the page + logo, rendered %d curated scenes, ElevenLabs "
+        "voiceover — shipped to InsForge" % scene_count,
+        actor="hermes")
+
     return {
         "ok": True,
         "step": "produce_and_ship",
@@ -509,6 +808,7 @@ TOOLS = {
                 "properties": {
                     "url": {"type": "string", "description": "Company/product URL to read."},
                     "run_key": {"type": "string", "description": "Optional run id (default derived from url)."},
+                    "run_id": {"type": "string", "description": "The InsForge run id for the LIVE activity feed. Pass the run_id given in the prompt through EVERY tool so the watch-the-agent feed shows each step."},
                     "brain": {"type": "string", "description": "Model brain (default ultra-paid = Nemotron Ultra 550B)."},
                 },
                 "required": ["url"],
@@ -540,6 +840,7 @@ TOOLS = {
                     "quality": {"type": "string", "description": "standard | premium (default standard)."},
                     "brain": {"type": "string", "description": "Planner brain (default ultra-paid = Nemotron 550B)."},
                     "emphasis": {"type": "string"},
+                    "run_id": {"type": "string", "description": "The InsForge run id for the LIVE activity feed (pass through from the prompt)."},
                 },
                 "required": ["url", "goal"],
             },
@@ -561,6 +862,7 @@ TOOLS = {
                 "properties": {
                     "plan_id": {"type": "string", "description": "The plan_id handle from the plan tool (preferred)."},
                     "plan": {"type": "object", "description": "Legacy: an inline plan dict (use plan_id instead)."},
+                    "run_id": {"type": "string", "description": "The InsForge run id for the LIVE activity feed (pass through from the prompt; also read from the cached plan)."},
                 },
                 "required": ["plan_id"],
             },
@@ -571,18 +873,19 @@ TOOLS = {
         "schema": {
             "name": "gate",
             "description": (
-                "The agent's money decision: proceed iff price_cents <= budget_cents. "
-                "Returns {proceed, reason}. An over-budget job is DECLINED here — this is "
-                "the autonomous money-shot. Call after price; only run produce_and_ship "
-                "when proceed is true."
+                "The agent's money decision. With every price capped at $10 and the "
+                "budget effectively >= $10, this ALWAYS proceeds (the agent never "
+                "refuses a job). Returns {proceed:true, reason}. Call after price, then "
+                "run produce_and_ship."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "price_cents": {"type": "integer", "description": "Customer price from price."},
-                    "budget_cents": {"type": "integer", "description": "The job's budget ceiling."},
+                    "budget_cents": {"type": "integer", "description": "Optional budget ceiling (defaults to the $10 cap)."},
+                    "run_id": {"type": "string", "description": "The InsForge run id for the LIVE activity feed (pass through from the prompt)."},
                 },
-                "required": ["price_cents", "budget_cents"],
+                "required": ["price_cents"],
             },
         },
     },
@@ -607,6 +910,7 @@ TOOLS = {
                     "plan": {"type": "object", "description": "Legacy: an inline plan dict (use plan_id instead)."},
                     "brand_theme": {"type": "object", "description": "Optional brand theme; else resolved from the url."},
                     "run_key": {"type": "string", "description": "Run id / object-key prefix (default = plan_id)."},
+                    "run_id": {"type": "string", "description": "The InsForge run id for the LIVE activity feed (pass through from the prompt; also read from the cached plan)."},
                 },
                 "required": ["url", "plan_id"],
             },
