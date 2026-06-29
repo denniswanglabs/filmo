@@ -1,6 +1,13 @@
 'use server'
 import { adminClient, verifyUser } from '../lib/insforge'
 
+// The product owner — the ONLY account allowed to read the business-wide analytics
+// (every run's revenue/COGS/profit). Matches the run page's OWNER_EMAIL gate, but
+// here the gate is a real security boundary: the admin client below bypasses RLS, so
+// the email check MUST happen server-side after verifying the token (never trust the
+// client). Mirrors readInsideRun's developer gate.
+const OWNER_EMAIL = 'denniswanglabs@gmail.com'
+
 // Internal: is this ALREADY-VERIFIED user id a developer? (No token check — callers
 // must have verified the token first.) Used to gate /inside reads + real-mode builds.
 async function isDeveloperId(userId: string): Promise<boolean> {
@@ -293,4 +300,76 @@ export async function readInsideRun(input: { runId: string; accessToken: string 
     run: run as Record<string, unknown>,
     events: (events as Record<string, unknown>[]) ?? [],
   }
+}
+
+// ─────────────────────────────── Owner analytics ───────────────────────────────
+// The business-wide P&L: EVERY run's revenue / COGS / profit, plus splits. Admin
+// client bypasses RLS, so this is owner-only — the gate is a real security boundary,
+// not a cosmetic one. We verify the token server-side and require the verified email
+// to equal OWNER_EMAIL before reading a single row. A non-owner gets `authorized:
+// false` and NO data. (cogs_cents is ~0 on most runs today; a later pipeline pass
+// populates real token-cost COGS — profit = price − cogs auto-follows whatever's
+// stored, so the page needs no change once COGS is real.)
+
+export interface AnalyticsRunRow {
+  id: string
+  created_at: string
+  brand: string | null
+  company_url: string
+  status: string
+  price_cents: number | null
+  cogs_cents: number | null
+  final_url: string | null
+  /** Pulled out of props.producer when set (e.g. 'hetzner-hermes' / 'hetzner-curated'). */
+  producer: string | null
+}
+
+export interface AnalyticsPayload {
+  authorized: boolean
+  rows: AnalyticsRunRow[]
+}
+
+export async function readAnalytics(
+  accessToken: string | null | undefined,
+): Promise<AnalyticsPayload> {
+  // 1) Verify the caller server-side (token → authoritative identity).
+  const me = await verifyUser(accessToken)
+  // 2) Owner-only. A non-owner never reaches the admin query → no data is exposed.
+  if (!me || (me.email || '').toLowerCase() !== OWNER_EMAIL) {
+    return { authorized: false, rows: [] }
+  }
+
+  const db = adminClient()
+  // Whole-business read: all runs, newest first. We only select the economics columns
+  // (no plan/props_edited blobs) so the payload stays light. `props` is selected to
+  // extract producer; we strip it to a single string before returning.
+  const { data, error } = await db.database
+    .from('runs')
+    .select(
+      'id, created_at, brand, company_url, status, price_cents, cogs_cents, final_url, props',
+    )
+    .order('created_at', { ascending: false })
+  if (error) return { authorized: true, rows: [] }
+
+  const rows: AnalyticsRunRow[] = (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    const props = row.props
+    let producer: string | null = null
+    if (props && typeof props === 'object') {
+      const p = (props as { producer?: unknown }).producer
+      if (typeof p === 'string' && p) producer = p
+    }
+    return {
+      id: String(row.id),
+      created_at: String(row.created_at),
+      brand: (row.brand as string | null) ?? null,
+      company_url: String(row.company_url ?? ''),
+      status: String(row.status ?? ''),
+      price_cents: (row.price_cents as number | null) ?? null,
+      cogs_cents: (row.cogs_cents as number | null) ?? null,
+      final_url: (row.final_url as string | null) ?? null,
+      producer,
+    }
+  })
+  return { authorized: true, rows }
 }

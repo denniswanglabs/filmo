@@ -313,6 +313,15 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
             : 'This usually takes 6–9 minutes — the agent reads your product, plans, prices, produces every scene, and renders. The larger models (Nemotron 550B) take longer to plan.'}
         </p>
 
+        {/* Concurrent-load expectation setter — the VM renders sequentially, so under
+            demand a build can sit in the queue. Subtle, friendly, only while building. */}
+        {!isQueued && !awaitingPayment && !preparingCheckout && (
+          <p className="mt-1.5 text-xs text-slate-400">
+            Hang tight — demand is high, so your video is in the queue. Rendering usually takes a
+            few minutes, and it&apos;ll appear here automatically the moment it&apos;s ready.
+          </p>
+        )}
+
         {/* Pay CTA — only when the human-pays flow parked the build awaiting a real
             Stripe TEST payment. Prominent, above the stage tracker. */}
         {awaitingPayment && <PayPanel run={run} />}

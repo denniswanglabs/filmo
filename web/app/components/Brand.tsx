@@ -4,6 +4,10 @@ import { useAuth } from '../../lib/auth'
 import { useRouter } from 'next/navigation'
 import { STATUS_STYLES, STATUS_LABELS } from '../../lib/types'
 
+// The operator account — the only one that sees the owner-only Analytics nav link.
+// Matches the run page + analytics server gate (which is the real boundary).
+const OWNER_EMAIL = 'denniswanglabs@gmail.com'
+
 export function StatusChip({ status }: { status: string }) {
   const style = STATUS_STYLES[status] || STATUS_STYLES.queued
   return (
@@ -71,6 +75,17 @@ export function TopBar() {
             <span className="inline-block h-4 w-20 animate-pulse rounded bg-black/5" />
           ) : user ? (
             <div className="flex items-center gap-3">
+              {/* Owner-only: link to the business analytics dashboard. Shown only when
+                  the signed-in email matches the operator account. */}
+              {typeof user.email === 'string' &&
+              user.email.toLowerCase() === OWNER_EMAIL ? (
+                <Link
+                  href="/analytics"
+                  className="hidden font-medium text-slate-600 transition hover:text-amber sm:inline"
+                >
+                  Analytics
+                </Link>
+              ) : null}
               <span className="hidden text-slate-500 sm:inline">{user.email}</span>
               <button
                 onClick={handleSignOut}
