@@ -266,6 +266,38 @@ function PayPanel({ run }: { run: Run }) {
   )
 }
 
+// Poll the server-side demand signal so the "demand is high" note only shows when
+// a real global backlog exists. Defaults to FALSE (normal) until the first fetch
+// resolves, so we never claim high demand without evidence. Server route is the
+// only place that can see other users' jobs (client SDK is RLS-scoped to self).
+function useHighDemand(enabled: boolean): boolean {
+  const [highDemand, setHighDemand] = useState(false)
+  useEffect(() => {
+    if (!enabled) {
+      setHighDemand(false)
+      return
+    }
+    let cancelled = false
+    const check = async () => {
+      try {
+        const res = await fetch('/api/demand', { cache: 'no-store' })
+        if (!res.ok) return
+        const json = (await res.json()) as { highDemand?: boolean }
+        if (!cancelled) setHighDemand(!!json.highDemand)
+      } catch {
+        // Fail safe: leave highDemand as-is (defaults false) — never over-claim.
+      }
+    }
+    void check()
+    const t = setInterval(check, 15000)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [enabled])
+  return highDemand
+}
+
 export default function BuildProgress({ run, events }: { run: Run; events: RunEvent[] }) {
   const isQueued = run.status === 'queued'
   const elapsed = useElapsed(run.created_at)
@@ -282,6 +314,11 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
   // so the user isn't stranded with no Pay button. If creation truly failed, the worker
   // fails the run and the run page shows the error.
   const preparingCheckout = run.phase === 'awaiting_payment' && !run.checkout_url
+
+  // Only consult the demand signal while we'd actually show the line (a live,
+  // non-payment producing build) — no point polling otherwise.
+  const showsExpectationLine = !isQueued && !awaitingPayment && !preparingCheckout
+  const highDemand = useHighDemand(showsExpectationLine)
 
   return (
     <div className="mt-6 overflow-hidden rounded-2xl border border-black/5 bg-white shadow-sm">
@@ -314,11 +351,15 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
         </p>
 
         {/* Concurrent-load expectation setter — the VM renders sequentially, so under
-            demand a build can sit in the queue. Subtle, friendly, only while building. */}
-        {!isQueued && !awaitingPayment && !preparingCheckout && (
+            demand a build can sit in the queue. The "demand is high / in the queue"
+            framing is shown ONLY when the server-side demand signal confirms a real
+            global backlog (≥2 genuinely-active jobs); otherwise a neutral
+            "Producing your video…" line that makes no queue claim. */}
+        {showsExpectationLine && (
           <p className="mt-1.5 text-xs text-slate-400">
-            Hang tight — demand is high, so your video is in the queue. Rendering usually takes a
-            few minutes, and it&apos;ll appear here automatically the moment it&apos;s ready.
+            {highDemand
+              ? "Hang tight — demand is high, so your video is in the queue. Rendering usually takes a few minutes, and it'll appear here automatically the moment it's ready."
+              : "Producing your video — this usually takes a few minutes, and it'll appear here automatically the moment it's ready."}
           </p>
         )}
 

@@ -54,6 +54,37 @@ function parseFilmstripTail(msg: string): unknown | null {
   }
 }
 
+// Friendly label for a raw scene `type` / `archetype`. Mirrors the pipeline's
+// _label_for_type (mcp_toolserver.py) so a card reads the same whether the scene
+// came from the Hermes filmstrip contract or the deterministic render shape.
+const TYPE_LABELS: Record<string, string> = {
+  title: 'Title',
+  screenshot: 'Screenshot',
+  motion_graphic: 'Motion graphic',
+  walkthrough: 'Walkthrough',
+  'hero-title': 'Title',
+  'apple-screenshot': 'Screenshot',
+  'apple-statement': 'Statement',
+  'explainer-card': 'Feature',
+  'split-stat': 'Stat',
+  'split-mosaic': 'Mosaic',
+  'icon-stat': 'Stat',
+  'icon-headline': 'Headline',
+  'logo-wall': 'Logo wall',
+  'walkthrough-player': 'Walkthrough',
+}
+
+function labelForType(t: string): string {
+  if (!t) return 'Scene'
+  return (
+    TYPE_LABELS[t] ||
+    t.replace(/_/g, ' ').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  )
+}
+
+// Parse a scene from the FILMSTRIP contract shape: {index, type, label, headline}.
+// Used for runs.props.scenes written by the Hermes-conduct path, the storyboard
+// run_event, and scene_done payloads.
 function asPlannedScene(raw: unknown): PlannedScene | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
@@ -66,6 +97,31 @@ function asPlannedScene(raw: unknown): PlannedScene | null {
   }
 }
 
+// Parse a scene from the RENDER shape the deterministic fallback writes:
+// {id, archetype, data:{title,headline,kicker,...}, ...} — NO numeric `index`,
+// NO `type`. The DETERMINISTIC (hetzner-curated) build path stores props.scenes
+// in this shape and never emits the storyboard/scene_done filmstrip events, so
+// without this the filmstrip rendered blank on every fallback run. We derive the
+// `index` from array POSITION and the `type` from `archetype`, mirroring the
+// pipeline's _scene_descriptor_from_props so a fallback run still shows the
+// scene-by-scene strip (cards only — the fallback produces no per-scene thumbs).
+function asRenderScene(raw: unknown, position: number): PlannedScene | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const type = typeof r.archetype === 'string' ? r.archetype : ''
+  const data = (r.data && typeof r.data === 'object' ? r.data : {}) as Record<string, unknown>
+  const headline =
+    [data.headline, data.title, data.punchWord, data.kicker, r.id].find(
+      (v): v is string => typeof v === 'string' && !!v,
+    ) || ''
+  return {
+    index: position,
+    type,
+    label: labelForType(type),
+    headline,
+  }
+}
+
 function readProps(run: Run): {
   scenes: PlannedScene[]
   thumbs: Record<number, string>
@@ -73,10 +129,15 @@ function readProps(run: Run): {
   const props = (run.props ?? {}) as Record<string, unknown>
   const scenes: PlannedScene[] = []
   if (Array.isArray(props.scenes)) {
-    for (const s of props.scenes) {
-      const p = asPlannedScene(s)
+    // Two shapes land in props.scenes depending on which path produced the run:
+    //   • Hermes-conduct path → filmstrip contract {index,type,label,headline}
+    //   • deterministic fallback (hetzner-curated) → render shape {id,archetype,data}
+    // Try the contract shape first; fall back to deriving from the render shape
+    // (index = array position) so a fallback run still renders its scene cards.
+    props.scenes.forEach((s, i) => {
+      const p = asPlannedScene(s) || asRenderScene(s, i)
       if (p) scenes.push(p)
-    }
+    })
   }
   const thumbs: Record<number, string> = {}
   const st = props.scene_thumbs
@@ -142,15 +203,29 @@ function buildCards(run: Run, events: RunEvent[]): FilmstripCard[] {
   const firstNotDone = indices.find((i) => !doneIdx.has(i))
   const isLive = run.status === 'running' || run.status === 'queued'
 
+  // A DELIVERED run shipped a real video — every scene is necessarily done, even
+  // when no scene_done events / scene_thumbs ever arrived (the deterministic
+  // hetzner-curated fallback ships a video but emits no per-scene filmstrip data).
+  // So on a terminal-delivered run, treat all cards as done (thumbnails simply
+  // absent) rather than stranding them as "pending" under a finished video.
+  const deliveredNoThumbs =
+    isDeliveredStatus(run.status) && doneIdx.size === 0
+
   return indices.map((i) => {
     const base = planned.get(i)!
-    const done = doneIdx.has(i)
+    const done = doneIdx.has(i) || deliveredNoThumbs
     // Only show a pulsing "rendering" card while the run is still live. On a
     // delivered run every card should read done/pending statically.
     const rendering = !done && i === firstNotDone && isLive
     const state: SceneState = done ? 'done' : rendering ? 'rendering' : 'pending'
     return { ...base, state, thumbnailUrl: thumbs.get(i) ?? null }
   })
+}
+
+// Delivered-ish statuses — the run shipped a real final video (mirrors
+// lib/types DELIVERED_STATUSES, kept local so this component has no import cycle).
+function isDeliveredStatus(status: string): boolean {
+  return status === 'delivered' || status === 'completed_with_warnings'
 }
 
 // ---- icons ------------------------------------------------------------------
