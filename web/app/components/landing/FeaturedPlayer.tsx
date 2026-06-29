@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
 
 const CHAPTERS = ['Intro', 'Hook', 'Feature', 'Proof', 'Close'] as const
-const POSTER = '/examples/stripe.jpg'
+const POSTER = '/hero-demo-poster.jpg'
 
 const WAVE = [
   0.3, 0.55, 0.42, 0.7, 0.5, 0.85, 0.62, 0.4, 0.74, 0.5, 0.92, 0.66, 0.48, 0.8,
@@ -95,8 +95,9 @@ export default function FeaturedPlayer() {
 
           <video
             ref={videoRef}
-            src="/examples/stripe.mp4"
+            src="/hero-demo.mp4"
             poster={POSTER}
+            autoPlay
             muted={muted}
             loop
             playsInline
@@ -115,7 +116,7 @@ export default function FeaturedPlayer() {
               <button
                 type="button"
                 onClick={startPlayback}
-                aria-label="Play the featured Stripe launch cut"
+                aria-label="Play the featured launch cut Filmo produced"
                 className="absolute inset-0 grid place-items-center"
               >
                 <span className="grid h-16 w-16 place-items-center rounded-full bg-white/90 shadow-lg ring-1 ring-[#3B82F6]/40 backdrop-blur-sm transition hover:scale-105">
