@@ -93,29 +93,58 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
     ? 'inline-flex min-h-12 items-center rounded-full bg-amber px-6 py-2.5 text-base font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90'
     : 'inline-flex min-h-12 cursor-not-allowed items-center rounded-full border border-[#D4E2FB] bg-[#EAF1FF] px-6 py-2.5 text-base font-semibold text-[#9AA6B8]'
 
+  const isOwner =
+    !loading &&
+    !!user &&
+    typeof user.email === 'string' &&
+    user.email.toLowerCase() === OWNER_EMAIL
+
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-40 px-4 sm:top-5 sm:px-6">
-      <nav className="pointer-events-auto relative mx-auto flex w-full max-w-6xl items-center justify-between py-2">
+      <nav className="pointer-events-auto mx-auto flex w-full max-w-6xl items-center gap-3 py-2 lg:gap-4 xl:gap-6">
         {/* Left — brand */}
         <Link href="/" className="relative z-10 shrink-0">
           <Wordmark tone="dark" inkClassName="text-[#0E1320]" size="nav" />
         </Link>
 
-        {/* Center — true viewport center (desktop). pointer-events on links only. */}
-        <div className="pointer-events-none absolute left-1/2 hidden -translate-x-1/2 items-center gap-7 lg:flex xl:gap-9">
+        {/* Center — section/route links in normal flex flow (desktop). Owner sees the
+            most items, so gaps/font tighten at lg and relax at xl; min-w-0 + scroll
+            guarantees they never collide or overflow at any width. */}
+        <div className="hidden min-w-0 flex-1 items-center justify-center gap-5 overflow-x-auto lg:flex xl:gap-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {NAV_LINKS.map((link) => (
             <button
               key={link.href}
               type="button"
               onClick={() => handleNavLink(link)}
-              className="pointer-events-auto whitespace-nowrap text-[17px] font-medium text-[#5A6472] transition hover:text-[#0E1320]"
+              className="shrink-0 whitespace-nowrap text-[15px] font-medium text-[#5A6472] transition hover:text-[#0E1320] xl:text-[17px]"
             >
               {link.label}
             </button>
           ))}
+          {/* Any signed-in user: their own videos. NOT owner-gated. */}
+          {!loading && user && (
+            <Link
+              href="/videos"
+              className="shrink-0 whitespace-nowrap text-[15px] font-medium text-[#5A6472] transition hover:text-amber xl:text-[17px]"
+            >
+              Your Videos
+            </Link>
+          )}
+          {/* Owner-only: business analytics dashboard. */}
+          {isOwner && (
+            <Link
+              href="/analytics"
+              className="shrink-0 whitespace-nowrap text-[15px] font-medium text-[#5A6472] transition hover:text-amber xl:text-[17px]"
+            >
+              Analytics
+            </Link>
+          )}
         </div>
 
-        {/* Right — auth + CTA (+ mobile menu). Always show Build (never hide behind auth loading). */}
+        {/* Spacer keeps the right group pinned right when the center row is hidden (below lg). */}
+        <div className="flex-1 lg:hidden" />
+
+        {/* Right — auth identity + CTA (+ mobile menu). Always show Build (never hide behind auth loading). */}
         <div className="relative z-20 flex shrink-0 items-center justify-end gap-2 sm:gap-3">
           {/* Mobile / tablet menu — section anchors below lg. */}
           <div className="relative lg:hidden">
@@ -170,6 +199,16 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
                       Your Videos
                     </Link>
                   )}
+                  {/* Owner-only analytics — reachable on mobile too. */}
+                  {isOwner && (
+                    <Link
+                      href="/analytics"
+                      onClick={() => setMenuOpen(false)}
+                      className="block w-full px-4 py-2.5 text-left text-sm text-[#5A6472] transition hover:bg-[#F5F8FF] hover:text-[#0E1320]"
+                    >
+                      Analytics
+                    </Link>
+                  )}
                 </div>
               </>
             )}
@@ -177,24 +216,9 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
 
           {!loading && user && (
             <>
-              {/* Any signed-in user: their own videos. NOT owner-gated. */}
-              <Link
-                href="/videos"
-                className="hidden whitespace-nowrap text-base font-medium text-[#5A6472] transition hover:text-amber sm:inline-flex"
-              >
-                Your Videos
-              </Link>
-              {/* Owner-only: link to the business analytics dashboard. Shown only when
-                  the signed-in email matches the operator account. */}
-              {typeof user.email === 'string' &&
-              user.email.toLowerCase() === OWNER_EMAIL ? (
-                <Link
-                  href="/analytics"
-                  className="hidden whitespace-nowrap text-base font-medium text-[#5A6472] transition hover:text-amber sm:inline-flex"
-                >
-                  Analytics
-                </Link>
-              ) : null}
+              {/* Identity + sign out. The "Your Videos" / "Analytics" links live in the
+                  center row (lg+) and in the mobile menu (below lg) — kept out of here so
+                  the right group can never grow wide enough to collide with the center. */}
               <span className="hidden max-w-[120px] truncate text-base text-[#5A6472] lg:inline xl:max-w-[160px]">
                 {displayName(user)}
               </span>
