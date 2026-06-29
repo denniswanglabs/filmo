@@ -6,6 +6,7 @@ import { insforge } from '../../../lib/insforge'
 import { useAuth } from '../../../lib/auth'
 import { TopBar, StatusChip } from '../../components/Brand'
 import BuildProgress from '../../components/BuildProgress'
+import SceneFilmstrip from '../../components/SceneFilmstrip'
 import {
   formatCents,
   formatMargin,
@@ -170,6 +171,11 @@ export default function RunPage() {
                   </div>
                 </div>
 
+                {/* The full delivered filmstrip — every scene's real thumbnail,
+                    rendered from props.scene_thumbs so a finished run still shows
+                    the scene-by-scene breakdown beneath the player. */}
+                <SceneFilmstrip run={run} events={events} />
+
                 <div className="mt-3 flex justify-end gap-2.5">
                   <a
                     href={`/api/runs/${runId}/download`}
@@ -210,7 +216,14 @@ export default function RunPage() {
                 {run.phase && <p className="mt-1 text-sm text-red-500">Last phase: {run.phase}</p>}
               </div>
             ) : (
-              <BuildProgress run={run} events={events} />
+              <>
+                {/* Live scene-production filmstrip — the headline of a producing run.
+                    Consumes the FILMSTRIP contract (props.scenes / props.scene_thumbs +
+                    storyboard/scene_done run_events). Renders nothing until the agent
+                    has decided the storyboard, so an early run shows just BuildProgress. */}
+                <SceneFilmstrip run={run} events={events} />
+                <BuildProgress run={run} events={events} />
+              </>
             )}
 
             {/* P&L / facts. COGS + Margin are internal numbers — show them ONLY to the
