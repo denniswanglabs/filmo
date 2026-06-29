@@ -796,18 +796,55 @@ def _label_for_type(t):
         return "Scene"
     return _TYPE_LABELS.get(t, t.replace("_", " ").replace("-", " ").title())
 
+# Plan scene `type`/`role` -> render `archetype`, mirroring style_fill.py's
+# Style.role_map. The STORYBOARD (planned cards) is built from plan `type`
+# (e.g. "motion_graphic"); the per-scene RENDER pass labels from the rendered
+# `archetype` (e.g. "explainer-card"). Without this the SAME scene showed
+# "Motion graphic" in the storyboard and "Feature" once rendered. Resolving the
+# plan type to its archetype here makes BOTH passes label a scene identically.
+# (Kept in sync with style_fill role_map; the dominant feature beats —
+# motion_graphic/feature/cinematic/explainer — all render as explainer-card.)
+_TYPE_TO_ARCHETYPE = {
+    "open": "hero-title", "hero": "hero-title", "title": "hero-title",
+    "intro": "hero-title", "close": "hero-title", "cta": "hero-title",
+    "outro": "hero-title",
+    "feature": "explainer-card", "motion_graphic": "explainer-card",
+    "motion-graphic": "explainer-card", "cinematic": "explainer-card",
+    "explainer": "explainer-card",
+    "capability": "card-ui", "capabilities": "card-ui",
+    "cards": "card-ui", "grid": "card-ui",
+    "walkthrough": "walkthrough-player", "demo": "walkthrough-player",
+    "screenshot": "apple-screenshot", "site": "apple-screenshot",
+}
+
+
+def _archetype_for_plan_type(t):
+    """Resolve a plan scene type/role to the render archetype it becomes, so the
+    storyboard label matches the per-scene scene_done label. Unknown types pass
+    through unchanged (labeled via the same title-case fallback as before)."""
+    if not t:
+        return ""
+    return _TYPE_TO_ARCHETYPE.get(t, t)
+
 
 def _storyboard_from_plan(plan):
-    """[{index, type, label, headline}] from the plan's scenes (pending cards)."""
+    """[{index, type, label, headline}] from the plan's scenes (pending cards).
+
+    The plan carries a coarse `type` (e.g. "motion_graphic"); the render labels
+    from the resolved `archetype` (e.g. "explainer-card"). We resolve the plan
+    type to that archetype HERE so a scene shows ONE consistent label across the
+    storyboard and the per-scene scene_done event (no "Motion graphic" -> "Feature"
+    flip mid-run)."""
     out = []
     for i, s in enumerate(_safe_scenes(plan)):
         t = s.get("type") or s.get("role") or ""
+        arch = _archetype_for_plan_type(t)
         head = (s.get("headline") or s.get("title") or s.get("label")
                 or s.get("brief") or "")
         out.append({
             "index": i,
-            "type": t,
-            "label": _label_for_type(t),
+            "type": arch,
+            "label": _label_for_type(arch),
             "headline": _clip(head),
         })
     return out
@@ -929,6 +966,76 @@ def _upload_to_insforge(mp4_path, object_key):
             continue
         return res.get("url"), {"key": res.get("key"), "bucket": res.get("bucket")}
     return None, last_info
+
+
+# Per-scene editor assets (logo / screenshots / VO mp3s / music) that style_fill
+# stages into studio/public/ with run-scoped names (<...>-<slug_run_key>...). The
+# editor (web/app/runs/[id]/edit/page.tsx) resolves BARE asset filenames against
+#   ${INSFORGE_URL}/api/storage/buckets/walk-videos/objects/${runs.run_key}/<name>
+# i.e. namespaced by the *database* runs.run_key (e.g. web-1782749600146-zsurh),
+# NOT the slug run_key (ycombinator-com-mcp) used as the on-disk run dir / video
+# object prefix. The deterministic worker/run.js path uploads these via
+# uploadRunAssets(runKey) -> putObject(`${runKey}/${name}`); produce_and_ship
+# previously shipped ONLY video.mp4 + scene thumbnails, so the editor's <Img>/
+# <Audio> URLs 404'd while scrubbing a Hermes-conducted run. This mirrors
+# uploadRunAssets so future Hermes videos load in the editor.
+def _studio_public_dir():
+    """studio/public/ — where style_fill stages run-scoped editor assets."""
+    return os.path.join(HERE, "studio", "public")
+
+
+def _db_run_key(run_id):
+    """The DB runs.run_key (UUID-keyed) the editor namespaces asset URLs under.
+
+    Returns None when run_id is not a UUID or the lookup fails — the caller then
+    skips the per-scene asset upload (best-effort; never fails a paid conduct)."""
+    if not run_id or not _UUID_RE.match(str(run_id)):
+        return None
+    rows = _insforge_get(
+        "/api/database/records/runs?id=eq.%s&select=run_key&limit=1" % run_id)
+    if isinstance(rows, list) and rows:
+        rk = rows[0].get("run_key")
+        if isinstance(rk, str) and rk.strip():
+            return rk.strip()
+    return None
+
+
+def _upload_run_assets_to_insforge(run_id, slug_run_key):
+    """Upload every studio/public/* asset whose name contains slug_run_key to the
+    walk-videos bucket under the DB runs.run_key namespace (so the editor's bare
+    asset URLs resolve). Mirrors worker/run.js stagedAssetNames + uploadRunAssets.
+
+    Best-effort + isolated: a missing dir, a failed DB lookup, or any single
+    upload failure is logged and skipped; never raises. Returns
+    {db_run_key, uploaded:[names], failed:[names]} (or {} when skipped)."""
+    db_run_key = _db_run_key(run_id)
+    if not db_run_key:
+        _log("per-scene asset upload skipped: no DB run_key for run %s" % run_id)
+        return {}
+    pub = _studio_public_dir()
+    if not os.path.isdir(pub):
+        _log("per-scene asset upload skipped: studio/public missing (%s)" % pub)
+        return {"db_run_key": db_run_key, "uploaded": [], "failed": []}
+    try:
+        names = [f for f in os.listdir(pub)
+                 if slug_run_key in f and os.path.isfile(os.path.join(pub, f))]
+    except Exception as e:
+        _log("per-scene asset upload: listdir failed: %s" % e)
+        return {"db_run_key": db_run_key, "uploaded": [], "failed": []}
+    uploaded, failed = [], []
+    for name in names:
+        src = os.path.join(pub, name)
+        object_key = "%s/%s" % (db_run_key, name)
+        url, _info = _upload_to_insforge(src, object_key)
+        if url:
+            uploaded.append(name)
+        else:
+            failed.append(name)
+            _log("per-scene asset upload failed: %s -> %s (%s)"
+                 % (name, object_key, _info.get("error") if isinstance(_info, dict) else _info))
+    _log("per-scene editor assets: %d/%d uploaded to %s/ (run %s)"
+         % (len(uploaded), len(names), db_run_key, run_id))
+    return {"db_run_key": db_run_key, "uploaded": uploaded, "failed": failed}
 
 
 def _scene_thumb_time_s(scene, fps, total_frames):
@@ -1122,13 +1229,16 @@ def tool_produce_and_ship(args):
     object_key = "%s/video.mp4" % run_key
     final_url, up_info = _upload_to_insforge(video_path, object_key)
 
-    # LIVE FEED: the produce+ship step done by the Hermes harness. actor=hermes.
-    scene_count = len(plan.get("scenes", [])) if isinstance(plan, dict) else 0
-    _emit_event(
-        run_id,
-        "Captured the page + logo, rendered %d curated scenes, ElevenLabs "
-        "voiceover — shipped to InsForge" % scene_count,
-        actor="hermes")
+    # 4b) per-scene EDITOR assets: upload the staged logo / screenshot(s) / VO mp3s
+    #     / music to walk-videos under the DB runs.run_key namespace (matching the
+    #     editor's bare-filename URL resolution + worker/run.js uploadRunAssets).
+    #     Without this the editor's <Img>/<Audio> 404 while scrubbing a Hermes run.
+    #     Best-effort + AFTER the video upload so it never delays/fails delivery.
+    run_assets = {}
+    try:
+        run_assets = _upload_run_assets_to_insforge(run_id, run_key)
+    except Exception as e:
+        _log("per-scene editor asset upload skipped: %s" % e)
 
     # FILMSTRIP: per-scene previews. The video is ONE Remotion render (not per-scene
     # renders), so we grab a real frame PER SCENE from the finished video.mp4 at each
@@ -1151,6 +1261,46 @@ def tool_produce_and_ship(args):
     except Exception as e:
         _log("filmstrip scene-thumbnail pass skipped: %s" % e)
 
+    # LIVE FEED: the produce+ship step done by the Hermes harness. actor=hermes.
+    # Emitted AFTER the per-scene scene_done events above so its seq (wall-clock
+    # derived, monotonic) sorts LAST: the live log reads price -> budget ->
+    # Scene 1/N..N/N done -> "shipped to InsForge", never "shipped" before scenes.
+    scene_count = len(plan.get("scenes", [])) if isinstance(plan, dict) else 0
+    _emit_event(
+        run_id,
+        "Captured the page + logo, rendered %d curated scenes, ElevenLabs "
+        "voiceover — shipped to InsForge" % scene_count,
+        actor="hermes")
+
+    # DURABLE RICH RENDER PROPS: persist the SAME rich props build_runner writes so
+    # the editor can load a Hermes-conducted run. The `plan` step only wrote a THIN
+    # storyboard ({type,index,label,headline}) to runs.props.scenes — missing the
+    # top-level fps/theme/total_frames and the rich per-scene shape
+    # ({id,archetype,data,audio,cues,in_frame,out_frame}) the editor's load gates
+    # require (Editor total_frames; Timeline archetype/in_frame/out_frame). We merge
+    # the rendered props back here, OVERWRITING the thin scenes with the rich scenes.
+    # _merge_run_props read-modify-writes, so producer/conducted_by/produced_on/
+    # scene_thumbs are preserved (they're not in this patch). Best-effort: a props
+    # write must never fail a (paid, delivered) conduct.
+    try:
+        if not isinstance(rendered_props, dict):
+            pj = os.path.join(run_dir, "props.json")
+            if os.path.exists(pj):
+                with open(pj, "r", encoding="utf-8") as fh:
+                    rendered_props = json.load(fh)
+        if isinstance(rendered_props, dict):
+            rich_patch = {}
+            for k in ("fps", "theme", "total_frames", "audio_path", "lang",
+                      "scenes"):
+                if k in rendered_props:
+                    rich_patch[k] = rendered_props[k]
+            if rich_patch:
+                _merge_run_props(run_id, rich_patch)
+                _log("rich render props merged to runs.props for run %s "
+                     "(keys=%s)" % (run_id, ",".join(sorted(rich_patch))))
+    except Exception as e:
+        _log("rich render props merge skipped: %s" % e)
+
     return {
         "ok": True,
         "step": "produce_and_ship",
@@ -1163,6 +1313,7 @@ def tool_produce_and_ship(args):
         "upload_info": up_info,
         "montage_path": (res or {}).get("montage_path") if isinstance(res, dict) else None,
         "scene_thumbs": scene_thumbs,
+        "run_assets": run_assets,
     }
 
 
@@ -1402,14 +1553,34 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    _log("starting %s v%s on 0.0.0.0:%d /mcp; tools: %s"
-         % (SERVER_NAME, SERVER_VERSION, PORT, ", ".join(TOOLS)))
+    # #89-M1 SECURITY: bind loopback + the docker-bridge gateway the sandbox reaches
+    # us on (172.18.0.1) instead of 0.0.0.0, so the tool-server is NOT exposed on
+    # the public interface. Override with MCP_BIND_HOSTS (comma-separated) if needed.
+    hosts = [h.strip() for h in
+             os.environ.get("MCP_BIND_HOSTS", "127.0.0.1,172.18.0.1").split(",")
+             if h.strip()]
+    _log("starting %s v%s on %s:%d /mcp; tools: %s"
+         % (SERVER_NAME, SERVER_VERSION, ",".join(hosts), PORT, ", ".join(TOOLS)))
     _log("WS_PREMIUM_MENU=%s OPENROUTER_API_KEY=%s INSFORGE_API_KEY=%s" % (
         os.environ.get("WS_PREMIUM_MENU"),
         "set" if os.environ.get("OPENROUTER_API_KEY") else "MISSING",
         "set" if os.environ.get("INSFORGE_API_KEY") else "MISSING"))
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    srv.serve_forever()
+    import threading
+    servers = []
+    for h in hosts:
+        try:
+            srv = ThreadingHTTPServer((h, PORT), Handler)
+        except OSError as e:
+            _log("WARN: could not bind %s:%d (%s) — skipping that host" % (h, PORT, e))
+            continue
+        servers.append(srv)
+    if not servers:
+        raise SystemExit("FATAL: no MCP bind host available (%s:%d)" % (",".join(hosts), PORT))
+    # Serve all but the last in background threads; block on the last.
+    for srv in servers[:-1]:
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+    servers[-1].serve_forever()
 
 
 if __name__ == "__main__":

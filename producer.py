@@ -242,9 +242,6 @@ def cmd_estimate(plan):
     vo_item = cost_items[-1]
     scenes_report = cost_items[:-1]
 
-    # SINGLE coherent pricing tier for ALL videos: the locked budget == COGS and the
-    # suggested customer price is COGS / (1 - target_margin). There is no premium /
-    # standard quality fork — every plan is priced identically off its real COGS.
     result = {
         "currency": currency,
         "target_margin": target_margin,
@@ -255,7 +252,169 @@ def cmd_estimate(plan):
         "production_budget_cents": total_cogs,  # the variable-spend ceiling == COGS
     }
 
+    # -- COST-PLUS PRICING (flag-gated) -------------------------------------
+    # When WS_PREMIUM_MENU=1, the LOCKED budget + customer price come from the
+    # COST-PLUS model (pricing.py): the customer price is the plan's REAL COGS x a
+    # markup (floored, rounded). The ONE customer choice — QUALITY (standard |
+    # premium) — changes WHAT the plan COGS IS: standard zeroes the Higgsfield
+    # (cinematic) + ElevenLabs (VO) spend (Remotion + edge-tts are free) so the
+    # price floors at $5; premium keeps that spend so the price rises (~$6-9). We
+    # OVERRIDE the price NUMBER only; the per-scene/VO estimate report (and the
+    # gate's per-scene reasoning) is unchanged, and the budget gate + Stripe
+    # authorize paths are untouched. With the flag OFF this block does nothing and
+    # the return above is byte-identical to baseline.
+    if _premium_menu_enabled():
+        _apply_premium_menu(result, plan)
+
     return result
+
+
+# ---------------------------------------------------------------------------
+# Cost-plus pricing (flag-gated; OFF path byte-identical)
+# ---------------------------------------------------------------------------
+
+def _premium_menu_enabled():
+    """True iff env WS_PREMIUM_MENU is a truthy flag ('1'/'true'/'yes', case-insensitive)."""
+    return os.environ.get("WS_PREMIUM_MENU", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _quality_resolved_media_cogs(result, quality, pricing):
+    """The MEDIA COGS (Higgsfield + ElevenLabs) the price floors against, per quality.
+
+    The estimate report's `total_cogs_cents` is the FULL media spend if every
+    cinematic scene used Higgsfield and the VO used ElevenLabs. The quality choice
+    changes which of those actually get produced:
+
+      * standard -> NO Higgsfield (cinematic scenes fall back to free Remotion) and
+        NO ElevenLabs (VO uses free edge-tts). So we SUBTRACT the cinematic scene
+        costs + the VO cost from the rollup -> only the free scenes remain (= 0).
+      * premium  -> keep the full media spend (Higgsfield clips + ElevenLabs VO),
+        then apply the tier's `cogs_floor_cents` minimum so premium always reads as
+        the richer tier even on a thin plan.
+
+    This is the MEDIA COGS only; the planner token COGS is added on top by the
+    caller (`_apply_premium_menu`) so it lands in BOTH the budget gate and the price
+    floor. Returns the integer media COGS (cents) for the chosen quality.
+    """
+    full_cogs = int(result.get("total_cogs_cents") or 0)
+    if pricing.quality_uses_higgsfield(quality):
+        # premium: full Higgsfield + ElevenLabs spend, floored to the tier minimum.
+        return max(full_cogs, pricing.quality_cogs_floor_cents(quality))
+    # standard: drop the Higgsfield (cinematic) spend + the ElevenLabs (VO) spend.
+    cinematic_cents = sum(int(s.get("est_cost_cents") or 0)
+                          for s in result.get("scenes", [])
+                          if s.get("type") == "cinematic")
+    vo_cents = int((result.get("voiceover") or {}).get("est_cost_cents") or 0)
+    standard_cogs = full_cogs - cinematic_cents - vo_cents
+    return max(0, standard_cogs, pricing.quality_cogs_floor_cents(quality))
+
+
+def _storyboard_signals(result, plan):
+    """Extract the storyboard signals the dynamic price reads from the est + plan.
+
+    Returns {scenes, cinematic_count, duration_s, uses_vo, vo_chars, brain,
+    walkthrough_steps}. Durations come from the plan scenes (the est report doesn't
+    carry duration); cinematic_count + scene count + the VO presence come from the
+    est report's per-scene rollup so they match the priced plan exactly.
+    """
+    scenes = result.get("scenes", []) or []
+    plan_scenes = plan.get("scenes", []) or []
+    cinematic_count = sum(1 for s in scenes if s.get("type") == "cinematic")
+    duration_s = 0.0
+    for s in plan_scenes:
+        try:
+            duration_s += float(s.get("duration_s") or 0)
+        except (TypeError, ValueError):
+            pass
+    vo = plan.get("voiceover") or {}
+    vo_script = vo.get("script") or ""
+    vo_cents = int((result.get("voiceover") or {}).get("est_cost_cents") or 0)
+    # The brain (planner LLM) is stamped onto plan["selection"] by build_runner.
+    selection = plan.get("selection") or {}
+    brain = selection.get("brain") or os.environ.get("HERMES_BRAIN") or "super-free"
+    # Future Walk-Agent hook: count walkthrough scenes as steps (priced 0 today).
+    walkthrough_steps = sum(1 for s in scenes if s.get("type") == "walkthrough")
+    return {
+        "scenes": len(scenes),
+        "cinematic_count": cinematic_count,
+        "duration_s": duration_s,
+        "uses_vo": bool(vo_cents > 0),
+        "vo_chars": len(vo_script),
+        "brain": brain,
+        "walkthrough_steps": walkthrough_steps,
+    }
+
+
+def _apply_premium_menu(result, plan):
+    """Override the locked budget + customer price with the DYNAMIC BANDED quote.
+
+    Mutates `result` IN PLACE, adding:
+      * pricing_mode = "cost_plus"  (legacy mode tag — downstream readers match on it)
+      * selection                (the resolved {quality} selection)
+      * quality                  (the resolved tier: "standard" | "premium")
+      * signals                  (the storyboard signals the price was derived from)
+      * token_cost_cents         (planner token COGS, folded into the budget + price)
+      * menu = price_for_plan(total_cogs, quality, signals=...) output (line items)
+      * production_budget_cents <- MEDIA COGS + token COGS (the variable-spend ceiling)
+      * suggested_price_cents   <- menu total_price (storyboard-derived, band-clamped)
+      * menu_total_cogs_cents
+
+    The PRICE is now driven by the STORYBOARD (scene/cinematic count + duration + VO),
+    band-clamped per quality (standard $5-$10, premium $15-$25), PLUS the planner
+    token COGS. The COGS (budget gate) = media COGS (quality-resolved) + token COGS;
+    standard zeroes the Higgsfield + ElevenLabs media spend, premium keeps it. A plan
+    with no `selection` uses pricing.default_selection() (standard). Import of pricing
+    is local so the OFF path never even imports it.
+
+    SACRED budget gate: the budget == COGS (NOT the price). We additionally ASSERT
+    the customer price >= total COGS (the band floors always exceed COGS, so this
+    holds) and log a warning to the result if it is ever violated.
+    """
+    import pricing  # local import: only loaded on the premium path
+
+    selection = plan.get("selection") or pricing.default_selection()
+    quality = pricing.quality_from_selection(selection)
+    signals = _storyboard_signals(result, plan)
+
+    # Planner token COGS: estimate planner tokens from VO length + scene count and
+    # price them at the chosen brain's per-1k rate. super-free -> 0.
+    token_cost = pricing.token_cost_cents(
+        signals.get("brain"),
+        scenes=signals.get("scenes"),
+        vo_chars=signals.get("vo_chars"),
+        walkthrough_steps=signals.get("walkthrough_steps"))
+    signals["token_cost_cents"] = token_cost
+
+    # Total COGS (the SACRED budget-gate ceiling) = quality-resolved MEDIA COGS +
+    # the planner token COGS. The price ALSO floors against this (via the band).
+    media_cogs = _quality_resolved_media_cogs(result, quality, pricing)
+    total_cogs = media_cogs + token_cost
+
+    # Dynamic banded quote: price from the storyboard signals, clamped to the tier
+    # band. Hand the FULL COGS (media + token) so the quote records a true margin.
+    menu = pricing.price_for_plan(total_cogs, quality=quality, signals=signals)
+
+    result["pricing_mode"] = "cost_plus"
+    result["selection"] = selection
+    result["quality"] = quality
+    result["signals"] = signals
+    result["token_cost_cents"] = token_cost
+    result["menu"] = menu
+    # The dynamic banded quote is the SOURCE OF TRUTH for the locked budget + price.
+    # The locked budget (variable-spend ceiling) = the plan's real spend at the
+    # chosen quality (premium media + token; standard ~token-only) — NOT the price.
+    result["production_budget_cents"] = total_cogs
+    result["suggested_price_cents"] = menu["total_price_cents"]
+    # Keep a menu COGS mirror so downstream readers (ledger, dashboard) stay consistent.
+    result["menu_total_cogs_cents"] = menu["total_cogs_cents"]
+
+    # SACRED invariant: the customer price must cover the COGS. Band floors exceed
+    # COGS by construction, so this holds; log (don't crash) if it is ever violated.
+    price_cents = int(menu["total_price_cents"])
+    if price_cents < total_cogs:
+        result["price_below_cogs_warning"] = (
+            "price_cents %d < total_cogs_cents %d (quality=%s) — band floor failed to "
+            "cover COGS; check pricing.json band vs COGS" % (price_cents, total_cogs, quality))
 
 
 def _distribute(total, weights):

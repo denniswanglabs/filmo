@@ -9,6 +9,8 @@ spending a single (mock or real) cycle on it.
 Returns a list of human-readable problems; an empty list means the plan is valid.
 """
 
+import re
+
 ALLOWED_TYPES = {"title", "cinematic", "walkthrough", "motion_graphic", "screenshot"}
 CINEMATIC_MODELS = {"seedance_2_0", "gpt_image_2", "nano_banana_flash", "nano_banana_2"}
 
@@ -169,7 +171,6 @@ def resolve_vo_beats(plan):
 
 def _split_sentences(text):
     """Naive, dependency-free sentence splitter for the legacy script fallback."""
-    import re
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
     return [p.strip() for p in parts if p.strip()]
 
@@ -301,6 +302,75 @@ def validate_plan(plan, *, strict_durations=False):
         if isinstance(target, int) and total != target:
             problems.append("durations sum to %d, expected %d" % (total, target))
 
+    return problems
+
+
+def _norm(s):
+    return " ".join((s or "").lower().split()).strip(" .!?·•|-—–")
+
+
+def _has_proof_token(text, facts):
+    """A beat earns 'proof' if it carries a number/unit, or names a real entity
+    from company facts (wordmark / a feature label)."""
+    low = (text or "").lower()
+    if re.search(r"\d", low) or "%" in low or "$" in low:
+        return True
+    wm = _norm(facts.get("wordmark", "")) if facts else ""
+    if wm and re.search(rf"\b{re.escape(wm)}\b", low):
+        # a bare wordmark-only line is not proof; require some other content too
+        if len(low.split()) > 2:
+            return True
+    for f in (facts or {}).get("features", []) or []:
+        label = _norm(f.get("title") if isinstance(f, dict) else f)
+        if label and len(label.split()) >= 2 and re.search(rf"\b{re.escape(label)}\b", low):
+            return True
+    return False
+
+
+def validate_plan_content_quality(plan, company_facts):
+    """Deterministic content-quality checks over voiceover.beats. Returns a list of
+    human-readable issue strings (empty = clean). Advisory: callers may trigger ONE
+    corrective re-plan; the render-time backstop guarantees no cross-scene repeats
+    regardless."""
+    facts = company_facts or {}
+    problems = []
+    beats = ((plan.get("voiceover") or {}).get("beats")) or []
+    nav_labels = {_norm(x) for x in (facts.get("nav_labels") or [])}
+
+    seen = {}
+    proof_beats = 0
+    content_beats = 0
+    for i, b in enumerate(beats):
+        text = (b.get("text") or "").strip()
+        norm = _norm(text)
+        if not norm:
+            continue
+        content_beats += 1
+        # 1. Repetition (exact normalized OR high token-set overlap).
+        for j, prev in seen.items():
+            inter = set(norm.split()) & set(prev.split())
+            union = set(norm.split()) | set(prev.split())
+            if norm == prev or (union and len(inter) / len(union) >= 0.7):
+                problems.append(f"beat[{i}] repeats beat[{j}]: {text!r}")
+                break
+        seen[i] = norm
+        # 2. Nav-label content.
+        if norm in nav_labels:
+            problems.append(f"beat[{i}] is a nav/section label, not content: {text!r}")
+        # 3. Thin / bare beat (word floor 4; bare wordmark).
+        wm = _norm(facts.get("wordmark", ""))
+        if len(norm.split()) < 4 or (wm and norm == wm):
+            problems.append(f"beat[{i}] is too thin/short: {text!r}")
+        # 4. proof accounting
+        if _has_proof_token(text, facts):
+            proof_beats += 1
+
+    # 4. Arc-from-proof: at least 2 content beats (or all, if fewer) must carry proof.
+    need = min(2, content_beats)
+    if content_beats and proof_beats < need:
+        problems.append(
+            f"arc lacks proof: only {proof_beats}/{content_beats} beats carry a concrete "
+            f"number/named-entity (need >= {need})")
     return problems
 
 

@@ -26,6 +26,7 @@ Stdlib only (urllib), mirroring `stripe_money.py`. Test mode == live API minus s
 
 import argparse
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
@@ -35,7 +36,11 @@ import urllib.error
 import stripe_money
 
 STRIPE_API = stripe_money.STRIPE_API  # "https://api.stripe.com"
-DASHBOARD_BASE = "http://localhost:3030"
+# Public base for Checkout success/cancel returns. Env-driven so the hosted
+# product lands the customer back on the live run page, not a stale localhost.
+# (The Hermes claimer also passes explicit success/cancel URLs, overriding this.)
+DASHBOARD_BASE = (os.environ.get("FILMO_PUBLIC_BASE")
+                  or "https://filmostudio.vercel.app").rstrip("/")
 
 
 class LiveKeyRefused(RuntimeError):

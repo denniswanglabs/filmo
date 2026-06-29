@@ -1020,6 +1020,53 @@ def _is_fragment_subtitle(text: str) -> bool:
     return False
 
 
+# Secondary on-screen fields that must never repeat across scenes. Hero fields
+# (title, headline) are deliberately EXCLUDED — blanking a hero line is worse than
+# a rare repeat; the shapers + plan-time validator handle hero dedup upstream.
+_DEDUPE_SECONDARY_FIELDS = ("subtitle", "kicker", "eyebrow", "supporting", "punchWord", "caption")
+
+
+def _norm_phrase(s: str) -> str:
+    """Lowercased, whitespace-collapsed, punctuation-trimmed key for dedup."""
+    return " ".join((s or "").lower().split()).strip(" .!?·•|-—–")
+
+
+def _dedupe_cross_scene_secondary(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Deterministic backstop: drop any SECONDARY string or bullet that already
+    appeared (normalized) on an earlier scene. Only phrases of >= 2 words are
+    treated as dedupable (so shared short tokens like a kicker 'YC' survive).
+    Mutates + returns `scenes`."""
+    seen: set = set()
+    for sc in scenes:
+        data = sc.get("data") or {}
+        for field in _DEDUPE_SECONDARY_FIELDS:
+            val = data.get(field)
+            if not isinstance(val, str) or not val.strip():
+                continue
+            key = _norm_phrase(val)
+            if len(key.split()) < 2:
+                continue  # never dedup a single short token
+            if key in seen:
+                data[field] = ""
+            else:
+                seen.add(key)
+        bullets = data.get("bullets")
+        if isinstance(bullets, list):
+            kept = []
+            for b in bullets:
+                if not isinstance(b, str) or not b.strip():
+                    continue
+                key = _norm_phrase(b)
+                if key and key in seen:
+                    continue
+                if len(key.split()) >= 2:
+                    seen.add(key)
+                kept.append(b)
+            data["bullets"] = kept
+        sc["data"] = data
+    return scenes
+
+
 def _clean_complete_headline(text: str, limit: int = 72) -> str:
     """Return a clean, COMPLETE headline derived from `text`, or "" if nothing usable.
 
@@ -2711,92 +2758,27 @@ def _shape_explainer(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, 
              or _title_from_text(brief)
              or _brand_fallback_title(brand)
              or brand.get("wordmark") or "").strip()
+    # Subtitle = ONE distinct DETAIL drawn from THIS scene's own VO beat (the second
+    # sentence the title didn't use), deduped across scenes via the shared used list —
+    # NOT the shared brand tagline (which produced the repeated-subtitle bug). Empty is
+    # fine: a card with just the key phrase reads clean ("reinforce" model).
+    used_supporting = d.get("_used_supporting")
+    used_supporting = used_supporting if isinstance(used_supporting, list) else None
     subtitle = d.get("subtitle")
     if subtitle is None:
-        # Don't echo the title as the subtitle; prefer the brand tagline, but if the
-        # title already IS the tagline, leave the subtitle empty rather than dup it.
-        # Reject a truncated meta-description so a mid-word fragment never shows.
-        tag = _clean_complete_headline(brand.get("tagline") or "")
-        subtitle = "" if tag and tag == title else tag
-    # FRAGMENT GUARD: reject a subtitle that is a scrape fragment (lowercase-leading,
-    # preposition-final, or single-word). Drop it — a missing subtitle is better
-    # than a dangling fragment.
+        subtitle = _supporting_line(title, d.get("_text") or "", brief, brand,
+                                    used=used_supporting)
     if _is_fragment_subtitle(subtitle):
         subtitle = ""
 
-    # Bullets: explicit copy wins; else short capability nouns from the brand's
-    # real features (CardUi labels). Each feature scene gets a DISTINCT, on-topic
-    # ordering so the explainer scenes don't all show the identical list (BUG C).
-    # This only REORDERS the real fixture features — it never invents copy (honesty
-    # rule) and keeps every real capability on screen so the scenes read as a set.
-    # Ordering priority:
-    #   1. Match the feature whose label words overlap THIS scene's spoken/title
-    #      text and lead with it (so the CNC scene leads "CNC Machining", the laser
-    #      scene leads "Laser Sintering"), even when scene count != feature count.
-    #   2. Fall back to a positional rotation by `data._feature_index` (build_props
-    #      threads the scene's 0-based order among feature scenes) so distinct
-    #      scenes still differ when no keyword matches.
-    bullets = d.get("bullets")
-    if not bullets:
-        feats = [f.get("label") or f.get("title") for f in (brand.get("features") or [])]
-        feats = [f for f in feats if f]
-        lead = _match_feature(feats, f"{d.get('_text') or ''} {brief} {title}")
-        if lead is not None:
-            feats = feats[lead:] + feats[:lead]
-        else:
-            idx = d.get("_feature_index")
-            if isinstance(idx, int) and feats:
-                start = idx % len(feats)
-                feats = feats[start:] + feats[:start]
-        bullets = feats[:EXPLAINER_BULLET_COUNT]
-
-    # BUG 2 FIX: When real features are unavailable (bot-blocked brand, empty
-    # features list), synthesize 2-3 concise bullet phrases from the scene's
-    # own content (VO text / brief / title) so the explainer card is never hollow.
-    # Only fires when bullets is still empty after the feature-lookup above.
-    if not bullets:
-        source = " ".join(filter(None, [d.get("_text") or "", brief, title]))
-        if source.strip():
-            # Split on sentence boundaries and em-dashes to surface short clauses.
-            raw_phrases = re.split(r"[.!?,;—–\n]+", source)
-            synth: List[str] = []
-            seen: set = set()
-            for phrase in raw_phrases:
-                # Collapse whitespace, cap at ~40 chars, min 3 words.
-                p = " ".join(phrase.split())
-                if len(p.split()) < 3:
-                    continue
-                # Drop fragments that open with a conjunction/article (split
-                # artifacts like "and experiences at every destination").
-                first_word = p.split()[0].lower()
-                if first_word in _DANGLING_WORDS:
-                    continue
-                # Hard-truncate at the last word boundary within 40 chars.
-                if len(p) > 40:
-                    p = p[:40].rsplit(" ", 1)[0].strip()
-                # After truncation, drop a dangling tail word.
-                p_words = p.split()
-                while p_words and p_words[-1].lower() in _DANGLING_WORDS:
-                    p_words.pop()
-                p = " ".join(p_words)
-                if len(p.split()) < 3:
-                    continue
-                p = p[0].upper() + p[1:]  # sentence-case
-                key = p.lower()
-                if key not in seen:
-                    seen.add(key)
-                    synth.append(p)
-                if len(synth) >= 3:
-                    break
-            bullets = synth[:EXPLAINER_BULLET_COUNT]
-
-    bullets = [b for b in (bullets or []) if b][:EXPLAINER_BULLET_COUNT]
+    # Reinforce model: feature cards show the key phrase + one detail, NO bullets.
+    bullets: List[str] = []
 
     out: Dict[str, Any] = {
         "kicker": _decode(d.get("kicker") or ""),
         "title": _decode(title),
         "subtitle": _decode(subtitle or ""),
-        "bullets": [_decode(b) for b in bullets],
+        "bullets": bullets,
     }
 
     # CARD TREATMENT (SHARED DATA CONTRACT with the Remotion ExplainerCard archetype).
@@ -3799,47 +3781,96 @@ STYLES: Dict[str, Style] = {
 # ---------------------------------------------------------------------------
 # CAPTURED-ASSET WIRING  (screenshots + walkthrough clip -> plan scene data)
 # ---------------------------------------------------------------------------
+def _manifest_is_real(data: Dict[str, Any]) -> bool:
+    """#82: True only when a parsed screenshots manifest is a REAL capture.
+
+    A produce-time capture that flaked writes {"ok": False, "real": False} with
+    synthetic shots flagged {"mock": True} (the orange placeholder). Such a manifest
+    must NOT be used as the picture source. Treat as real when the manifest is not
+    explicitly not-ok / not-real AND it has at least one non-mock shot."""
+    if not isinstance(data, dict):
+        return False
+    if data.get("ok") is False or data.get("real") is False:
+        return False
+    shots = data.get("shots") or []
+    real_shots = [s for s in shots if isinstance(s, dict) and not s.get("mock")]
+    return len(real_shots) > 0
+
+
+def _shots_from_manifest(data: Dict[str, Any], shots_dir: str) -> List[Dict[str, Any]]:
+    """Parse a screenshots manifest dict into the ordered [{file,path,url,...}]
+    records the stager consumes. Skips synthetic mock shots."""
+    shots: List[Dict[str, Any]] = []
+    for s in (data.get("shots") or []):
+        if not isinstance(s, dict) or s.get("mock"):
+            continue
+        f = s.get("file") or (os.path.basename(s.get("path")) if s.get("path") else None)
+        if not f:
+            continue
+        rec = {"file": f,
+               "path": s.get("path") or os.path.join(shots_dir, f),
+               "url": s.get("url") or "",
+               # R5: carry the captured page <title> + the capture target
+               # label so the headline can NAME the on-screen surface
+               # (Shopify bug #2: "Run payments, shipping" over a product
+               # list). Absent/empty => the headline stays VO/brand-derived.
+               "title": (s.get("title") or "").strip(),
+               "label": (s.get("label") or "").strip()}
+        # Task F: pass through the card-local focus rect so the
+        # apple-screenshot archetype can highlight/zoom the named UI
+        # element. Absent => no highlight (plain shot).
+        focus = s.get("focus")
+        if isinstance(focus, dict):
+            rec["focus"] = focus
+            # R2 coherence: the focus rect carries extra labelled
+            # candidate rects (_candidates) so _shape_screenshot can pick
+            # the rect whose LABEL best matches the scene's headline.
+            cands = focus.get("_candidates")
+            if isinstance(cands, list) and cands:
+                rec["focus_candidates"] = cands
+        shots.append(rec)
+    return shots
+
+
 def _load_screenshot_manifest(out_dir: str) -> List[Dict[str, Any]]:
     """Return the captured screenshots as an ordered [{file, path, url}] list.
 
-    Reads runs/<id>/screenshots/manifest.json (written by capture_screenshots), else
-    globs shot-NN.png in that dir so a manifest-less capture still wires up. Returns
-    [] when nothing was captured (the screenshot scenes then show their never-blank
-    placeholder)."""
+    Source priority (#82 SCREENSHOT FIX): the produce-time capture
+    runs/<id>/screenshots/manifest.json is used ONLY when it is a REAL capture
+    (not ok=false / real=false / all-mock). When the produce-time capture flaked
+    and left a synthetic MOCK manifest, prefer the REAL read-pass capture at
+    runs/<id>/screenshots-read/manifest.json (the early brand-read hero shot) so
+    the customer sees the REAL homepage instead of the orange synthetic mock.
+    Falls back to globbing shot-NN.png in the produce dir, then to [] (the
+    screenshot scenes then show their never-blank placeholder)."""
     shots_dir = os.path.join(out_dir, "screenshots")
     manifest_path = os.path.join(shots_dir, "manifest.json")
-    shots: List[Dict[str, Any]] = []
+    # 1) produce-time capture, but ONLY if it is a real (non-mock) capture.
     if os.path.exists(manifest_path):
         try:
             data = _load_json(manifest_path)
-            for s in (data.get("shots") or []):
-                f = s.get("file") or (os.path.basename(s.get("path")) if s.get("path") else None)
-                if f:
-                    rec = {"file": f,
-                           "path": s.get("path") or os.path.join(shots_dir, f),
-                           "url": s.get("url") or "",
-                           # R5: carry the captured page <title> + the capture target
-                           # label so the headline can NAME the on-screen surface
-                           # (Shopify bug #2: "Run payments, shipping" over a product
-                           # list). Absent/empty => the headline stays VO/brand-derived.
-                           "title": (s.get("title") or "").strip(),
-                           "label": (s.get("label") or "").strip()}
-                    # Task F: pass through the card-local focus rect so the
-                    # apple-screenshot archetype can highlight/zoom the named UI
-                    # element. Absent => no highlight (plain shot).
-                    focus = s.get("focus")
-                    if isinstance(focus, dict):
-                        rec["focus"] = focus
-                        # R2 coherence: the focus rect carries extra labelled
-                        # candidate rects (_candidates) so _shape_screenshot can pick
-                        # the rect whose LABEL best matches the scene's headline.
-                        cands = focus.get("_candidates")
-                        if isinstance(cands, list) and cands:
-                            rec["focus_candidates"] = cands
-                    shots.append(rec)
+            if _manifest_is_real(data):
+                shots = _shots_from_manifest(data, shots_dir)
+                if shots:
+                    return shots
         except (OSError, ValueError):
-            shots = []
-    if not shots and os.path.isdir(shots_dir):
+            pass
+    # 2) #82 fallback: the real read-pass capture (screenshots-read/) — this is the
+    #    genuine page hero captured early in the run, never a mock.
+    read_dir = os.path.join(out_dir, "screenshots-read")
+    read_manifest = os.path.join(read_dir, "manifest.json")
+    if os.path.exists(read_manifest):
+        try:
+            data = _load_json(read_manifest)
+            if _manifest_is_real(data):
+                shots = _shots_from_manifest(data, read_dir)
+                if shots:
+                    return shots
+        except (OSError, ValueError):
+            pass
+    # 3) glob the produce dir for any real shot-NN.png a manifest-less capture left.
+    shots = []
+    if os.path.isdir(shots_dir):
         import glob
         for p in sorted(glob.glob(os.path.join(shots_dir, "shot-*.png"))):
             shots.append({"file": os.path.basename(p), "path": p, "url": ""})
@@ -4006,6 +4037,10 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
         if archetype == ARCH_EXPLAINER:
             d.setdefault("_feature_index", feature_counter)
             feature_counter += 1
+            # Share the SAME cross-scene dedup list screenshots use, so each feature
+            # card's beat-derived subtitle is DISTINCT across the set.
+            d["_used_supporting"] = used_supporting
+            d["_used_headlines"] = used_headlines
         if archetype == ARCH_WALKTHROUGH and run_emphasis:
             # Title bar tracks the emphasized feature, not the planner's VO flow.
             d.setdefault("_emphasis", run_emphasis)
@@ -4046,6 +4081,7 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
             scene_obj["audio"] = {"src": audio["src"]}
         scenes.append(scene_obj)
 
+    scenes = _dedupe_cross_scene_secondary(scenes)
     return {
         "fps": timeline.get("fps", 30),
         "total_frames": timeline.get("total_frames", 0),
@@ -4367,10 +4403,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     choices=sorted(STYLES), help="curated style template")
     ap.add_argument("--out", required=True, help="run output dir (runs/<id>/)")
     ap.add_argument("--fps", type=int, default=30)
-    # SINGLE coherent tier for ALL videos: no premium/free fork. `--tier` is kept
-    # only for back-compat of existing invocations; the one accepted value is "free"
-    # (the value threaded into align_vo for VO-provider selection, which TASK C owns).
-    ap.add_argument("--tier", default="free", choices=["free"])
+    ap.add_argument("--tier", default="free", choices=["free", "premium"])
     ap.add_argument("--no-align", action="store_true",
                     help="reuse existing vo_alignment.json in --out (skip synth)")
     ap.add_argument("--render", action="store_true",

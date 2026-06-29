@@ -14,7 +14,7 @@ import sys
 
 import validate_planner as vp
 import brain as brain_mod
-from plan_schema import validate_plan
+from plan_schema import validate_plan, validate_plan_content_quality
 
 # --- Style differentiation -------------------------------------------------
 # The three user-facing styles control the OUTPUT (scene count / hold durations /
@@ -411,6 +411,34 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
         problems = validate_plan(plan)
         if problems:
             raise ValueError("planner produced an invalid plan: " + "; ".join(problems))
+    # CONTENT-QUALITY GATE (advisory + ONE corrective re-plan). Only LLM plans are
+    # retried; template plans and a second failure fall through (the render-time
+    # cross-scene dedup backstop still guarantees no cross-scene repeats; the other
+    # content checks (nav-labels, thin beats, proof) remain advisory).
+    content_problems = validate_plan_content_quality(plan, company_facts or {})
+    if content_problems and plan_source == "llm":
+        print("[planner] content-quality issues -> one corrective re-plan: %s"
+              % "; ".join(content_problems), file=sys.stderr)
+        fix = ("Your previous plan had these content problems: "
+               + "; ".join(content_problems)
+               + ". Rewrite the voiceover beats so each is distinct, names a concrete "
+                 "proof point (a real number or named feature), and contains no nav/section "
+                 "labels. Keep the same scene ids, types, and durations.")
+        retry = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality,
+                                    brain, company_facts, meta=planner_meta,
+                                    conversion_read=conversion_read, extra_user=fix)
+        if retry is not None:
+            retry = seed_plan_with_read(retry, conversion_read)
+            retry_problems = validate_plan(retry)
+            if not retry_problems:
+                plan = retry
+                print("[planner] corrective re-plan accepted", file=sys.stderr)
+            else:
+                print("[planner] corrective re-plan still invalid -> keeping original",
+                      file=sys.stderr)
+    elif content_problems:
+        print("[planner] content-quality issues (advisory, not retried): %s"
+              % "; ".join(content_problems), file=sys.stderr)
     # Stamp planner provenance on the plan so the ledger/console can show EVERY build
     # plainly as LLM-planned or template-fallback (with finish_reason + token usage).
     # build_runner reads plan["_planner"] into ledger selection. Not a frozen-schema
@@ -1396,7 +1424,7 @@ def _restyle_durations(plan, style, target_duration_s):
 
 def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
                         quality="standard", brain="super-free", company_facts=None,
-                        meta=None, conversion_read=None):
+                        meta=None, conversion_read=None, extra_user=""):
     # `meta`: optional dict the caller threads in to learn WHY the LLM path did or
     # did not produce a plan. Populated with finish_reason / usage (token costs) and
     # a short `reason` string ("ok", "no-key", "refusal", "truncated", "parse-fail",
@@ -1458,6 +1486,8 @@ def _plan_with_nemotron(company_url, goal, target_duration_s, style="standard",
         "\nThe brief above is COMPLETE. Do NOT ask for more information, do NOT "
         "apologize, and do NOT explain. Respond with ONLY the JSON scene-plan "
         "object and nothing else.\n")
+    if extra_user:
+        user = user + "\n" + extra_user
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": user}]
 

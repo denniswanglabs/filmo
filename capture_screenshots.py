@@ -1006,11 +1006,11 @@ def _norm_url(url: str) -> str:
     return url
 
 
-# English-by-default geo overrides. The capture host (the live VM) is in the EU, so
-# a BARE apex of a geo-routed site renders the local-language edition (verified:
-# stripe.com -> German from the EU IP). We pin the bare apex to the explicit
-# English path so the captured hero / Conversion-Read shot is English regardless of
-# the capture box's geolocation. Keyed by lowercase host; extend as needed.
+# English-by-default geo overrides. The capture host (this VM) is in the EU, so a
+# BARE apex of a geo-routed site renders the local-language edition (verified:
+# stripe.com -> German from the EU IP). We pin the bare apex to an explicit English
+# path so the captured hero / Conversion-Read shot is English regardless of the
+# capture box's geolocation. Keyed by lowercase host; extend as needed.
 # Applied ONLY when the path is bare ("" or "/") — an explicit /en-us or any other
 # path is left untouched, so a deliberate locale choice is never rewritten.
 #
@@ -1989,8 +1989,11 @@ def _capture_inproc(url: str, out_dir: str, max_shots: int) -> Dict[str, Any]:
 # this code runs unless CAPTURE_BACKEND=="nemoclaw" is set explicitly.
 # ---------------------------------------------------------------------------
 
-# Sandbox carrying the playwright-cdn + demo-targets policies (handoff §"Use the").
-_NEMOCLAW_SANDBOX = os.environ.get("NEMOCLAW_SANDBOX", "walk-ultra")
+# Sandbox carrying the per-job target preset (filmo-targets) + the install/infra
+# presets. Defaults to "filmo" — the live registered sandbox on this VM. Override
+# with NEMOCLAW_SANDBOX. (Historically defaulted to "walk-ultra" from the original
+# hand-off; the live Filmo sandbox is named "filmo".)
+_NEMOCLAW_SANDBOX = os.environ.get("NEMOCLAW_SANDBOX", "filmo")
 _NEMOCLAW_BIN = os.environ.get("NEMOCLAW_BIN", "nemoclaw")
 # Lower-level OpenShell CLI (the gateway-native binary under nemoclaw). The
 # `nemoclaw policy-add` wrapper bumps the policy version but does NOT reprogram
@@ -2002,29 +2005,167 @@ _NEMOCLAW_OPENSHELL_BIN = os.environ.get("NEMOCLAW_OPENSHELL_BIN", "openshell")
 # does not reprogram the live proxy on OpenShell 0.0.44); "off" disables runtime
 # egress changes (only already-allowed hosts are capturable in-sandbox).
 _NEMOCLAW_EGRESS_MODE = os.environ.get("NEMOCLAW_EGRESS_MODE", "policy-set").strip().lower()
-# Browser cache dir inside the sandbox (Playwright lands chromium-1223 here).
+# Browser cache dir inside the sandbox (Playwright lands chromium-<rev> here).
 _NEMOCLAW_BROWSERS_PATH = "/tmp/.cache/ms-playwright"
-_NEMOCLAW_CHROMIUM_DIR = _NEMOCLAW_BROWSERS_PATH + "/chromium-1223"
+# Glob for the FULL-chrome executable Playwright installs (the rev number AND the
+# dir name are version-dependent — pw 1.60 used chromium-1223/chrome-linux/chrome;
+# pw 1.61's Chrome-for-Testing layout is chromium-1228/chrome-linux64/chrome — so
+# we DISCOVER it rather than hardcode. NB: we match chromium-<rev> (the full
+# browser) and NOT chromium_headless_shell-<rev> (the underscore guards against
+# the shell variant). The spawn recipe needs the exact binary path.)
+_NEMOCLAW_CHROME_GLOB = _NEMOCLAW_BROWSERS_PATH + "/chromium-*/chrome-linux*/chrome"
+_NEMOCLAW_CHROMIUM_DIR = _NEMOCLAW_BROWSERS_PATH + "/chromium-1223"  # legacy ref
+# Hosts Playwright downloads the Chromium build from. Allowlisted (temporarily,
+# auto-marked) ONLY for the one-time install; stripped on the next per-run reset.
+# Playwright 1.61's `install chromium` fetches "Chrome for Testing" via
+# cdn.playwright.dev, which 302-redirects to storage.googleapis.com — so the
+# storage host must be allowlisted for the install too. These NEVER touch the
+# steady-state capture policy (the next capture's per-run reset strips them); a
+# customer-page redirect to storage.googleapis.com is still discarded by the
+# hardened redirect resolver (cross-registrable-domain), so this is install-only.
+_NEMOCLAW_PLAYWRIGHT_CDN_HOSTS = (
+    "cdn.playwright.dev",
+    "storage.googleapis.com",
+    "playwright.azureedge.net",
+    "playwright.download.prss.microsoft.com",
+)
+# The in-sandbox venv that carries Playwright (pypi preset authorizes
+# /sandbox/.venv/bin/python* for pypi.org + files.pythonhosted.org).
+_NEMOCLAW_SBX_VENV = "/sandbox/.venv"
+_NEMOCLAW_SBX_PYTHON = _NEMOCLAW_SBX_VENV + "/bin/python"
+# Where the in-sandbox capture script is staged (written once via base64 pipe).
+_NEMOCLAW_CAP_SCRIPT = "/tmp/filmo-cap.py"
 # Sandbox viewport (matches the handoff's proven capture line). The native
 # backend uses a 1600x1000@2x retina shot; the sandbox path keeps a 1440x900
 # logical viewport (the handoff-verified geometry) but records the SAME
 # width/height contract so downstream framing is identical in shape.
 _NEMOCLAW_VW, _NEMOCLAW_VH = 1440, 900
 
-# Curated ubiquitous asset hosts allowlisted alongside the target so arbitrary
-# customer pages can pull their fonts/CDN assets and render. This is the whole
-# security story: we allow the target + these few asset CDNs, NOT open egress.
+# Curated asset hosts allowlisted alongside the target so arbitrary customer
+# pages render with their fonts/imagery. This is the whole security story: we
+# allow the target's registrable domain + these few VETTED asset hosts, NOT open
+# egress.
+#
+# WALK-ULTRA SSRF INVARIANT (auto-allowlist.sh:16-19): NO open-CDN seeds.
+# cdnjs.cloudflare.com / cdn.jsdelivr.net / unpkg.com serve ARBITRARY
+# attacker-publishable content — a visited page could exfil through them — so
+# they are DELIBERATELY removed. fonts.googleapis.com + fonts.gstatic.com stay
+# (they serve fonts, not arbitrary content; render-quality load-bearing).
+# images.unsplash.com is a read-only image CDN walk-ultra keeps as a permanent
+# VETTED entry.
 _NEMOCLAW_ASSET_HOSTS = (
     "fonts.googleapis.com",
     "fonts.gstatic.com",
-    "cdnjs.cloudflare.com",
-    "cdn.jsdelivr.net",
-    "unpkg.com",
     "images.unsplash.com",
 )
 
+# Curated same-org companion-domain map (port of auto-allowlist.sh:140-145). Some
+# major properties serve assets from a SIBLING registrable domain. This map is
+# STATIC — page content cannot extend it — so it does not reopen the
+# attacker-host hole. Add entries only for vetted org pairs as customers need.
+# Keyed by the target's registrable domain; value is a list of additional
+# registrable domains to allow (the host itself + subdomains of it).
+_NEMOCLAW_COMPANION_DOMAINS = {
+    "github.com": ["githubassets.com"],
+    "wikipedia.org": ["wikimedia.org"],
+    "stripe.com": ["stripecdn.com"],
+    "mozilla.org": ["mozilla.net"],
+}
+
+# Small public-suffix carve-out so docs.foo.co.uk roots to foo.co.uk (not co.uk)
+# — auto-allowlist.sh:93-103. Two-label public suffixes we might actually hit.
+_NEMOCLAW_TWO_LABEL_SUFFIXES = frozenset((
+    "co.uk", "org.uk", "com.au", "co.jp", "com.tw", "com.br",
+    "co.kr", "com.cn", "co.nz", "co.in", "com.sg", "com.hk",
+))
+
+# PERMANENT BASELINE for the filmo-targets preset (the "VETTED region" that the
+# per-run reset NEVER strips). YAML comments do NOT survive an `openshell policy
+# set` round-trip, so the per-run reset cannot mark auto-added hosts with a
+# comment; instead it REBUILDS the filmo-targets endpoints to exactly
+# (baseline + this run's hosts), discarding everything else. So this baseline
+# IS the durable allowlist. It contains:
+#   - the preset's committed customer-demo hosts (Stripe — the seed target), and
+#   - the VETTED asset hosts (fonts + unsplash) so render quality is permanent.
+# OpenRouter / NVIDIA inference live in the SEPARATE hermes-inference preset and
+# are untouched by this reset. Override via NEMOCLAW_TARGET_BASELINE (comma-sep)
+# if the committed baseline changes. (auto-allowlist.sh's permanent VETTED region
+# above the # Auto-added marker — lines 247-255 of the plan.)
+_NEMOCLAW_TARGET_BASELINE_HOSTS = tuple(
+    h.strip().lower() for h in os.environ.get(
+        "NEMOCLAW_TARGET_BASELINE",
+        "stripe.com,www.stripe.com,js.stripe.com,b.stripecdn.com,"
+        "fonts.googleapis.com,fonts.gstatic.com,images.unsplash.com"
+    ).split(",") if h.strip())
+
 
 import re as _nc_re
+
+# Charset gate for any host before it touches the policy YAML (auto-allowlist.sh
+# :52, :212-216). A host must be a plain DNS name; anything with shell/YAML
+# metacharacters, embedded whitespace, or IDN trickery is rejected outright.
+# NOTE: a bare '*.apex' wildcard is NOT a valid DNS host and is intentionally
+# rejected by this gate — the hardened allowlist grants exact subdomains only.
+_NC_HOST_RE = _nc_re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
+
+
+def _nc_valid_host(host: str) -> bool:
+    """True iff `host` is a plain, public DNS name safe to inject into the policy
+    YAML. Charset-validated (auto-allowlist.sh:52) AND refused if it is a
+    loopback / private / metadata / link-local target (auto-allowlist.sh:57-64) —
+    defense in depth alongside the host-side url_guard. Pure; never raises."""
+    h = (host or "").strip().lower()
+    if not h or not _NC_HOST_RE.match(h):
+        return False
+    # Refuse loopback / private / metadata / link-local (sandbox-side SSRF guard).
+    if h in ("localhost", "localhost.localdomain", "0.0.0.0", "broadcasthost"):
+        return False
+    if h.endswith(".localhost") or h.endswith(".local") or h.endswith(".internal"):
+        return False
+    # Bare IPv4 in private/loopback/link-local/metadata ranges.
+    _ip = _nc_re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", h)
+    if _ip:
+        a, b = int(_ip.group(1)), int(_ip.group(2))
+        if a == 127 or a == 10 or a == 0:
+            return False
+        if a == 169 and b == 254:          # link-local + 169.254.169.254 metadata
+            return False
+        if a == 192 and b == 168:
+            return False
+        if a == 172 and 16 <= b <= 31:
+            return False
+    return True
+
+
+def _nc_registrable_domain(host: str) -> Optional[str]:
+    """Registrable (root) domain of `host`, with the small public-suffix carve-out
+    (auto-allowlist.sh:93-103) so `docs.foo.co.uk` roots to `foo.co.uk`, not
+    `co.uk`. Returns None for a bare label / single-label host. Pure +
+    unit-testable, no network (no real PSL lookup — the static carve-out covers
+    the suffixes Filmo actually hits)."""
+    h = (host or "").strip().lower().strip(".")
+    if not h:
+        return None
+    labels = h.split(".")
+    if len(labels) < 2:
+        return None
+    last_two = ".".join(labels[-2:])
+    if len(labels) >= 3 and last_two in _NEMOCLAW_TWO_LABEL_SUFFIXES:
+        return ".".join(labels[-3:])
+    return last_two
+
+
+def _nc_same_registrable_domain(host: str, root: str) -> bool:
+    """True iff `host` equals the registrable domain `root` or is a subdomain of
+    it (auto-allowlist.sh:169-184 / :160 invariant). Exact-suffix match on a
+    label boundary — NO substring matching, so `evilroot.com` does NOT match root
+    `root.com` and `cdn-attacker.net` never matches anything."""
+    h = (host or "").strip().lower().strip(".")
+    r = (root or "").strip().lower().strip(".")
+    if not h or not r:
+        return False
+    return h == r or h.endswith("." + r)
+
 
 # nemoclaw status colorizes labels (e.g. "\x1b[2mPhase:\x1b[0m Ready"), so a
 # literal "Phase: Ready" substring never matches the raw bytes. Strip ANSI SGR
@@ -2066,8 +2207,11 @@ def _openshell_exec(args: List[str], *, timeout: int) -> subprocess.CompletedPro
 
 
 def _host_apex(host: str) -> Optional[str]:
-    """Best-effort apex (last two labels) of a host, or None if host is an apex
-    already / a bare label. `app.notion.so` -> `notion.so`; `notion.so` -> None."""
+    """DEPRECATED naive last-two-labels apex. Superseded by
+    `_nc_registrable_domain` (public-suffix carve-out). Kept only because the
+    legacy `_nemoclaw_policy_yaml` / `_nemoclaw_policy_add_egress` diagnostic path
+    still references it; the production `policy-set` path uses the registrable
+    domain. Returns None for a bare/2-label host."""
     if not host:
         return None
     labels = host.split(".")
@@ -2119,61 +2263,88 @@ def _nemoclaw_policy_yaml(host: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-# Marker for the demo-targets preset's endpoints list inside the live policy
-# YAML. The live policy is emitted with 2-space indent per level (preset key at
-# 2 spaces, its fields at 4, list items at 4 + "- "), matching `policy get
-# --full` output. We inject new endpoints immediately AFTER this line.
-_DEMO_TARGETS_ENDPOINTS_MARKER = (
-    "  demo-targets:\n    name: demo-targets\n    endpoints:\n")
+# The per-job target preset in Filmo's LIVE policy is `filmo-targets` (verified
+# via `openshell policy get --full filmo`). The live policy is emitted with
+# 2-space indent per level (preset key at 2 spaces, its fields at 4, list items
+# at 4 + "- "). We inject new endpoints immediately AFTER this marker line.
+# (Overridable so a future rename of the preset doesn't require a code change.)
+_FILMO_TARGETS_PRESET = os.environ.get("NEMOCLAW_TARGET_PRESET", "filmo-targets")
+_FILMO_TARGETS_ENDPOINTS_MARKER = (
+    "  %s:\n    name: %s\n    endpoints:\n"
+    % (_FILMO_TARGETS_PRESET, _FILMO_TARGETS_PRESET))
+# Back-compat alias (some call sites / tests referenced the old name).
+_DEMO_TARGETS_ENDPOINTS_MARKER = _FILMO_TARGETS_ENDPOINTS_MARKER
+
+def _nemoclaw_find_target_block(policy_yaml: str):
+    """Locate the filmo-targets endpoints block. Returns (block_start, block_end)
+    char offsets spanning JUST the endpoint list items (after the `endpoints:`
+    line, up to the preset's `binaries:` / next 2-space sibling key). Raises
+    ValueError if the block is absent (caller fails closed to native)."""
+    start = policy_yaml.find(_FILMO_TARGETS_ENDPOINTS_MARKER)
+    if start < 0:
+        raise ValueError(
+            "live policy has no %s endpoints block" % _FILMO_TARGETS_PRESET)
+    block_start = start + len(_FILMO_TARGETS_ENDPOINTS_MARKER)
+    rest = policy_yaml[block_start:]
+    # The endpoints end at the preset's own "    binaries:" (4-space) OR the next
+    # 2-space sibling preset key, whichever comes first.
+    m_bin = _nc_re.search(r"\n    binaries:\s*\n", rest)
+    m_sib = _nc_re.search(r"\n  \S[^\n]*:\n", rest)
+    ends = [block_start + (m.start() + 1) for m in (m_bin, m_sib) if m]
+    block_end = min(ends) if ends else block_start + len(rest)
+    return block_start, block_end
+
+
+def _nemoclaw_endpoint_yaml(host: str) -> str:
+    """One endpoint group (the proven working shape: access:full, no tls:skip).
+    Single-quoted host value, 4-space list indent matching `policy get --full`."""
+    return ("    - host: '%s'\n      port: 443\n      access: full\n" % host)
 
 
 def _nemoclaw_inject_hosts(policy_yaml: str, hosts: List[str]) -> str:
-    """Return `policy_yaml` with each host in `hosts` added to the `demo-targets`
-    preset's endpoints (the proven working shape: `access: full`, NO `tls: skip`
-    — the live egress proxy only honours that preset's full-terminate entries
-    after a `policy set` full-replace). Hosts already present are skipped (no
-    duplicates). Pure string transform so it is unit-testable without a sandbox.
+    """REBUILD the filmo-targets endpoints to exactly (permanent baseline + this
+    run's `hosts`), then return the full policy.
 
-    Raises ValueError if the policy has no demo-targets endpoints block (so the
-    caller fails closed to native rather than applying a broken replace)."""
-    start = policy_yaml.find(_DEMO_TARGETS_ENDPOINTS_MARKER)
-    if start < 0:
-        raise ValueError("live policy has no demo-targets endpoints block")
-    # The demo-targets endpoints span from the marker up to the next sibling key
-    # ("  <name>:\n", a preset at the same 2-space indent) — typically the next
-    # preset or this preset's own "binaries:" / "name:". We only dedup within
-    # this block: hosts present in OTHER presets (e.g. demo_dynamic) do NOT count
-    # as honoured, because the live proxy only enforces demo-targets after a
-    # `policy set` full-replace. So a host in demo_dynamic alone must still be
-    # injected here.
-    block_start = start + len(_DEMO_TARGETS_ENDPOINTS_MARKER)
-    rest = policy_yaml[block_start:]
-    # Next sibling key at 2-space indent ("  word:") ends the demo-targets block.
-    m = _nc_re.search(r"\n  \S[^\n]*:\n", rest)
-    block_end = block_start + (m.start() + 1 if m else len(rest))
-    demo_block = policy_yaml[block_start:block_end]
+    PER-RUN RESET (walk-ultra auto-allowlist.sh:105-123 invariant): YAML comments
+    do NOT survive an `openshell policy set` round-trip, so we cannot mark
+    auto-added hosts. Instead we DISCARD whatever is currently in the
+    filmo-targets endpoints and rewrite it as the PERMANENT BASELINE
+    (_NEMOCLAW_TARGET_BASELINE_HOSTS — the committed Stripe demo hosts + the
+    VETTED fonts/unsplash region) PLUS this run's hosts. So previous runs' grants
+    NEVER accumulate (a no-op run leaves only baseline), and the VETTED region is
+    always preserved. Every other preset (hermes-inference with OpenRouter/NVIDIA,
+    pypi, npm, etc.) is preserved byte-for-byte — only the filmo-targets endpoint
+    list is rebuilt.
 
-    new_entries: List[str] = []
-    queued: set = set()
+    Pure string transform; unit-testable without a sandbox. Raises ValueError if
+    the policy has no filmo-targets endpoints block (caller fails closed)."""
+    block_start, block_end = _nemoclaw_find_target_block(policy_yaml)
+
+    # Build the new endpoint list: baseline first (stable order), then this run's
+    # hosts (charset/private-validated, deduped, never baseline-dupes).
+    ordered: List[str] = []
+    seen: set = set()
+
+    def _emit(h: str) -> None:
+        h = (h or "").strip().lower()
+        if h and h not in seen and _nc_valid_host(h):
+            seen.add(h)
+            ordered.append(h)
+
+    for h in _NEMOCLAW_TARGET_BASELINE_HOSTS:
+        _emit(h)
     for raw in hosts:
         h = (raw or "").strip().lower()
-        if not h or h in queued:
+        if not h:
             continue
-        # Skip only if already an endpoint WITHIN demo-targets (quoted or not).
-        if ("host: %s\n" % h) in demo_block or ("host: '%s'\n" % h) in demo_block \
-                or ('host: "%s"\n' % h) in demo_block:
+        if not _nc_valid_host(h):
+            sys.stderr.write(
+                "[capture/nemoclaw] refusing to inject invalid host %r.\n" % h)
             continue
-        # ALWAYS single-quote the host value. A bare value starting with '*'
-        # (the *.apex wildcard) is otherwise parsed as a YAML alias and rejected
-        # ("did not find expected alphabetic or numeric character ... alias").
-        # Quoting matches how `policy get --full` itself emits special hosts.
-        new_entries.append(
-            "    - host: '%s'\n      port: 443\n      access: full\n" % h)
-        queued.add(h)
-    if not new_entries:
-        return policy_yaml
-    return (policy_yaml[:block_start] + "".join(new_entries)
-            + policy_yaml[block_start:])
+        _emit(h)
+
+    rebuilt = "".join(_nemoclaw_endpoint_yaml(h) for h in ordered)
+    return policy_yaml[:block_start] + rebuilt + policy_yaml[block_end:]
 
 
 def _nemoclaw_host_allowed(host: str, *, timeout: int = 60) -> bool:
@@ -2195,32 +2366,72 @@ def _nemoclaw_host_allowed(host: str, *, timeout: int = 60) -> bool:
 
 
 def _nemoclaw_allowlist_hosts_for(host, *extra_hosts) -> List[str]:
-    """The set of hosts to allowlist for a capture of `host` (plus any
-    `extra_hosts`, e.g. cross-domain redirect targets — FIX 2): each seed host,
-    its apex, a `*.apex` subdomain wildcard, plus the curated asset CDNs. Mirrors
-    the security story of _nemoclaw_policy_yaml — targets + curated assets, NOT
-    open egress.
+    """The set of hosts to allowlist for a capture of `host`, enforcing the
+    walk-ultra SSRF invariants (auto-allowlist.sh:11-29). DEFAULT-DENY: only the
+    following are granted —
 
-    `host` may be a single host string; `extra_hosts` are additional host
-    strings (each expanded to apex + *.apex the same way)."""
+      1. The target `host` itself + its registrable (root) domain.
+      2. `extra_hosts` (redirect-chain / probed subresource hosts) ONLY IF each
+         equals the target's registrable domain or is a subdomain of it, OR a
+         subdomain of a curated companion domain. A probed/redirect host that
+         leaves the target's registrable domain is DISCARDED (no substring/CDN
+         matching — a visited page cannot mint grants for attacker-controlled
+         third-party hosts).
+      3. The curated same-org companion domains for this target (static map).
+      4. The VETTED asset hosts (fonts + unsplash; NO open CDNs).
+
+    There is NO `*.apex` wildcard — only EXACT hosts (the target, its registrable
+    root, and concretely-probed same-domain subhosts) are emitted. Every emitted
+    host is charset- and private-range-validated (`_nc_valid_host`). Pure +
+    unit-testable, no network."""
     out: List[str] = []
 
     def _add(h: str) -> None:
         h = (h or "").strip().lower()
-        if h and h not in out:
+        if h and h not in out and _nc_valid_host(h):
             out.append(h)
 
-    seeds: List[str] = [host]
-    seeds.extend(extra_hosts)
-    for seed in seeds:
+    target = (host or "").strip().lower()
+    if not target:
+        # No valid target — still emit the VETTED assets so a caller never opens
+        # egress beyond the curated set.
+        for h in _NEMOCLAW_ASSET_HOSTS:
+            _add(h)
+        return out
+
+    root = _nc_registrable_domain(target)
+    # The set of registrable domains a probed/extra host may belong to: the
+    # target's own root + the curated companion domains for that root.
+    allowed_roots: List[str] = []
+    if root:
+        allowed_roots.append(root)
+    for companion in _NEMOCLAW_COMPANION_DOMAINS.get(root or target, []):
+        allowed_roots.append(companion)
+
+    # 1. Target host + its registrable root (always granted).
+    _add(target)
+    if root:
+        _add(root)
+    # 3. Curated companion registrable domains (the roots themselves).
+    for companion in allowed_roots:
+        if companion != root:
+            _add(companion)
+
+    # 2. Extra hosts (redirect chain + probed subresources): keep ONLY those that
+    #    are same-registrable-domain as the target or a curated companion. No
+    #    wildcard, no substring, no CDN heuristic.
+    for seed in extra_hosts:
         seed = (seed or "").strip().lower()
-        if not seed:
+        if not seed or not _nc_valid_host(seed):
             continue
-        _add(seed)
-        apex = _host_apex(seed)
-        if apex:
-            _add(apex)
-            _add("*." + apex)
+        if any(_nc_same_registrable_domain(seed, r) for r in allowed_roots):
+            _add(seed)
+        else:
+            sys.stderr.write(
+                "[capture/nemoclaw] dropping off-registrable-domain host %r "
+                "(target root=%r) — not allowlisted.\n" % (seed, root))
+
+    # 4. VETTED asset hosts (curated; never open CDNs).
     for h in _NEMOCLAW_ASSET_HOSTS:
         _add(h)
     return out
@@ -2249,24 +2460,44 @@ _NC_EFFECTIVE_MARK = "__NC_EFFECTIVE_URL__"
 
 
 def _nemoclaw_redirect_chain_hosts(url: str, *, timeout: int = 25) -> List[str]:
-    """FIX 2: resolve `url`'s top-level redirect chain FROM THE HOST (which has no
-    egress restriction) and return EVERY host in that chain — the final effective
-    URL's host plus every intermediate `Location:` host. This catches cross-apex
-    redirects (e.g. notion.so 30x -> www.notion.com) that the sandbox's allowlist
-    would otherwise miss, killing Playwright with ERR_TUNNEL_CONNECTION_FAILED.
+    """FIX 2 (HARDENED): resolve `url`'s top-level redirect chain FROM THE HOST
+    (which has no egress restriction) and return the hosts in that chain that
+    stay WITHIN the original host's registrable domain (or a curated companion).
+    This catches SAME-DOMAIN cross-apex redirects (e.g. www.notion.so ->
+    www.notion.com is NOT same-domain — see below) while DISCARDING any hop that
+    leaves the target's registrable domain — the walk-ultra SSRF invariant
+    (auto-allowlist.sh:159-165): a cross-origin redirect must not mint a grant for
+    the destination.
 
     Runs a GET with `-L` (follow the FULL chain a real navigation hits), dumping
     each response's headers (`-D -`) and the final effective URL (`-w`), with a
-    realistic desktop UA and `--max-time`. Parses the host out of the original
-    URL, every `Location:` header (absolute or relative), AND the effective URL.
-    We GET rather than HEAD because some sites (notion) only emit the cross-apex
-    301 on GET — HEAD returns 200 and hides the hop. On ANY failure/timeout,
-    returns just the original URL's host so the caller never blocks the capture
-    (best-effort widening, never a gate)."""
+    realistic desktop UA and `--max-time`. We GET rather than HEAD because some
+    sites only emit a cross-apex 301 on GET. On ANY failure/timeout, returns just
+    the original URL's host (best-effort, never a gate).
+
+    NOTE: notion.so -> notion.com is a DIFFERENT registrable domain, so under the
+    hardened invariant the notion.com hop is DISCARDED here. The actual capture
+    then follows that redirect inside the sandbox; if it lands off-domain the
+    page simply fails egress and we fall back to native — which is the correct,
+    safe behaviour (we do not silently open egress to an unrelated domain a
+    customer URL happened to redirect to). Same-registrable-domain subdomain
+    hops (app.foo.com -> www.foo.com) ARE kept."""
     orig_host = (urlparse(url).hostname or "").strip().lower()
     fallback = [orig_host] if orig_host else []
     if not orig_host:
         return fallback
+    # Registrable-domain anchor: a redirect hop is kept ONLY if it stays within
+    # the ORIGINAL host's registrable domain (or a curated companion). A
+    # cross-origin redirect discards the probe — walk-ultra SSRF invariant
+    # (auto-allowlist.sh:159-165). This stops a customer URL that 30x-redirects to
+    # an attacker domain from minting a grant for it.
+    orig_root = _nc_registrable_domain(orig_host) or orig_host
+    allowed_roots = [orig_root] + list(
+        _NEMOCLAW_COMPANION_DOMAINS.get(orig_root, []))
+
+    def _in_target_domain(h: str) -> bool:
+        return any(_nc_same_registrable_domain(h, r) for r in allowed_roots)
+
     # GET, discard body, dump headers to stdout, print final effective URL.
     argv = ["curl", "-sL", "-o", os.devnull, "-D", "-",
             "--max-time", str(int(timeout)), "-A", _NEMOCLAW_RESOLVE_UA,
@@ -2285,8 +2516,17 @@ def _nemoclaw_redirect_chain_hosts(url: str, *, timeout: int = 25) -> List[str]:
 
     def _add(h: str) -> None:
         h = (h or "").strip().lower()
-        if h and h not in out:
-            out.append(h)
+        if not h or h in out:
+            return
+        # SSRF invariant: discard any hop that leaves the target's registrable
+        # domain (or a curated companion). The original host always stays.
+        if not _in_target_domain(h):
+            sys.stderr.write(
+                "[capture/nemoclaw] redirect hop %r is off the target's "
+                "registrable domain (%r) — discarding (cross-origin redirect "
+                "does not mint a grant).\n" % (h, orig_root))
+            return
+        out.append(h)
 
     _add(orig_host)
     # Parse every Location: header in the -L chain (curl prints each response's
@@ -2470,43 +2710,187 @@ def _nemoclaw_allow_host(host: str, *, url: Optional[str] = None,
     return _nemoclaw_policy_set_egress(host, url=url, timeout=timeout)
 
 
-def _nemoclaw_install_chromium() -> bool:
-    """One-time (per sandbox lifetime) Chromium install per the handoff steps
-    1-2: venv Playwright, then Playwright 1.60.0 via npm into the policy-
-    allowlisted /sandbox/explainer-agent, then `playwright install chromium`.
-    Returns True if chromium-1223 exists afterwards."""
-    sys.stderr.write("[capture/nemoclaw] installing Playwright + Chromium "
-                     "in sandbox (one-time)...\n")
-    steps = [
-        ("python3 -m venv /sandbox/.venv; /sandbox/.venv/bin/pip install "
-         "--quiet --upgrade pip; /sandbox/.venv/bin/pip install playwright", 300),
-        ("cd /sandbox/explainer-agent && npm install --no-save "
-         "playwright@1.60.0 playwright-core@1.60.0", 300),
-        ("cd /sandbox/explainer-agent && ./node_modules/.bin/playwright "
-         "install chromium", 560),
-    ]
-    for one_line, t in steps:
-        try:
-            r = _nemoclaw_exec_sh(one_line, timeout=t)
-        except Exception as e:
-            sys.stderr.write("[capture/nemoclaw] install step raised: %s\n" % e)
-            return False
-        if r.returncode != 0:
-            sys.stderr.write(
-                "[capture/nemoclaw] install step failed (rc=%s): %s\n"
-                % (r.returncode, (r.stderr or r.stdout or "")[-400:]))
-            return False
-    return _nemoclaw_chromium_ready()
+def _nemoclaw_chrome_path(*, timeout: int = 60) -> Optional[str]:
+    """The exact chrome executable path Playwright installed in the sandbox, or
+    None. Discovered via glob (the rev number is version-dependent). The spawn
+    recipe needs this exact path (it Popen's chrome directly, NOT chromium.launch).
+    Strips CR (CRLF over the gRPC pipe) from the listing."""
+    try:
+        r = _nemoclaw_exec_sh(
+            "ls -1 %s 2>/dev/null | head -1" % _NEMOCLAW_CHROME_GLOB,
+            timeout=timeout)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    path = (r.stdout or "").replace("\r", "").strip().splitlines()
+    path = path[0].strip() if path else ""
+    return path or None
 
 
 def _nemoclaw_chromium_ready(*, timeout: int = 60) -> bool:
-    """Reachability one-shot: chromium-1223 present in the sandbox cache."""
+    """Reachability one-shot: a Playwright chrome executable is present."""
+    return _nemoclaw_chrome_path(timeout=timeout) is not None
+
+
+# Debian mirror host(s) the chrome-deps .deb closure is downloaded from. APT
+# uses HTTP (port 80) by default which the proxy 403s; we force HTTPS (port 443,
+# allowlisted). Install-only; stripped by the next per-run reset.
+_NEMOCLAW_DEBIAN_HOSTS = (
+    "deb.debian.org",
+    "cdn-aws.deb.debian.org",
+    "cloudfront.debian.net",
+)
+# Where the extracted chromium runtime libs + fonts land (uid998-writable). The
+# spawn recipe points LD_LIBRARY_PATH / FONTCONFIG_* here.
+_NEMOCLAW_CHROME_LIBS = "/tmp/chrome-libs/extracted"
+# The chromium runtime deps + a base font set, by Debian-trixie package name.
+# apt-cache depends --recurse expands the full transitive closure.
+_NEMOCLAW_CHROME_DEP_PKGS = (
+    "libglib2.0-0t64 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 "
+    "libatspi2.0-0t64 libcups2t64 libdbus-1-3 libgbm1 libpango-1.0-0 libcairo2 "
+    "libasound2t64 libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 "
+    "libxrandr2 libxcb1 libxkbcommon0 libexpat1 libxrender1 libxau6 libxdmcp6 "
+    "libpangocairo-1.0-0 fontconfig fonts-liberation fonts-dejavu-core "
+    "fonts-noto-core")
+
+
+def _nemoclaw_chrome_libs_ready(*, timeout: int = 40) -> bool:
+    """True iff the extracted chromium libs are present (libglib is the canary)."""
     try:
-        r = _nemoclaw_exec_sh("ls %s && echo NC_BROWSER_OK" % _NEMOCLAW_CHROMIUM_DIR,
-                              timeout=timeout)
+        r = _nemoclaw_exec_sh(
+            "ls %s/usr/lib/*/libglib-2.0.so.0 >/dev/null 2>&1 && echo LIBS_OK"
+            % _NEMOCLAW_CHROME_LIBS, timeout=timeout)
     except Exception:
         return False
-    return r.returncode == 0 and "NC_BROWSER_OK" in (r.stdout or "")
+    return r.returncode == 0 and "LIBS_OK" in (r.stdout or "")
+
+
+def _nemoclaw_install_chrome_libs() -> bool:
+    """One-time (per sandbox lifetime) extraction of chromium's runtime shared
+    libraries + a base font set into /tmp/chrome-libs/extracted, as uid998 (NO
+    root — `playwright install-deps` needs root and is unavailable). The clean
+    sandbox image ships none of these, so chrome won't even dlopen without them.
+
+    Recipe (proven empirically): allowlist the Debian mirror; configure apt fully
+    into writable dirs (status/lists/cache/extended_states); force the source to
+    HTTPS (the proxy 403s plain HTTP); apt-get download the transitive closure of
+    the chromium deps + fonts; dpkg -x each .deb into the extracted dir. The
+    install hosts are install-only and stripped by the next per-run reset.
+
+    Returns True iff libglib lands in the extracted dir."""
+    sys.stderr.write("[capture/nemoclaw] extracting chromium runtime libs + "
+                     "fonts in sandbox (one-time)...\n")
+    for h in _NEMOCLAW_DEBIAN_HOSTS:
+        if not _nemoclaw_host_allowed(h):
+            _nemoclaw_policy_set_egress(h)
+    # A single newline-free bash pipeline (the gRPC exec rejects argv newlines).
+    A = "/tmp/apt"
+    opts = (
+        '-o Dir::State::Lists=%s/lists -o Dir::Cache=%s/cache '
+        '-o Dir::State::status=%s/state/status '
+        '-o Dir::State::extended_states=%s/state/extended_states '
+        '-o Dir::Etc::SourceList=%s/etc/sources.list '
+        '-o Dir::Etc::SourceParts=/dev/null '
+        '-o Acquire::AllowInsecureRepositories=true '
+        '-o Acquire::Check-Valid-Until=false' % (A, A, A, A, A))
+    one_line = (
+        "set -e; A=%s; rm -rf $A; "
+        "mkdir -p $A/lists/partial $A/cache/archives/partial $A/state $A/etc; "
+        ": > $A/state/status; : > $A/state/extended_states; "
+        "printf 'deb https://deb.debian.org/debian trixie main\\n' > $A/etc/sources.list; "
+        "O='%s'; apt-get $O update >/dev/null 2>&1; "
+        "mkdir -p /tmp/debs; cd /tmp/debs; rm -f *.deb; "
+        "CLOSURE=$(apt-cache $O depends --recurse --no-recommends --no-suggests "
+        "--no-conflicts --no-breaks --no-replaces --no-enhances %s 2>/dev/null "
+        "| grep -v '^ ' | grep -v '<' | sort -u); "
+        "apt-get $O --allow-unauthenticated download $CLOSURE >/dev/null 2>&1; "
+        "rm -rf %s; mkdir -p %s; "
+        "for d in /tmp/debs/*.deb; do dpkg -x \"$d\" %s 2>/dev/null; done; "
+        "ls %s/usr/lib/*/libglib-2.0.so.0 >/dev/null 2>&1 && echo LIBS_OK"
+        % (A, opts, _NEMOCLAW_CHROME_DEP_PKGS,
+           _NEMOCLAW_CHROME_LIBS, _NEMOCLAW_CHROME_LIBS, _NEMOCLAW_CHROME_LIBS,
+           _NEMOCLAW_CHROME_LIBS))
+    try:
+        r = _nemoclaw_exec_sh(one_line, timeout=480)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] chrome-libs install raised: %s\n" % e)
+        return False
+    if r.returncode != 0 or "LIBS_OK" not in (r.stdout or ""):
+        sys.stderr.write(
+            "[capture/nemoclaw] chrome-libs install failed (rc=%s): %s\n"
+            % (r.returncode, (r.stderr or r.stdout or "")[-400:]))
+        return False
+    return True
+
+
+def _nemoclaw_install_chromium() -> bool:
+    """One-time (per sandbox lifetime) Chromium install.
+
+    1. venv + `pip install playwright` into /sandbox/.venv (the pypi preset
+       authorizes /sandbox/.venv/bin/python* + /sandbox/.venv/bin/pip* for
+       pypi.org + files.pythonhosted.org, so this egress is policy-allowed).
+    2. Temporarily allowlist the Playwright browser-download CDN hosts (filmo-
+       targets has binaries:/** so any binary may reach injected hosts). These
+       are install-only and stripped by the next per-run reset.
+    3. `playwright install chromium` (downloads the browser build).
+    4. Extract chromium's runtime libs + fonts (the image ships none; no root for
+       install-deps) into /tmp/chrome-libs/extracted; the spawn recipe points
+       LD_LIBRARY_PATH / FONTCONFIG_* at them.
+
+    Returns True iff a chrome executable AND the runtime libs exist afterwards.
+    Best-effort; any failure => False => native fallback."""
+    sys.stderr.write("[capture/nemoclaw] installing Playwright + Chromium "
+                     "in sandbox (one-time)...\n")
+    # 1. venv + pip install playwright (pypi-allowed for /sandbox/.venv/*).
+    step1 = (
+        "set -e; test -x %s || python3 -m venv %s; "
+        "%s/bin/pip install --quiet --upgrade pip; "
+        "%s/bin/pip install --quiet playwright"
+        % (_NEMOCLAW_SBX_PYTHON, _NEMOCLAW_SBX_VENV,
+           _NEMOCLAW_SBX_VENV, _NEMOCLAW_SBX_VENV))
+    try:
+        r = _nemoclaw_exec_sh(step1, timeout=400)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] pip install raised: %s\n" % e)
+        return False
+    if r.returncode != 0:
+        sys.stderr.write(
+            "[capture/nemoclaw] pip install playwright failed (rc=%s): %s\n"
+            % (r.returncode, (r.stderr or r.stdout or "")[-400:]))
+        return False
+
+    # 2. Allowlist the Playwright download CDN for the browser fetch.
+    for cdn in _NEMOCLAW_PLAYWRIGHT_CDN_HOSTS:
+        if not _nemoclaw_host_allowed(cdn):
+            _nemoclaw_policy_set_egress(cdn)  # best-effort; verified below
+
+    # 3. Download the chromium build (the rev lands under PLAYWRIGHT_BROWSERS_PATH).
+    step3 = (
+        "export PLAYWRIGHT_BROWSERS_PATH=%s; "
+        "%s/bin/python -m playwright install chromium"
+        % (_NEMOCLAW_BROWSERS_PATH, _NEMOCLAW_SBX_VENV))
+    try:
+        r = _nemoclaw_exec_sh(step3, timeout=560)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] playwright install raised: %s\n" % e)
+        return False
+    if r.returncode != 0:
+        sys.stderr.write(
+            "[capture/nemoclaw] playwright install chromium failed (rc=%s): %s\n"
+            % (r.returncode, (r.stderr or r.stdout or "")[-500:]))
+        return False
+    if not _nemoclaw_chromium_ready():
+        sys.stderr.write("[capture/nemoclaw] chrome binary not found after "
+                         "install.\n")
+        return False
+    # 4. Extract chromium runtime libs + fonts (chrome won't dlopen without them).
+    if not _nemoclaw_chrome_libs_ready():
+        if not _nemoclaw_install_chrome_libs():
+            sys.stderr.write("[capture/nemoclaw] chrome runtime libs unavailable "
+                             "after extract.\n")
+            return False
+    return True
 
 
 def _nemoclaw_status_ready(*, timeout: int = 90) -> bool:
@@ -2551,14 +2935,21 @@ def _nemoclaw_preflight(host: str, url: Optional[str] = None) -> bool:
                 "[capture/nemoclaw] sandbox not Ready after recover; "
                 "falling back to native.\n")
             return False
-    # 3. chromium reachability one-shot; install once if missing.
-    if not _nemoclaw_chromium_ready():
+    # 3. chromium + runtime-libs reachability; install once if either missing.
+    if not (_nemoclaw_chromium_ready() and _nemoclaw_chrome_libs_ready()):
         if not _nemoclaw_install_chromium():
             sys.stderr.write(
-                "[capture/nemoclaw] Chromium unavailable and install failed; "
-                "falling back to native.\n")
+                "[capture/nemoclaw] Chromium/libs unavailable and install "
+                "failed; falling back to native.\n")
             return False
-    # 4. dynamic egress-allowlist the target host + its redirect chain (TASK 2).
+    # 4. stage the capture script (idempotent; always rewrites so a code update
+    #    lands). Failure => native fallback.
+    if not _nemoclaw_stage_capture_script():
+        sys.stderr.write(
+            "[capture/nemoclaw] could not stage capture script; "
+            "falling back to native.\n")
+        return False
+    # 5. dynamic egress-allowlist the target host + its redirect chain (TASK 2).
     if not _nemoclaw_allow_host(host, url=url):
         sys.stderr.write(
             "[capture/nemoclaw] could not allowlist host %r; "
@@ -2572,65 +2963,366 @@ def _nemoclaw_preflight(host: str, url: Optional[str] = None) -> bool:
 _NC_OK = "CAPTURE_OK"
 _NC_BODY_BEGIN = "NC_BODY_BEGIN"
 _NC_BODY_END = "NC_BODY_END"
+_NC_LOGO_BEGIN = "NC_LOGO_BEGIN"     # base64 of {"file","source","b64"} JSON
+_NC_LOGO_END = "NC_LOGO_END"
+_NC_STATUS_MARK = "NC_STATUS"        # NC_STATUS <code> <b64-title>
 
 
-def _nemoclaw_capture_python(url: str, shot_path: str) -> str:
-    """Build the single-line python -c body run inside the sandbox venv. Matches
-    the handoff's proven step-3 capture line (cert + netlink flags), and ALSO
-    base64-prints the page's inner_text('body') between sentinels so the
-    Conversion Read gets real page copy without a second navigation."""
-    # JSON-encode literals so quoting is safe inside the nested python source.
-    url_lit = json.dumps(url)
-    shot_lit = json.dumps(shot_path)
-    # A real multi-line python script (NOT semicolon-joined) so the try/except
-    # for body-text extraction is valid. _shquote wraps the whole thing for the
-    # outer `bash -lc`. Body text is base64'd between sentinels so it survives
-    # newlines/quotes through stdout.
-    lines = [
-        "import base64",
-        "from playwright.sync_api import sync_playwright",
-        "p = sync_playwright().start()",
-        "b = p.chromium.launch(args=['--ignore-certificate-errors', "
-        "'--enable-features=NetworkService,NetworkServiceInProcess'])",
-        "ctx = b.new_context(viewport={'width': %d, 'height': %d}, "
-        "ignore_https_errors=True)" % (_NEMOCLAW_VW, _NEMOCLAW_VH),
-        "pg = ctx.new_page()",
-        "r = pg.goto(%s, wait_until='domcontentloaded', timeout=60000)" % url_lit,
-        "print('STATUS', r.status if r else 'NONE', 'TITLE', repr(pg.title()))",
-        "pg.wait_for_timeout(3500)",
-        "pg.screenshot(path=%s, full_page=False)" % shot_lit,
-        "bt = ''",
-        "try:",
-        "    bt = pg.inner_text('body') or ''",
-        "except Exception:",
-        "    bt = ''",
-        "print('%s' + base64.b64encode(bt[:4000].encode('utf-8', 'replace'))"
-        ".decode() + '%s')" % (_NC_BODY_BEGIN, _NC_BODY_END),
-        "b.close()",
-        "p.stop()",
-        "print('%s')" % _NC_OK,
-    ]
-    return "\n".join(lines)
+# The self-contained in-sandbox capture script. This is the LOAD-BEARING fix vs.
+# the old chromium.launch(): it manually subprocess.Popen's chrome with the full
+# walk-ultra flag set (NetworkServiceInProcess workaround for the seccomp netlink
+# block — agent.sandbox-v26.js:1381-1402), polls the CDP /json/version endpoint,
+# then connect_over_cdp's. It ALSO ports _capture_logo's DOM logic (inline header
+# <svg> -> icon/og:image -> /favicon.ico) so the capture is a real BRAND capture,
+# not a bare screenshot. Args: <url> <out_dir>. Writes <out_dir>/cap-01.png and
+# (when found) <out_dir>/cap-logo.<ext>; prints sentinels to stdout. Pure stdlib
+# + Playwright; NO host filesystem dependency. Staged once to /tmp/filmo-cap.py.
+#
+# The @@NAME@@ tokens are substituted by _nemoclaw_capture_script() before
+# staging (NOT str.format — the embedded JS contains literal {} braces).
+_NEMOCLAW_CAPTURE_SCRIPT = r'''
+import base64, json, os, random, re, subprocess, sys, time, glob
+from urllib.parse import urljoin, urlparse
+
+VW, VH = @@VW@@, @@VH@@
+url = sys.argv[1]
+out_dir = sys.argv[2]
+os.makedirs(out_dir, exist_ok=True)
+shot_path = os.path.join(out_dir, "cap-01.png")
+
+def emit(tag, payload=""):
+    sys.stdout.write(tag + payload + "\n")
+    sys.stdout.flush()
+
+# Pre-run zombie sweep BY NAME (not -f, which would match this exec wrapper) so a
+# prior crashed chrome holding a profile/port can't wedge this run.
+for nm in ("chrome", "chromium", "chrome_crashpad_handler"):
+    subprocess.run(["pkill", "-9", "-x", nm], capture_output=True)
+
+PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+CHROME = sorted(glob.glob("/tmp/.cache/ms-playwright/chromium-*/chrome-linux*/chrome"))
+if not CHROME:
+    emit("NC_FATAL", "no chrome binary")
+    sys.exit(2)
+CHROME = CHROME[-1]
+PORT = 9300 + random.randint(0, 399)
+profile = "/tmp/filmo-cap-profile-%d-%d" % (os.getpid(), int(time.time()))
+
+args = [CHROME,
+    "--remote-debugging-port=%d" % PORT,
+    "--remote-debugging-address=127.0.0.1",
+]
+if PROXY:
+    args += ["--proxy-server=" + PROXY,
+             "--proxy-bypass-list=localhost,127.0.0.1,::1,10.200.0.1"]
+args += [
+    "--ignore-certificate-errors",
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--enable-features=NetworkService,NetworkServiceInProcess",
+    "--disable-features=Translate",
+    "--headless=new",
+    "--ozone-platform=headless",
+    "--use-angle=swiftshader-webgl",
+    "--enable-unsafe-swiftshader",
+    "--disable-background-networking",
+    "--no-first-run", "--no-default-browser-check",
+    "--use-mock-keychain", "--password-store=basic",
+    "--window-size=%d,%d" % (VW, VH),
+    "--user-data-dir=" + profile,
+    "about:blank",
+]
+
+# Font/lib env: the sandbox image ships NO chromium deps, so the install step
+# extracted them (.deb -> dpkg -x) into /tmp/chrome-libs/extracted; point
+# LD_LIBRARY_PATH + fontconfig at them. The arch dir is discovered (x86_64 on
+# this VM; aarch64 elsewhere) so the recipe is portable. Without fontconfig +
+# the extracted fonts, chromium HarfBuzz renders text as empty boxes.
+cenv = dict(os.environ)
+EXTRACTED = "/tmp/chrome-libs/extracted"
+if os.path.isdir(EXTRACTED):
+    libdirs = []
+    for arch in ("x86_64-linux-gnu", "aarch64-linux-gnu"):
+        for base in ("usr/lib/", "lib/"):
+            d = os.path.join(EXTRACTED, base + arch)
+            if os.path.isdir(d):
+                libdirs.append(d)
+    libdirs.append(os.path.join(EXTRACTED, "usr/lib"))
+    cenv["LD_LIBRARY_PATH"] = ":".join(
+        libdirs + ([cenv["LD_LIBRARY_PATH"]] if cenv.get("LD_LIBRARY_PATH") else []))
+    fc = os.path.join(EXTRACTED, "etc/fonts")
+    if os.path.isdir(fc):
+        cenv["FONTCONFIG_PATH"] = fc
+        cenv["FONTCONFIG_FILE"] = os.path.join(fc, "fonts.conf")
+    cenv["XDG_DATA_DIRS"] = (
+        os.path.join(EXTRACTED, "usr/share")
+        + ":/usr/local/share:/usr/share")
+    # fontconfig needs a writable cache dir as uid998.
+    cenv.setdefault("XDG_CACHE_HOME", "/tmp/.fccache")
+cenv["PLAYWRIGHT_BROWSERS_PATH"] = "/tmp/.cache/ms-playwright"
+
+proc = subprocess.Popen(args, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, env=cenv)
+
+# Poll the CDP endpoint (<=30 x 0.5s = 15s) before connecting.
+import urllib.request
+ready = False
+for _ in range(30):
+    time.sleep(0.5)
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/json/version" % PORT,
+                                    timeout=2) as r:
+            if r.status == 200:
+                ready = True
+                break
+    except Exception:
+        pass
+if not ready:
+    emit("NC_FATAL", "chrome CDP not ready on port %d" % PORT)
+    try: proc.kill()
+    except Exception: pass
+    sys.exit(3)
+
+from playwright.sync_api import sync_playwright
+
+LOGO_SELECTORS = [
+    "header a[href='/'] svg", "header a[href='./'] svg",
+    "a[href='/'][aria-label*='ome' i] svg",
+    "[class*='ogo' i] a svg", "a[class*='ogo' i] svg",
+    "header [class*='ogo' i] svg", "nav a[href='/'] svg", "header svg",
+]
+LOGO_JS = """
+(selectors) => {
+  for (const sel of selectors) {
+    let els;
+    try { els = Array.from(document.querySelectorAll(sel)); }
+    catch (e) { continue; }
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r && r.width >= 40 && r.height >= 8 && r.width <= 600) {
+        const html = el.outerHTML || '';
+        if (html && html.toLowerCase().startsWith('<svg')) return html;
+      }
+    }
+  }
+  return null;
+}
+"""
+LINK_JS = """
+() => {
+  const pick = (sel, attr) => {
+    const el = document.querySelector(sel);
+    return el ? (el.getAttribute(attr) || '') : '';
+  };
+  return {
+    appleTouch: pick("link[rel='apple-touch-icon']", 'href')
+             || pick("link[rel='apple-touch-icon-precomposed']", 'href'),
+    maskIcon:   pick("link[rel='mask-icon']", 'href'),
+    icon:       pick("link[rel='icon']", 'href')
+             || pick("link[rel='shortcut icon']", 'href'),
+    ogImage:    pick("meta[property='og:image']", 'content')
+             || pick("meta[name='og:image']", 'content'),
+  };
+}
+"""
+
+def sanitize_svg(html):
+    if not html:
+        return html
+    ink = "#0a2540"
+    html = re.sub(r'(fill|stroke)="var\(--[^"]*\)"', r'\1="%s"' % ink, html)
+    html = re.sub(r'(fill|stroke)="currentColor"', r'\1="%s"' % ink, html,
+                  flags=re.IGNORECASE)
+    html = re.sub(r'(fill|stroke)\s*:\s*var\(--[^;")]*\)', r'\1:%s' % ink, html)
+    html = re.sub(r'(fill|stroke)\s*:\s*currentColor', r'\1:%s' % ink, html,
+                  flags=re.IGNORECASE)
+    return html
+
+def ext_for(asset_url, ctype):
+    p = urlparse(asset_url).path.lower()
+    for c in (".svg", ".png", ".ico", ".jpg", ".jpeg", ".webp", ".gif"):
+        if p.endswith(c):
+            return c
+    ct = (ctype or "").lower()
+    if "svg" in ct: return ".svg"
+    if "png" in ct: return ".png"
+    if "icon" in ct or "ico" in ct: return ".ico"
+    if "jpeg" in ct or "jpg" in ct: return ".jpg"
+    if "webp" in ct: return ".webp"
+    return ".png"
+
+def capture_logo(page, ctx):
+    # 1) inline header <svg>
+    try:
+        html = page.evaluate(LOGO_JS, LOGO_SELECTORS)
+    except Exception:
+        html = None
+    if html and isinstance(html, str):
+        html = html.strip()
+        if "xmlns" not in html[:200]:
+            html = html.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+        html = sanitize_svg(html)
+        dest = os.path.join(out_dir, "cap-logo.svg")
+        try:
+            with open(dest, "w", encoding="utf-8") as fh:
+                fh.write(html)
+            return {"file": "cap-logo.svg", "source": "inline-svg"}
+        except Exception:
+            pass
+    # 2) link icon / og:image
+    info = {}
+    try:
+        info = page.evaluate(LINK_JS) or {}
+    except Exception:
+        info = {}
+    asset_url = ""
+    for key in ("appleTouch", "maskIcon", "icon", "ogImage"):
+        href = (info.get(key) or "").strip()
+        if href:
+            base = ""
+            try: base = page.url or ""
+            except Exception: base = ""
+            full = urljoin(base, href) if base else href
+            if urlparse(full).scheme in ("http", "https"):
+                asset_url = full
+                break
+    candidates = []
+    if asset_url:
+        candidates.append(asset_url)
+    # 3) /favicon.ico last resort
+    try:
+        base = page.url or ""
+    except Exception:
+        base = ""
+    if base:
+        fav = urljoin(base, "/favicon.ico")
+        if urlparse(fav).scheme in ("http", "https"):
+            candidates.append(fav)
+    for cand in candidates:
+        try:
+            resp = ctx.request.get(cand, timeout=15000)
+            if not resp.ok:
+                continue
+            body = resp.body()
+            if not body or len(body) < 64:
+                continue
+            ctype = resp.headers.get("content-type") or ""
+        except Exception:
+            continue
+        ext = ext_for(cand, ctype)
+        dest = os.path.join(out_dir, "cap-logo" + ext)
+        try:
+            with open(dest, "wb") as fh:
+                fh.write(body)
+            src = "favicon:" + cand if cand.endswith("favicon.ico") else "link-or-og:" + cand
+            return {"file": os.path.basename(dest), "source": src}
+        except Exception:
+            continue
+    return None
+
+title = ""
+status = 0
+logo_rec = None
+body_text = ""
+try:
+    pw = sync_playwright().start()
+    browser = pw.chromium.connect_over_cdp("http://127.0.0.1:%d" % PORT, timeout=90000)
+    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    try:
+        page.set_viewport_size({"width": VW, "height": VH})
+    except Exception:
+        pass
+    r = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    status = (r.status if r else 0) or 0
+    try:
+        title = page.title() or ""
+    except Exception:
+        title = ""
+    page.wait_for_timeout(3500)
+    page.screenshot(path=shot_path, full_page=False)
+    try:
+        body_text = (page.inner_text("body") or "")[:4000]
+    except Exception:
+        body_text = ""
+    try:
+        logo_rec = capture_logo(page, ctx)
+    except Exception:
+        logo_rec = None
+    try:
+        browser.close()
+    except Exception:
+        pass
+    pw.stop()
+finally:
+    try: proc.kill()
+    except Exception: pass
+
+emit("@@STATUS_MARK@@", " %d %s" % (
+    status, base64.b64encode((title or "").encode("utf-8", "replace")).decode()))
+emit("@@BODY_BEGIN@@", base64.b64encode(
+    (body_text or "").encode("utf-8", "replace")).decode() + "@@BODY_END@@")
+if logo_rec:
+    emit("@@LOGO_BEGIN@@", base64.b64encode(
+        json.dumps(logo_rec).encode("utf-8")).decode() + "@@LOGO_END@@")
+if os.path.exists(shot_path) and os.path.getsize(shot_path) > 0:
+    emit("@@NC_OK@@")
+'''
 
 
-def _nemoclaw_capture_command(url: str, shot_path: str) -> str:
-    """Build the NEWLINE-FREE single-line bash command run inside the sandbox.
+def _nemoclaw_capture_script() -> str:
+    """The fully-substituted in-sandbox capture script source (sentinels +
+    viewport baked in). Uses @@TOKEN@@ replacement (NOT str.format — the embedded
+    JS contains literal {} braces). Pure; staged to /tmp/filmo-cap.py."""
+    subs = {
+        "@@VW@@": str(_NEMOCLAW_VW), "@@VH@@": str(_NEMOCLAW_VH),
+        "@@STATUS_MARK@@": _NC_STATUS_MARK,
+        "@@BODY_BEGIN@@": _NC_BODY_BEGIN, "@@BODY_END@@": _NC_BODY_END,
+        "@@LOGO_BEGIN@@": _NC_LOGO_BEGIN, "@@LOGO_END@@": _NC_LOGO_END,
+        "@@NC_OK@@": _NC_OK,
+    }
+    src = _NEMOCLAW_CAPTURE_SCRIPT
+    for k, v in subs.items():
+        src = src.replace(k, v)
+    return src
 
-    NemoClaw's gRPC `exec` rejects any argv element containing a newline/CR. The
-    capture python source is naturally multi-line (a try/except for body text),
-    so we base64-encode it and run `python -c "import base64;exec(...)"` — the
-    b64 blob carries no newlines, so the whole `bash -lc` argument is one line.
-    PLAYWRIGHT_BROWSERS_PATH points the venv Playwright at the shared browser
-    cache (handoff step 3)."""
+
+def _nemoclaw_stage_capture_script(*, timeout: int = 60) -> bool:
+    """Stage the capture script to /tmp/filmo-cap.py inside the sandbox via a
+    single base64 pipe (newline-free exec wrapper — the gRPC exec rejects argv
+    newlines). Idempotent: rewrites every run so a code update always lands.
+    Returns True on success."""
     import base64 as _b64
-    src = _nemoclaw_capture_python(url, shot_path)
+    src = _nemoclaw_capture_script()
     b64 = _b64.b64encode(src.encode("utf-8")).decode("ascii")
+    # Decode the b64 to the file in one line (no newline in argv).
+    one_line = (
+        "python3 -c 'import base64,sys; "
+        "open(%s,\"wb\").write(base64.b64decode(\"%s\"))'"
+        % (json.dumps(_NEMOCLAW_CAP_SCRIPT), b64))
+    try:
+        r = _nemoclaw_exec_sh(one_line, timeout=timeout)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] stage script raised: %s\n" % e)
+        return False
+    if r.returncode != 0:
+        sys.stderr.write(
+            "[capture/nemoclaw] stage script failed (rc=%s): %s\n"
+            % (r.returncode, (r.stderr or r.stdout or "")[-300:]))
+        return False
+    return True
+
+
+def _nemoclaw_capture_command(url: str, out_dir_sbx: str) -> str:
+    """The NEWLINE-FREE single-line bash command that runs the staged capture
+    script via the sandbox venv python. PLAYWRIGHT_BROWSERS_PATH points at the
+    shared browser cache. url + out_dir are shell-quoted args (no newline)."""
     return (
-        "export PLAYWRIGHT_BROWSERS_PATH=%s; "
-        "/sandbox/.venv/bin/python -c "
-        "'import base64;exec(base64.b64decode(\"%s\").decode())'"
-        % (_NEMOCLAW_BROWSERS_PATH, b64)
-    )
+        "export PLAYWRIGHT_BROWSERS_PATH=%s; %s %s %s %s"
+        % (_NEMOCLAW_BROWSERS_PATH, _NEMOCLAW_SBX_PYTHON,
+           json.dumps(_NEMOCLAW_CAP_SCRIPT), json.dumps(url),
+           json.dumps(out_dir_sbx)))
 
 
 def _nemoclaw_pull_png(sandbox_path: str, dest_path: str, *, timeout: int = 90) -> bool:
@@ -2661,6 +3353,34 @@ def _nemoclaw_pull_png(sandbox_path: str, dest_path: str, *, timeout: int = 90) 
     return True
 
 
+def _nemoclaw_pull_asset(sandbox_path: str, dest_path: str, *,
+                         min_bytes: int = 64, timeout: int = 60) -> bool:
+    """Base64-pull an arbitrary asset (the captured logo) out of the sandbox to
+    `dest_path`. Validates a non-trivial size only (a logo may be SVG/PNG/ICO).
+    Returns True on success."""
+    try:
+        r = _nemoclaw_exec_sh("base64 %s" % json.dumps(sandbox_path), timeout=timeout)
+    except Exception as e:
+        sys.stderr.write("[capture/nemoclaw] logo pull raised: %s\n" % e)
+        return False
+    if r.returncode != 0 or not (r.stdout or "").strip():
+        return False
+    import base64 as _b64
+    try:
+        raw = _b64.b64decode("".join((r.stdout or "").split()))
+    except Exception:
+        return False
+    if len(raw) < min_bytes:
+        return False
+    try:
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        with open(dest_path, "wb") as fh:
+            fh.write(raw)
+    except Exception:
+        return False
+    return True
+
+
 def _capture_via_nemoclaw(url: str, out_dir: str,
                           max_shots: int) -> Optional[Dict[str, Any]]:
     """Capture `url` with Playwright running INSIDE the NemoClaw sandbox.
@@ -2683,8 +3403,13 @@ def _capture_via_nemoclaw(url: str, out_dir: str,
     if not _nemoclaw_preflight(host, url):
         return None
 
-    sandbox_png = "/tmp/cap-01.png"
-    one_line = _nemoclaw_capture_command(url, sandbox_png)
+    # Capture into a UNIQUE per-run sandbox out_dir so concurrent/repeat runs
+    # never share files (the daemon serializes jobs, but unique dirs are cheap
+    # defense). The script writes cap-01.png + cap-logo.<ext> there.
+    import base64 as _b64
+    sbx_out = "/tmp/filmo-cap-out-%d" % int(__import__("time").time())
+    sandbox_png = sbx_out + "/cap-01.png"
+    one_line = _nemoclaw_capture_command(url, sbx_out)
     try:
         r = _nemoclaw_exec_sh(one_line, timeout=180)
     except Exception as e:
@@ -2694,7 +3419,7 @@ def _capture_via_nemoclaw(url: str, out_dir: str,
     if _NC_OK not in out:
         sys.stderr.write(
             "[capture/nemoclaw] capture did not print CAPTURE_OK (rc=%s): %s\n"
-            % (r.returncode, (r.stderr or out or "")[-400:]))
+            % (r.returncode, (r.stderr or out or "")[-500:]))
         return None
 
     # Pull the PNG back to out_dir/shot-01.png and validate it.
@@ -2711,23 +3436,56 @@ def _capture_via_nemoclaw(url: str, out_dir: str,
             pass
         return None
 
-    # Parse STATUS/TITLE + the base64 body text out of stdout.
+    # Parse NC_STATUS <code> <b64-title> + the base64 body text out of stdout.
     title = ""
     for line in out.splitlines():
-        if line.startswith("STATUS ") and "TITLE " in line:
-            try:
-                title = ast.literal_eval(line.split("TITLE ", 1)[1].strip())  # repr() literal
-            except Exception:
-                title = ""
+        if line.startswith(_NC_STATUS_MARK + " "):
+            parts = line.split(" ", 2)
+            if len(parts) >= 3:
+                try:
+                    title = _b64.b64decode(parts[2].strip().encode()).decode(
+                        "utf-8", "replace")
+                except Exception:
+                    title = ""
             break
     body_text = ""
     if _NC_BODY_BEGIN in out and _NC_BODY_END in out:
         try:
             enc = out.split(_NC_BODY_BEGIN, 1)[1].split(_NC_BODY_END, 1)[0]
-            import base64 as _b64
             body_text = _b64.b64decode(enc.strip().encode()).decode("utf-8", "replace")
         except Exception:
             body_text = ""
+
+    # Logo: parse the {file,source} record from stdout, then PULL the bytes.
+    logo_rec: Optional[Dict[str, str]] = None
+    if _NC_LOGO_BEGIN in out and _NC_LOGO_END in out:
+        try:
+            enc = out.split(_NC_LOGO_BEGIN, 1)[1].split(_NC_LOGO_END, 1)[0]
+            meta = json.loads(_b64.b64decode(enc.strip().encode()).decode("utf-8"))
+            sbx_logo = sbx_out + "/" + meta.get("file", "")
+            ext = os.path.splitext(meta.get("file", ""))[1] or ".png"
+            dest_logo = os.path.join(out_dir, "brand", "logo" + ext)
+            if meta.get("file") and _nemoclaw_pull_asset(sbx_logo, dest_logo):
+                logo_rec = {
+                    "file": os.path.basename(dest_logo),
+                    "path": dest_logo,
+                    "source": meta.get("source", "nemoclaw"),
+                }
+                sys.stderr.write(
+                    "[capture/nemoclaw] logo captured (%s): %s\n"
+                    % (logo_rec["source"], dest_logo))
+        except Exception as e:
+            sys.stderr.write("[capture/nemoclaw] logo parse/pull failed: %s\n" % e)
+            logo_rec = None
+    if logo_rec is None:
+        sys.stderr.write("[capture/nemoclaw] no logo captured; host-side wordmark "
+                         "derivation will take over.\n")
+
+    # Best-effort cleanup of the per-run sandbox out_dir (never fails the capture).
+    try:
+        _nemoclaw_exec_sh("rm -rf %s" % json.dumps(sbx_out), timeout=30)
+    except Exception:
+        pass
 
     size = os.path.getsize(shot_path)
     rec: Dict[str, Any] = {
@@ -2739,8 +3497,12 @@ def _capture_via_nemoclaw(url: str, out_dir: str,
     }
     _attach_read_text(rec, title=title, body_text=body_text)
 
-    manifest = {"url": url, "count": 1, "shots": [rec], "ok": True,
-                "backend": "nemoclaw"}
+    manifest: Dict[str, Any] = {"url": url, "count": 1, "shots": [rec], "ok": True,
+                                "backend": "nemoclaw"}
+    # Match the native manifest shape: a captured logo is recorded so brand_extract
+    # prefers it over the derived wordmark (honest degrade when absent).
+    if logo_rec:
+        manifest["logo"] = logo_rec
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
     return manifest

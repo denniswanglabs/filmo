@@ -312,10 +312,71 @@ def _capture_screenshots_for_run(url, run_dir):
         # already captured this run — don't re-fetch.
         try:
             with open(manifest_path) as f:
-                return json.load(f)
+                return _salvage_screenshot_manifest(run_dir, shots_dir, json.load(f))
         except (OSError, ValueError):
             pass
-    return adapters.generate_screenshots(url, shots_dir, mode="mock", max_shots=2)
+    manifest = adapters.generate_screenshots(url, shots_dir, mode="mock", max_shots=2)
+    return _salvage_screenshot_manifest(run_dir, shots_dir, manifest)
+
+
+def _salvage_screenshot_manifest(run_dir, shots_dir, manifest):
+    """#82: if the produce-time capture flaked (ok=false / no real shots), copy the
+    REAL read-pass hero (runs/<id>/screenshots-read/shot-01.png) into screenshots/
+    and rewrite the manifest as a real capture. Best-effort: returns the original
+    manifest unchanged if there's no usable read-pass shot. Never raises."""
+    try:
+        if not isinstance(manifest, dict):
+            return manifest
+        real_shots = [s for s in (manifest.get("shots") or [])
+                      if isinstance(s, dict) and not s.get("mock")]
+        if manifest.get("ok") is not False and real_shots:
+            return manifest  # already real
+        read_manifest_path = os.path.join(run_dir, "screenshots-read", "manifest.json")
+        if not os.path.exists(read_manifest_path):
+            return manifest
+        with open(read_manifest_path) as f:
+            read_m = json.load(f)
+        read_shots = [s for s in (read_m.get("shots") or [])
+                      if isinstance(s, dict) and not s.get("mock") and (s.get("path") or s.get("file"))]
+        if not read_shots:
+            return manifest
+        import shutil
+        os.makedirs(shots_dir, exist_ok=True)
+        salvaged = []
+        for i, s in enumerate(read_shots, start=1):
+            src_path = s.get("path") or os.path.join(run_dir, "screenshots-read", s.get("file"))
+            if not src_path or not os.path.exists(src_path):
+                continue
+            fname = "shot-%02d.png" % i
+            dst_path = os.path.join(shots_dir, fname)
+            try:
+                shutil.copyfile(src_path, dst_path)
+            except OSError:
+                continue
+            rec = dict(s)
+            rec["index"] = i
+            rec["file"] = fname
+            rec["path"] = dst_path
+            rec.pop("mock", None)
+            salvaged.append(rec)
+        if not salvaged:
+            return manifest
+        new_m = {"url": manifest.get("url") or read_m.get("url"),
+                 "count": len(salvaged), "shots": salvaged,
+                 "ok": True, "real": True, "salvaged_from_read_pass": True}
+        if read_m.get("logo"):
+            new_m["logo"] = read_m["logo"]
+        try:
+            with open(os.path.join(shots_dir, "manifest.json"), "w") as f:
+                json.dump(new_m, f, indent=2)
+        except OSError:
+            return manifest
+        print("[build_runner] #82: salvaged %d real read-pass shot(s) into screenshots/"
+              % len(salvaged), file=sys.stderr)
+        return new_m
+    except Exception as e:
+        print("[build_runner] screenshot salvage skipped: %s" % e, file=sys.stderr)
+        return manifest
 
 
 def _try_unlink(path):
@@ -357,22 +418,6 @@ def _validate_rendered_mp4(path, min_bytes=10000):
         return False
 
 
-def _safe_run_id(run_id):
-    """sec-C2: sanitize a run-id before it is used as a path component.
-
-    `run_id` becomes runs/<run_id>/… — used verbatim it lets a crafted value
-    (../../etc/cron.d/x, /abs/path, …) escape the runs dir and write as root.
-    Reduce to a safe slug: keep [A-Za-z0-9._-], map everything else to '-',
-    strip any leading dots/dashes, and reject the pure-dot traversal tokens.
-    Always returns a non-empty, path-safe token.
-    """
-    raw = str(run_id or "").strip()
-    slug = re.sub(r"[^A-Za-z0-9._-]", "-", raw).lstrip(".-")
-    if slug in ("", ".", ".."):
-        slug = "run"
-    return slug[:128]
-
-
 def _run_vo_engine(plan, run_id, url, run_dir):
     """Produce the PICTURE via the VO-driven <Timeline> engine and replace the
     run's final.mp4 with it. NEVER-BLANK by construction (ExplainerCard floor).
@@ -382,11 +427,8 @@ def _run_vo_engine(plan, run_id, url, run_dir):
     already written ledger.json (P&L, scenes, budget gate, Stripe) by the time this
     runs. We only overwrite the picture so the customer never sees a blank scene.
 
-    Returns (final_mp4_path_or_None, vo_provenance_or_None). vo_provenance is the
-    VO engine record read from vo_alignment.json — {vo_engine, vo_fallback,
-    vo_fallback_reason, voice} — so the caller can write it into the ledger's
-    (already-allowed) voiceover block. ElevenLabs is the default voice engine; on
-    any failure align_vo auto-falls-back to free edge-tts + whisper.
+    Returns the path to the engine final.mp4 on success, or None if the engine
+    could not run (in which case the legacy picture from orchestrate is left as-is).
     """
     import style_fill
 
@@ -411,37 +453,15 @@ def _run_vo_engine(plan, run_id, url, run_dir):
     # audio). do_render=False here so we render once, below, into the run's final.mp4.
     #
     # VO PROVIDER (independent of quality/Higgsfield): the VO engine is ALWAYS the
-    # Remotion Timeline (VO_ENGINE_STYLE, no Higgsfield) regardless of provider.
-    # ElevenLabs is now the DEFAULT voice for EVERY video (decided inside
-    # align_vo.synth_full_script): it is tried FIRST and, on ANY failure (no key,
-    # 401, quota_exceeded, network, etc.), AUTO-FALLS-BACK to free edge-tts +
-    # whisper so the render NEVER fails on VO. tier="free" (the run_pipeline
-    # default) no longer gates the engine; set WS_VO_PROVIDER=edge|free to force
-    # the free path. Which engine actually ran is read from vo_alignment.json below
-    # and recorded into the ledger's voiceover block.
+    # Remotion Timeline (VO_ENGINE_STYLE, no Higgsfield) regardless of provider. By
+    # default the voice is $0 edge-tts + whisper (tier="free" below). Set
+    # WS_VO_PROVIDER=elevenlabs in the environment to swap ONLY the voice engine to
+    # real ElevenLabs VO (read inside align_vo.synth_full_script) — so a
+    # `--quality standard` build (Higgsfield OFF) still gets premium ElevenLabs VO.
+    # We don't pass tier="premium" here; the env switch alone selects the provider.
     res = style_fill.run_pipeline(plan_path, brand_path, VO_ENGINE_STYLE, run_dir,
                                   fps=30, do_align=True, do_render=False)
     props_path = res["props_path"]
-
-    # VO ENGINE PROVENANCE — read which voice engine actually ran (ElevenLabs is the
-    # default; on any failure align_vo auto-falls-back to free edge-tts + whisper).
-    # This is recorded by the caller into the LEDGER's voiceover block (an
-    # already-allowed structure — NEVER a new top-level plan key). Best-effort:
-    # never block the picture render on reading provenance.
-    vo_provenance = None
-    try:
-        align_path = res.get("alignment_path")
-        if align_path and os.path.exists(align_path):
-            with open(align_path) as _af:
-                _al = json.load(_af)
-            vo_provenance = {
-                "vo_engine": _al.get("vo_engine"),
-                "vo_fallback": bool(_al.get("vo_fallback")),
-                "vo_fallback_reason": _al.get("vo_fallback_reason"),
-                "voice": _al.get("voice"),
-            }
-    except Exception:
-        vo_provenance = None
 
     # Render the Timeline composition with the props into the run's final.mp4 — the
     # exact path the dashboard/stitch already point at, so nothing downstream changes.
@@ -467,15 +487,35 @@ def _run_vo_engine(plan, run_id, url, run_dir):
     r = subprocess.run(cmd, cwd=studio, env=env)
     if r.returncode != 0 or not os.path.exists(tmp):
         _try_unlink(tmp)
-        return None, vo_provenance
+        return None
     if not _validate_rendered_mp4(tmp):
         print("[build_runner] VO-ENGINE render failed validation (%s) — keeping the "
               "verified picture" % tmp, file=sys.stderr)
         _try_unlink(tmp)
-        return None, vo_provenance
+        return None
     # Atomic swap: the verified picture is only destroyed AFTER the new one validates.
     os.replace(tmp, final)
-    return final, vo_provenance
+    return final
+
+
+def _safe_run_id(run_id):
+    """sec-C2: sanitize a run-id before it is used as a path component.
+
+    `run_id` becomes runs/<run_id>/… — used verbatim it lets a crafted value
+    (../../etc/cron.d/x, /abs/path, …) escape the runs dir and write as root.
+    Reduce to a safe slug: keep [A-Za-z0-9._-], map everything else to '-',
+    strip any leading dots/dashes, and reject the pure-dot traversal tokens.
+    Always returns a non-empty, path-safe token.
+    """
+    raw = str(run_id or "").strip()
+    # collapse any path separators / disallowed chars to '-'
+    slug = re.sub(r"[^A-Za-z0-9._-]", "-", raw)
+    # no leading dots/dashes (kills "..", "."-prefixed, and leading "-")
+    slug = slug.lstrip(".-")
+    # reject pure-traversal residue
+    if slug in ("", ".", ".."):
+        slug = "run"
+    return slug[:128]
 
 
 def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="standard",
@@ -492,14 +532,12 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
     job = {"company_url": url, "goal": goal, "target_duration_s": target_duration,
            "target_margin": 0.6, "currency": "usd"}
 
-    # SINGLE COHERENT TIER: the premium/standard menu is retired — every video is
-    # produced the same way (Remotion designed scenes + the default VO engine, which
-    # is now ElevenLabs-with-free-fallback). `quality` is pinned to "standard" (the one
-    # tier) so any stray `--quality premium` invocation can't fork the pipeline, and the
-    # cost-plus premium menu stays OFF so producer/orchestrator run their clean
-    # single-tier pricing path.
-    quality = "standard"
-    os.environ.pop("WS_PREMIUM_MENU", None)
+    # QUALITY (the upfront cost-plus choice) drives BOTH pricing + the produce stack.
+    # Turn the cost-plus menu ON for dashboard builds so producer/orchestrator honor
+    # the quality dimension (standard = Remotion + edge-tts, no Higgsfield/ElevenLabs,
+    # price floors at $5; premium = cinematic Higgsfield + ElevenLabs VO, ~$6-9).
+    quality = "premium" if str(quality).strip().lower() == "premium" else "standard"
+    os.environ["WS_PREMIUM_MENU"] = "1"
 
     os.environ["PRODUCER_PACE"] = str(pace)
     # User-facing STYLE controls the actual output (scene count / holds / motion
@@ -754,31 +792,7 @@ def run(url, goal, run_id, mode="mock", target_duration=30, pace=1.2, style="sta
                 # the "capturing" stage above: read-only hint, never a gate.
                 disk_led.data["stage"] = "rendering"
                 disk_led.write(led_path)
-                final, vo_prov = _run_vo_engine(plan, run_id, url, run_dir)
-                # VO ENGINE PROVENANCE — record which voice engine actually ran into
-                # the ledger's voiceover block (an ALREADY-ALLOWED structure; NEVER a
-                # new top-level plan key) so we can tell whether ElevenLabs (the
-                # default) ran or it auto-fell-back to free edge-tts. ElevenLabs is
-                # currently out of credits, so vo_fallback=True is expected today.
-                if vo_prov and vo_prov.get("vo_engine"):
-                    vo_block = disk_led.data.get("voiceover")
-                    if not isinstance(vo_block, dict):
-                        vo_block = {}
-                    vo_block["vo_engine"] = vo_prov.get("vo_engine")
-                    vo_block["vo_fallback"] = bool(vo_prov.get("vo_fallback"))
-                    vo_block["vo_fallback_reason"] = vo_prov.get("vo_fallback_reason")
-                    if vo_prov.get("voice"):
-                        vo_block.setdefault("vo_voice", vo_prov.get("voice"))
-                    disk_led.data["voiceover"] = vo_block
-                    if vo_prov.get("vo_fallback"):
-                        disk_led.event(
-                            "info", "VO-ENGINE: ElevenLabs (default) unavailable — "
-                            "auto-fell-back to free edge-tts+whisper (%s)"
-                            % (vo_prov.get("vo_fallback_reason") or "unknown reason"))
-                    else:
-                        disk_led.event(
-                            "info", "VO-ENGINE: voiceover synthesized via %s"
-                            % vo_prov.get("vo_engine"))
+                final = _run_vo_engine(plan, run_id, url, run_dir)
                 if final:
                     disk_led.event("info", "VO-ENGINE: rendered never-blank <Timeline> "
                                    "picture -> final.mp4 (WS_VO_ENGINE on)")
@@ -1018,10 +1032,10 @@ def main():
                          "scenes, ~6-8 scenes, 2-4s holds, faster cut rhythm) | "
                          "standard (legacy ~4-5 scenes, longer holds) | "
                          "cinematic (fewest+longest scenes)")
-    ap.add_argument("--quality", choices=["standard"], default="standard",
-                    help="retained for the worker's param contract; the premium tier is "
-                         "retired, so there is a SINGLE coherent tier (always 'standard'). "
-                         "run() pins this regardless.")
+    ap.add_argument("--quality", choices=["standard", "premium"], default="standard",
+                    help="video quality (the upfront cost-plus choice): standard "
+                         "(Remotion + edge-tts, no Higgsfield/ElevenLabs, ~$5) | premium "
+                         "(cinematic Higgsfield + ElevenLabs VO, ~$6-9)")
     ap.add_argument("--brain", choices=list(brain_mod.VALID_BRAINS), default=brain_mod.DEFAULT_BRAIN,
                     help="planner LLM (operator), all via OpenRouter: ultra-paid | "
                          "super-free (default, $0) | super-paid")
