@@ -1,6 +1,6 @@
 # Filmo
 
-**Your product launch, produced by an autonomous agent.**
+**Your product launch, produced by an AI agent.**
 
 Give Filmo a product **URL + a goal**. It reads your real product, reads why the page fails to convert, then plans, prices, and presents a **Stripe checkout** — you pay (test card `4242`), and it produces a finished **1080p launch video**. One agent runs the whole pipeline end to end.
 
