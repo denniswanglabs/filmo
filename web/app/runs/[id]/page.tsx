@@ -19,6 +19,31 @@ import {
 // terminal too, or polling never stops and the live tracker spins forever.
 const TERMINAL = new Set(['delivered', 'completed_with_warnings', 'failed'])
 
+// ── Heavy-props poll mitigation ──────────────────────────────────────────────
+// The `runs.props` blob is 2.7KB–42KB+ on real runs, and ~40KB of a heavy one is
+// `scenes[].data` (full render copy) — which THIS page never reads (the delivered
+// video is a URL; only the editor + the Remotion render consume `scenes[].data`).
+// Re-pulling that whole blob every 3s across the EU→Singapore hop is a documented
+// InsForge-timeout trigger (HANDOFF 2026-06-26) and is exactly what makes the run
+// page sit heavy while a user watches a delivered run.
+//
+// We can't strip `scenes[].data` in PostgREST (no array-element projection), and the
+// LIVE filmstrip genuinely needs the scenes (its card headlines read `scene.data`).
+// So we split the poll by regime instead:
+//   • NON-terminal (queued/running) + the very first load → full `select()` (default
+//     `*`): unchanged behavior, so the live filmstrip keeps its scene data and the
+//     curated-fallback "props is the floor" path is untouched.
+//   • TERMINAL (delivered / completed_with_warnings / failed) → the page keeps polling
+//     ONLY to catch a rerender's `edited_url`. Nothing about `scenes` can change now,
+//     so we poll a LIGHT column set (no `props`) and MERGE it into the already-loaded
+//     run — preserving the full props/scenes already in state. This drops the heavy
+//     blob from every post-delivery tick (the long-lived, page-freezing case) while
+//     never risking the live view or the delivered-video/editor paths.
+// Light columns the terminal watch needs: the rerender output + status/phase, so the
+// "Edited" cut and any late status change still appear without a manual refresh.
+const TERMINAL_WATCH_SELECT =
+  'id, status, phase, final_url, edited_url, updated_at'
+
 
 export default function RunPage() {
   const params = useParams<{ id: string }>()
@@ -29,13 +54,31 @@ export default function RunPage() {
   const [events, setEvents] = useState<RunEvent[]>([])
   const [notFound, setNotFound] = useState(false)
   const stopped = useRef(false)
+  // Latest run, mirrored into a ref so `poll` can branch on terminal-vs-live WITHOUT
+  // depending on `run` (a dep would tear down + recreate the 3s interval every update).
+  const runRef = useRef<Run | null>(null)
+  runRef.current = run
 
   const poll = useCallback(async () => {
     if (!runId) return
+
+    // Regime: once we already have a TERMINAL run loaded, the only reason we keep
+    // polling is to catch a rerender's edited_url — so poll the LIGHT watch columns
+    // (no heavy props) and merge. Otherwise (first load, or a live/non-terminal run)
+    // pull the full row so the filmstrip has its scene data. `runRef` reads the latest
+    // run without making `poll` depend on it (the 3s interval keeps a stable callback).
+    const loaded = runRef.current
+    const terminalLoaded = loaded && TERMINAL.has(loaded.status)
+
     // Retry a transient InsForge blip (8s-timeout 408 / 5xx / network) inside a single
     // poll tick so a stuck call doesn't drop a cycle. A real 4xx returns immediately.
     const { data, error } = await resilientRead(() =>
-      insforge.database.from('runs').select().eq('id', runId).maybeSingle(),
+      (terminalLoaded
+        ? insforge.database.from('runs').select(TERMINAL_WATCH_SELECT)
+        : insforge.database.from('runs').select()
+      )
+        .eq('id', runId)
+        .maybeSingle(),
     )
     // Transient error → keep the last good state and let the next 3s tick retry; never
     // blank the view or flip a delivered run to an error on a network hiccup.
@@ -50,17 +93,31 @@ export default function RunPage() {
       })
       return
     }
-    const r = data as Run
-    setRun(r)
 
-    const { data: ev } = await resilientRead(() =>
-      insforge.database
-        .from('run_events')
-        .select()
-        .eq('run_id', runId)
-        .order('seq', { ascending: true }),
-    )
-    if (ev) setEvents(ev as RunEvent[])
+    // Merge (terminal watch = partial row → patch onto the loaded run, keeping props)
+    // or replace (full row). Either way `r` is the up-to-date run used below.
+    let r: Run
+    if (terminalLoaded) {
+      r = { ...loaded, ...(data as Partial<Run>) } as Run
+      setRun(r)
+    } else {
+      r = data as Run
+      setRun(r)
+    }
+
+    // Events: skip the re-fetch on terminal ticks — the activity feed is already loaded
+    // and frozen once a run is terminal, so there's no need to re-pull it every 3s while
+    // we wait on a rerender. (BuildProgress's live feed only shows pre-terminal.)
+    if (!terminalLoaded) {
+      const { data: ev } = await resilientRead(() =>
+        insforge.database
+          .from('run_events')
+          .select()
+          .eq('run_id', runId)
+          .order('seq', { ascending: true }),
+      )
+      if (ev) setEvents(ev as RunEvent[])
+    }
 
     // A terminal build normally stops polling — but an editor Export enqueues a
     // `rerender` job that produces runs.edited_url AFTER the run is already
