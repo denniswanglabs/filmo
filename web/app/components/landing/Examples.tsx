@@ -17,7 +17,7 @@ interface Card {
 const BRAND: Record<string, { logo: string; tint: string }> = {
   'Y Combinator': { logo: '/examples/logos/ycombinator.svg', tint: '#FFF4EE' },
   'Nous Research': { logo: '/examples/logos/nousresearch.svg', tint: '#F4F1FD' },
-  Stripe: { logo: '/examples/logos/stripe.svg', tint: '#F2F1FF' },
+  ElevenLabs: { logo: '/examples/logos/elevenlabs.svg', tint: '#EAF1FD' },
 }
 
 const CARDS: readonly Card[] = [
@@ -38,12 +38,12 @@ const CARDS: readonly Card[] = [
     descriptor: 'A local-first agent explainer, read from the live site.',
   },
   {
-    slug: 'stripe-wide',
-    src: '/examples/stripe.mp4',
-    poster: '/examples/stripe.jpg',
-    brand: 'Stripe',
-    sourceUrl: 'https://stripe.com',
-    descriptor: 'A payments story, planned and produced on autopilot.',
+    slug: 'elevenlabs-wide',
+    src: '/examples/elevenlabs.mp4',
+    poster: '/examples/elevenlabs.jpg',
+    brand: 'ElevenLabs',
+    sourceUrl: 'https://elevenlabs.io',
+    descriptor: 'A voice-AI story, planned and produced on autopilot.',
   },
 ]
 
