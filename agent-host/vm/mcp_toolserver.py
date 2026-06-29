@@ -122,6 +122,36 @@ def _emit_event(run_id, msg, actor="hermes", level="info"):
         _log("emit failed for run %s: %s" % (run_id, e))
 
 
+# --------------------------------------------------------------------------- #
+# FILMSTRIP feed — live scene-production thumbnails (demo showpiece).
+#
+# run_events has NO structured JSON column (only {run_id,seq,actor,level,msg}),
+# so the machine-readable filmstrip payload rides INSIDE `msg` after a fixed
+# sentinel. The front-end splits on the sentinel: the head is human-readable log
+# text; the tail is a JSON object it parses to drive the filmstrip cards. The
+# event KIND is also placed on the `level` column ("storyboard" / "scene_done")
+# so the front-end can cheaply filter filmstrip rows without parsing every msg.
+#
+# Belt-and-suspenders: the SAME data is mirrored into runs.props (scenes[] +
+# scene_thumbs{}) — a real JSON column — so the front-end has a durable, no-parse
+# source for the initial render even if it misses live events.
+# --------------------------------------------------------------------------- #
+FILMSTRIP_MARK = " ::FILMSTRIP:: "
+
+
+def _emit_filmstrip_event(run_id, human_msg, payload, level, actor="hermes"):
+    """Emit one filmstrip run_event: human text + sentinel + compact JSON tail.
+
+    `level` is the discriminator ("storyboard" | "scene_done"). Best-effort.
+    """
+    try:
+        tail = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    except Exception as e:
+        _log("filmstrip payload not serializable: %s" % e)
+        return
+    _emit_event(run_id, human_msg + FILMSTRIP_MARK + tail, actor=actor, level=level)
+
+
 _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
@@ -142,6 +172,56 @@ def _insforge_get(path):
     except Exception as e:
         _log("insforge GET failed (%s): %s" % (path, e))
         return None
+
+
+def _merge_run_props(run_id, patch):
+    """Merge `patch` into runs.props for run_id (read-modify-write). Best-effort.
+
+    runs.props is a free-form JSON column already carrying
+    {conducted_by, produced_on, producer}. We GET the current props, shallow-merge
+    the new keys (scenes / scene_thumbs), and PATCH the row back. Never raises — a
+    props write must not fail a (paid, delivered) conduct. The run_events feed is
+    the live driver; this column is the durable, no-parse fallback for the UI.
+    """
+    if not run_id or not _UUID_RE.match(str(run_id)):
+        return
+    api_key = os.environ.get("INSFORGE_API_KEY")
+    if not api_key:
+        return
+    try:
+        cur_rows = _insforge_get(
+            "/api/database/records/runs?id=eq.%s&limit=1" % run_id)
+        cur = {}
+        if isinstance(cur_rows, list) and cur_rows:
+            cur = cur_rows[0].get("props") or {}
+        if not isinstance(cur, dict):
+            cur = {}
+        # deep-merge one level for dict values (e.g. scene_thumbs index map) so a
+        # later scene_thumbs patch does not clobber earlier indices.
+        merged = dict(cur)
+        for k, v in patch.items():
+            if isinstance(v, dict) and isinstance(merged.get(k), dict):
+                m = dict(merged[k])
+                m.update(v)
+                merged[k] = m
+            else:
+                merged[k] = v
+        body = json.dumps({"props": merged}).encode("utf-8")
+        url = INSFORGE_URL.rstrip("/") + "/api/database/records/runs?id=eq.%s" % run_id
+        req = urllib.request.Request(
+            url, data=body, method="PATCH",
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer %s" % api_key})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            detail = ""
+        _log("props PATCH HTTPError %s for run %s: %s" % (e.code, run_id, detail))
+    except Exception as e:
+        _log("props PATCH failed for run %s: %s" % (run_id, e))
 
 
 def _resolve_run_id(args):
@@ -425,6 +505,21 @@ def tool_plan(args):
         % (len(scenes), ", ".join(t for t in scene_types if t) or "—"),
         actor="nemotron")
 
+    # FILMSTRIP: storyboard event — list the PLANNED scenes so the run page can
+    # render every filmstrip card up front as "pending" before any render finishes.
+    # level="storyboard"; structured tail = {event, count, scenes:[{index,type,label,headline}]}.
+    # Mirrored into runs.props.scenes as the durable, no-parse source.
+    try:
+        storyboard = _storyboard_from_plan(plan)
+        _emit_filmstrip_event(
+            run_id,
+            "Storyboard ready — %d scenes" % len(storyboard),
+            {"event": "storyboard", "count": len(storyboard), "scenes": storyboard},
+            level="storyboard", actor="hermes")
+        _merge_run_props(run_id, {"scenes": storyboard})
+    except Exception as e:
+        _log("storyboard filmstrip emit skipped: %s" % e)
+
     # Lightweight, corruption-safe summary only. Do NOT return the full plan.
     return {
         "ok": True,
@@ -607,6 +702,72 @@ def _slug(url):
     return (out or "site")[:48]
 
 
+# --------------------------------------------------------------------------- #
+# FILMSTRIP scene summaries — the per-card descriptor the front-end shows.
+# Two call sites, two scene shapes:
+#   * tool_plan      -> plan["scenes"]  (id, type, brief)            -> storyboard
+#   * produce_and_ship -> props["scenes"] (id, archetype, data{...}) -> scene_done
+# Both reduce to {index, type, label, headline}. Index is 0-based and stable
+# across the two passes (plan scenes map 1:1 to props scenes by position/id).
+# --------------------------------------------------------------------------- #
+_TYPE_LABELS = {
+    "title": "Title", "screenshot": "Screenshot", "motion_graphic": "Motion graphic",
+    "walkthrough": "Walkthrough", "hero-title": "Title", "apple-screenshot": "Screenshot",
+    "explainer-card": "Feature", "split-stat": "Stat", "split-mosaic": "Mosaic",
+    "icon-stat": "Stat", "icon-headline": "Headline", "logo-wall": "Logo wall",
+    "walkthrough-player": "Walkthrough",
+}
+
+
+def _clip(s, n=72):
+    s = (s or "").strip()
+    return s if len(s) <= n else (s[: n - 1].rstrip() + "…")
+
+
+def _label_for_type(t):
+    if not t:
+        return "Scene"
+    return _TYPE_LABELS.get(t, t.replace("_", " ").replace("-", " ").title())
+
+
+def _storyboard_from_plan(plan):
+    """[{index, type, label, headline}] from the plan's scenes (pending cards)."""
+    out = []
+    for i, s in enumerate(_safe_scenes(plan)):
+        t = s.get("type") or s.get("role") or ""
+        head = (s.get("headline") or s.get("title") or s.get("label")
+                or s.get("brief") or "")
+        out.append({
+            "index": i,
+            "type": t,
+            "label": _label_for_type(t),
+            "headline": _clip(head),
+        })
+    return out
+
+
+def _scene_descriptor_from_props(scene, index):
+    """{index, type, label, headline} from a rendered props scene (done card)."""
+    d = scene.get("data") or {}
+    arch = scene.get("archetype") or ""
+    head = (d.get("headline") or d.get("title") or d.get("punchWord")
+            or d.get("kicker") or scene.get("id") or "")
+    return {
+        "index": index,
+        "type": arch,
+        "label": _label_for_type(arch),
+        "headline": _clip(head),
+    }
+
+
+def _safe_scenes(obj):
+    if isinstance(obj, dict):
+        sc = obj.get("scenes")
+        if isinstance(sc, list):
+            return [s for s in sc if isinstance(s, dict)]
+    return []
+
+
 # Belt-and-suspenders: even with the plan_id handle, normalize any stray
 # bare "uXXXX" (a corrupted JSON \uXXXX escape) back to the real character in
 # all plan strings before render. Matches the literal lowercase 'u' followed by
@@ -664,6 +825,94 @@ def _upload_to_insforge(mp4_path, object_key):
     if not res.get("ok"):
         return None, {"error": res.get("error"), "stderr": (proc.stderr or "")[-800:]}
     return res.get("url"), {"key": res.get("key"), "bucket": res.get("bucket")}
+
+
+def _scene_thumb_time_s(scene, fps, total_frames):
+    """Pick a representative timestamp (seconds) inside a scene to grab a frame.
+
+    Uses the scene's MIDPOINT between in_frame/out_frame (so we miss the
+    cross-scene transition wipes that bookend each clip and land on the held
+    composition). Clamped to [0, (total_frames-1)/fps]. Robust to missing fields.
+    """
+    fps = fps or 30
+    try:
+        a = int(scene.get("in_frame") or 0)
+    except Exception:
+        a = 0
+    try:
+        b = int(scene.get("out_frame") or (a + fps))
+    except Exception:
+        b = a + fps
+    if b <= a:
+        b = a + fps
+    mid = a + int((b - a) * 0.55)  # slightly past center: clears the entrance anim
+    if total_frames:
+        mid = min(mid, max(0, int(total_frames) - 1))
+    return max(0.0, mid / float(fps))
+
+
+def _emit_scene_thumbnails(run_id, props, video_path, run_key):
+    """FILMSTRIP per-scene pass: one frame -> PNG -> bucket -> scene_done event.
+
+    For each rendered scene (props["scenes"]) extract a frame from the final
+    video.mp4 at the scene midpoint (ffmpeg), upload it to the SAME walk-videos
+    bucket under <run_key>/thumbs/scene-NN.png, and emit a `scene_done` run_event
+    carrying {index, type, label, headline, thumbnail_url, status:"done"}. Also
+    mirrors index->url into runs.props.scene_thumbs.
+
+    Best-effort + isolated per scene: a single ffmpeg/upload failure emits a
+    scene_done with thumbnail_url=null (the card still flips to done) and never
+    aborts the conduct. Returns {index: url} for the scenes that uploaded.
+    """
+    thumbs = {}
+    scenes = _safe_scenes(props)
+    fps = props.get("fps") or 30
+    total = props.get("total_frames")
+    n = len(scenes)
+    if not scenes or not os.path.exists(video_path):
+        return thumbs
+    thumb_dir = os.path.join(os.path.dirname(os.path.abspath(video_path)), "thumbs")
+    try:
+        os.makedirs(thumb_dir, exist_ok=True)
+    except Exception:
+        pass
+    for i, scene in enumerate(scenes):
+        desc = _scene_descriptor_from_props(scene, i)
+        thumb_url = None
+        try:
+            t = _scene_thumb_time_s(scene, fps, total)
+            png_path = os.path.join(thumb_dir, "scene-%02d.png" % i)
+            # one frame at t, downscale to a card-sized 480px-wide preview.
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-ss", "%.3f" % t, "-i", os.path.abspath(video_path),
+                 "-frames:v", "1", "-vf", "scale=480:-1", png_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            if r.returncode == 0 and os.path.exists(png_path) and os.path.getsize(png_path) > 0:
+                object_key = "%s/thumbs/scene-%02d.png" % (run_key, i)
+                thumb_url, _info = _upload_to_insforge(png_path, object_key)
+                if thumb_url:
+                    thumbs[str(i)] = thumb_url
+            else:
+                _log("scene %d thumb ffmpeg rc=%s: %s"
+                     % (i, r.returncode, (r.stderr or "")[-200:]))
+        except Exception as e:
+            _log("scene %d thumbnail failed: %s" % (i, e))
+        payload = dict(desc)
+        payload.update({"event": "scene_done", "status": "done",
+                        "thumbnail_url": thumb_url, "scene_count": n})
+        human = "Scene %d/%d done — %s%s" % (
+            i + 1, n, desc["label"],
+            (": %s" % desc["headline"]) if desc["headline"] else "")
+        _emit_filmstrip_event(run_id, human, payload,
+                              level="scene_done", actor="render")
+    # durable mirror: index->url map on runs.props.scene_thumbs
+    if thumbs:
+        try:
+            _merge_run_props(run_id, {"scene_thumbs": thumbs})
+        except Exception as e:
+            _log("scene_thumbs props merge skipped: %s" % e)
+    return thumbs
 
 
 def tool_produce_and_ship(args):
@@ -774,6 +1023,27 @@ def tool_produce_and_ship(args):
         "voiceover — shipped to InsForge" % scene_count,
         actor="hermes")
 
+    # FILMSTRIP: per-scene previews. The video is ONE Remotion render (not per-scene
+    # renders), so we grab a real frame PER SCENE from the finished video.mp4 at each
+    # scene's midpoint, upload each PNG to walk-videos, and emit a `scene_done` event
+    # per scene carrying its thumbnail_url. Runs AFTER the final upload so it never
+    # delays delivery; best-effort so it never fails a (paid) conduct. Uses the
+    # RENDERED props (res["props"]) — the authoritative scene boundaries + archetypes.
+    scene_thumbs = {}
+    try:
+        rendered_props = (res or {}).get("props") if isinstance(res, dict) else None
+        if not isinstance(rendered_props, dict):
+            # fall back to the props.json written by run_pipeline
+            pj = os.path.join(run_dir, "props.json")
+            if os.path.exists(pj):
+                with open(pj, "r", encoding="utf-8") as fh:
+                    rendered_props = json.load(fh)
+        if isinstance(rendered_props, dict):
+            scene_thumbs = _emit_scene_thumbnails(
+                run_id, rendered_props, video_path, run_key)
+    except Exception as e:
+        _log("filmstrip scene-thumbnail pass skipped: %s" % e)
+
     return {
         "ok": True,
         "step": "produce_and_ship",
@@ -785,6 +1055,7 @@ def tool_produce_and_ship(args):
         "final_url": final_url,
         "upload_info": up_info,
         "montage_path": (res or {}).get("montage_path") if isinstance(res, dict) else None,
+        "scene_thumbs": scene_thumbs,
     }
 
 
