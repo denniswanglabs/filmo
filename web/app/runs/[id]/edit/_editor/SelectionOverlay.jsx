@@ -420,6 +420,8 @@ export function SelectionOverlay({ stageRef, selected, hoverSel, frame, editing,
                 inset: 0,
                 cursor: "move",
                 pointerEvents: "auto",
+                // touch-action:none so a finger drag repositions instead of scrolling.
+                touchAction: "none",
                 // a hair of background so the whole box is a grab target
                 background: "rgba(59,130,246,.001)",
               }}
@@ -434,6 +436,7 @@ export function SelectionOverlay({ stageRef, selected, hoverSel, frame, editing,
             return (
               <span
                 key={c.id}
+                className={live ? "ws-drag-handle" : undefined}
                 onPointerDown={live ? beginDrag(c.id) : undefined}
                 title={
                   live
@@ -453,6 +456,7 @@ export function SelectionOverlay({ stageRef, selected, hoverSel, frame, editing,
                   boxShadow: "0 1px 2px rgba(20,23,28,.3)",
                   cursor: live ? c.cursor : "default",
                   pointerEvents: live ? "auto" : "none",
+                  touchAction: live ? "none" : undefined,
                 }}
               />
             );

@@ -20,12 +20,12 @@ const STEPS: readonly Step[] = [
   {
     n: 3,
     title: 'Hermes clears the payment',
-    body: 'The agent prices the job and settles on Stripe. If a run would go over budget, it declines its own spend — a real authorization decision, no human in the loop.',
+    body: 'Hermes prices every job to turn a profit — capped at $10 — and takes payment on Stripe (test mode), no human in the loop.',
   },
   {
     n: 4,
     title: 'Hermes produces the video',
-    body: "It captures your real page and logo sealed inside NVIDIA's NemoClaw sandbox, then renders the curated patterns with your real screenshot, logo, and an ElevenLabs voiceover.",
+    body: 'It captures your real page and logo and renders the curated patterns with your real screenshot, logo, and an ElevenLabs voiceover.',
   },
   {
     n: 5,

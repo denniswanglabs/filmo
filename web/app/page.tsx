@@ -191,7 +191,7 @@ export default function Home() {
           </>
         }
         title={
-          <div className="mx-auto flex max-w-full justify-center px-1 text-[clamp(2.25rem,8.5vw,3.25rem)] font-semibold leading-[1.04] tracking-tight text-[#0E1320] sm:px-0 sm:text-[clamp(4.25rem,8vw,5.25rem)] sm:leading-[1.02]">
+          <div className="mx-auto flex max-w-full justify-center px-1 text-[clamp(2.25rem,8.5vw,3.25rem)] font-semibold leading-[1.04] tracking-tight text-[#0E1320] sm:px-0 sm:text-[clamp(3.25rem,6vw,4.5rem)] sm:leading-[1.03]">
             <VerticalCutReveal
               splitBy="lines"
               staggerDuration={0.14}

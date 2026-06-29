@@ -218,3 +218,86 @@
 @media (prefers-reduced-motion: reduce) {
   .ws-editor-root * { transition: none !important; animation: none !important; }
 }
+
+/* =====================================================================
+   MOBILE / TOUCH — make the FULL editor usable on a phone (~390px).
+   Desktop layout is untouched: these rules are gated on a viewport
+   media query (and the `.ws-mobile` class the Editor sets) so the
+   desktop side rail / split body never see them.
+   ===================================================================== */
+
+/* The drag handles + timeline scrub are pointer-event driven (touch-OK),
+   but the browser's default touch-action would scroll the page instead of
+   resizing/scrubbing. Opt those surfaces out of the browser gesture so a
+   finger drag goes to OUR handler. Applied on all pointer types — harmless
+   on desktop (mouse ignores touch-action). */
+.ws-editor-root .ws-scrub,
+.ws-editor-root .ws-range { touch-action: none; }
+.ws-editor-root .ws-stage { touch-action: manipulation; }
+.ws-editor-root .ws-timeline-lane { touch-action: pan-y; }
+.ws-editor-root .ws-drag-handle { touch-action: none; }
+
+/* Coarse pointer (finger): grow the small resize handles + the play button to
+   ~44px touch targets so they're hittable. The visual dot stays small via a
+   transparent expanded hit-area pseudo-element. */
+@media (pointer: coarse) {
+  .ws-editor-root .ws-drag-handle::after {
+    content: "";
+    position: absolute;
+    inset: -13px;            /* expand the touch area well past the 10px dot */
+  }
+}
+
+/* iOS zooms the page when a focused input is < 16px. Bump editor inputs to 16px
+   on small screens so tapping a field never triggers the auto-zoom that strands
+   the layout off-screen. (Desktop keeps the denser 13px.) The component inputs
+   carry an INLINE font-size (from the shared inputBase style object), so we need
+   !important here to win over that inline declaration. */
+@media (max-width: 768px) {
+  .ws-editor-root .ws-input,
+  .ws-editor-root .ws-textarea,
+  .ws-editor-root input[type="number"],
+  .ws-editor-root input[type="text"],
+  .ws-editor-root textarea {
+    font-size: 16px !important;
+  }
+
+  /* The top bar holds a lot of controls; let it wrap and shrink on a phone
+     instead of overflowing horizontally. */
+  .ws-editor-root .ws-topbar {
+    flex-wrap: wrap;
+    height: auto !important;
+    row-gap: 8px;
+    padding: 10px 12px !important;
+  }
+}
+
+/* The mobile bottom-sheet tab bar + panel. Only rendered (and only styled) in
+   the mobile branch, so it can't affect desktop. */
+.ws-editor-root .ws-tabbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+}
+.ws-editor-root .ws-tab {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 10px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--line);
+  background: var(--glass);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  min-height: 44px;
+}
+.ws-editor-root .ws-tab[data-active="true"] {
+  background: var(--accent-tint);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}

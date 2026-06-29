@@ -62,6 +62,22 @@ function Wordmark() {
   );
 }
 
+// Track whether we're on a phone-width viewport. The editor keeps its desktop
+// split layout above this breakpoint and switches to a stacked + tabbed layout
+// below it. matchMedia (not a resize listener) so it's cheap and SSR-safe.
+function useIsMobile(query = "(max-width: 768px)") {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia(query);
+    const apply = () => setIsMobile(mql.matches);
+    apply();
+    mql.addEventListener?.("change", apply);
+    return () => mql.removeEventListener?.("change", apply);
+  }, [query]);
+  return isMobile;
+}
+
 export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAssetName, downloadUrl, onSave, onExport, onBack }) {
   // The live, editable props. Seed the asset base so the preview resolves the run's
   // screenshots / VO / music against the InsForge bucket (when one is provided).
@@ -77,6 +93,11 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
   const [hoverSel, setHoverSel] = useState(null);
   const [focusField, setFocusField] = useState(null); // { field, nonce } -> inspector
   const [editing, setEditing] = useState(null); // inline text edit state
+
+  // Mobile: stacked layout with a bottom tab bar instead of the fixed side rail.
+  const isMobile = useIsMobile();
+  // Which bottom panel is open on mobile: "inspector" | "timeline" | null (preview only).
+  const [mobilePanel, setMobilePanel] = useState("inspector");
 
   const playerRef = useRef(null);
   const stageRef = useRef(null);
@@ -130,6 +151,15 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     []
   );
 
+  // Touch-friendly tap-to-edit: on a coarse pointer dblclick is unreliable, so a
+  // SECOND tap on an already-selected editable text element opens the inline editor
+  // (the tap-then-edit affordance). selectedRef mirrors `selected` for this check
+  // without making selectElement depend on it (keeps the callback stable).
+  const selectedRef = useRef(null);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
   // Select a composition ELEMENT clicked in the live preview (coral->blue box +
   // inspector focus + seek into the scene's hold so the box hugs real content).
   const selectElement = useCallback(({ sceneId, field }) => {
@@ -137,6 +167,14 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     const scenes = cur?.scenes || [];
     const i = scenes.findIndex((s) => s.id === sceneId);
     if (i < 0) return;
+    // Re-tap of the SAME already-selected editable text element -> enter inline
+    // edit. This is the primary mobile text-edit path (double-tap is flaky on
+    // touch); on desktop it's a harmless bonus (a second click also edits).
+    const prev = selectedRef.current;
+    if (prev && prev.sceneId === sceneId && prev.field === field && TEXT_KEY_FOR_FIELD[field]) {
+      beginInlineEditRef.current?.({ sceneId, field });
+      return;
+    }
     setActiveIdx(i);
     setSelected({ sceneId, field });
     setFocusField({ field, nonce: Date.now() });
@@ -173,6 +211,12 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     playerRef.current?.pause();
     setEditing({ sceneId, field, key });
   }, []);
+  // Ref so selectElement (defined earlier) can trigger inline edit without a
+  // declaration-order or dependency cycle.
+  const beginInlineEditRef = useRef(beginInlineEdit);
+  useEffect(() => {
+    beginInlineEditRef.current = beginInlineEdit;
+  }, [beginInlineEdit]);
   const endInlineEdit = useCallback(() => setEditing(null), []);
 
   const onEnter = useCallback(() => {
@@ -255,6 +299,140 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     error: "var(--neg)",
   }[statusKind];
 
+  // ─────────────────────────────────────────────────────────── EXTRACTED PANELS
+  // The inspector, preview, and timeline are extracted so BOTH the desktop split
+  // layout and the mobile stacked/tabbed layout render the SAME component trees.
+
+  // INSPECTOR body (EditPanel renders its own sticky "Inspector" header).
+  const inspectorBody = props ? (
+    <EditPanel props={props} activeIdx={activeIdx} setActiveIdx={selectScene} update={update} focusField={focusField} musicAssetName={musicAssetName} />
+  ) : (
+    <div style={{ padding: 20, color: "var(--muted)" }}>No props loaded.</div>
+  );
+
+  // PREVIEW (the @remotion/player stage + overlays). On mobile the stage card
+  // shows the 16:9 video at full width (a fixed aspect box) rather than filling
+  // a flexed column, so it stays visible above the tabbed panel.
+  const previewStage = (
+    <div
+      style={{
+        position: "relative",
+        flex: isMobile ? "0 0 auto" : "1 1 auto",
+        minHeight: 0,
+        width: "auto",
+        maxWidth: "100%",
+        borderRadius: "var(--r-lg)",
+        padding: isMobile ? 6 : 10,
+        background: "var(--bg-1, #FFFFFF)",
+        border: "1px solid var(--line)",
+        boxShadow: "var(--shadow-pop)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // The 16/9 stage derives its size from this card. Without a concrete
+        // width to measure against, aspect-ratio collapsed the stage to 0×0
+        // (blank preview). overflow:hidden + the centered flex keep the stage
+        // bounded by the card's real width/height.
+        overflow: "hidden",
+      }}
+    >
+      <div
+        ref={stageRef}
+        className="ws-stage"
+        style={
+          isMobile
+            ? { position: "relative", aspectRatio: "16 / 9", width: "100%", height: "auto", margin: "auto", borderRadius: 10, overflow: "hidden", background: "var(--video-bg)", boxShadow: "0 0 0 1px rgba(14,19,32,.08) inset" }
+            : { position: "relative", aspectRatio: "16 / 9", height: "100%", width: "auto", maxHeight: "100%", maxWidth: "100%", margin: "auto", borderRadius: 12, overflow: "hidden", background: "var(--video-bg)", boxShadow: "0 0 0 1px rgba(14,19,32,.08) inset" }
+        }
+      >
+        {props ? (
+          <Player
+            ref={playerRef}
+            component={Timeline}
+            inputProps={inputProps}
+            durationInFrames={dur}
+            fps={fps}
+            compositionWidth={1920}
+            compositionHeight={1080}
+            loop
+            clickToPlay={false}
+            style={{ width: "100%", height: "100%", display: "block" }}
+            acknowledgeRemotionLicense
+          />
+        ) : (
+          <div style={{ color: "var(--muted)", padding: 80, textAlign: "center", aspectRatio: "16 / 9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            Loading preview…
+          </div>
+        )}
+        <SelectionOverlay
+          stageRef={stageRef}
+          selected={selected}
+          hoverSel={hoverSel}
+          frame={frame}
+          editing={editing}
+          scene={props?.scenes?.[activeIdx]}
+          update={update}
+          activeIdx={activeIdx}
+        />
+        <InlineEditor
+          stageRef={stageRef}
+          editing={editing}
+          frame={frame}
+          value={editValue}
+          onChange={setEditValue}
+          onCommit={endInlineEdit}
+          onCancel={endInlineEdit}
+        />
+      </div>
+    </div>
+  );
+
+  const previewPills = (
+    <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 9, alignSelf: "stretch", justifyContent: "center", flexWrap: "wrap" }}>
+      <Pill tone="live">LIVE PREVIEW</Pill>
+      {!isMobile ? <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--dim)" }} /> : null}
+      {!isMobile ? <Pill>16 : 9 · 1920×1080</Pill> : null}
+      <Pill>{props?.scenes?.length ?? 0} scenes</Pill>
+      <Pill>{secs}s · {fps}fps</Pill>
+      {!isMobile ? <span style={{ flex: 1 }} /> : null}
+      {!isMobile ? (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "var(--muted)", fontWeight: 600 }}>
+          <span style={{ display: "inline-flex", color: "var(--accent)" }}><Icon.cursor /></span>
+          Click any element to select &amp; edit
+        </span>
+      ) : (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>
+          <span style={{ display: "inline-flex", color: "var(--accent)" }}><Icon.cursor /></span>
+          Tap an element · tap again to edit text
+        </span>
+      )}
+    </div>
+  );
+
+  const playbackControls = props ? (
+    <div style={{ flex: "0 0 auto", width: isMobile ? "100%" : "min(680px, 100%)" }}>
+      <PlayerControls playerRef={playerRef} frame={frame} setFrame={setFrame} total={dur} fps={fps} />
+    </div>
+  ) : null;
+
+  // TIMELINE section (header + the clip track).
+  const timelineSection = props ? (
+    <section className="ws-glass" style={{ flex: "0 0 auto", borderRadius: "var(--r-card)", padding: "12px 16px 14px", position: "relative", zIndex: 5 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ color: "var(--accent)", display: "flex" }}><Icon.film /></span>
+        <span style={{ fontSize: 10.5, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--text-2)", fontWeight: 700 }}>Timeline</span>
+        {!isMobile ? (
+          <span style={{ fontSize: 10.5, color: "var(--dim)", fontFamily: "var(--code)" }}>click a clip or a preview element to select + seek</span>
+        ) : null}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 10.5, color: "var(--muted)", fontFamily: "var(--code)", fontVariantNumeric: "tabular-nums" }}>
+          frame {Math.round(frame)} / {dur}
+        </span>
+      </div>
+      <TimelineTrack props={props} activeIdx={activeIdx} onSelect={selectScene} onSeek={seekToFrame} currentFrame={frame} total={dur} fps={fps} />
+    </section>
+  ) : null;
+
   return (
     <div
       className="ws-editor-root"
@@ -262,7 +440,7 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     >
       {/* ===================================================== FILMO TOP BAR */}
       <header
-        className="ws-glass"
+        className="ws-glass ws-topbar"
         style={{
           display: "flex",
           alignItems: "center",
@@ -306,20 +484,23 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
 
         <div style={{ width: 1, height: 26, background: "var(--glass-edge)" }} />
         <Wordmark />
-        <div style={{ width: 1, height: 26, background: "var(--glass-edge)" }} />
+        {!isMobile ? <div style={{ width: 1, height: 26, background: "var(--glass-edge)" }} /> : null}
 
-        {/* Run label (read-only — the editor is scoped to THIS run) */}
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <span style={{ fontSize: 9.5, letterSpacing: 1.2, textTransform: "uppercase", color: "var(--muted)", fontWeight: 700 }}>
-            Editing
-          </span>
-          <span
-            style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 280 }}
-            title={goal || brand || runId}
-          >
-            {brand || goal || "Brand video"}
-          </span>
-        </div>
+        {/* Run label (read-only — the editor is scoped to THIS run). Hidden on a
+            phone to keep the top bar compact — the run page already names it. */}
+        {!isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <span style={{ fontSize: 9.5, letterSpacing: 1.2, textTransform: "uppercase", color: "var(--muted)", fontWeight: 700 }}>
+              Editing
+            </span>
+            <span
+              style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 280 }}
+              title={goal || brand || runId}
+            >
+              {brand || goal || "Brand video"}
+            </span>
+          </div>
+        ) : null}
 
         <div style={{ flex: 1 }} />
 
@@ -335,9 +516,11 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
               animation: statusKind === "working" ? "ws-pulse 1.4s var(--ease) infinite" : "none",
             }}
           />
-          <span style={{ fontSize: 11.5, color: "var(--text-2)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {status}
-          </span>
+          {!isMobile ? (
+            <span style={{ fontSize: 11.5, color: "var(--text-2)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {status}
+            </span>
+          ) : null}
         </div>
 
         {downloadUrl ? (
@@ -378,157 +561,122 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
       </header>
 
       {/* ======================================================== BODY
-          LEFT  = inspector (sliders & fields)
-          RIGHT = preview canvas (top) + scene timeline (below)         */}
-      <div style={{ display: "flex", flex: 1, minHeight: 0, padding: "12px 14px 14px", gap: 14 }}>
-        {/* ------------------------------ LEFT: INSPECTOR RAIL */}
-        <aside
-          className="ws-glass"
-          style={{
-            width: 392,
-            flex: "0 0 392px",
-            borderRadius: "var(--r-card)",
-            position: "relative",
-            zIndex: 12,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-            overflow: "hidden",
-          }}
-        >
-          {/* Inspector body — the slider/field editor for the selected scene.
-              (EditPanel renders its own sticky "Inspector" header.) */}
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-            {props ? (
-              <EditPanel props={props} activeIdx={activeIdx} setActiveIdx={selectScene} update={update} focusField={focusField} musicAssetName={musicAssetName} />
-            ) : (
-              <div style={{ padding: 20, color: "var(--muted)" }}>No props loaded.</div>
-            )}
+          Desktop : inspector rail (left) + preview/timeline (right).
+          Mobile  : preview on top (always visible) + a tab bar that swaps
+                    the inspector / timeline into a scrollable bottom panel.   */}
+      {isMobile ? (
+        /* ---------------------------------------------------- MOBILE LAYOUT */
+        <div style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "column", padding: "10px 10px 0" }}>
+          {/* Preview — full width, fixed 16:9, always on screen */}
+          <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 9 }}>
+            {previewPills}
+            {previewStage}
+            {playbackControls}
           </div>
-        </aside>
 
-        {/* ------------------------ RIGHT: PREVIEW CANVAS + TIMELINE */}
-        <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", gap: 14, position: "relative" }}>
+          {/* The active bottom panel (scrolls independently). Inspector or Timeline. */}
           <div
+            className="ws-glass"
             style={{
-              position: "absolute",
-              inset: -14,
-              pointerEvents: "none",
-              opacity: 0.6,
-              backgroundImage:
-                "linear-gradient(rgba(20,23,28,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(20,23,28,.04) 1px, transparent 1px)",
-              backgroundSize: "46px 46px",
-              maskImage: "radial-gradient(820px 520px at 50% 34%, #000 0%, transparent 80%)",
-              WebkitMaskImage: "radial-gradient(820px 520px at 50% 34%, #000 0%, transparent 80%)",
+              flex: "1 1 auto",
+              minHeight: 0,
+              marginTop: 10,
+              borderRadius: "var(--r-card)",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+              position: "relative",
+              zIndex: 8,
             }}
-          />
+          >
+            {mobilePanel === "inspector" ? inspectorBody : null}
+            {mobilePanel === "timeline" ? (
+              <div style={{ padding: 12 }}>{timelineSection}</div>
+            ) : null}
+          </div>
 
-          <section style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, position: "relative" }}>
-            <div style={{ width: "100%", maxWidth: 1080, height: "100%", minHeight: 0, display: "flex", flexDirection: "column", gap: 13, alignItems: "stretch" }}>
-              <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 9, alignSelf: "stretch", justifyContent: "center", flexWrap: "wrap" }}>
-                <Pill tone="live">LIVE PREVIEW</Pill>
-                <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--dim)" }} />
-                <Pill>16 : 9 · 1920×1080</Pill>
-                <Pill>{props?.scenes?.length ?? 0} scenes</Pill>
-                <Pill>{secs}s · {fps}fps</Pill>
-                <span style={{ flex: 1 }} />
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "var(--muted)", fontWeight: 600 }}>
-                  <span style={{ display: "inline-flex", color: "var(--accent)" }}><Icon.cursor /></span>
-                  Click any element to select &amp; edit
-                </span>
+          {/* Bottom tab bar — switches the panel above. Always reachable. */}
+          <div
+            className="ws-glass ws-tabbar"
+            style={{
+              flex: "0 0 auto",
+              margin: "10px -10px 0",
+              borderRadius: 0,
+              borderLeft: "none",
+              borderRight: "none",
+              position: "sticky",
+              bottom: 0,
+              zIndex: 20,
+            }}
+          >
+            <button
+              type="button"
+              className="ws-tab"
+              data-active={mobilePanel === "inspector"}
+              onClick={() => setMobilePanel("inspector")}
+            >
+              <Icon.sliders /> Inspector
+            </button>
+            <button
+              type="button"
+              className="ws-tab"
+              data-active={mobilePanel === "timeline"}
+              onClick={() => setMobilePanel("timeline")}
+            >
+              <Icon.film /> Timeline
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* --------------------------------------------------- DESKTOP LAYOUT */
+        <div style={{ display: "flex", flex: 1, minHeight: 0, padding: "12px 14px 14px", gap: 14 }}>
+          {/* ------------------------------ LEFT: INSPECTOR RAIL */}
+          <aside
+            className="ws-glass"
+            style={{
+              width: 392,
+              flex: "0 0 392px",
+              borderRadius: "var(--r-card)",
+              position: "relative",
+              zIndex: 12,
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              overflow: "hidden",
+            }}
+          >
+            {/* Inspector body — the slider/field editor for the selected scene.
+                (EditPanel renders its own sticky "Inspector" header.) */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>{inspectorBody}</div>
+          </aside>
+
+          {/* ------------------------ RIGHT: PREVIEW CANVAS + TIMELINE */}
+          <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", gap: 14, position: "relative" }}>
+            <div
+              style={{
+                position: "absolute",
+                inset: -14,
+                pointerEvents: "none",
+                opacity: 0.6,
+                backgroundImage:
+                  "linear-gradient(rgba(20,23,28,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(20,23,28,.04) 1px, transparent 1px)",
+                backgroundSize: "46px 46px",
+                maskImage: "radial-gradient(820px 520px at 50% 34%, #000 0%, transparent 80%)",
+                WebkitMaskImage: "radial-gradient(820px 520px at 50% 34%, #000 0%, transparent 80%)",
+              }}
+            />
+
+            <section style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, position: "relative" }}>
+              <div style={{ width: "100%", maxWidth: 1080, height: "100%", minHeight: 0, display: "flex", flexDirection: "column", gap: 13, alignItems: "stretch" }}>
+                {previewPills}
+                {previewStage}
+                {playbackControls}
               </div>
-
-              <div
-                style={{
-                  position: "relative",
-                  flex: "1 1 auto",
-                  minHeight: 0,
-                  width: "auto",
-                  maxWidth: "100%",
-                  borderRadius: "var(--r-lg)",
-                  padding: 10,
-                  background: "var(--bg-1, #FFFFFF)",
-                  border: "1px solid var(--line)",
-                  boxShadow: "var(--shadow-pop)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  // The 16/9 stage derives its size from this card. Without a concrete
-                  // width to measure against, aspect-ratio collapsed the stage to 0×0
-                  // (blank preview). overflow:hidden + the centered flex keep the stage
-                  // bounded by the card's real width/height.
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  ref={stageRef}
-                  style={{ position: "relative", aspectRatio: "16 / 9", height: "100%", width: "auto", maxHeight: "100%", maxWidth: "100%", margin: "auto", borderRadius: 12, overflow: "hidden", background: "var(--video-bg)", boxShadow: "0 0 0 1px rgba(14,19,32,.08) inset" }}
-                >
-                  {props ? (
-                    <Player
-                      ref={playerRef}
-                      component={Timeline}
-                      inputProps={inputProps}
-                      durationInFrames={dur}
-                      fps={fps}
-                      compositionWidth={1920}
-                      compositionHeight={1080}
-                      loop
-                      clickToPlay={false}
-                      style={{ width: "100%", height: "100%", display: "block" }}
-                      acknowledgeRemotionLicense
-                    />
-                  ) : (
-                    <div style={{ color: "var(--muted)", padding: 80, textAlign: "center", aspectRatio: "16 / 9", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      Loading preview…
-                    </div>
-                  )}
-                  <SelectionOverlay
-                    stageRef={stageRef}
-                    selected={selected}
-                    hoverSel={hoverSel}
-                    frame={frame}
-                    editing={editing}
-                    scene={props?.scenes?.[activeIdx]}
-                    update={update}
-                    activeIdx={activeIdx}
-                  />
-                  <InlineEditor
-                    stageRef={stageRef}
-                    editing={editing}
-                    frame={frame}
-                    value={editValue}
-                    onChange={setEditValue}
-                    onCommit={endInlineEdit}
-                    onCancel={endInlineEdit}
-                  />
-                </div>
-              </div>
-
-              {props ? (
-                <div style={{ flex: "0 0 auto", width: "min(680px, 100%)" }}>
-                  <PlayerControls playerRef={playerRef} frame={frame} setFrame={setFrame} total={dur} fps={fps} />
-                </div>
-              ) : null}
-            </div>
-          </section>
-
-          {props ? (
-            <section className="ws-glass" style={{ flex: "0 0 auto", borderRadius: "var(--r-card)", padding: "12px 16px 14px", position: "relative", zIndex: 5 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <span style={{ color: "var(--accent)", display: "flex" }}><Icon.film /></span>
-                <span style={{ fontSize: 10.5, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--text-2)", fontWeight: 700 }}>Timeline</span>
-                <span style={{ fontSize: 10.5, color: "var(--dim)", fontFamily: "var(--code)" }}>click a clip or a preview element to select + seek</span>
-                <span style={{ flex: 1 }} />
-                <span style={{ fontSize: 10.5, color: "var(--muted)", fontFamily: "var(--code)", fontVariantNumeric: "tabular-nums" }}>
-                  frame {Math.round(frame)} / {dur}
-                </span>
-              </div>
-              <TimelineTrack props={props} activeIdx={activeIdx} onSelect={selectScene} onSeek={seekToFrame} currentFrame={frame} total={dur} fps={fps} />
             </section>
-          ) : null}
-        </main>
-      </div>
+
+            {timelineSection}
+          </main>
+        </div>
+      )}
     </div>
   );
 }

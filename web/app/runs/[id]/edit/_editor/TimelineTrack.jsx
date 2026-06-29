@@ -150,6 +150,7 @@ export function TimelineTrack({ props, activeIdx, onSelect, onSeek, currentFrame
       >
         <div
           ref={laneRef}
+          className="ws-timeline-lane"
           onPointerDown={onTrackPointerDown}
           style={{ position: "relative", width: "100%", height: "100%", cursor: onSeek ? "ew-resize" : "default" }}
         >

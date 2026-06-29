@@ -19,6 +19,10 @@ import {
 // terminal too, or polling never stops and the live tracker spins forever.
 const TERMINAL = new Set(['delivered', 'completed_with_warnings', 'failed'])
 
+// COGS + Margin are the internal P&L (the cost side + the business margin). Only the
+// product owner sees them; every other viewer sees ONLY the customer-facing Price.
+const OWNER_EMAIL = 'denniswanglabs@gmail.com'
+
 export default function RunPage() {
   const params = useParams<{ id: string }>()
   const runId = params?.id
@@ -209,13 +213,29 @@ export default function RunPage() {
               <BuildProgress run={run} events={events} />
             )}
 
-            {/* P&L / facts */}
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Quality" value={run.quality} capitalize />
-              <Stat label="Price" value={formatCents(run.price_cents)} />
-              <Stat label="COGS" value={formatCents(run.cogs_cents)} />
-              <Stat label="Margin" value={formatMargin(run.margin)} accent />
-            </div>
+            {/* P&L / facts. COGS + Margin are internal numbers — show them ONLY to the
+                product owner; every other viewer sees just the customer-facing Price.
+                The owner grid keeps 4 columns; the customer grid collapses to 2 so the
+                two visible stats don't strand half a row of empty cells. */}
+            {(() => {
+              const isOwner =
+                typeof user?.email === 'string' &&
+                user.email.toLowerCase() === OWNER_EMAIL
+              return (
+                <div
+                  className={`mt-6 grid grid-cols-2 gap-3 ${isOwner ? 'sm:grid-cols-4' : ''}`}
+                >
+                  <Stat label="Quality" value={run.quality} capitalize />
+                  <Stat label="Price" value={formatCents(run.price_cents)} />
+                  {isOwner ? (
+                    <>
+                      <Stat label="COGS" value={formatCents(run.cogs_cents)} />
+                      <Stat label="Margin" value={formatMargin(run.margin)} accent />
+                    </>
+                  ) : null}
+                </div>
+              )
+            })()}
 
             {/* Activity feed — full log. Only shown once the run reaches a terminal
                 state; during a build the live feed in BuildProgress covers this, so

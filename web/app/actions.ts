@@ -16,6 +16,34 @@ async function isDeveloperId(userId: string): Promise<boolean> {
 
 const ALLOWED_BRAINS = new Set(['super-free', 'super-paid', 'ultra-paid'])
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// Retry a Supabase/InsForge call that returns `{ data, error }`. A transient
+// InsForge blip (network/gateway hiccup) on the build-enqueue inserts otherwise
+// surfaces to the user as a failed build; retrying with backoff (500ms→1s→2s)
+// converts a blip into a build that's 1–2s slower but succeeds. The op is retried
+// only on a returned `error` (or a thrown one) — a successful insert returns on the
+// first attempt. attempts=3 → up to 3 tries total.
+async function withRetry<T extends { data?: unknown; error: unknown }>(
+  // The InsForge/Postgrest query builder is a *thenable*, not a real Promise, so
+  // accept PromiseLike here and `await` it (await unwraps either).
+  op: () => PromiseLike<T>,
+  { attempts = 3, baseDelayMs = 500 }: { attempts?: number; baseDelayMs?: number } = {},
+): Promise<T> {
+  let last: T | undefined
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await op()
+      if (!res.error) return res
+      last = res
+    } catch (e) {
+      last = { error: e } as T
+    }
+    if (i < attempts - 1) await sleep(baseDelayMs * 2 ** i) // 500, 1000, 2000…
+  }
+  return last as T
+}
+
 // ─────────────────────────── In-browser editor: save ───────────────────────────
 // Persist the editor's edited props into runs.props_edited (a separate jsonb column
 // from the clean, worker-generated `props`, so "revert to original" stays possible).
@@ -114,18 +142,24 @@ export async function createBuild(input: {
   const brand = rawUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
   const goal = input.goal || 'A 30-second brand explainer'
 
-  const { data: runs, error: runErr } = await db.database
-    .from('runs')
-    .insert([{
-      user_id: me.id, run_key: runKey, brand, company_url: rawUrl,
-      goal, emphasis: input.emphasis || null, quality, brain, mode, status: 'queued',
-    }])
-    .select()
+  // Both enqueue inserts retry on a transient InsForge error so a one-off blip
+  // doesn't surface as a failed build (see withRetry).
+  const { data: runs, error: runErr } = await withRetry(() =>
+    db.database
+      .from('runs')
+      .insert([{
+        user_id: me.id, run_key: runKey, brand, company_url: rawUrl,
+        goal, emphasis: input.emphasis || null, quality, brain, mode, status: 'queued',
+      }])
+      .select(),
+  )
   if (runErr) throw new Error('runs.insert: ' + JSON.stringify(runErr))
   const runId = runs![0].id
 
   const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, pay_mode: payMode, run_key: runKey, duration: 30 }
-  const { error: jobErr } = await db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }])
+  const { error: jobErr } = await withRetry(() =>
+    db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }]),
+  )
   if (jobErr) throw new Error('jobs.insert: ' + JSON.stringify(jobErr))
 
   return { runId, runKey }
