@@ -63,6 +63,24 @@ export function formatCents(cents: number | null | undefined): string {
   return `$${(cents / 100).toFixed(2)}`
 }
 
+// Cent-precise dollar formatter for COGS / profit, where the real per-video model +
+// voice cost can be a small fraction of a cent (e.g. 0.4¢ on the free Nemotron tier).
+// Plain formatCents (.toFixed(2)) rounds those to "$0.00"; this shows enough decimals
+// to reveal the true value while staying tidy for normal whole-cent amounts:
+//   1234¢  -> $12.34   (whole cents → 2 dp)
+//   0.42¢  -> $0.0042  (sub-cent → up to 6 dp, trailing zeros trimmed)
+//   0¢     -> $0.00
+export function formatCentsPrecise(cents: number | null | undefined): string {
+  if (cents == null) return '--'
+  const dollars = cents / 100
+  // Whole-cent (or larger) amounts read best at the usual 2 dp.
+  if (dollars === 0 || Math.abs(dollars) >= 0.01) return `$${dollars.toFixed(2)}`
+  // Sub-cent: keep up to 6 decimals, drop trailing zeros (but never below 2 dp).
+  const trimmed = dollars.toFixed(6).replace(/0+$/, '')
+  const minTwo = trimmed.length - trimmed.indexOf('.') - 1 < 2 ? dollars.toFixed(2) : trimmed
+  return `$${minTwo}`
+}
+
 export function formatMargin(margin: number | null | undefined): string {
   if (margin == null) return '--'
   // margin stored as a fraction (e.g. 0.62) or a percent (e.g. 62) — normalize.

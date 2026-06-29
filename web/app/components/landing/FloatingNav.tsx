@@ -7,6 +7,10 @@ import { useAuth } from '../../../lib/auth'
 import { scrollToHeroComposer } from './Motion'
 import { Wordmark } from '../Brand'
 
+// The operator account — the only one that sees the owner-only Analytics link.
+// Mirrors the run-page TopBar + the analytics server gate (the real boundary).
+const OWNER_EMAIL = 'denniswanglabs@gmail.com'
+
 const NAV_LINKS = [
   { href: '/#examples', label: 'Examples', kind: 'hash' as const },
   { href: '/#editor-demo', label: 'Editor', kind: 'hash' as const },
@@ -163,6 +167,17 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
 
           {!loading && user && (
             <>
+              {/* Owner-only: link to the business analytics dashboard. Shown only when
+                  the signed-in email matches the operator account. */}
+              {typeof user.email === 'string' &&
+              user.email.toLowerCase() === OWNER_EMAIL ? (
+                <Link
+                  href="/analytics"
+                  className="hidden whitespace-nowrap text-base font-medium text-[#5A6472] transition hover:text-amber sm:inline-flex"
+                >
+                  Analytics
+                </Link>
+              ) : null}
               <span className="hidden max-w-[120px] truncate text-base text-[#5A6472] lg:inline xl:max-w-[160px]">
                 {displayName(user)}
               </span>

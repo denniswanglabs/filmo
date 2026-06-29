@@ -322,6 +322,10 @@ export interface AnalyticsRunRow {
   final_url: string | null
   /** Pulled out of props.producer when set (e.g. 'hetzner-hermes' / 'hetzner-curated'). */
   producer: string | null
+  /** Real rendered video duration in seconds, derived from props.total_frames / props.fps
+   *  when both are present (else null). Used to estimate VO cost (ElevenLabs is billed per
+   *  character; characters ≈ duration × speaking rate). Exact for runs that stored frames. */
+  vo_seconds: number | null
 }
 
 export interface AnalyticsPayload {
@@ -353,12 +357,20 @@ export async function readAnalytics(
 
   const rows: AnalyticsRunRow[] = (data ?? []).map((r) => {
     const row = r as Record<string, unknown>
-    const props = row.props
+    const props = (row.props && typeof row.props === 'object' ? row.props : {}) as Record<
+      string,
+      unknown
+    >
     let producer: string | null = null
-    if (props && typeof props === 'object') {
-      const p = (props as { producer?: unknown }).producer
-      if (typeof p === 'string' && p) producer = p
-    }
+    const p = props.producer
+    if (typeof p === 'string' && p) producer = p
+
+    // Real video duration → drives the VO-cost estimate. Stored as total_frames / fps
+    // on produced runs; null when either is missing (the page then uses a default).
+    const fps = typeof props.fps === 'number' ? props.fps : null
+    const totalFrames = typeof props.total_frames === 'number' ? props.total_frames : null
+    const voSeconds = fps && fps > 0 && totalFrames && totalFrames > 0 ? totalFrames / fps : null
+
     return {
       id: String(row.id),
       created_at: String(row.created_at),
@@ -369,6 +381,7 @@ export async function readAnalytics(
       cogs_cents: (row.cogs_cents as number | null) ?? null,
       final_url: (row.final_url as string | null) ?? null,
       producer,
+      vo_seconds: voSeconds,
     }
   })
   return { authorized: true, rows }

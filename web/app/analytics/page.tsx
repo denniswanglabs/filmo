@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
 import { TopBar, StatusChip } from '../components/Brand'
 import { readAnalytics, type AnalyticsRunRow } from '../actions'
-import { formatCents } from '../../lib/types'
+import { formatCents, formatCentsPrecise } from '../../lib/types'
 
 // Owner-only business analytics. The page renders nothing sensitive on its own — the
 // real gate is server-side in readAnalytics (admin client bypasses RLS, so the owner
@@ -14,6 +14,36 @@ const OWNER_EMAIL = 'denniswanglabs@gmail.com'
 
 // Delivered-ish = the run shipped a video (mirrors lib/types DELIVERED_STATUSES).
 const DELIVERED = new Set(['delivered', 'completed_with_warnings'])
+
+// ── COGS model (tunable rates) ───────────────────────────────────────────────
+// We COMPUTE a real per-video COGS here instead of trusting runs.cogs_cents — older
+// runs recorded 0/NULL and the pipeline under-counted ElevenLabs. The dominant cost
+// is voiceover (ElevenLabs, billed per character); the LLM/token cost is ~$0 on the
+// free Nemotron tier. COGS = ElevenLabs VO cost + token cost, recomputed fresh.
+//
+// ElevenLabs effective price (≈ the plan's $/char). MAIN cost driver.
+const ELEVENLABS_USD_PER_1K_CHARS = 0.22
+// VO characters ≈ video duration × speaking rate. ~14 chars/sec is a natural pace.
+const VO_CHARS_PER_SECOND = 14
+// Fallback VO length when a run didn't store its duration (≈ a typical ~30s VO).
+const DEFAULT_VO_CHARS = 450
+// Token/LLM cost per video. Free Nemotron tier is genuinely ~$0; a labeled knob in
+// case a paid run's real token cost is ever wired in.
+const TOKEN_USD_PER_VIDEO = 0
+
+// Estimated VO character count for a run — exact-ish from stored duration, else default.
+function voCharsFor(row: AnalyticsRunRow): number {
+  if (row.vo_seconds && row.vo_seconds > 0) return Math.round(row.vo_seconds * VO_CHARS_PER_SECOND)
+  return DEFAULT_VO_CHARS
+}
+
+// Real per-video COGS in CENTS: ElevenLabs (chars × rate) + token cost. Only delivered
+// videos incur production cost — a queued/failed run that never rendered cost ~nothing.
+function cogsCentsFor(row: AnalyticsRunRow): number {
+  if (!DELIVERED.has(row.status)) return 0
+  const elevenUsd = (voCharsFor(row) / 1000) * ELEVENLABS_USD_PER_1K_CHARS
+  return (elevenUsd + TOKEN_USD_PER_VIDEO) * 100
+}
 
 type Loaded = { authorized: boolean; rows: AnalyticsRunRow[] }
 
@@ -52,7 +82,9 @@ export default function AnalyticsPage() {
   const metrics = useMemo(() => {
     const rows = data?.rows ?? []
     const revenue = rows.reduce((a, r) => a + (r.price_cents || 0), 0)
-    const cogs = rows.reduce((a, r) => a + (r.cogs_cents || 0), 0)
+    // Real, recomputed COGS (ElevenLabs VO + token), summed over delivered videos —
+    // NOT the stored r.cogs_cents (null/0 on every run today).
+    const cogs = rows.reduce((a, r) => a + cogsCentsFor(r), 0)
     const profit = revenue - cogs
 
     const delivered = rows.filter((r) => DELIVERED.has(r.status))
@@ -177,10 +209,15 @@ export default function AnalyticsPage() {
         {/* Top cards — revenue / COGS / profit / delivered */}
         <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <BigStat label="Total revenue" value={formatCents(m.revenue)} accent="blue" />
-          <BigStat label="Total COGS" value={formatCents(m.cogs)} />
-          <BigStat label="Total profit" value={formatCents(m.profit)} accent="green" />
+          <BigStat label="Total COGS" value={formatCentsPrecise(m.cogs)} />
+          <BigStat label="Total profit" value={formatCentsPrecise(m.profit)} accent="green" />
           <BigStat label="Videos delivered" value={`${m.deliveredCount}`} sub={`of ${m.total} runs`} />
         </div>
+
+        <p className="mt-2.5 text-xs leading-relaxed text-slate-400">
+          COGS = real per-video model + voice cost (near-zero on the free Nemotron tier);
+          fixed infra not included.
+        </p>
 
         {/* Secondary metrics */}
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -260,7 +297,8 @@ export default function AnalyticsPage() {
               </thead>
               <tbody>
                 {(data?.rows ?? []).map((r) => {
-                  const profit = (r.price_cents || 0) - (r.cogs_cents || 0)
+                  const rowCogs = cogsCentsFor(r)
+                  const profit = (r.price_cents || 0) - rowCogs
                   return (
                     <tr key={r.id} className="border-b border-black/[0.04] last:border-0">
                       <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">
@@ -281,10 +319,10 @@ export default function AnalyticsPage() {
                         {formatCents(r.price_cents)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-slate-500">
-                        {formatCents(r.cogs_cents)}
+                        {DELIVERED.has(r.status) ? formatCentsPrecise(rowCogs) : '--'}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums font-medium text-nemo">
-                        {r.price_cents == null ? '--' : formatCents(profit)}
+                        {r.price_cents == null ? '--' : formatCentsPrecise(profit)}
                       </td>
                       <td className="px-4 py-2.5">
                         {r.final_url ? (
@@ -308,10 +346,14 @@ export default function AnalyticsPage() {
           </div>
         </section>
 
-        <p className="mt-5 text-xs text-slate-400">
-          Revenue reflects Stripe <span className="font-medium">test-mode</span> checkouts.
-          COGS is the stored token/render cost (a separate pipeline pass populates real
-          per-run COGS; profit = price − COGS auto-updates once it lands).
+        <p className="mt-5 text-xs leading-relaxed text-slate-400">
+          Revenue reflects Stripe <span className="font-medium">test-mode</span> checkouts. COGS
+          per delivered video = ElevenLabs voiceover ({ELEVENLABS_USD_PER_1K_CHARS.toFixed(2)}
+          {' '}$/1k chars, the main driver) + token cost (≈$0 on the free Nemotron tier).
+          It is <span className="font-medium">estimated</span> for older runs (exact VO
+          character counts weren&apos;t recorded — VO length is inferred from the rendered
+          video duration at ~{VO_CHARS_PER_SECOND} chars/sec) and exact for newer ones.
+          Profit = price − COGS.
         </p>
       </main>
     </>

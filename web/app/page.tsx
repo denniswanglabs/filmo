@@ -8,6 +8,7 @@ import { createBuild } from './actions'
 import { StatusChip } from './components/Brand'
 import { AuthGate } from './components/AuthGate'
 import FloatingNav from './components/landing/FloatingNav'
+import HeroDemoVideo from './components/landing/HeroDemoVideo'
 import Examples from './components/landing/Examples'
 import EditorDemo from './components/landing/EditorDemo'
 import PatternLookbook from './components/landing/PatternLookbook'
@@ -311,6 +312,11 @@ export default function Home() {
       />
 
       <HeroBelowFold heroRef={heroRef}>
+      {/* The big autoplaying demo — a real Filmo-produced launch cut, the visual
+          centerpiece of the page. Revealed right after the hero hold. */}
+      <section className="relative z-10 px-5 pt-10 sm:pt-12">
+        <HeroDemoVideo />
+      </section>
       <main className="relative z-10 mx-auto max-w-3xl px-5 pb-8 pt-8">
           {user && (
             <section className="mt-4">
