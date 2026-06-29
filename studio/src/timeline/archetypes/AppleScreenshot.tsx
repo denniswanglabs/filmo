@@ -40,6 +40,7 @@ import {
   cursorAt,
   highlightBox,
   zoomPunch,
+  monoFrames,
   type CursorKeyframe,
 } from "../motion";
 
@@ -268,9 +269,19 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
 
   // accent-pop glow on the punch noun (HeroTitle.punchGlow shape): pops on punchAt,
   // soft tail pulse so the held word breathes.
+  // SHORT-SCENE GUARD: the glow keyframes mix a cue-derived `punchAt` (+14/+40
+  // pop+tail) with scene-length tail stops (`durationInFrames-18`, `durationInFrames`).
+  // On a SHORT screenshot scene — a stripe.com proof beat narrated in ~2-3s lands
+  // `durationInFrames` ≈ 60-100 — the third stop `punchAt+40` overtakes the fourth
+  // `durationInFrames-18`, so the raw inputRange descends (e.g. [44,58,84,78,96]) and
+  // interpolate() throws "inputRange must be strictly monotonically increasing",
+  // crashing the Hermes render into the slow build_runner fallback. `monoFrames`
+  // forces each stop > the previous (clamp to prev+1) so the range is GUARANTEED
+  // strictly increasing. It is a NO-OP on the normal (long) scene where the stops
+  // are already ascending, so the visual is byte-identical there.
   const punchGlow = interpolate(
     frame,
-    [punchAt, punchAt + 14, punchAt + 40, durationInFrames - 18, durationInFrames],
+    monoFrames([punchAt, punchAt + 14, punchAt + 40, durationInFrames - 18, durationInFrames]),
     [0, 1, 0.6, 0.85, 0.5],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
