@@ -113,6 +113,12 @@ export default function RunPage() {
               <StatusChip status={run.status} />
             </div>
 
+            {/* Sponsor credit chip. HONEST: only claim Hermes when this run was
+                actually Hermes-conducted (props.producer === 'hetzner-hermes').
+                The deterministic fallback ('hetzner-curated') and any
+                unknown/missing producer get a neutral "Produced by Filmo". */}
+            <CreditBadge producer={readProducer(run.props)} />
+
             {/* Live / delivered surface */}
             {DELIVERED_STATUSES.has(run.status) && run.final_url ? (
               <>
@@ -286,6 +292,57 @@ export default function RunPage() {
         )}
       </main>
     </>
+  )
+}
+
+// Pull the producer tag out of the run's props blob. Returns the raw string when
+// present (e.g. 'hetzner-hermes' / 'hetzner-curated') or null. The badge decides
+// what to claim — this only reads.
+function readProducer(props: unknown): string | null {
+  if (!props || typeof props !== 'object') return null
+  const p = (props as Record<string, unknown>).producer
+  return typeof p === 'string' && p ? p : null
+}
+
+// A small, honest sponsor-credit chip shown near the run header. We ONLY claim
+// "Conducted by Hermes" when the run genuinely ran through the Hermes harness
+// ('hetzner-hermes'). The deterministic curated fallback ('hetzner-curated') and
+// any unknown/missing producer fall back to a neutral "Produced by Filmo" — no
+// Hermes claim, no Nemotron claim. The Nemotron tier (120B/550B) is deliberately
+// not stated. Stripe is intentionally omitted (not wired into the live flow yet).
+function CreditBadge({ producer }: { producer: string | null }) {
+  const isHermes = producer === 'hetzner-hermes'
+  return (
+    <div className="mt-3">
+      <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-1 rounded-full border border-black/5 bg-white px-3 py-1 text-[11px] font-medium text-slate-500 shadow-sm">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+          className={`shrink-0 ${isHermes ? 'text-amber' : 'text-slate-400'}`}
+        >
+          <path
+            d="M12 2l2.4 5.5L20 8.2l-4 4 1 5.8-5-2.9-5 2.9 1-5.8-4-4 5.6-.7L12 2z"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+        </svg>
+        {isHermes ? (
+          <>
+            <span className="text-ink">Conducted by Hermes</span>
+            <span aria-hidden="true" className="text-slate-300">·</span>
+            <span>NVIDIA Nemotron</span>
+            <span aria-hidden="true" className="text-slate-300">·</span>
+            <span>sealed in NemoClaw</span>
+          </>
+        ) : (
+          <span className="text-ink">Produced by Filmo</span>
+        )}
+      </span>
+    </div>
   )
 }
 
