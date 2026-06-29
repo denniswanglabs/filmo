@@ -15,19 +15,19 @@ interface Card {
 }
 
 const BRAND: Record<string, { logo: string; tint: string }> = {
-  Notion: { logo: '/examples/logos/notion.svg', tint: '#F6F8FC' },
+  'Y Combinator': { logo: '/examples/logos/ycombinator.svg', tint: '#FFF4EE' },
   Linear: { logo: '/examples/logos/linear.svg', tint: '#F2F3FD' },
   Stripe: { logo: '/examples/logos/stripe.svg', tint: '#F2F1FF' },
 }
 
 const CARDS: readonly Card[] = [
   {
-    slug: 'notion-tall',
-    src: '/examples/notion.mp4',
-    poster: '/examples/notion.jpg',
-    brand: 'Notion',
-    sourceUrl: 'https://notion.so',
-    descriptor: 'Activity-demo launch cut, read from the live product.',
+    slug: 'ycombinator-wide',
+    src: '/examples/ycombinator.mp4',
+    poster: '/examples/ycombinator.jpg',
+    brand: 'Y Combinator',
+    sourceUrl: 'https://www.ycombinator.com',
+    descriptor: 'A launch story for YC, read from the live site.',
   },
   {
     slug: 'linear-wide',
@@ -44,30 +44,6 @@ const CARDS: readonly Card[] = [
     brand: 'Stripe',
     sourceUrl: 'https://stripe.com',
     descriptor: 'A payments story, planned and produced on autopilot.',
-  },
-  {
-    slug: 'notion-square',
-    src: '/examples/notion.mp4',
-    poster: '/examples/notion.jpg',
-    brand: 'Notion',
-    sourceUrl: 'https://notion.so',
-    descriptor: 'A waitlist teaser scored to a beat.',
-  },
-  {
-    slug: 'stripe-square',
-    src: '/examples/stripe.mp4',
-    poster: '/examples/stripe.jpg',
-    brand: 'Stripe',
-    sourceUrl: 'https://stripe.com',
-    descriptor: 'A 30-second hero loop for the launch page.',
-  },
-  {
-    slug: 'linear-square',
-    src: '/examples/linear.mp4',
-    poster: '/examples/linear.jpg',
-    brand: 'Linear',
-    sourceUrl: 'https://linear.app',
-    descriptor: 'A Product Hunt cut built to win the day.',
   },
 ]
 
