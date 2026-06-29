@@ -4254,9 +4254,29 @@ def run_pipeline(plan_path: str, brand_path: str, style_name: str, out_dir: str,
     # shorter than their VO), and the timeline is padded to job.target_duration_s.
     target_duration_s = (plan.get("job") or {}).get("target_duration_s") \
         if isinstance(plan, dict) else None
+
+    # SCENE-ALIGNED VO DRIVES THE PICTURE LENGTH (the headline fix for the hosted/MCP
+    # drift + trailing-silence bug). When align_vo emitted per-beat segments
+    # (vo_aligned), each scene plays its OWN beat at its in_frame and must land ==
+    # that beat's real speech length. Two plan-side levers otherwise inflate the
+    # picture past the (~25s) VO span and re-introduce the bug:
+    #   1. honor_plan_durations: each scene is floored to its plan duration_s, and a
+    #      curated plan sets those to sum to the ~30s target (3+6+5+5+5+6) — so even
+    #      with no grow pass the picture would hold ~30s while the voice is ~25s
+    #      (trailing silence + the picture running ahead of the voice = drift).
+    #   2. _grow_scenes_to_target: with job.target_duration_s (~30s) the grow pass
+    #      inflates the holds to 30s on top of (1).
+    # Turning honor_plan_durations OFF makes each VOICED scene exactly
+    # max(VO word span, its per-beat mp3 speech length) — its own beat, no plan-hold
+    # padding — AND gates the grow/shrink target pass off entirely (it is guarded by
+    # `honor_plan_durations and target_duration_s`). Result: total video ~= total VO,
+    # zero per-scene drift. The deterministic fallback (vo_aligned False / no per-beat
+    # files) keeps the old plan-honoring + job.target_duration_s behavior untouched.
+    vo_aligned = bool(isinstance(alignment, dict) and alignment.get("vo_aligned"))
     timeline = build_timeline.build_timeline(plan_scenes, alignment, fps=fps,
                                              brand_fallback=brand_fallback,
-                                             target_duration_s=target_duration_s)
+                                             target_duration_s=target_duration_s,
+                                             honor_plan_durations=not vo_aligned)
     timeline_path = os.path.join(out_dir, "timeline.json")
     with open(timeline_path, "w", encoding="utf-8") as fh:
         json.dump(timeline, fh, indent=2)
