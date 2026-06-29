@@ -123,6 +123,46 @@ def _emit_event(run_id, msg, actor="hermes", level="info"):
 
 
 # --------------------------------------------------------------------------- #
+# runs.phase setter — drives the web run-page PROGRESS STEPPER.
+#
+# The deterministic build_runner.py advances the stepper via led.set_phase(...).
+# The Hermes-conducted path runs the tools in THIS server, which previously never
+# touched runs.phase — so the stepper stuck on its index-0 fallback ("Reading the
+# site") for the whole conduct. This helper writes runs.phase from the relevant
+# tools using the SAME InsForge PATCH mechanism _merge_run_props uses (PATCH the
+# runs row by id). The phase strings are byte-exact to what BuildProgress.tsx maps:
+#   planning -> Planning; pricing/awaiting_payment -> Pricing; producing -> Producing.
+#
+# Best-effort + NEVER raises (exactly like _emit_event): a stepper write must not
+# fail a (paid, delivered) conduct. No-op when run_id is absent / not a UUID.
+# --------------------------------------------------------------------------- #
+def _set_phase(run_id, phase):
+    """PATCH runs.phase for run_id so the web progress stepper advances. Best-effort."""
+    if not run_id or not _UUID_RE.match(str(run_id)):
+        return
+    api_key = os.environ.get("INSFORGE_API_KEY")
+    if not api_key:
+        return
+    try:
+        body = json.dumps({"phase": phase}).encode("utf-8")
+        url = INSFORGE_URL.rstrip("/") + "/api/database/records/runs?id=eq.%s" % run_id
+        req = urllib.request.Request(
+            url, data=body, method="PATCH",
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer %s" % api_key})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            detail = ""
+        _log("phase PATCH HTTPError %s for run %s: %s" % (e.code, run_id, detail))
+    except Exception as e:
+        _log("phase PATCH failed for run %s: %s" % (run_id, e))
+
+
+# --------------------------------------------------------------------------- #
 # FILMSTRIP feed — live scene-production thumbnails (demo showpiece).
 #
 # run_events has NO structured JSON column (only {run_id,seq,actor,level,msg}),
@@ -455,6 +495,11 @@ def tool_plan(args):
     brain = (args.get("brain") or "ultra-paid").strip() or "ultra-paid"
     emphasis = (args.get("emphasis") or "").strip() or None
 
+    # PROGRESS STEPPER: advance the web run page to "Planning" at the START of this
+    # tool (byte-exact "planning" — BuildProgress.tsx maps it to the Planning stage).
+    run_id = _run_id_of(args)
+    _set_phase(run_id, "planning")
+
     try:
         import plan_job
     except Exception as e:
@@ -490,7 +535,7 @@ def tool_plan(args):
     plan["_plan_id"] = plan_id
     # Persist the run_id on the cached plan so price/produce_and_ship can emit feed
     # events without the conductor having to re-thread it into every tool call.
-    run_id = _run_id_of(args)
+    # (run_id already resolved at the top of this tool for the phase update.)
     if run_id:
         plan["_run_id"] = run_id
     try:
@@ -592,6 +637,8 @@ def tool_price(args):
     if err:
         return {"ok": False, "error": err}
     run_id = _run_id_of(args) or (plan.get("_run_id") if isinstance(plan, dict) else None)
+    # PROGRESS STEPPER: advance the web run page to "Pricing" (byte-exact "pricing").
+    _set_phase(run_id, "pricing")
     try:
         import producer
     except Exception as e:
@@ -926,6 +973,9 @@ def tool_produce_and_ship(args):
         return {"ok": False, "error": err}
     brand_theme = args.get("brand_theme")
     run_id = _run_id_of(args) or (plan.get("_run_id") if isinstance(plan, dict) else None)
+    # PROGRESS STEPPER: advance the web run page to "Producing scenes" (byte-exact
+    # "producing") at the START of the produce+ship step.
+    _set_phase(run_id, "producing")
 
     # Reuse the plan_id as the run_key so render + the cached plan.json share one
     # run dir (and the on-screen text uses the un-corrupted cached plan).
