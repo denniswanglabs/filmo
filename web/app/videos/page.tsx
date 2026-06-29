@@ -6,7 +6,7 @@
 // Signed-out visitors get a sign-in prompt — never any data.
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { insforge } from '../../lib/insforge'
+import { insforge, resilientRead } from '../../lib/insforge'
 import { useAuth } from '../../lib/auth'
 import { StatusChip } from '../components/Brand'
 import FloatingNav from '../components/landing/FloatingNav'
@@ -21,13 +21,18 @@ export default function VideosPage() {
   const [runs, setRuns] = useState<Run[] | null>(null)
 
   const loadRuns = useCallback(async () => {
-    const { data, error } = await insforge.database
-      .from('runs')
-      .select(
-        'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at',
-      )
-      .order('created_at', { ascending: false })
-      .limit(20)
+    // One-shot list load. Retry a transient InsForge blip so the post-sign-in builds
+    // list doesn't sit on "Loading runs…" forever after a 30s-style timeout; a real
+    // 4xx returns immediately and leaves the list untouched (no false-empty).
+    const { data, error } = await resilientRead(() =>
+      insforge.database
+        .from('runs')
+        .select(
+          'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at',
+        )
+        .order('created_at', { ascending: false })
+        .limit(20),
+    )
     if (!error) setRuns((data as Run[]) ?? [])
   }, [])
 

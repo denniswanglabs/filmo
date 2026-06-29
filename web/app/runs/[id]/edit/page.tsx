@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { insforge } from '../../../../lib/insforge'
+import { insforge, resilientRead } from '../../../../lib/insforge'
 import { useAuth } from '../../../../lib/auth'
 import { TopBar } from '../../../components/Brand'
 import { saveEditedProps, requestReRender } from '../../../actions'
@@ -31,12 +31,12 @@ export default function EditRunPage() {
     let cancelled = false
     ;(async () => {
       // RLS scopes the anon client to rows the signed-in user owns, so this both
-      // loads the run and enforces ownership.
-      const { data, error } = await insforge.database
-        .from('runs')
-        .select()
-        .eq('id', runId)
-        .maybeSingle()
+      // loads the run and enforces ownership. This is a one-shot load (no poll), so a
+      // transient InsForge blip would otherwise strand the editor on "Loading…" forever
+      // — retry the timeout/5xx/network before giving up; a real 4xx still returns fast.
+      const { data, error } = await resilientRead(() =>
+        insforge.database.from('runs').select().eq('id', runId).maybeSingle(),
+      )
       if (cancelled) return
       if (error) return
       if (!data) {

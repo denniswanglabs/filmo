@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { insforge } from '../../../lib/insforge'
+import { insforge, resilientRead } from '../../../lib/insforge'
 import { useAuth } from '../../../lib/auth'
 import { TopBar, StatusChip } from '../../components/Brand'
 import BuildProgress from '../../components/BuildProgress'
@@ -32,24 +32,34 @@ export default function RunPage() {
 
   const poll = useCallback(async () => {
     if (!runId) return
-    const { data, error } = await insforge.database
-      .from('runs')
-      .select()
-      .eq('id', runId)
-      .maybeSingle()
+    // Retry a transient InsForge blip (8s-timeout 408 / 5xx / network) inside a single
+    // poll tick so a stuck call doesn't drop a cycle. A real 4xx returns immediately.
+    const { data, error } = await resilientRead(() =>
+      insforge.database.from('runs').select().eq('id', runId).maybeSingle(),
+    )
+    // Transient error → keep the last good state and let the next 3s tick retry; never
+    // blank the view or flip a delivered run to an error on a network hiccup.
     if (error) return
     if (!data) {
-      setNotFound(true)
+      // Empty result. Only declare "not found" when we have NOTHING loaded yet — once a
+      // run is on screen (esp. a delivered video), a transient empty/RLS race must never
+      // erase it to "could not be found". A real deletion is vanishingly rare here.
+      setRun((prev) => {
+        if (!prev) setNotFound(true)
+        return prev
+      })
       return
     }
     const r = data as Run
     setRun(r)
 
-    const { data: ev } = await insforge.database
-      .from('run_events')
-      .select()
-      .eq('run_id', runId)
-      .order('seq', { ascending: true })
+    const { data: ev } = await resilientRead(() =>
+      insforge.database
+        .from('run_events')
+        .select()
+        .eq('run_id', runId)
+        .order('seq', { ascending: true }),
+    )
     if (ev) setEvents(ev as RunEvent[])
 
     // A terminal build normally stops polling — but an editor Export enqueues a
@@ -58,12 +68,14 @@ export default function RunPage() {
     // "Edited" cut appears without a manual refresh.
     let rerenderInFlight = false
     if (TERMINAL.has(r.status)) {
-      const { data: jobs } = await insforge.database
-        .from('jobs')
-        .select('id, type, status')
-        .eq('run_id', runId)
-        .eq('type', 'rerender')
-        .in('status', ['queued', 'claimed'])
+      const { data: jobs } = await resilientRead(() =>
+        insforge.database
+          .from('jobs')
+          .select('id, type, status')
+          .eq('run_id', runId)
+          .eq('type', 'rerender')
+          .in('status', ['queued', 'claimed']),
+      )
       rerenderInFlight = !!(jobs && jobs.length > 0)
     }
     stopped.current = TERMINAL.has(r.status) && !rerenderInFlight
