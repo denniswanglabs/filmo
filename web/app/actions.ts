@@ -129,6 +129,25 @@ export async function createBuild(input: {
     throw new Error('Too many builds in a short window — give it a minute and try again.')
   }
 
+  // Daily cap: every account EXCEPT the owner is limited to N videos per rolling 24h.
+  // Identity comes from the server-verified token (never the client), and the admin
+  // count below bypasses RLS, so this can't be bypassed. The owner is exempt so demos
+  // and operations are never throttled.
+  const DAILY_VIDEO_LIMIT = 3
+  if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
+    const dayStart = new Date(Date.now() - 24 * 60 * 60_000).toISOString()
+    const { data: today } = await db.database
+      .from('runs')
+      .select('id')
+      .eq('user_id', me.id)
+      .gte('created_at', dayStart)
+    if (today && today.length >= DAILY_VIDEO_LIMIT) {
+      throw new Error(
+        `Daily limit reached — ${DAILY_VIDEO_LIMIT} videos per day. Try again tomorrow.`,
+      )
+    }
+  }
+
   // Whitelist every client-supplied param (never forward raw — the worker trusts these).
   // Single coherent tier: every video is produced the same way. `quality` is pinned to
   // 'standard' (kept only to satisfy the existing runs/jobs schema + worker param contract).
