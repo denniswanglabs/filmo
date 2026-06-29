@@ -2,7 +2,7 @@
 
 **Your product launch, produced by an autonomous agent.**
 
-Give Filmo a product **URL + a goal**. It reads your real product, diagnoses why the page fails to convert, then plans, prices, pays for, and produces a finished **1080p launch video** — end to end, no human in the loop.
+Give Filmo a product **URL + a goal**. It reads your real product, reads why the page fails to convert, then plans, prices, and presents a **Stripe checkout** — you pay (test card `4242`), and it produces a finished **1080p launch video**. One agent runs the whole pipeline end to end.
 
 [![Nous Hermes](https://img.shields.io/badge/Agent%20runtime-Nous%20Hermes-7C3AED)](https://nousresearch.com)
 [![NVIDIA Nemotron](https://img.shields.io/badge/Brain-NVIDIA%20Nemotron-76B900?logo=nvidia&logoColor=white)](https://build.nvidia.com)
@@ -10,7 +10,7 @@ Give Filmo a product **URL + a goal**. It reads your real product, diagnoses why
 [![Stripe](https://img.shields.io/badge/Payments-Stripe-635BFF?logo=stripe&logoColor=white)](https://stripe.com)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![Remotion](https://img.shields.io/badge/Video-Remotion-0B84F3?logo=remotion&logoColor=white)](https://remotion.dev)
-[![Railway](https://img.shields.io/badge/Worker-Railway-0B0D0E?logo=railway&logoColor=white)](https://railway.app)
+[![Hetzner](https://img.shields.io/badge/Worker-Hetzner%20VM%20(Railway%20fallback)-D50C2D?logo=hetzner&logoColor=white)](https://hetzner.com)
 
 > Entry for the **Hermes Hackathon — Nous Research × NVIDIA × Stripe** (due 2026-06-30).
 > **Live:** https://filmostudio.vercel.app
@@ -19,9 +19,9 @@ Give Filmo a product **URL + a goal**. It reads your real product, diagnoses why
 
 ## What is Filmo
 
-Filmo is an autonomous **agent** that produces product-launch videos. You hand it a live URL and a goal — *"more signups," "explain the product," "drive demo bookings"* — and it does the rest: reads the actual page, finds the conversion gap, plans the cut, prices the job, takes payment on Stripe, produces the video, and ships a real **1080p / AAC MP4**. No timeline editor, no prompt-wrangling, no human in the loop.
+Filmo is an agentic **producer** of product-launch videos. You hand it a live URL and a goal — *"more signups," "explain the product," "drive demo bookings"* — and it does the rest: reads the actual page, reads the conversion gap, plans the cut, prices the job, presents a Stripe checkout (you pay a test card), produces the video, and ships a real **1080p / AAC MP4**. No prompt-wrangling. You never *have* to touch a timeline — though an in-browser editor is there if you want to tweak before you download.
 
-The whole pipeline is **conducted by a Hermes agent, sealed inside NVIDIA's NemoClaw sandbox** — the autonomous worker can only pull the tools we sanctioned, and it reasons on NVIDIA Nemotron between every step.
+The whole pipeline is **conducted by a Hermes agent, sealed inside NVIDIA's NemoClaw sandbox** — the agent can only pull the host tools we sanctioned, and it reasons on NVIDIA Nemotron between every step.
 
 ---
 
@@ -29,7 +29,7 @@ The whole pipeline is **conducted by a Hermes agent, sealed inside NVIDIA's Nemo
 
 Most "AI video" tools hallucinate footage — generic b-roll, fake UI, a tagline you never wrote. It looks glossy and converts nobody, because it is not *your* product.
 
-**Filmo is grounded and diagnostic.** It opens your page, captures your real UI and logo, and — before it animates a single frame — runs the **Conversion Read**: a diagnosis of *why the page fails to convert*. The video is built to fix that specific gap. And every shot is assembled from a **curated library of designer-quality scene patterns** harvested from real launch films — designed motion, not slop.
+**Filmo is grounded and diagnostic.** It opens your page in a headless browser, captures your real hero UI and logo, and — before it animates a single frame — runs the **Conversion Read**: NVIDIA Nemotron scores your page copy across six conversion dimensions and names the weakest one. The video is built to fix that specific gap. And every shot is assembled from a **curated library of designer-quality scene patterns** — designed motion, not slop.
 
 The wedge, in one line: **grounded + diagnostic + curated, vs. generic + hallucinated + sloppy.**
 
@@ -37,27 +37,27 @@ The wedge, in one line: **grounded + diagnostic + curated, vs. generic + halluci
 
 ## How it works
 
-You give Filmo a URL and a goal. The Hermes agent then conducts a seven-stage pipeline — each stage an explicit, inspectable step.
+You give Filmo a URL and a goal. The Hermes agent then conducts **five host MCP tools** — once each, in strict order — each one an explicit, inspectable step that streams to the live feed.
 
 ```mermaid
 flowchart LR
-    A[URL + Goal] --> B[ANALYZE<br/>Conversion Read · Nemotron]
-    B --> C[PLAN<br/>Nemotron planner]
-    C --> D[PRICE<br/>cost-plus]
-    D --> E[PAY<br/>Stripe test mode]
-    E --> F[PRODUCE<br/>capture + curated patterns + Remotion + VO]
-    F --> G[DELIVER<br/>final.mp4 1080p]
+    A[URL + Goal] --> B[conversion_read<br/>Conversion Read · Nemotron]
+    B --> C[plan<br/>Nemotron planner]
+    C --> D[price<br/>cost-plus, capped]
+    D --> E[gate<br/>budget check]
+    E --> F[produce_and_ship<br/>capture + curated patterns + Remotion + VO]
+    F --> G[final.mp4<br/>1080p / AAC]
 
     B -. scores 6 dims .-> B1[promise / outcome / proof<br/>show / specificity / cta]
-    E -. self-declines<br/>over-budget spend .-> E1[Stripe Issuing<br/>no human]
+    E -. human Stripe gate .-> E1[test checkout · card 4242<br/>pays before produce]
 ```
 
-- **ANALYZE — the Conversion Read.** Filmo reads the page copy and asks **NVIDIA Nemotron** to score it across **six dimensions**: promise, outcome, proof, show, specificity, and CTA. The result (`conversion_read.json`) is the diagnosis — and it directly **seeds the plan**: the headline fix becomes the opening title, each weak dimension becomes a scene.
-- **PLAN.** The **Nemotron** planner turns the goal plus the diagnosis into a **strict scene-plan JSON**. One planner owns the whole storyboard, so the cut is coherent rather than stitched from disconnected sub-agents — and each scene is typed to a **curated pattern** (split-stat, logo mosaic, device screenshot, pull-quote, kinetic statement…).
-- **PRICE.** Cost-plus pricing from the plan's projected cost.
-- **PAY.** Stripe (test mode). When a run would exceed budget, **the agent declines its own spend** via Stripe Issuing — no human approves or blocks it.
-- **PRODUCE.** The agent captures the real page screenshot and logo **inside the NemoClaw sandbox**, renders the curated patterns in **Remotion**, narrates with **ElevenLabs** (with an automatic free-voice fallback so a render never fails), times words with whisper, and stitches with ffmpeg.
-- **DELIVER.** A finished `final.mp4` — proven on real sites (a stripe.com run delivers H.264 1920×1080, ~32s, with the real Stripe screenshot, real wordmark, and the customer-logo mosaic).
+- **conversion_read — the Conversion Read.** Filmo reads the page copy and asks **NVIDIA Nemotron** to score it across **six dimensions**: promise, outcome, proof, show, specificity, and CTA. The result (`conversion_read.json`) is the read — and it directly **seeds the plan**: the headline fix becomes the opening title, each weak dimension becomes a scene.
+- **plan.** The **Nemotron** planner turns the goal plus the read into a **strict scene-plan JSON**. One planner owns the whole storyboard, so the cut is coherent rather than stitched from disconnected sub-agents — and each scene is typed to a **curated pattern** (split-stat, logo mosaic, device screenshot, pull-quote, kinetic statement…).
+- **price.** Cost-plus pricing from the plan's projected cost, capped.
+- **gate.** A budget check on the price. The live default also opens a real Stripe **TEST** checkout *before* the agent conducts — the human pays (card `4242`), then produce runs. (The codebase also carries an autonomous Stripe Issuing spend-governance path — a card that declines its own over-budget charge — but the hosted default is the human checkout gate.)
+- **produce_and_ship.** A host tool captures the real page screenshot and logo (headless Playwright, behind the sandbox's per-job egress allowlist), renders the curated patterns in **Remotion**, narrates with **ElevenLabs** (with an automatic free-voice fallback so a render never fails), times words with whisper, stitches with ffmpeg, and uploads the MP4. The agent only conducts; the tools do the work.
+- **Delivered.** A finished `final.mp4` — proven on real sites (a stripe.com run delivers H.264 1920×1080, ~32s, with the real Stripe screenshot, real wordmark, and the customer-logo mosaic).
 
 ---
 
@@ -66,50 +66,48 @@ flowchart LR
 Filmo is built squarely on the hackathon's three sponsors — one for the agent runtime, one for the brain and the sandbox, one for the money.
 
 ### Nous / Hermes — the agent runtime
-**Hermes is the harness** — the agent runtime that *orchestrates the whole pipeline*. It conducts the stages (read → plan → price → gate → produce → ship), reasoning between them and narrating each step. Hermes is **not** a model that does one step; it is the autonomous agent that perceives (reads the product), decides (diagnoses, plans, prices, and gates its own spend), acts (pays and produces), and delivers — the Hermes agent thesis applied to a job people actually pay for.
+**Hermes is the harness** — the agent runtime that *orchestrates the whole pipeline*. It conducts the five stages (conversion_read → plan → price → gate → produce_and_ship), reasoning between them and narrating each step. Hermes is **not** a model that does one step; it is the agent that perceives (reads the product), decides (reads the page, plans, prices, gates), acts (produces and ships), and delivers — the Hermes agent thesis applied to a job people actually pay for. It is a strict conductor: it calls each host tool exactly once and never does the production work itself.
 
 ### NVIDIA — the brain and the sandbox
-**Nemotron is the brain** behind *every* reasoning call — the Conversion Read **and** the storyboard planner — served via OpenRouter across tiers (`super-free` 120B default, `ultra-paid` 550B flagship). **NemoClaw / OpenShell is the secure sandbox**: the agent is contained inside it and screenshots **any URL** safely, with a per-job egress allowlist (proven on nvidia.com, python.org, notion.com). The pitch: *the agent that could go rogue is sealed in NVIDIA's sandbox and can only pull the levers we sanctioned.*
+**Nemotron is the brain** behind *every* reasoning call — the Conversion Read **and** the storyboard planner — served via OpenRouter. The hosted default is the **`ultra-paid` 550B flagship** (`nvidia/nemotron-3-ultra-550b-a55b`), with cheaper `super-paid` / `super-free` 120B tiers selectable and used as fallbacks. **NemoClaw / OpenShell is the secure sandbox**: the agent is contained inside it, and the host capture tool it triggers screenshots a **per-job-vetted URL** behind an egress allowlist (OpenRouter + NVIDIA for inference, the host tool-server, Stripe, and the one SSRF-vetted customer URL). The pitch: *the agent that could go rogue is sealed in NVIDIA's sandbox and can only pull the levers we sanctioned.*
 
-### Stripe — autonomous money
-Stripe handles autonomous pricing and payment in test mode. The signature moment: when a planned run goes over budget, the agent's card **declines its own purchase** through **Stripe Issuing** — a real authorization decline, decided and enforced without a human in the loop. Spend governance is part of the agent, not a manual gate.
+### Stripe — the money layer
+Stripe handles pricing and payment in test mode. The hosted default is a **human checkout gate**: the agent prices the job and presents a real Stripe **TEST** checkout, and the user pays (card `4242`) before produce runs. The codebase also implements the autonomous angle — a **Stripe Issuing** card that *declines its own over-budget charge* without a human — wired through a real `issuing_authorization.request` webhook; it's the agentic-spend thesis, available but not the live default path.
 
 ---
 
 ## The curated pattern library — the anti-slop moat
 
-The reason Filmo's output looks designed, not generated: every scene is drawn from a **curated library of designer-quality scene patterns**, harvested from real launch films (the Luceo Studio library) and recorded as a single source of truth with a **visible Lookbook on the site**. The planner picks each scene's pattern by content fit (stats → split-stat, customers → logo mosaic, a homepage → device screenshot, a quote → pull-quote) and brand vibe, then **real brand extraction** drops in the actual logo, palette, and screenshot. The look DNA is consistent: text-left / glass-UI-right / brand-accent headline / device-as-hero. An honesty guard never fabricates a stat or a customer — data-poor brands degrade gracefully instead of inventing.
+The reason Filmo's output looks designed, not generated: every scene is drawn from a **curated library of 14 designer-quality scene patterns**, recorded as a single source of truth with a **visible Lookbook on the site**. Most are hand-designed; a few (the `kinetic-statement`, `process-pipeline`, and `scan-grid` patterns) are harvested directly from real Luceo Studio launch films and tagged as such. The planner picks each scene's pattern by content fit (stats → split-stat, customers → logo mosaic, a homepage → device screenshot, a quote → pull-quote) and brand vibe, then **real brand extraction** drops in the actual logo, palette, and screenshot. The look DNA is consistent: text-left / glass-UI-right / brand-accent headline / device-as-hero. An honesty guard never fabricates a stat or a customer — data-poor brands degrade gracefully instead of inventing.
 
 ---
 
 ## Architecture
 
-Filmo splits into a **frontend** (Next.js on Vercel), an **async worker** (Railway), the **Hermes agent** (Nemotron brain + NemoClaw sandbox + Remotion renderer + Stripe), and an **InsForge** backend (Postgres `runs` / `run_events` / `jobs` tables + the video storage bucket). The frontend enqueues a run; the worker drives the agent; events and the final video stream back live.
+Filmo splits into a **frontend** (Next.js on Vercel), an **async worker** (`filmo-claimer` on a Hetzner VM; an older Railway worker remains as a fallback path), the **Hermes agent** (Nemotron brain + NemoClaw sandbox + Remotion renderer + Stripe), and an **InsForge** backend (Postgres `runs` / `run_events` / `jobs` tables + the `walk-videos` storage bucket). The frontend enqueues a run; the worker claims it and drives the agent; events and the final video stream back live. See `DEPLOY.md` for the live system.
 
 ```mermaid
 flowchart TD
     subgraph Client
-        FE[Next.js frontend on Vercel<br/>landing + composer + sign-in + run pages]
+        FE[Next.js frontend on Vercel<br/>landing + composer + sign-in + run + editor pages]
     end
     subgraph Backend
-        IF[(InsForge<br/>runs / run_events / jobs<br/>video bucket)]
-        WK[Railway worker<br/>polls InsForge]
+        IF[(InsForge<br/>runs / run_events / jobs<br/>walk-videos bucket)]
+        WK[filmo-claimer · Hetzner VM<br/>polls InsForge jobs]
     end
-    subgraph Agent[Hermes agent · sealed in NemoClaw]
-        HM[Hermes runtime<br/>conducts read→plan→price→gate→produce→ship]
+    subgraph Agent[Hermes agent · sealed in NemoClaw, on the VM]
+        HM[Hermes runtime<br/>conducts conversion_read→plan→price→gate→produce_and_ship]
         BR[Nemotron<br/>Conversion Read + planner via OpenRouter]
-        NC[NemoClaw / OpenShell<br/>in-sandbox capture]
-        RM[Remotion<br/>curated patterns]
-        ST[Stripe<br/>pricing + Issuing decline]
+        TS[host MCP tool-server :8770<br/>Playwright capture · Remotion render]
+        ST[Stripe<br/>test checkout gate]
     end
 
     FE -->|enqueue run| IF
     IF -->|poll jobs| WK
-    WK --> HM
+    WK -->|nemoclaw exec| HM
     HM --> BR
-    HM --> NC
+    HM --> TS
     HM --> ST
-    HM --> RM
     WK -->|events + final.mp4| IF
     IF -->|live run state| FE
 ```
@@ -121,12 +119,12 @@ flowchart TD
 | Layer | Technology |
 | --- | --- |
 | Agent runtime | **Nous Hermes** — the harness that orchestrates the pipeline |
-| Brain (all reasoning) | **NVIDIA Nemotron** via OpenRouter — Conversion Read **and** storyboard planner (`super-free` 120B default, `ultra-paid` 550B) |
-| Secure capture sandbox | **NVIDIA NemoClaw / OpenShell** — in-sandbox screenshot with per-job egress allowlist |
-| Payments | **Stripe** (test mode) + Stripe Issuing (autonomous over-budget decline) |
-| Scene system | Curated pattern library (designer-quality patterns) + real brand extraction (logo / palette / screenshot) |
-| Frontend | Next.js (Vercel), sign-in via InsForge OAuth |
-| Async worker | Railway (Docker) polling InsForge |
+| Brain (all reasoning) | **NVIDIA Nemotron** via OpenRouter — Conversion Read **and** storyboard planner (`ultra-paid` 550B is the hosted default; `super-paid` / `super-free` 120B tiers + fallbacks) |
+| Sandbox + capture | **NVIDIA NemoClaw / OpenShell** seals the agent; the host capture tool screenshots a per-job-vetted URL behind an egress allowlist |
+| Payments | **Stripe** (test mode) — human checkout gate (default); Stripe Issuing self-decline path also implemented |
+| Scene system | Curated 14-pattern library (designer-quality patterns) + real brand extraction (logo / palette / screenshot) |
+| Frontend | Next.js (Vercel), sign-in via InsForge OAuth, in-browser timeline editor |
+| Async worker | `filmo-claimer` on a Hetzner VM polling InsForge (Railway worker = fallback) |
 | Backend / data | InsForge (Postgres + video storage bucket) |
 | Video render | Remotion |
 | Voiceover / timing | ElevenLabs (with automatic free-voice fallback) + whisper word timing |
@@ -136,7 +134,7 @@ flowchart TD
 
 ## Status
 
-**Hackathon entry.** The full pipeline delivers real 1080p video — grounded in the live page, with the real logo, real screenshot, and the curated patterns. All three sponsor axes are wired: Hermes conducts the run, Nemotron is the brain, NemoClaw sandboxes the capture, and Stripe runs the autonomous money (including the over-budget self-decline). Hosted for anyone at **https://filmostudio.vercel.app**.
+**Hackathon entry.** The full pipeline delivers real 1080p video — grounded in the live page, with the real logo, real screenshot, and the curated patterns. All three sponsor axes are wired: Hermes conducts the run, Nemotron is the brain, NemoClaw seals the agent, and Stripe runs the money (a human test-checkout gate by default, plus an implemented autonomous over-budget self-decline). Hosted for anyone at **https://filmostudio.vercel.app**.
 
 ---
 
