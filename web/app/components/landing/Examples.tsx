@@ -16,7 +16,7 @@ interface Card {
 
 const BRAND: Record<string, { logo: string; tint: string }> = {
   'Y Combinator': { logo: '/examples/logos/ycombinator.svg', tint: '#FFF4EE' },
-  Linear: { logo: '/examples/logos/linear.svg', tint: '#F2F3FD' },
+  'Nous Research': { logo: '/examples/logos/nousresearch.svg', tint: '#F4F1FD' },
   Stripe: { logo: '/examples/logos/stripe.svg', tint: '#F2F1FF' },
 }
 
@@ -30,12 +30,12 @@ const CARDS: readonly Card[] = [
     descriptor: 'A launch story for YC, read from the live site.',
   },
   {
-    slug: 'linear-wide',
-    src: '/examples/linear.mp4',
-    poster: '/examples/linear.jpg',
-    brand: 'Linear',
-    sourceUrl: 'https://linear.app',
-    descriptor: 'Build-velocity teaser grounded in the real UI.',
+    slug: 'nousresearch-wide',
+    src: '/examples/hermes.mp4',
+    poster: '/examples/hermes.jpg',
+    brand: 'Nous Research',
+    sourceUrl: 'https://hermes-agent.nousresearch.com',
+    descriptor: 'A local-first agent explainer, read from the live site.',
   },
   {
     slug: 'stripe-wide',
