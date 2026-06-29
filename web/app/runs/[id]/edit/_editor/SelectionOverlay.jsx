@@ -37,44 +37,22 @@ function relRect(el, containerEl) {
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-// data-field -> the scene.data text key it inline-edits (single plain text value).
-// Mirrors EditPanel.TEXT_KEY_FOR_FIELD; kept here so the hover cue can show an
-// I-beam + "double-click to edit" only on fields that ARE inline-editable text.
-// (Duplicated rather than imported to keep this overlay module self-contained;
-// the set is tiny + stable.)
-export const INLINE_TEXT_FIELDS = new Set([
-  "title",
-  "subtitle",
-  "kicker",
-  "heading",
-  "headingAccent",
-  "punchWord",
-  "statement",
-  "headline",
-  "caption",
-  "overlayTitle",
-  "footnote",
-  "product",
-]);
-
-// Hook: wire click-to-select + hover-cue + double-click-to-edit onto the stage.
+// Hook: wire click-to-select + hover-cue onto the stage.
 //   onPick({sceneId,field})     fires on a committed single click,
-//   onHover(el|null)            reports the hovered selectable,
-//   onActivate({sceneId,field}) fires on a double-click of an editable element
-//                               (App routes text fields into inline-edit mode).
+//   onHover(el|null)            reports the hovered selectable.
+// A double-click is bound only to be swallowed (it never opens an editor — all
+// text editing is done in the Inspector).
 //
 // `stage` is the live stage DOM NODE (or null before mount). The caller passes a
 // state-backed node (NOT a ref) so a node SWAP — which happens whenever the editor
 // crosses the 768px breakpoint and remounts the preview into the other layout's
 // JSX tree — re-runs this effect and re-binds the listeners onto the new node.
 // Binding to a stale node (the bug this fixes) silently kills click-to-select.
-export function usePreviewSelection(stage, { onPick, onHover, onActivate, enabled = true }) {
+export function usePreviewSelection(stage, { onPick, onHover, enabled = true }) {
   const onPickRef = useRef(onPick);
   const onHoverRef = useRef(onHover);
-  const onActivateRef = useRef(onActivate);
   onPickRef.current = onPick;
   onHoverRef.current = onHover;
-  onActivateRef.current = onActivate;
 
   useEffect(() => {
     if (!stage || !enabled) return;
@@ -92,28 +70,21 @@ export function usePreviewSelection(stage, { onPick, onHover, onActivate, enable
       });
     };
 
-    // Double-click: enter inline-edit on a text element (App ignores non-text).
-    //
-    // ALWAYS swallow the dblclick's default action inside the preview. The live
-    // <Player> renders the composition as real DOM (brand logo <img>, a captured
-    // page-URL in the device chrome, selectable title text). A native double-click
-    // would (a) select text and (b) — crucially — let a follow-on image/text DRAG
-    // drop onto the document and NAVIGATE the browser to that asset/URL ("jumps to
-    // a different page"). We preventDefault + clear the selection so a double-click
-    // can ONLY ever open the inline editor and NEVER leak to a browser navigation.
+    // Double-click inside the preview is INERT — there is no in-place editing
+    // (all text edits happen in the Inspector). We keep it bound only to SWALLOW
+    // the dblclick's default action: the live <Player> renders the composition as
+    // real DOM (brand logo <img>, a captured page-URL in the device chrome,
+    // selectable title text). A native double-click would (a) select text and
+    // (b) — crucially — let a follow-on image/text DRAG drop onto the document and
+    // NAVIGATE the browser to that asset/URL ("jumps to a different page"). We
+    // preventDefault + clear the selection so a double-click can NEVER leak to a
+    // browser navigation. (No onActivate — it no longer opens an inline editor.)
     const handleDouble = (e) => {
       e.preventDefault();
       e.stopPropagation();
       try {
         window.getSelection?.()?.removeAllRanges();
       } catch {}
-      const el = pickEl(e.target, stage);
-      if (!el) return; // empty canvas: nothing to edit, but nav is already blocked
-      onActivateRef.current?.({
-        sceneId: el.getAttribute("data-scene-id"),
-        field: el.getAttribute("data-field"),
-        el,
-      });
     };
 
     // Belt-and-braces: kill drag-to-navigate inside the preview. Dragging a brand
@@ -127,10 +98,9 @@ export function usePreviewSelection(stage, { onPick, onHover, onActivate, enable
     const handleMove = (e) => {
       const el = pickEl(e.target, stage);
       onHoverRef.current?.(el || null);
-      // I-beam over editable TEXT (it reads as "you can type here"); pointer over
-      // other selectables (geo plates / lists open the inspector).
-      const field = el?.getAttribute("data-field");
-      stage.style.cursor = el ? (INLINE_TEXT_FIELDS.has(field) ? "text" : "pointer") : "default";
+      // Pointer cursor over any selectable (a click selects it + focuses its
+      // Inspector field). No I-beam — there is no in-place text typing.
+      stage.style.cursor = el ? "pointer" : "default";
     };
     const handleLeave = () => {
       onHoverRef.current?.(null);
@@ -156,8 +126,7 @@ export function usePreviewSelection(stage, { onPick, onHover, onActivate, enable
 // Track a single element's box (by data-scene-id + data-field) inside the stage,
 // re-measuring whenever `frame` changes (scrub/play), on resize and on a rAF tick
 // while the video plays. Returns null when the element is not currently mounted
-// (e.g. its scene isn't on screen). Exported so the InlineEditor overlay can hug
-// the EXACT same rect the coral box uses (single source of geometry truth).
+// (e.g. its scene isn't on screen). Drives the coral selection box's geometry.
 // Shallow-equal two {left,top,width,height} rects (either may be null).
 function sameRect(a, b) {
   if (a === b) return true;
@@ -169,12 +138,11 @@ export function useTrackedRect(stageRef, sel, frame) {
   const [rect, setRect] = useState(null);
   const rafRef = useRef(0);
 
-  // Callers (e.g. InlineEditor) pass a fresh `{ sceneId, field }` literal every
-  // render, so depend on the PRIMITIVE fields — not object identity — to keep
-  // `measure` (and the effects below) stable across renders. Together with the
-  // no-op-on-unchanged setRect, this prevents the layout-effect → setState →
-  // re-render → setState loop that otherwise throws "Maximum update depth
-  // exceeded" the moment the inline editor mounts over a tracked element.
+  // Callers pass a fresh `{ sceneId, field }` literal every render, so depend on
+  // the PRIMITIVE fields — not object identity — to keep `measure` (and the effects
+  // below) stable across renders. Together with the no-op-on-unchanged setRect,
+  // this prevents the layout-effect → setState → re-render → setState loop that
+  // otherwise throws "Maximum update depth exceeded" over a tracked element.
   const sceneId = sel?.sceneId ?? null;
   const field = sel?.field ?? null;
 
@@ -282,7 +250,7 @@ function compScale(stageEl) {
 // handles. The HOVER cue + label are pointer-events:none; only the drag-affordant
 // pieces of the selected box (body + corner handles) opt back into pointer events
 // so they never block a click meant for an unselected element.
-export function SelectionOverlay({ stageRef, selected, hoverSel, frame, editing, scene, update, activeIdx }) {
+export function SelectionOverlay({ stageRef, selected, hoverSel, frame, scene, update, activeIdx }) {
   const selRect = useTrackedRect(stageRef, selected, frame);
   const hovRect = useTrackedRect(stageRef, hoverSel, frame);
   // Don't draw the hover cue on top of the already-selected element.
@@ -290,12 +258,8 @@ export function SelectionOverlay({ stageRef, selected, hoverSel, frame, editing,
     hovRect &&
     !(selected && hoverSel && selected.sceneId === hoverSel.sceneId && selected.field === hoverSel.field);
 
-  // While inline-editing the InlineEditor owns the visuals — hide the coral box so
-  // there isn't a double outline / handles fighting the textbox.
-  const isEditing = !!editing && selected && editing.sceneId === selected.sceneId && editing.field === selected.field;
-
   const spec = dragSpecFor(scene, selected?.field);
-  const canDrag = !!spec && !!update && activeIdx != null && activeIdx >= 0 && !isEditing;
+  const canDrag = !!spec && !!update && activeIdx != null && activeIdx >= 0;
 
   // Imperative drag: on pointerdown we snapshot the element's starting geo values
   // (current override OR the spec default) and the pointer origin, then write new
@@ -399,7 +363,7 @@ export function SelectionOverlay({ stageRef, selected, hoverSel, frame, editing,
         />
       ) : null}
 
-      {selRect && !isEditing ? (
+      {selRect ? (
         <div
           style={{
             position: "absolute",
