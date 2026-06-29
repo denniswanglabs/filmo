@@ -121,9 +121,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           /* exchange failures are non-fatal; we fall through to getCurrentUser */
         }
       }
-      const { data, error } = await insforge.auth.getCurrentUser()
+      // Resolve the session WITH RETRY. getCurrentUser hits InsForge over the network,
+      // and InsForge has intermittent multi-second timeouts — a single failed call would
+      // FALSE-LOGOUT a signed-in user (e.g. right after returning from Stripe checkout,
+      // the exact symptom we hit). A genuine "signed out" returns a fast 401 (don't retry
+      // that); a timeout / 5xx / network error is transient → retry a few times with
+      // backoff before giving up, so a DB blip can't strand a valid session at the gate.
+      let u: AuthUser | null = null
+      for (let attempt = 0; ; attempt++) {
+        const { data, error } = await insforge.auth.getCurrentUser()
+        if (cancelled) return
+        if (!error) {
+          u = (data?.user as AuthUser) ?? null
+          break
+        }
+        const status = (error as { statusCode?: number })?.statusCode
+        if (status === 401 || attempt >= 3) break
+        await new Promise((r) => setTimeout(r, 700 * (attempt + 1)))
+      }
       if (cancelled) return
-      setUser(error ? null : ((data?.user as AuthUser) ?? null))
+      setUser(u)
       setLoading(false)
     })()
     return () => {
