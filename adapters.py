@@ -1742,13 +1742,23 @@ def _studio_render(source_tsx, out_path):
         f.write(source_tsx)
     env = dict(os.environ, PATH=os.path.join(STUDIO_DIR, "node_modules/.bin") + ":" + os.environ.get("PATH", ""))
     t0 = time.time()
+    # --concurrency=50% is REQUIRED: studio/remotion.config.ts pins
+    # Config.setConcurrency(8), but the VM has 4 cores and Remotion REJECTS a
+    # concurrency > core count ("Concurrency must be lower or equal to N"), so every
+    # per-scene `Scene` render failed (empty artifact + SCENE-FAILED ledger spam).
+    # 50% resolves to a per-host core fraction that is always <= cores, matching the
+    # customer final.mp4 render argv (which already passes --concurrency=50%).
     proc = subprocess.run(
-        ["remotion", "render", "src/index.ts", "Scene", os.path.abspath(out_path), "--codec=h264"],
+        ["remotion", "render", "src/index.ts", "Scene", os.path.abspath(out_path),
+         "--codec=h264", "--concurrency=50%"],
         cwd=STUDIO_DIR, env=env, capture_output=True, text=True, timeout=300, check=False)
     render_ms = int((time.time() - t0) * 1000)
     if proc.returncode != 0 or not os.path.exists(out_path):
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        raise AdapterError("studio render failed: " + (tail[-1] if tail else "?"))
+        # Log the FULL stderr/stdout tail (not just the last line) so the real
+        # Remotion error is visible in the ledger / logs, not a useless trace tail.
+        err = (proc.stderr or proc.stdout or "").strip()
+        tail = "\n".join(err.splitlines()[-20:]) if err else "?"
+        raise AdapterError("studio render failed (rc=%s):\n%s" % (proc.returncode, tail))
     return render_ms
 
 

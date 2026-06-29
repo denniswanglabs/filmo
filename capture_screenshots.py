@@ -1013,16 +1013,34 @@ def _norm_url(url: str) -> str:
 # the capture box's geolocation. Keyed by lowercase host; extend as needed.
 # Applied ONLY when the path is bare ("" or "/") — an explicit /en-us or any other
 # path is left untouched, so a deliberate locale choice is never rewritten.
+#
+# ★ Stripe gotcha (verified 2026-06-29 from the EU egress IP): /en-us does NOT stay
+#   English — Stripe 307-redirects /en-us -> / -> /de (server-side IP geo-routing the
+#   browser locale/Accept-Language can't override). The English path that does NOT
+#   redirect from the EU IP is /gb (curl-verified: /gb stays /gb and renders
+#   "Financial Infrastructure"). So we pin stripe.com -> /gb (English), NOT /en-us.
 GEO_ENGLISH_OVERRIDES = {
-    "stripe.com": "https://stripe.com/en-us",
+    "stripe.com": "https://stripe.com/gb",
 }
 
 
-def _apply_geo_english_override(url: str) -> str:
-    """Rewrite a BARE geo-routed apex to its explicit English edition.
+# Redirect-prone locale paths for the mapped hosts: a BARE apex OR one of these
+# paths gets rewritten to the host's English target. These are the paths that
+# server-side IP geo-routing bounces to the local language from the EU egress
+# (verified for Stripe: bare, /us, /en-us all 307 -> /de). We do NOT rewrite an
+# already-English-safe path (e.g. the target itself, /gb, /en) so a deliberate
+# English choice is never disturbed. The conducting agent (Hermes) sometimes
+# invents /us or /en-us instead of the bare apex; this catches those too.
+_REDIRECT_PRONE_PATHS = ("", "/", "/us", "/us/", "/en-us", "/en-us/")
 
-    Bare = host is in GEO_ENGLISH_OVERRIDES and the path is "" or "/" with no
-    query/fragment. Anything else (an explicit /en-us, /pricing, ?q=…) passes
+
+def _apply_geo_english_override(url: str) -> str:
+    """Rewrite a geo-routed host to its explicit English edition.
+
+    Rewrites when host is in GEO_ENGLISH_OVERRIDES AND the path is either bare
+    ("" or "/") OR a known redirect-prone locale path (/us, /en-us) OR a non-English
+    locale segment that _GEO_LOCALE_RE matches (/de, /fr, …) — all with no query/
+    fragment. An already-English-safe path (the target's own path, /gb, /en) passes
     through unchanged. Best-effort: a parse failure returns the input untouched.
     """
     try:
@@ -1030,8 +1048,14 @@ def _apply_geo_english_override(url: str) -> str:
         host = (pu.netloc or "").lower()
         # strip a leading www. so www.stripe.com matches the override key too
         host = host[4:] if host.startswith("www.") else host
-        if host in GEO_ENGLISH_OVERRIDES \
-                and pu.path in ("", "/") and not pu.query and not pu.fragment:
+        if host not in GEO_ENGLISH_OVERRIDES or pu.query or pu.fragment:
+            return url
+        path = pu.path or ""
+        # bare apex / known redirect-prone locale path -> rewrite.
+        if path in _REDIRECT_PRONE_PATHS:
+            return GEO_ENGLISH_OVERRIDES[host]
+        # a non-English locale segment (/de, /fr/, /zh-tw, …) -> rewrite to English.
+        if _GEO_LOCALE_RE.search(path):
             return GEO_ENGLISH_OVERRIDES[host]
     except Exception:
         pass
