@@ -19,15 +19,22 @@ interface Film {
   title: string
   /** one-line descriptor (from Luceo's catalog) */
   descriptor: string
+  /**
+   * Source aspect of the clip. 16:9 films fill the card (object-cover).
+   * A vertical 9:16 clip (e.g. Cumie) is letterboxed inside the 16:9 card
+   * (object-contain on a brand-matched bar) so the full phone mockups stay
+   * visible instead of getting center-cropped.
+   */
+  vertical?: boolean
 }
 
 const FILMS: readonly Film[] = [
   {
-    slug: 'smartbase',
-    src: '/luceo/smartbase-launch-720.mp4',
-    poster: '/luceo/smartbase-thumbnail.jpg',
-    title: 'Smartbase',
-    descriptor: 'Manufacturing AI — handwritten PO to ERP-ready row.',
+    slug: 'orinovate',
+    src: '/luceo/orinovate-launch-720.mp4',
+    poster: '/luceo/orinovate-thumbnail.jpg',
+    title: 'Orinovate',
+    descriptor: '3D-print & CNC instant-quote portal.',
   },
   {
     slug: 'kuli',
@@ -44,11 +51,12 @@ const FILMS: readonly Film[] = [
     descriptor: 'AI-native R&D cloud for biotech.',
   },
   {
-    slug: 'hero-loop',
-    src: '/luceo/hero-loop-720.mp4',
-    poster: '/luceo/hero-loop-poster.jpg',
-    title: 'Studio reel',
-    descriptor: 'The looping hero cut — kinetic typography and deliberate pacing.',
+    slug: 'cumie',
+    src: '/luceo/cumie-launch-720.mp4',
+    poster: '/luceo/cumie-thumbnail.jpg',
+    title: 'Cumie',
+    descriptor: 'AI dating assistant — openers that actually land.',
+    vertical: true,
   },
 ]
 
@@ -77,7 +85,7 @@ function VideoCard({ film }: { film: Film }) {
       onMouseLeave={reset}
       className="group overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white shadow-[0_24px_60px_-34px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] transition hover:-translate-y-0.5 hover:border-[#B9D2F8] hover:shadow-[0_28px_70px_-34px_rgba(30,58,120,0.28)]"
     >
-      <div className="relative">
+      <div className={`relative ${film.vertical ? 'bg-[#160a2b]' : ''}`}>
         <video
           ref={videoRef}
           src={film.src}
@@ -86,7 +94,11 @@ function VideoCard({ film }: { film: Film }) {
           loop
           playsInline
           preload="none"
-          className="aspect-video w-full bg-[#F5F8FF] object-cover"
+          className={`aspect-video w-full ${
+            film.vertical
+              ? 'bg-[#160a2b] object-contain'
+              : 'bg-[#F5F8FF] object-cover'
+          }`}
         />
         {/* Play affordance — fades out on hover. */}
         <div
