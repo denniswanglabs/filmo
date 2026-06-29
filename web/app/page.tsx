@@ -28,6 +28,17 @@ interface PendingBuild {
   requirePay: boolean
 }
 
+// Same shape the server action enforces (createBuild → 'Enter a valid website URL.').
+// We validate client-side FIRST so an empty/garbage URL never reaches the server
+// action: a thrown error inside a server action surfaces in production as the opaque
+// "Server Components render … digest" 500. The classic trigger is the OAuth round-trip
+// — a logged-out visitor opens the sign-in gate with an empty composer, we stash
+// `{url:''}`, and on return the auto-resume would fire createBuild('') → throw → 500.
+// Guarding here keeps that 500 (and its digest) from ever happening.
+function isValidBuildUrl(raw: string): boolean {
+  return /^https?:\/\/[^\s]+\.[^\s]+/i.test((raw || '').trim())
+}
+
 export default function Home() {
   const router = useRouter()
   const { user, loading, getToken } = useAuth()
@@ -64,6 +75,13 @@ export default function Home() {
   const runBuild = useCallback(
     async (p: PendingBuild) => {
       setError(null)
+      // Validate BEFORE touching the server action. createBuild throws on a bad URL,
+      // and a thrown server-action error becomes an opaque production 500 (the digest
+      // "Server Components render" error). Fail here with a friendly inline message.
+      if (!isValidBuildUrl(p.url)) {
+        setError('Enter a valid website URL.')
+        return
+      }
       setBuilding(true)
       try {
         const accessToken = await getToken()
@@ -129,7 +147,11 @@ export default function Home() {
     setUrl(p.url ?? '')
     setBrain(p.brain ?? 'ultra-paid')
     setRequirePay(p.requirePay ?? false)
-    if (user) void runBuild(p)
+    // Auto-resume the build only when we returned signed-in AND the stashed URL is real.
+    // A blank/garbage stash (e.g. the nav "Build" button opened the gate with an empty
+    // composer) must NOT auto-fire createBuild — that would throw server-side and crash
+    // the post-login landing with the opaque digest 500. We just restore the composer.
+    if (user && isValidBuildUrl(p.url ?? '')) void runBuild(p)
   }, [loading, user, runBuild])
 
   function onBuild(e: React.FormEvent) {
