@@ -42,3 +42,9 @@ Filmo is an AI Product Launch Producer (hosted SaaS) for the **Hermes × NVIDIA 
 
 ## Latest handoff
 See the newest `HANDOFF-*.md` in this dir for in-progress state.
+
+## Filmo Lab (LOCAL ONLY — do not confuse with production/Hetzner)
+- **`filmo-lab/`** = isolated Hermes self-improve experiment on your Mac. Read **`filmo-lab/CLAUDE.md`** before any lab work.
+- Lab uses Hermes profile **`filmo-lab`**, runs under **`filmo-lab/runs/`**, never InsForge/Railway/Hetzner/VM.
+- Production = `worker/`, `web/`, `agent-host/`, Vercel, Hetzner — **never mix with lab scripts.**
+

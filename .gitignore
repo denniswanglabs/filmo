@@ -44,6 +44,9 @@ __pycache__/
 /runs/**/*.wav
 /runs/**/*.png
 /runs/**/*.jpg
+# filmo-lab local experiment runs (isolated from production /runs/)
+/filmo-lab/runs/*
+!/filmo-lab/runs/.gitkeep
 # evidence/ holds large render stills + clips — keep only small refs
 evidence/**/*.png
 evidence/**/*.jpg
