@@ -44,19 +44,42 @@ export function InlineEditor({ stageRef, editing, frame, value, onChange, onComm
     );
     if (el) {
       const cs = getComputedStyle(el);
-      // Many text fields render the value inside a child (e.g. the title splits to
-      // lines); the container's own font is still a good match. Prefer the deepest
-      // text-bearing node's font when the container has a single element child.
-      const probe =
-        el.childElementCount === 1 && el.firstElementChild
-          ? getComputedStyle(el.firstElementChild)
-          : cs;
+      // The <Player> renders the composition at its authored 1920×1080 size and
+      // CSS-`transform: scale(s)`s the whole stage down to fit (s = stageWidth/1920).
+      // getComputedStyle() returns the AUTHORED (unscaled) px — e.g. a 76px headline
+      // reads "76px" — but the overlay box is positioned from getBoundingClientRect()
+      // which is POST-scale (the visually rendered, smaller rect). So the typography
+      // MUST be multiplied by the same scale or the edit field renders at full 76px
+      // inside a box that's a third of that size (the "small mismatched box over the
+      // big headline" bug). Derive the exact scale from the element itself:
+      // boundingRect.width is post-scale, offsetWidth is the unscaled layout width.
+      const rectW = el.getBoundingClientRect().width;
+      const scale = el.offsetWidth > 0 && rectW > 0 ? rectW / el.offsetWidth : 1;
+      // Pick the node whose font actually renders the value. Title/headline fields
+      // wrap their text in per-LINE child <div>s (the big font lives on the child,
+      // NOT the flex container, whose own font-size is the inherited default — that
+      // default is what made the box read small). Walk to the deepest single text-
+      // bearing descendant so multi-line titles match too, not just single-child ones.
+      let probeEl = el;
+      while (probeEl.firstElementChild && probeEl.childElementCount === 1) {
+        probeEl = probeEl.firstElementChild;
+      }
+      // Multi-child container (e.g. a 2-line title): the lines are siblings; sample
+      // the first line's font — every line shares the same size/weight.
+      if (probeEl === el && el.firstElementChild) probeEl = el.firstElementChild;
+      const probe = getComputedStyle(probeEl);
+      // Scale the px-valued metrics; keep keyword/unit-relative ones (e.g. "normal",
+      // "-0.02em") as-is — em-relative values already track the scaled font-size.
+      const scalePx = (v) => {
+        const n = parseFloat(v);
+        return v && v.endsWith("px") && Number.isFinite(n) ? `${n * scale}px` : v;
+      };
       setFont({
         fontFamily: probe.fontFamily,
-        fontSize: probe.fontSize,
+        fontSize: scalePx(probe.fontSize),
         fontWeight: probe.fontWeight,
-        letterSpacing: probe.letterSpacing,
-        lineHeight: probe.lineHeight,
+        letterSpacing: scalePx(probe.letterSpacing),
+        lineHeight: scalePx(probe.lineHeight),
         color: probe.color,
         textAlign: cs.textAlign && cs.textAlign !== "start" ? cs.textAlign : "center",
         textTransform: probe.textTransform,

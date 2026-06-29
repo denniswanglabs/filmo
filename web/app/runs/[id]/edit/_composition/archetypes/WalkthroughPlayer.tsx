@@ -309,11 +309,11 @@ export const WalkthroughPlayer: React.FC<{
     : autoPath
   ).map((k) => ({ at: k.at, x: k.x * WIN_W, y: k.y * WIN_H, click: k.click }));
   const cursor = cursorAt(frame, cursorKeys, fps);
-  const cursorOpacity = interpolate(frame, [motionAt, motionAt + 10, tailEnd, tailEnd + 12], [0, 1, 1, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-    easing: EASE_OUT_QUART,
-  });
+  // PARITY with the studio render (the cursor + click ripples were disabled there
+  // per user request). Forcing opacity to 0 keeps the cursorAt/cursorKeys math
+  // (used by the highlight-ring timing) intact while never rendering the pointer
+  // or ripples — so the editor preview matches the produced video.
+  const cursorOpacity = 0;
 
   // highlight ring at the hotspot, drawn on at the cursor click.
   const ringAt = clickFrame - 4;
