@@ -160,6 +160,16 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
                       {link.label}
                     </button>
                   ))}
+                  {/* Any signed-in user: their own videos — reachable on mobile too. */}
+                  {!loading && user && (
+                    <Link
+                      href="/videos"
+                      onClick={() => setMenuOpen(false)}
+                      className="block w-full px-4 py-2.5 text-left text-sm text-[#5A6472] transition hover:bg-[#F5F8FF] hover:text-[#0E1320]"
+                    >
+                      Your Videos
+                    </Link>
+                  )}
                 </div>
               </>
             )}
@@ -167,6 +177,13 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
 
           {!loading && user && (
             <>
+              {/* Any signed-in user: their own videos. NOT owner-gated. */}
+              <Link
+                href="/videos"
+                className="hidden whitespace-nowrap text-base font-medium text-[#5A6472] transition hover:text-amber sm:inline-flex"
+              >
+                Your Videos
+              </Link>
               {/* Owner-only: link to the business analytics dashboard. Shown only when
                   the signed-in email matches the operator account. */}
               {typeof user.email === 'string' &&

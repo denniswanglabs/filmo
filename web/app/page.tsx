@@ -1,11 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { insforge } from '../lib/insforge'
 import { useAuth } from '../lib/auth'
 import { createBuild } from './actions'
-import { StatusChip } from './components/Brand'
 import { AuthGate } from './components/AuthGate'
 import FloatingNav from './components/landing/FloatingNav'
 import HeroDemoVideo from './components/landing/HeroDemoVideo'
@@ -18,7 +15,7 @@ import SiteFooter from './components/landing/SiteFooter'
 import LandingBackdrop, { HeroBrandLayer } from './components/landing/LandingBackdrop'
 import { HeroBelowFold, PinnedHero, scrollToHeroComposer } from './components/landing/Motion'
 import VerticalCutReveal from './components/fancy/VerticalCutReveal'
-import { BRAINS, type Run } from '../lib/types'
+import { BRAINS } from '../lib/types'
 
 // Composer state stashed across the Google OAuth round-trip so the prompt survives
 // the redirect and the build resumes automatically on return.
@@ -49,9 +46,6 @@ export default function Home() {
   // Sign-in gate (opens when a logged-out visitor hits Build)
   const [gateOpen, setGateOpen] = useState(false)
 
-  // Recents
-  const [runs, setRuns] = useState<Run[] | null>(null)
-
   // "Remix" from the Examples gallery seeds the composer with that cut's source
   // URL, then scrolls the composer into view and focuses the URL input — same
   // landing pattern as FloatingNav.jumpToComposer.
@@ -65,21 +59,6 @@ export default function Home() {
     window.addEventListener('filmo:seed-composer', onSeed)
     return () => window.removeEventListener('filmo:seed-composer', onSeed)
   }, [])
-
-  const loadRuns = useCallback(async () => {
-    const { data, error } = await insforge.database
-      .from('runs')
-      .select(
-        'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at',
-      )
-      .order('created_at', { ascending: false })
-      .limit(20)
-    if (!error) setRuns((data as Run[]) ?? [])
-  }, [])
-
-  useEffect(() => {
-    if (user) void loadRuns()
-  }, [user, loadRuns])
 
   // Kick off a build and navigate to its run page. Identity travels as the verified
   // access token (the server derives the owner from it), never a client-set user id.
@@ -317,48 +296,6 @@ export default function Home() {
       <section className="relative z-10 px-5 pt-10 sm:pt-12">
         <HeroDemoVideo />
       </section>
-      <main className="relative z-10 mx-auto max-w-3xl px-5 pb-8 pt-8">
-          {user && (
-            <section className="mt-4">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="eyebrow">Recents</span>
-                <button
-                  onClick={() => void loadRuns()}
-                  className="text-sm text-[#5A6472] transition hover:text-[#0E1320]"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              {runs == null ? (
-                <p className="text-sm text-[#5A6472]">Loading runs…</p>
-              ) : runs.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-[#D4E2FB] px-5 py-10 text-center text-sm text-[#5A6472]">
-                  No builds yet. Your first one will show up here.
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {runs.map((r) => (
-                    <li key={r.id}>
-                      <Link
-                        href={`/runs/${r.id}`}
-                        className="flex items-center justify-between gap-4 rounded-xl border border-[#D4E2FB] bg-white px-4 py-3 transition hover:border-[#B9D2F8] hover:bg-[#F8FAFF]"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-[#0E1320]">
-                            {r.brand || r.company_url}
-                          </p>
-                          <p className="truncate text-sm text-[#5A6472]">{r.goal || 'Brand video'}</p>
-                        </div>
-                        <StatusChip status={r.status} />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-      </main>
 
       {/* Proof — real videos the pipeline produced. */}
       <Examples />
