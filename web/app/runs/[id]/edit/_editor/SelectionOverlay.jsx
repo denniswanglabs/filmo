@@ -153,21 +153,40 @@ export function usePreviewSelection(stageRef, { onPick, onHover, onActivate, ena
 // while the video plays. Returns null when the element is not currently mounted
 // (e.g. its scene isn't on screen). Exported so the InlineEditor overlay can hug
 // the EXACT same rect the coral box uses (single source of geometry truth).
+// Shallow-equal two {left,top,width,height} rects (either may be null).
+function sameRect(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
+}
+
 export function useTrackedRect(stageRef, sel, frame) {
   const [rect, setRect] = useState(null);
   const rafRef = useRef(0);
 
+  // Callers (e.g. InlineEditor) pass a fresh `{ sceneId, field }` literal every
+  // render, so depend on the PRIMITIVE fields — not object identity — to keep
+  // `measure` (and the effects below) stable across renders. Together with the
+  // no-op-on-unchanged setRect, this prevents the layout-effect → setState →
+  // re-render → setState loop that otherwise throws "Maximum update depth
+  // exceeded" the moment the inline editor mounts over a tracked element.
+  const sceneId = sel?.sceneId ?? null;
+  const field = sel?.field ?? null;
+
   const measure = useCallback(() => {
     const stage = stageRef.current;
-    if (!stage || !sel) {
-      setRect(null);
+    if (!stage || sceneId == null || field == null) {
+      setRect((prev) => (prev === null ? prev : null));
       return;
     }
     const el = stage.querySelector(
-      `[data-scene-id="${CSS.escape(sel.sceneId)}"][data-field="${CSS.escape(sel.field)}"]`
+      `[data-scene-id="${CSS.escape(sceneId)}"][data-field="${CSS.escape(field)}"]`
     );
-    setRect(el ? relRect(el, stage) : null);
-  }, [stageRef, sel]);
+    const next = el ? relRect(el, stage) : null;
+    // Only commit when the geometry actually changed — identical rects must NOT
+    // trigger a state update (that is what drives the infinite render loop).
+    setRect((prev) => (sameRect(prev, next) ? prev : next));
+  }, [stageRef, sceneId, field]);
 
   // Re-measure on selection change, on frame change (scrub/seek), and on resize.
   useLayoutEffect(() => {
@@ -175,7 +194,7 @@ export function useTrackedRect(stageRef, sel, frame) {
   }, [measure, frame]);
 
   useEffect(() => {
-    if (!sel) return;
+    if (sceneId == null || field == null) return;
     // A short rAF loop keeps the box glued while the element animates (the first
     // ~1s of a scene reveal moves/scales it). Also covers play without frame prop
     // churn. Cheap: one getBoundingClientRect per frame, only while selected.
@@ -193,7 +212,7 @@ export function useTrackedRect(stageRef, sel, frame) {
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener("resize", onResize);
     };
-  }, [sel, measure]);
+  }, [sceneId, field, measure]);
 
   return rect;
 }

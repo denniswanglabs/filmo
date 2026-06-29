@@ -148,7 +148,16 @@ export default function RunPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex justify-end gap-2.5">
+                  <a
+                    href={`/runs/${runId}/download`}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm transition hover:bg-black/[0.03]"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Download
+                  </a>
                   <Link
                     href={`/runs/${runId}/edit`}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-[#3B82F6] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#2f6fe0]"
