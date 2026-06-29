@@ -88,6 +88,32 @@ export default function RunPage() {
     return <div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>
   }
 
+  // Logged-out gate. The run fetch is RLS-scoped to the signed-in owner, so when
+  // there's no session the poll never runs (it bails on !user) and the view would
+  // otherwise sit on "Loading run…" forever. Mirror the editor's sign-in gate —
+  // a short message + a link to /login — instead of a dead spinner.
+  if (!user) {
+    return (
+      <>
+        <TopBar />
+        <main className="mx-auto max-w-3xl px-5 pb-24 pt-8">
+          <Link href="/" className="text-sm text-slate-400 transition hover:text-ink">
+            ← All builds
+          </Link>
+          <div className="mt-10">
+            <p className="text-slate-500">Please sign in to view this video.</p>
+            <Link
+              href="/login"
+              className="mt-4 inline-flex items-center justify-center rounded-lg bg-[#3B82F6] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#2f6fe0]"
+            >
+              Sign in
+            </Link>
+          </div>
+        </main>
+      </>
+    )
+  }
+
   return (
     <>
       <TopBar />
