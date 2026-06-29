@@ -35,6 +35,130 @@ export const insforge = createClient({
   retryDelay: 400,
 })
 
+// ─────────────────── Durable session persistence (localStorage) ───────────────────
+// ROOT CAUSE this fixes (verified against @insforge/sdk 1.4.2 source, not guessed):
+// the SDK's TokenManager is MEMORY-ONLY ("Memory-only token storage", dist/index.mjs
+// TokenManager class ~L214-281; the access token + user live in `this.accessToken` /
+// `this.user` and are NEVER written to any persistent store). The ONLY thing the SDK
+// persists across a full page reload is the **httpOnly `insforge_refresh_token` cookie**
+// (`SameSite=None; Secure; Path=/api/auth`), which on reload `getCurrentUser()` trades
+// for a new session via `POST /api/auth/refresh` (dist/index.mjs `getCurrentUser`
+// ~L1224-1238 → `refreshSession`). That refresh REQUIRES an `X-CSRF-Token` header that
+// hash-matches the `csrfNonce` baked into the refresh-cookie JWT; the SDK reads that CSRF
+// value from the `insforge_csrf_token` cookie, which it writes itself via `document.cookie`
+// as **`SameSite=Lax`** (`setCsrfToken` ~L203-208). Empirically (curl + live browser):
+// refresh with cookie + matching CSRF → 200; with a missing/mismatched CSRF → **403 →
+// signed out**. So the whole "stay signed in across pay→return" path hangs on a fragile
+// Lax-CSRF + cross-site-refresh round-trip after the Stripe redirect. There is NO SDK
+// option to persist the session (InsForgeConfig in types-Dk-44JJf.d.ts has no
+// storage/persistSession; auth options are only `detectOAuthCallback`), and the refresh
+// token is httpOnly so we CANNOT store it ourselves.
+//
+// What we CAN do — and what makes the session survive a reload / new tab / the cross-origin
+// Stripe round-trip deterministically — is persist the JS-accessible `{ accessToken, user }`
+// in **localStorage** (origin-scoped, NOT SameSite-gated, survives the redirect-and-back) and
+// re-seed it into the SDK on load. The access token is a 15-min JWT (measured) — far longer
+// than a checkout — so the restored token authenticates the post-payment page immediately,
+// with the httpOnly refresh cookie still there as the longer-term backstop. We never weaken
+// auth: a restored token that's actually expired/revoked still 401s server-side, and we always
+// reconcile against `getCurrentUser()` (which refreshes) and clear the cache on a real signout.
+const SESSION_KEY = 'insforge_session_v1'
+
+type PersistedSession = { accessToken: string; user: AuthLikeUser }
+type AuthLikeUser = { id: string; email?: string; [k: string]: unknown }
+
+function ls(): Storage | null {
+  // SSR-safe: no window/localStorage on the server, and a privacy-mode browser can throw
+  // on access — never let storage access break auth.
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+/** Persist (or clear, when session is null) the JS-readable session for cross-reload restore. */
+export function persistSession(session: PersistedSession | null): void {
+  const store = ls()
+  if (!store) return
+  try {
+    if (session && session.accessToken && session.user?.id) {
+      store.setItem(SESSION_KEY, JSON.stringify(session))
+    } else {
+      store.removeItem(SESSION_KEY)
+    }
+  } catch {
+    /* quota / privacy mode — non-fatal */
+  }
+}
+
+/** Read the persisted session (or null). */
+export function readPersistedSession(): PersistedSession | null {
+  const store = ls()
+  if (!store) return null
+  try {
+    const raw = store.getItem(SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PersistedSession
+    if (parsed?.accessToken && parsed?.user?.id) return parsed
+    return null
+  } catch {
+    return null
+  }
+}
+
+// Reach the SDK's (private at the type level, present at runtime) TokenManager so we can
+// re-seed a FULL session — both the access token AND the user — which is what makes the
+// SDK's own `getCurrentUser()` short-circuit from memory (`tokenManager.getSession()` only
+// returns non-null when BOTH are set). We probe defensively (mirrors auth.tsx's existing
+// token-probe style) so an SDK version bump can't hard-break this; if the internal shape
+// changes we still fall back to the public `setAccessToken`, so authed reads keep working.
+type TokenManagerLike = {
+  saveSession?: (s: { accessToken: string; user: AuthLikeUser }) => void
+  setAccessToken?: (t: string) => void
+}
+function reachTokenManager(): TokenManagerLike | null {
+  const probe = insforge as unknown as {
+    tokenManager?: TokenManagerLike
+    auth?: { tokenManager?: TokenManagerLike }
+    getHttpClient?: () => { tokenManager?: TokenManagerLike }
+  }
+  return (
+    probe.tokenManager ??
+    probe.auth?.tokenManager ??
+    probe.getHttpClient?.().tokenManager ??
+    null
+  )
+}
+
+/**
+ * Re-seed a persisted session into the live SDK client so authed requests + getToken work
+ * IMMEDIATELY on this page load, without waiting on (or depending on) the cross-site refresh
+ * round-trip. Sets the HTTP bearer via the public `setAccessToken`, and (best-effort) writes
+ * the full {accessToken,user} into the TokenManager so `getCurrentUser()` resolves from memory.
+ * Returns the restored user (or null).
+ */
+export function rehydrateSessionIntoClient(): AuthLikeUser | null {
+  const session = readPersistedSession()
+  if (!session) return null
+  try {
+    ;(insforge as unknown as { setAccessToken?: (t: string) => void }).setAccessToken?.(
+      session.accessToken,
+    )
+  } catch {
+    /* ignore */
+  }
+  const tm = reachTokenManager()
+  try {
+    if (tm?.saveSession) tm.saveSession({ accessToken: session.accessToken, user: session.user })
+    else tm?.setAccessToken?.(session.accessToken)
+  } catch {
+    /* ignore — bearer is already set above, reads still authenticate */
+  }
+  return session.user
+}
+
 // ───────────────────────── Transient-read resilience ─────────────────────────
 // Wrap a `{ data, error }` SDK read so a TRANSIENT failure (the 8s timeout 408, a
 // 5xx, or a network blip — exactly the InsForge intermittent-timeout symptom that

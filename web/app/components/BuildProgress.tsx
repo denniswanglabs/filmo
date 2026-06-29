@@ -219,11 +219,18 @@ function BuildChat({ run, events }: { run: Run; events: RunEvent[] }) {
 
 // Pay affordance — shown only when the human-pays flow has parked the build at
 // 'awaiting_payment' AND a Stripe TEST checkout URL is on the run. Redirects THIS
-// tab to Stripe's hosted test checkout (same-tab, not a new tab — the InsForge
-// session lives in per-tab sessionStorage, so a new tab returns logged-out); once
-// the human pays (test card 4242), Stripe's success_url returns to this run page
-// and the pipeline's payment gate resolves so the build continues. Landing tokens: white surface,
-// ink #0E1320, blue accent (#3B82F6). No emojis — SVG lock mark only.
+// tab to Stripe's hosted test checkout (same-tab); once the human pays (test card
+// 4242), Stripe's success_url returns to this run page and the pipeline's payment
+// gate resolves so the build continues.
+//
+// Auth across the round-trip: the InsForge SDK keeps the session token IN MEMORY only
+// (it dies on any full reload, incl. this Stripe return) — durability comes from the
+// httpOnly refresh cookie PLUS a `{accessToken,user}` copy we persist in localStorage
+// (see lib/insforge.ts persistSession + lib/auth.tsx rehydrate-on-load). localStorage is
+// origin-scoped and survives the cross-origin redirect, a reload, AND a new tab, so the
+// user stays signed in on return regardless of same-tab vs new-tab. Same-tab is still the
+// nicer UX, so we keep it. Landing tokens: white surface, ink #0E1320, blue accent
+// (#3B82F6). No emojis — SVG lock mark only.
 function PayPanel({ run }: { run: Run }) {
   const price = formatCents(run.price_cents)
   return (
@@ -250,10 +257,11 @@ function PayPanel({ run }: { run: Run }) {
         </div>
       </div>
 
-      {/* SAME-TAB redirect (NOT target="_blank"). The InsForge session lives in
-          per-tab sessionStorage, so a new tab would return from Stripe logged-out
-          and the run page would show its sign-in gate. Redirecting this tab keeps
-          the session through the round-trip; Stripe's success_url returns here. */}
+      {/* SAME-TAB redirect (NOT target="_blank"). Session durability across the
+          Stripe round-trip is handled by localStorage persistence + rehydrate-on-load
+          (lib/insforge.ts / lib/auth.tsx), so the user stays signed in on return in
+          either a same tab or a new tab. We keep same-tab purely for the cleaner UX;
+          Stripe's success_url returns here. */}
       <a
         href={run.checkout_url ?? '#'}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#3B82F6] py-3 font-semibold text-white shadow-[0_10px_30px_-10px_rgba(59,130,246,0.6)] transition hover:bg-[#2f6fe0]"

@@ -1,6 +1,11 @@
 'use client'
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { insforge } from './insforge'
+import {
+  insforge,
+  persistSession,
+  readPersistedSession,
+  rehydrateSessionIntoClient,
+} from './insforge'
 
 interface AuthUser {
   id: string
@@ -66,7 +71,25 @@ async function readAccessToken(): Promise<string | null> {
     /* ignore — fall through */
   }
   t = probe()
-  return t ?? null
+  if (t) return t
+  // Last resort: the in-memory token may have been dropped by a reload before the SDK
+  // re-seeded it. Fall back to the durable localStorage copy so a server action on the
+  // post-payment page still has a bearer to verify (verifyUser re-validates it anyway).
+  return readPersistedSession()?.accessToken ?? null
+}
+
+// After we resolve who the user is, mirror the result into durable localStorage so the
+// NEXT page load (reload / new tab / the Stripe pay→return) restores it instantly instead
+// of depending on the cross-site refresh round-trip. We pair the user with the SDK's CURRENT
+// in-memory access token (the freshest one, just minted by getCurrentUser/refresh). On a
+// signed-out resolve we clear the cache so we never resurrect a dead session.
+async function persistAfterResolve(user: AuthUser | null): Promise<void> {
+  if (!user?.id) {
+    persistSession(null)
+    return
+  }
+  const token = await readAccessToken()
+  if (token) persistSession({ accessToken: token, user: { id: user.id, email: user.email } })
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -78,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const u = error ? null : ((data?.user as AuthUser) ?? null)
     setUser(u)
     setLoading(false)
+    void persistAfterResolve(u)
     return u
   }, [])
 
@@ -85,6 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     await insforge.auth.signOut()
+    persistSession(null) // drop the durable copy so a reload doesn't restore a dead session
     setUser(null)
   }, [])
 
@@ -109,6 +134,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false
+
+    // SYNCHRONOUS rehydrate FIRST: if we have a durable session in localStorage, re-seed it
+    // into the SDK and paint `user` immediately. This is the core fix — the post-payment page
+    // (a full reload after the cross-origin Stripe round-trip) now shows the signed-in UI and
+    // makes authed reads on the FIRST render, instead of momentarily (or permanently, when the
+    // Lax-CSRF refresh fails) dropping to the signed-out gate. The async reconcile below then
+    // validates/refreshes in the background and corrects the cache if the session is truly gone.
+    const restored = rehydrateSessionIntoClient()
+    if (restored) {
+      setUser(restored as AuthUser)
+      // We have a usable session right now — render the authed UI immediately and let the
+      // background reconcile validate. Without this the run page sits on its loading spinner
+      // until getCurrentUser returns (and never flashes the signed-out gate).
+      setLoading(false)
+    }
+
     ;(async () => {
       // If we just came back from an OAuth redirect, the SDK constructor kicked off the
       // `insforge_code` exchange. Wait for it to finish so getCurrentUser sees the session.
@@ -127,21 +168,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // the exact symptom we hit). A genuine "signed out" returns a fast 401 (don't retry
       // that); a timeout / 5xx / network error is transient → retry a few times with
       // backoff before giving up, so a DB blip can't strand a valid session at the gate.
-      let u: AuthUser | null = null
+      //
+      // CRUCIAL with the localStorage restore above: we must distinguish a DEFINITIVE 401
+      // (real signout → clear `user` AND the durable cache) from a TRANSIENT failure
+      // (timeout/5xx/network → keep whatever we restored; do NOT wipe a valid session on a
+      // blip). `restored` is the optimistically-painted user; we only override it on a clear
+      // signal.
+      let u: AuthUser | null = restored as AuthUser | null
+      let definitive = false
       for (let attempt = 0; ; attempt++) {
         const { data, error } = await insforge.auth.getCurrentUser()
         if (cancelled) return
         if (!error) {
           u = (data?.user as AuthUser) ?? null
+          definitive = true
           break
         }
         const status = (error as { statusCode?: number })?.statusCode
-        if (status === 401 || attempt >= 3) break
+        if (status === 401) {
+          // Real, authoritative signed-out state.
+          u = null
+          definitive = true
+          break
+        }
+        if (attempt >= 3) break // transient failure exhausted retries — keep `restored`
         await new Promise((r) => setTimeout(r, 700 * (attempt + 1)))
       }
       if (cancelled) return
       setUser(u)
       setLoading(false)
+      // Persist only on a DEFINITIVE resolve: a fresh user → refresh the cache (new token);
+      // a real 401 → clear it. On a transient failure we leave the existing cache intact so
+      // the next load can still restore.
+      if (definitive) void persistAfterResolve(u)
     })()
     return () => {
       cancelled = true
