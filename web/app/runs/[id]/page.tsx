@@ -9,11 +9,15 @@ import BuildProgress from '../../components/BuildProgress'
 import {
   formatCents,
   formatMargin,
+  DELIVERED_STATUSES,
   type Run,
   type RunEvent,
 } from '../../../lib/types'
 
-const TERMINAL = new Set(['delivered', 'failed'])
+// Terminal states stop the 3s poll loop. `completed_with_warnings` is delivered-ish
+// (the run shipped a video but isolated one or more scene failures) — it must be
+// terminal too, or polling never stops and the live tracker spins forever.
+const TERMINAL = new Set(['delivered', 'completed_with_warnings', 'failed'])
 
 export default function RunPage() {
   const params = useParams<{ id: string }>()
@@ -105,8 +109,22 @@ export default function RunPage() {
             </div>
 
             {/* Live / delivered surface */}
-            {run.status === 'delivered' && run.final_url ? (
+            {DELIVERED_STATUSES.has(run.status) && run.final_url ? (
               <>
+                {/* The video shipped, but the orchestrator isolated one or more scene
+                    failures. Surface it as a non-blocking note — the video below is real. */}
+                {run.status === 'completed_with_warnings' ? (
+                  <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-amber/30 bg-amber/[0.06] px-4 py-3">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="mt-0.5 shrink-0 text-amber">
+                      <path d="M12 9v4m0 4h.01M10.3 3.86l-8 13.86A2 2 0 004 21h16a2 2 0 001.7-3.28l-8-13.86a2 2 0 00-3.4 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <p className="text-sm text-ink">
+                      <span className="font-semibold">Completed with warnings.</span>{' '}
+                      Your video shipped, but one or more scenes were skipped during production.
+                    </p>
+                  </div>
+                ) : null}
+
                 {/* Edited cut (from an editor Export → re-render), shown FIRST when present */}
                 {run.edited_url ? (
                   <div className="mt-6">
@@ -150,7 +168,7 @@ export default function RunPage() {
 
                 <div className="mt-3 flex justify-end gap-2.5">
                   <a
-                    href={`/runs/${runId}/download`}
+                    href={`/api/runs/${runId}/download`}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm transition hover:bg-black/[0.03]"
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -166,8 +184,8 @@ export default function RunPage() {
                   </Link>
                 </div>
               </>
-            ) : run.status === 'delivered' && !run.final_url ? (
-              // Delivered but no video URL = the render finished but the upload didn't
+            ) : DELIVERED_STATUSES.has(run.status) && !run.final_url ? (
+              // Delivered-ish but no video URL = the render finished but the upload didn't
               // land. Don't show the live "Producing" tracker forever — surface it
               // honestly with a way to retry.
               <div className="mt-6 rounded-2xl border border-amber/30 bg-amber/[0.06] px-5 py-8 text-center">

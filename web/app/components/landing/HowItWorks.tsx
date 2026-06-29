@@ -9,23 +9,28 @@ interface Step {
 const STEPS: readonly Step[] = [
   {
     n: 1,
-    title: 'Read your page',
-    body: 'Filmo opens your real site and runs a Conversion Read on NVIDIA Nemotron — pulling your real name, colors, logo, stats and story, and scoring six dimensions of how the page converts.',
+    title: 'Hermes reads your page',
+    body: "The agent opens your real site and runs a Conversion Read on NVIDIA Nemotron, scoring six dimensions of how the page converts and pulling your real name, colors, logo, stats, and story. The diagnosis seeds the whole video.",
   },
   {
     n: 2,
-    title: 'Plan the cut',
-    body: 'Nemotron turns that read into a scene-by-scene storyboard with a voiceover script written from your real facts — never invented copy.',
+    title: 'Hermes plans the cut',
+    body: 'It has Nemotron write a scene-by-scene storyboard from your real facts — never invented copy — matching each scene to a hand-curated designer pattern harvested from real launch films.',
   },
   {
     n: 3,
-    title: 'Fill the patterns',
-    body: 'Your facts flow into a hand-curated library of designer-made motion patterns — harvested from real Luceo Studio launch films, not improvised per video. The right pattern follows your story: stats become a stat scene, steps a process flow, a quote a pull-quote.',
+    title: 'Hermes clears the payment',
+    body: 'The agent prices the job and settles on Stripe. If a run would go over budget, it declines its own spend — a real authorization decision, no human in the loop.',
   },
   {
     n: 4,
-    title: 'Render & ship',
-    body: 'Remotion renders it with your real logo and an AI voiceover into a finished 1080p MP4 — ready for Product Hunt, X, or your hero section, in minutes.',
+    title: 'Hermes produces the video',
+    body: "It captures your real page and logo sealed inside NVIDIA's NemoClaw sandbox, then renders the curated patterns with your real screenshot, logo, and an ElevenLabs voiceover.",
+  },
+  {
+    n: 5,
+    title: 'Hermes ships it',
+    body: 'A finished 1080p MP4 — ready for Product Hunt, X, or your hero section, in minutes.',
   },
 ]
 
@@ -42,17 +47,18 @@ export default function HowItWorks({ showBadge = true }: { showBadge?: boolean }
         <Reveal className="mx-auto max-w-xl text-center">
           {showBadge && <span className="eyebrow">How it works</span>}
           <h2 className="section-title mt-4">
-            Four steps, fully autonomous.
+            One agent runs the whole production.
           </h2>
           <p className="section-lede mx-auto max-w-xl">
-            No brief, no timeline, no editor. Paste your URL and Filmo does the rest.
+            Filmo is a Hermes agent. Paste a URL and a goal — it reads, plans, pays its own
+            way, produces, and ships, conducting every step itself.
           </p>
         </Reveal>
 
         {/* Steps grid */}
         <RevealGroup
           as="ol"
-          className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4"
+          className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5"
         >
           {STEPS.map((step, i) => (
             <RevealItem
@@ -77,11 +83,12 @@ export default function HowItWorks({ showBadge = true }: { showBadge?: boolean }
         <Reveal className="mx-auto mt-12 max-w-3xl">
           <p className="rounded-2xl border border-[#D4E2FB] bg-white/70 px-6 py-5 text-center text-sm leading-relaxed text-[#5A6472]">
             <span className="font-semibold text-[#0E1320]">The engine.</span>{' '}
-            Filmo runs as a Hermes agent that orchestrates this pipeline — reasoning
+            Hermes (Nous) is the agent runtime orchestrating all of it — reasoning
             on <span className="font-medium text-[#0E1320]">NVIDIA Nemotron</span>,
             sealed inside <span className="font-medium text-[#0E1320]">NVIDIA NemoClaw</span>,
-            with <span className="font-medium text-[#0E1320]">Stripe</span> (test mode)
-            for payment.
+            paying through <span className="font-medium text-[#0E1320]">Stripe</span> (test
+            mode). In the sandbox the agent can only pull the five tools we sanctioned —
+            autonomy with a leash.
           </p>
         </Reveal>
       </div>

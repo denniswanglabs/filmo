@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
 import { useRouter } from 'next/navigation'
-import { STATUS_STYLES } from '../../lib/types'
+import { STATUS_STYLES, STATUS_LABELS } from '../../lib/types'
 
 export function StatusChip({ status }: { status: string }) {
   const style = STATUS_STYLES[status] || STATUS_STYLES.queued
@@ -10,7 +10,7 @@ export function StatusChip({ status }: { status: string }) {
     <span
       className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${style}`}
     >
-      {status}
+      {STATUS_LABELS[status] || status}
     </span>
   )
 }

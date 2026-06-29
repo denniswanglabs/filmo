@@ -1,6 +1,9 @@
 // Shared row types mirroring the InsForge `public` schema. Cast SDK results to these.
 
-export type RunStatus = 'queued' | 'running' | 'delivered' | 'failed'
+// `completed_with_warnings` = the orchestrator shipped a video but isolated one or
+// more scene failures (orchestrator.py sets it; worker/run.js writes it verbatim).
+// The web side treats it as delivered-with-a-warning: it HAS a final_url.
+export type RunStatus = 'queued' | 'running' | 'delivered' | 'completed_with_warnings' | 'failed'
 export type RunQuality = 'standard' | 'premium'
 export type RunMode = 'mock' | 'real'
 
@@ -71,5 +74,24 @@ export const STATUS_STYLES: Record<string, string> = {
   queued: 'bg-slate-100 text-slate-600 border-slate-200',
   running: 'bg-blue-50 text-amber border-amber/30',
   delivered: 'bg-nemo/10 text-nemo border-nemo/30',
+  // Shipped, but with isolated scene failures — amber to flag the caveat.
+  completed_with_warnings: 'bg-amber/10 text-amber border-amber/30',
   failed: 'bg-red-50 text-red-600 border-red-200',
+}
+
+// Human-readable chip labels. Most statuses display verbatim (the chip CSS-capitalizes
+// them); the underscored `completed_with_warnings` would render as an ugly
+// "Completed_with_warnings", so collapse it to a clean "Completed".
+export const STATUS_LABELS: Record<string, string> = {
+  completed_with_warnings: 'completed',
+}
+
+// Delivered-ish statuses: the run shipped a final video. `completed_with_warnings`
+// is delivered with isolated scene failures, but it still HAS a final_url, so it
+// renders the video player / download affordances exactly like `delivered`. Shared
+// across the run page and the editor so the two never drift.
+export const DELIVERED_STATUSES = new Set<string>(['delivered', 'completed_with_warnings'])
+
+export function isDelivered(status: string | null | undefined): boolean {
+  return status != null && DELIVERED_STATUSES.has(status)
 }

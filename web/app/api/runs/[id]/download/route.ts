@@ -9,6 +9,7 @@
 // Returns 404 when the run isn't delivered or has no final_url.
 import { NextResponse } from 'next/server'
 import { adminClient } from '../../../../../lib/insforge'
+import { isDelivered } from '../../../../../lib/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +22,20 @@ export async function GET(
     return new NextResponse('Missing run id', { status: 400 })
   }
 
+  // ── IDOR note (ACCEPTED hackathon risk) ───────────────────────────────────
+  // This route streams a delivered run's MP4 by id WITHOUT an ownership check, so
+  // anyone who knows a run id can fetch its video. We deliberately do NOT gate it
+  // on `verifyUser(...) && run.user_id === caller.id`: the Download button is a
+  // plain GET <a href> (a top-level browser navigation), and this app carries the
+  // InsForge access token in client memory (SDK tokenManager), NOT in a cookie —
+  // so the navigation sends no Authorization header and there is no session cookie
+  // for the route to read. An ownership gate would therefore 404 the legitimate
+  // owner's own download, which is worse than the exposure. The exposure is bounded:
+  // run ids are unguessable UUIDs and the only thing returned is the marketing-video
+  // output the user asked Filmo to produce (no PII, no account data). If this ever
+  // ships beyond the hackathon, move auth onto a short-lived signed download URL
+  // (or set an httpOnly session cookie) so the GET can be gated without breaking it.
+  //
   // Admin client bypasses RLS so the route can resolve the run's final_url. We only
   // expose the bytes of a delivered video; no user data is returned.
   const db = adminClient()
@@ -35,7 +50,9 @@ export async function GET(
   }
 
   const run = data as { id: string; status?: string | null; final_url?: string | null }
-  if (run.status !== 'delivered' || !run.final_url) {
+  // `completed_with_warnings` ships a real video too — gate on delivered-ish, not
+  // strictly 'delivered', so its Download button doesn't 404.
+  if (!isDelivered(run.status) || !run.final_url) {
     return new NextResponse('No video available for this run', { status: 404 })
   }
 

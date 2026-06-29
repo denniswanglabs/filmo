@@ -11,7 +11,7 @@ import { insforge } from '../../../../lib/insforge'
 import { useAuth } from '../../../../lib/auth'
 import { TopBar } from '../../../components/Brand'
 import { saveEditedProps, requestReRender } from '../../../actions'
-import type { Run } from '../../../../lib/types'
+import { isDelivered, type Run } from '../../../../lib/types'
 import { Editor } from './_editor/Editor'
 
 // Minimal shape we read off props for the empty-state copy + asset base.
@@ -177,7 +177,7 @@ export default function EditRunPage() {
       goal={run.goal || undefined}
       assetBaseUrl={assetBaseUrl}
       musicAssetName={run.run_key ? `music-${run.run_key}.mp3` : undefined}
-      downloadUrl={run.status === 'delivered' && run.final_url ? `/api/runs/${run.id}/download` : undefined}
+      downloadUrl={isDelivered(run.status) && run.final_url ? `/api/runs/${run.id}/download` : undefined}
       onSave={handleSave}
       onExport={handleExport}
       onBack={handleBack}
