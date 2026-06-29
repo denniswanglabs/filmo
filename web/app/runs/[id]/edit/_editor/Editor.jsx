@@ -20,11 +20,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Player } from "@remotion/player";
 import { Timeline } from "../_composition/Timeline";
-import { EditPanel, TEXT_KEY_FOR_FIELD } from "./EditPanel.jsx";
+import { EditPanel } from "./EditPanel.jsx";
 import { TimelineTrack } from "./TimelineTrack.jsx";
 import { PlayerControls } from "./PlayerControls.jsx";
 import { SelectionOverlay, usePreviewSelection } from "./SelectionOverlay.jsx";
-import { InlineEditor } from "./InlineEditor.jsx";
 import { useShortcuts } from "./useShortcuts.js";
 import { Button, Pill, Icon } from "./ui.jsx";
 import "./editor.css";
@@ -92,7 +91,6 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
   const [selected, setSelected] = useState(null); // { sceneId, field } | null
   const [hoverSel, setHoverSel] = useState(null);
   const [focusField, setFocusField] = useState(null); // { field, nonce } -> inspector
-  const [editing, setEditing] = useState(null); // inline text edit state
 
   // Mobile: stacked layout with a bottom tab bar instead of the fixed side rail.
   const isMobile = useIsMobile();
@@ -134,21 +132,6 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
   const dur = Math.max(1, props?.total_frames || 1);
   const fps = props?.fps || 30;
 
-  // Inline-edit value: scene.data[key] of the scene being edited (resolved by id).
-  const editIdx = editing ? (props?.scenes || []).findIndex((s) => s.id === editing.sceneId) : -1;
-  const editValue = editIdx >= 0 ? props?.scenes?.[editIdx]?.data?.[editing.key] ?? "" : "";
-  const setEditValue = useCallback(
-    (v) => {
-      if (editIdx < 0 || !editing) return;
-      update((p) => {
-        const next = structuredClone(p);
-        next.scenes[editIdx].data = { ...next.scenes[editIdx].data, [editing.key]: v };
-        return next;
-      });
-    },
-    [editIdx, editing, update]
-  );
-
   // Select a scene by index: drive the inspector AND seek the Player to its in_frame.
   const selectScene = useCallback(
     (i, { clearElement = true } = {}) => {
@@ -165,30 +148,15 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     []
   );
 
-  // Touch-friendly tap-to-edit: on a coarse pointer dblclick is unreliable, so a
-  // SECOND tap on an already-selected editable text element opens the inline editor
-  // (the tap-then-edit affordance). selectedRef mirrors `selected` for this check
-  // without making selectElement depend on it (keeps the callback stable).
-  const selectedRef = useRef(null);
-  useEffect(() => {
-    selectedRef.current = selected;
-  }, [selected]);
-
   // Select a composition ELEMENT clicked in the live preview (coral->blue box +
   // inspector focus + seek into the scene's hold so the box hugs real content).
+  // Clicking selects + focuses the matching Inspector field — all text editing
+  // happens in the Inspector (there is NO in-place inline editor).
   const selectElement = useCallback(({ sceneId, field }) => {
     const cur = propsRef.current;
     const scenes = cur?.scenes || [];
     const i = scenes.findIndex((s) => s.id === sceneId);
     if (i < 0) return;
-    // Re-tap of the SAME already-selected editable text element -> enter inline
-    // edit. This is the primary mobile text-edit path (double-tap is flaky on
-    // touch); on desktop it's a harmless bonus (a second click also edits).
-    const prev = selectedRef.current;
-    if (prev && prev.sceneId === sceneId && prev.field === field && TEXT_KEY_FOR_FIELD[field]) {
-      beginInlineEditRef.current?.({ sceneId, field });
-      return;
-    }
     setActiveIdx(i);
     setSelected({ sceneId, field });
     setFocusField({ field, nonce: Date.now() });
@@ -219,39 +187,18 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
     [dur]
   );
 
-  const beginInlineEdit = useCallback(({ sceneId, field }) => {
-    const key = TEXT_KEY_FOR_FIELD[field];
-    if (!key) return;
-    playerRef.current?.pause();
-    setEditing({ sceneId, field, key });
-  }, []);
-  // Ref so selectElement (defined earlier) can trigger inline edit without a
-  // declaration-order or dependency cycle.
-  const beginInlineEditRef = useRef(beginInlineEdit);
-  useEffect(() => {
-    beginInlineEditRef.current = beginInlineEdit;
-  }, [beginInlineEdit]);
-  const endInlineEdit = useCallback(() => setEditing(null), []);
-
-  const onEnter = useCallback(() => {
-    if (editing) return false;
-    if (selected && TEXT_KEY_FOR_FIELD[selected.field]) {
-      beginInlineEdit(selected);
-      return true;
-    }
-    return false;
-  }, [editing, selected, beginInlineEdit]);
+  // Text is edited ONLY in the Inspector, so Enter no longer opens an in-place
+  // editor. Return false so useShortcuts lets the key pass through untouched.
+  const onEnter = useCallback(() => false, []);
 
   const onEscape = useCallback(() => {
-    if (editing) {
-      setEditing((cur) => (cur ? { ...cur, cancel: (cur.cancel || 0) + 1 } : cur));
-    } else if (selected) {
-      setSelected(null);
-    }
-  }, [editing, selected]);
+    if (selected) setSelected(null);
+  }, [selected]);
 
   // Pass the live stage NODE (state) — not just the ref — so the hook's listener
   // effect re-binds when the node is swapped out on a mobile<->desktop layout flip.
+  // No onActivate: a double-click no longer enters inline edit (it stays inert in
+  // SelectionOverlay so it can't trigger a browser navigation in the live preview).
   usePreviewSelection(stageEl, {
     enabled: !!props,
     onPick: selectElement,
@@ -259,7 +206,6 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
       setHoverSel(
         el ? { sceneId: el.getAttribute("data-scene-id"), field: el.getAttribute("data-field") } : null
       ),
-    onActivate: beginInlineEdit,
   });
 
   useShortcuts({ playerRef, total: dur, fps, enabled: !!props, frame, setFrame, onEscape, onEnter });
@@ -385,19 +331,9 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
           selected={selected}
           hoverSel={hoverSel}
           frame={frame}
-          editing={editing}
           scene={props?.scenes?.[activeIdx]}
           update={update}
           activeIdx={activeIdx}
-        />
-        <InlineEditor
-          stageRef={stageRef}
-          editing={editing}
-          frame={frame}
-          value={editValue}
-          onChange={setEditValue}
-          onCommit={endInlineEdit}
-          onCancel={endInlineEdit}
         />
       </div>
     </div>
@@ -414,12 +350,12 @@ export function Editor({ runId, initialProps, brand, goal, assetBaseUrl, musicAs
       {!isMobile ? (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "var(--muted)", fontWeight: 600 }}>
           <span style={{ display: "inline-flex", color: "var(--accent)" }}><Icon.cursor /></span>
-          Click any element to select &amp; edit
+          Click an element to select it, then edit it in the Inspector
         </span>
       ) : (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>
           <span style={{ display: "inline-flex", color: "var(--accent)" }}><Icon.cursor /></span>
-          Tap an element · tap again to edit text
+          Tap an element, then edit it in the Inspector
         </span>
       )}
     </div>

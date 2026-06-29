@@ -38,9 +38,8 @@ const FIELD_MAP = {
 };
 
 // data-field -> the scene.data text key it edits, ONLY for fields that are plain
-// single text values (so the preview's inline editor knows which fields are
-// directly editable in place and which key to write). Derived from FIELD_MAP so
-// it stays in sync. Used by App.jsx (beginInlineEdit) + the InlineEditor.
+// single text values (which Inspector field a clicked element maps to, and which
+// key writes its text). Derived from FIELD_MAP so it stays in sync.
 export const TEXT_KEY_FOR_FIELD = Object.fromEntries(
   Object.entries(FIELD_MAP)
     .filter(([, m]) => m.kind === "text")
