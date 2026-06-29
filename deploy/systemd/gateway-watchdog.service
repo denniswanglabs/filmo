@@ -1,0 +1,16 @@
+[Unit]
+Description=Filmo OpenShell/NemoClaw gateway self-heal watchdog (recovers :8080 if it flaps down)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+# HOME/XDG so the recover sub-process does NOT abort on "HOME is not set"
+Environment=HOME=/root
+Environment=XDG_CONFIG_HOME=/root/.config
+Environment=XDG_STATE_HOME=/root/.local/state
+Environment=XDG_DATA_HOME=/root/.local/share
+Environment=XDG_CACHE_HOME=/root/.cache
+ExecStart=/root/filmo-worker/gateway-watchdog.sh
+# Never let a hung recover stack up
+TimeoutStartSec=210

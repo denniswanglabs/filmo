@@ -1,0 +1,31 @@
+# Egress to the host MCP tool-server (Filmo M2 Phase A/B) on :8770 via the
+# OpenShell L7 host gateway. Modeled on the built-in local-inference preset.
+preset:
+  name: filmo-host
+  description: "Filmo host MCP tool-server (:8770) via host gateway"
+
+network_policies:
+  filmo_host:
+    name: filmo_host
+    endpoints:
+      - host: host.openshell.internal
+        port: 8770
+        protocol: rest
+        enforcement: enforce
+        allowed_ips:
+          # OpenShell's SSRF guard rejects private host-gateway IPs unless
+          # the policy explicitly allowlists the resolved address.
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+    binaries:
+      - { path: /usr/local/bin/hermes }
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }
+      - { path: /usr/bin/curl }
+      - { path: /usr/bin/python3 }
+      - { path: /sandbox/hermes-venv/bin/python }
+      - { path: /opt/hermes/.venv/bin/python }

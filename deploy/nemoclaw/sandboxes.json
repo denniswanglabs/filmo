@@ -1,0 +1,62 @@
+{
+  "sandboxes": {
+    "filmo": {
+      "name": "filmo",
+      "createdAt": "2026-06-28T11:09:59.788Z",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "nimContainer": null,
+      "provider": "nvidia-prod",
+      "gpuEnabled": false,
+      "hostGpuDetected": false,
+      "sandboxGpuEnabled": false,
+      "sandboxGpuMode": "0",
+      "sandboxGpuDevice": null,
+      "openshellDriver": "docker",
+      "openshellVersion": "0.0.44",
+      "policies": [
+        "npm",
+        "pypi",
+        "huggingface",
+        "brew",
+        "openclaw-pricing",
+        "hermes-inference",
+        "filmo-targets",
+        "filmo-dynamic",
+        "filmo-host"
+      ],
+      "policyTier": null,
+      "agent": null,
+      "agentVersion": "2026.5.18",
+      "imageTag": "openshell/sandbox-from:1782644924",
+      "messagingChannels": [],
+      "dashboardPort": 18789,
+      "customPolicies": [
+        {
+          "name": "hermes-inference",
+          "sourcePath": "/root/filmo-sandbox/hermes-inference.yaml",
+          "appliedAt": "2026-06-28T11:16:09.638Z",
+          "_note": "content omitted here; see deploy/nemoclaw/policies/hermes-inference.yaml"
+        },
+        {
+          "name": "filmo-targets",
+          "sourcePath": "/root/filmo-sandbox/filmo-targets.yaml",
+          "appliedAt": "2026-06-28T12:12:53.716Z",
+          "_note": "content omitted here; see deploy/nemoclaw/policies/filmo-targets.yaml"
+        },
+        {
+          "name": "filmo-dynamic",
+          "sourcePath": "/root/filmo-sandbox/filmo-dynamic.yaml",
+          "appliedAt": "2026-06-28T15:28:56.893Z",
+          "_note": "content omitted here; see deploy/nemoclaw/policies/filmo-dynamic.yaml (rewritten per job)"
+        },
+        {
+          "name": "filmo-host",
+          "sourcePath": "/root/filmo-sandbox/filmo-host.yaml",
+          "appliedAt": "2026-06-28T19:29:34.537Z",
+          "_note": "content omitted here; see deploy/nemoclaw/policies/filmo-host.yaml"
+        }
+      ]
+    }
+  },
+  "defaultSandbox": "filmo"
+}

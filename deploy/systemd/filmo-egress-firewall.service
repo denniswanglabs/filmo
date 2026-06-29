@@ -1,0 +1,23 @@
+[Unit]
+Description=Filmo sandbox agent-egress firewall (re-applies on container start)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# Watch docker for the filmo container start/restart and (re)apply the
+# uid-998 agent-egress firewall to its (new) netns. Idempotent. Also applies
+# once at unit start for the already-running container.
+ExecStart=/usr/bin/env bash -c '\
+  /root/filmo-sandbox/apply-egress-firewall.sh 2>&1 | sed "s/^/[boot-apply] /" || true; \
+  docker events --filter "type=container" --filter "event=start" --filter "name=openshell-filmo" --format "{{.Actor.Attributes.name}}" | \
+  while read -r name; do \
+    case "$name" in *-prehardened|*-rollback*|*-hardened*) continue;; esac; \
+    sleep 2; \
+    /root/filmo-sandbox/apply-egress-firewall.sh 2>&1 | sed "s/^/[event-apply $name] /" || true; \
+  done'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

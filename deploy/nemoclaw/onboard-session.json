@@ -1,0 +1,57 @@
+{
+  "_comment": "SCRUBBED snapshot of /root/.nemoclaw/onboard-session.json. The live file already carries NO secrets (credentialEnv / routerCredentialHash / hermesAuthMethod are all null — the sandbox gets its OpenRouter/NVIDIA keys from the host MCP tool-server's process env, not from onboarding). sessionId reset to a placeholder.",
+  "version": 1,
+  "sessionId": "<SESSION_ID>",
+  "resumable": false,
+  "status": "complete",
+  "mode": "non-interactive",
+  "lastStepStarted": "policies",
+  "lastCompletedStep": "policies",
+  "failure": null,
+  "agent": null,
+  "sandboxName": "filmo",
+  "provider": null,
+  "model": "nvidia/nemotron-3-ultra-550b-a55b",
+  "endpointUrl": null,
+  "credentialEnv": null,
+  "hermesAuthMethod": null,
+  "preferredInferenceApi": "openai-completions",
+  "nimContainer": null,
+  "routerPid": null,
+  "routerCredentialHash": null,
+  "webSearchConfig": null,
+  "hermesToolGateways": [],
+  "policyPresets": [
+    "npm",
+    "pypi",
+    "huggingface",
+    "brew",
+    "openclaw-pricing",
+    "hermes-inference",
+    "filmo-targets",
+    "filmo-dynamic",
+    "filmo-host"
+  ],
+  "messagingChannels": [],
+  "messagingChannelConfig": null,
+  "gpuPassthrough": false,
+  "metadata": {
+    "gatewayName": "nemoclaw",
+    "fromDockerfile": "/root/filmo-sandbox/Dockerfile"
+  },
+  "machine": {
+    "version": 1,
+    "state": "complete",
+    "revision": 10
+  },
+  "steps": {
+    "preflight": { "status": "complete" },
+    "gateway": { "status": "complete" },
+    "sandbox": { "status": "complete" },
+    "provider_selection": { "status": "complete" },
+    "inference": { "status": "complete" },
+    "openclaw": { "status": "complete" },
+    "agent_setup": { "status": "skipped" },
+    "policies": { "status": "complete" }
+  }
+}

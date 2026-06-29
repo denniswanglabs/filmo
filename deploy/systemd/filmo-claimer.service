@@ -1,0 +1,31 @@
+[Unit]
+Description=Filmo curated claimer (InsForge jobs -> build_runner.py curated -> walk-videos bucket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/filmo-worker
+# InsForge backend URL (the Filmo project the website + worker share).
+Environment=INSFORGE_URL=https://jd3mdkqr.ap-southeast.insforge.app
+Environment=PIPELINE_DIR=/root/filmo-pipeline
+Environment=PYTHON_BIN=/root/filmo-venv/bin/python
+Environment=PRODUCER=hetzner-curated
+# Secrets, each a KEY=VALUE file (mode 600). EnvironmentFile loads them verbatim.
+#   /root/.insforge-key -> INSFORGE_API_KEY=<REDACTED>   (Filmo admin key, bypasses RLS)
+#   /root/.orkey        -> OPENROUTER_API_KEY=<REDACTED>  (planner / Nemotron brain)
+#   /root/.el-key       -> ELEVENLABS_API_KEY=<REDACTED>  (present but UNUSED by default:
+#                          the free edge-tts + whisper VO path runs unless the claimer
+#                          sets WS_VO_PROVIDER=elevenlabs)
+EnvironmentFile=/root/.insforge-key
+EnvironmentFile=/root/.orkey
+EnvironmentFile=-/root/.el-key
+ExecStart=/usr/bin/node /root/filmo-worker/curated-claimer.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=filmo-claimer
+
+[Install]
+WantedBy=multi-user.target

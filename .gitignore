@@ -8,6 +8,9 @@
 *credentials*
 client_secrets.json
 .hermes/
+# but DO commit the scrubbed deploy snapshot's .env.example templates
+# (placeholders only — verified secret-free; see DEPLOY.md)
+!deploy/**/.env.example
 
 # ── Dependencies / build artifacts ──────────────────────────────────
 node_modules/

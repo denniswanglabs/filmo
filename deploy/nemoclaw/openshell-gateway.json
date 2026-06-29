@@ -1,0 +1,14 @@
+{
+  "_comment": "OpenShell gateway config the NemoClaw CLI resolves under ~/.config/openshell/. Reconstructed from /root/.config/openshell/active_gateway + gateways/nemoclaw/metadata.json + last_sandbox. The conduct path uses ONLY this host :8080 L7 relay (the in-sandbox :18789 dashboard gateway is NOT required for conducts). No secrets — auth_mode is plaintext on loopback.",
+  "active_gateway": "nemoclaw",
+  "gateways": {
+    "nemoclaw": {
+      "name": "nemoclaw",
+      "gateway_endpoint": "http://127.0.0.1:8080",
+      "is_remote": false,
+      "gateway_port": 0,
+      "auth_mode": "plaintext",
+      "last_sandbox": "filmo"
+    }
+  }
+}

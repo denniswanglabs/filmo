@@ -1,0 +1,13 @@
+preset:
+  name: filmo-targets
+  description: "Test target host"
+network_policies:
+  filmo-targets:
+    name: filmo-targets
+    endpoints:
+      - { host: stripe.com, port: 443, access: full }
+      - { host: www.stripe.com, port: 443, access: full }
+      - { host: js.stripe.com, port: 443, access: full }
+      - { host: b.stripecdn.com, port: 443, access: full }
+    binaries:
+      - { path: "/**" }

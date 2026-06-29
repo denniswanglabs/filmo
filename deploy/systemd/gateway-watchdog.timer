@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the Filmo gateway watchdog every ~12s (self-heal :8080 flaps)
+
+[Timer]
+# First check 15s after boot, then every 12s. Tight accuracy so a flap is
+# caught within ~12-13s, before a conduct hits the dead gateway.
+OnBootSec=15
+OnUnitActiveSec=12s
+AccuracySec=1s
+# Catch up immediately if a tick was missed (e.g. across a brief downtime)
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=Filmo HOST MCP tool-server (M2 Phase A/B) on :8770
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# start-mcp-toolserver.sh sources the secret KEY=VALUE files (/root/.orkey,
+# /root/.el-key, /root/.insforge-key) and execs the dependency-free python
+# MCP server (mcp_toolserver.py) on :8770. The Hermes conduct reaches it from
+# inside the sandbox at http://host.openshell.internal:8770/mcp via the
+# OpenShell L7 host gateway (allowlisted by the `filmo-host` policy).
+ExecStart=/root/start-mcp-toolserver.sh
+Restart=always
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=15
+StandardOutput=append:/root/mcp-toolserver.log
+StandardError=append:/root/mcp-toolserver.log
+
+[Install]
+WantedBy=multi-user.target
