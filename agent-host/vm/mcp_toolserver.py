@@ -66,6 +66,48 @@ def _log(msg):
 
 
 # --------------------------------------------------------------------------- #
+# InsForge write resilience: a slow InsForge write must NOT drag each scene or hang
+# the ship. Every urllib InsForge call below goes through _insforge_request, which:
+#   - uses a SHORT per-attempt timeout (IF_HTTP_TIMEOUT, default 8s) instead of the
+#     old 15s, so one slow write stalls a step by at most ~8s, not 15s+;
+#   - retries IF_HTTP_ATTEMPTS times (default 3) with 0.4s/0.8s backoff on a timeout
+#     or transient (5xx / network) error — a 4xx is NOT retried (it won't self-heal);
+#   - is BEST-EFFORT: it NEVER raises (returns the response body on success, or None),
+#     exactly like the callers already are, so a feed/phase/props write can never
+#     fail a (paid, delivered) conduct. Tunable via env IF_HTTP_TIMEOUT / IF_HTTP_ATTEMPTS.
+# --------------------------------------------------------------------------- #
+IF_HTTP_TIMEOUT = float(os.environ.get("IF_HTTP_TIMEOUT", "8"))
+IF_HTTP_ATTEMPTS = int(os.environ.get("IF_HTTP_ATTEMPTS", "3"))
+
+
+def _insforge_request(req, label):
+    """Perform a bounded, retried urllib InsForge request. Returns the response body
+    bytes on success or None. Best-effort: never raises. A 4xx HTTPError is treated
+    as terminal (no retry, no self-heal); timeouts and 5xx/network errors retry."""
+    last = None
+    for i in range(IF_HTTP_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=IF_HTTP_TIMEOUT) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            try:
+                detail = e.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                detail = ""
+            # 4xx = a real rejection (bad row / not-found); retrying won't help.
+            if 400 <= e.code < 500:
+                _log("%s HTTPError %s (terminal): %s" % (label, e.code, detail))
+                return None
+            last = "HTTP %s: %s" % (e.code, detail)
+        except Exception as e:
+            last = str(e)
+        if i < IF_HTTP_ATTEMPTS - 1:
+            time.sleep(0.4 * (2 ** i))  # 0.4s, 0.8s
+    _log("%s failed after %d attempts: %s" % (label, IF_HTTP_ATTEMPTS, last))
+    return None
+
+
+# --------------------------------------------------------------------------- #
 # Customer-price cap (Phase-C money policy): EVERY video is capped at $10 so the
 # demo never quotes a surprise price and the gate never declines. The cost-plus
 # menu's premium band can quote up to $25; we clamp the customer-facing price to
@@ -109,17 +151,7 @@ def _emit_event(run_id, msg, actor="hermes", level="info"):
         url, data=body, method="POST",
         headers={"Content-Type": "application/json",
                  "Authorization": "Bearer %s" % api_key})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            resp.read()
-    except urllib.error.HTTPError as e:
-        try:
-            detail = e.read().decode("utf-8", "replace")[:300]
-        except Exception:
-            detail = ""
-        _log("emit HTTPError %s for run %s: %s" % (e.code, run_id, detail))
-    except Exception as e:
-        _log("emit failed for run %s: %s" % (run_id, e))
+    _insforge_request(req, "emit(run %s)" % run_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -150,14 +182,7 @@ def _set_phase(run_id, phase):
             url, data=body, method="PATCH",
             headers={"Content-Type": "application/json",
                      "Authorization": "Bearer %s" % api_key})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            resp.read()
-    except urllib.error.HTTPError as e:
-        try:
-            detail = e.read().decode("utf-8", "replace")[:300]
-        except Exception:
-            detail = ""
-        _log("phase PATCH HTTPError %s for run %s: %s" % (e.code, run_id, detail))
+        _insforge_request(req, "phase PATCH(run %s)" % run_id)
     except Exception as e:
         _log("phase PATCH failed for run %s: %s" % (run_id, e))
 
@@ -206,11 +231,13 @@ def _insforge_get(path):
     req = urllib.request.Request(
         url, method="GET",
         headers={"Authorization": "Bearer %s" % api_key})
+    body = _insforge_request(req, "GET %s" % path)
+    if body is None:
+        return None
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return json.loads(body.decode("utf-8"))
     except Exception as e:
-        _log("insforge GET failed (%s): %s" % (path, e))
+        _log("insforge GET parse failed (%s): %s" % (path, e))
         return None
 
 
@@ -252,14 +279,7 @@ def _merge_run_props(run_id, patch):
             url, data=body, method="PATCH",
             headers={"Content-Type": "application/json",
                      "Authorization": "Bearer %s" % api_key})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            resp.read()
-    except urllib.error.HTTPError as e:
-        try:
-            detail = e.read().decode("utf-8", "replace")[:300]
-        except Exception:
-            detail = ""
-        _log("props PATCH HTTPError %s for run %s: %s" % (e.code, run_id, detail))
+        _insforge_request(req, "props PATCH(run %s)" % run_id)
     except Exception as e:
         _log("props PATCH failed for run %s: %s" % (run_id, e))
 
@@ -848,30 +868,67 @@ def _scrub_plan_unicode(obj):
 
 def _upload_to_insforge(mp4_path, object_key):
     """Replicate curated-claimer.js uploadVideo via the Node @insforge/sdk helper.
-    Returns (final_url_or_None, info_dict)."""
+    Returns (final_url_or_None, info_dict).
+
+    BOUNDED + RETRIED: the upload subprocess is per-attempt timeout-capped (the node
+    uploader's own remove+upload is idempotent, so a retry is safe) and retried up to
+    UPLOAD_ATTEMPTS times with backoff on a timeout / non-ok result. The rendered
+    video.mp4 stays on disk regardless, so an ultimate upload failure does NOT lose
+    the video — produce_and_ship returns final_url=None and the caller can re-ship."""
     if not os.path.exists(INSFORGE_UPLOADER):
         return None, {"error": "uploader missing: %s" % INSFORGE_UPLOADER}
+    # 413 GUARD: the InsForge gateway hard-rejects bodies over ~20-30MB (HTTP 413,
+    # deterministic, independent of timeout/plan). Skip the upload over UPLOAD_MAX_BYTES
+    # (default 18MB) instead of burning retries on a guaranteed 413 — the file stays on
+    # disk so produce_and_ship returns final_url=None and the run is re-shippable.
+    upload_max = int(os.environ.get("UPLOAD_MAX_BYTES", str(18 * 1024 * 1024)))
+    try:
+        sz = os.path.getsize(mp4_path)
+    except OSError as e:
+        return None, {"error": "stat failed: %s" % e}
+    if sz > upload_max:
+        _log("upload %s SKIPPED: %.1fMB > %dMB cap (would 413); file kept at %s"
+             % (object_key, sz / 1048576.0, upload_max // 1048576, mp4_path))
+        return None, {"error": "file too large for gateway (%.1fMB > %dMB); kept on disk for re-ship"
+                      % (sz / 1048576.0, upload_max // 1048576), "too_large": True}
     env = dict(os.environ)
     env.setdefault("INSFORGE_URL", INSFORGE_URL)
     if not env.get("INSFORGE_API_KEY"):
         return None, {"error": "INSFORGE_API_KEY not in env"}
-    try:
-        proc = subprocess.run(
-            [NODE_BIN, INSFORGE_UPLOADER, os.path.abspath(mp4_path), object_key],
-            cwd=WORKER_DIR, capture_output=True, text=True, timeout=300, env=env,
-        )
-    except subprocess.TimeoutExpired:
-        return None, {"error": "upload timed out"}
-    out = (proc.stdout or "").strip().splitlines()
-    last = out[-1] if out else ""
-    try:
-        res = json.loads(last)
-    except Exception:
-        return None, {"error": "non-JSON upload output", "stderr": (proc.stderr or "")[-800:],
-                       "stdout": (proc.stdout or "")[-800:]}
-    if not res.get("ok"):
-        return None, {"error": res.get("error"), "stderr": (proc.stderr or "")[-800:]}
-    return res.get("url"), {"key": res.get("key"), "bucket": res.get("bucket")}
+    attempts = int(os.environ.get("UPLOAD_ATTEMPTS", "3"))
+    per_attempt_timeout = int(os.environ.get("UPLOAD_TIMEOUT", "180"))
+    last_info = {"error": "upload not attempted"}
+    for i in range(attempts):
+        try:
+            proc = subprocess.run(
+                [NODE_BIN, INSFORGE_UPLOADER, os.path.abspath(mp4_path), object_key],
+                cwd=WORKER_DIR, capture_output=True, text=True,
+                timeout=per_attempt_timeout, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            last_info = {"error": "upload timed out (attempt %d/%d)" % (i + 1, attempts)}
+            _log("upload %s: %s" % (object_key, last_info["error"]))
+            if i < attempts - 1:
+                time.sleep(1.5 * (2 ** i))  # 1.5s, 3s
+            continue
+        out = (proc.stdout or "").strip().splitlines()
+        last = out[-1] if out else ""
+        try:
+            res = json.loads(last)
+        except Exception:
+            last_info = {"error": "non-JSON upload output", "stderr": (proc.stderr or "")[-800:],
+                         "stdout": (proc.stdout or "")[-800:]}
+            if i < attempts - 1:
+                time.sleep(1.5 * (2 ** i))
+            continue
+        if not res.get("ok"):
+            last_info = {"error": res.get("error"), "stderr": (proc.stderr or "")[-800:]}
+            _log("upload %s failed (attempt %d/%d): %s" % (object_key, i + 1, attempts, res.get("error")))
+            if i < attempts - 1:
+                time.sleep(1.5 * (2 ** i))
+            continue
+        return res.get("url"), {"key": res.get("key"), "bucket": res.get("bucket")}
+    return None, last_info
 
 
 def _scene_thumb_time_s(scene, fps, total_frames):
