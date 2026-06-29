@@ -16,20 +16,46 @@ const OWNER_EMAIL = 'denniswanglabs@gmail.com'
 const DELIVERED = new Set(['delivered', 'completed_with_warnings'])
 
 // ── COGS model (tunable rates) ───────────────────────────────────────────────
-// We COMPUTE a real per-video COGS here instead of trusting runs.cogs_cents — older
-// runs recorded 0/NULL and the pipeline under-counted ElevenLabs. The dominant cost
-// is voiceover (ElevenLabs, billed per character); the LLM/token cost is ~$0 on the
-// free Nemotron tier. COGS = ElevenLabs VO cost + token cost, recomputed fresh.
+// We COMPUTE a real per-video COGS here instead of trusting runs.cogs_cents — every run
+// today records cogs_cents = NULL. COGS has TWO real lines, both per-run-aware:
+//   (1) ElevenLabs voiceover — billed per character; the dominant cost.
+//   (2) Nemotron tokens — REAL OpenRouter spend, NOT zero. The planner (and on the
+//       Hermes path, the Conversion Read too) run on Nemotron via OpenRouter. Pricier
+//       550B (`ultra-paid`) runs cost more than free 120B (`super-free`) runs, so the
+//       token line is keyed on each run's brain + its actual recorded usage.cost.
 //
+// ── (1) ElevenLabs VO ──
 // ElevenLabs effective price (≈ the plan's $/char). MAIN cost driver.
 const ELEVENLABS_USD_PER_1K_CHARS = 0.22
 // VO characters ≈ video duration × speaking rate. ~14 chars/sec is a natural pace.
 const VO_CHARS_PER_SECOND = 14
 // Fallback VO length when a run didn't store its duration (≈ a typical ~30s VO).
 const DEFAULT_VO_CHARS = 450
-// Token/LLM cost per video. Free Nemotron tier is genuinely ~$0; a labeled knob in
-// case a paid run's real token cost is ever wired in.
-const TOKEN_USD_PER_VIDEO = 0
+
+// ── (2) Nemotron token COGS ──
+// PREFERRED: the ACTUAL OpenRouter spend the pipeline stamps at
+// runs.selection.planner_usage.cost (e.g. $0.0047 for a 550B plan call). The plan call's
+// cost is recorded; the Conversion Read + design_brief calls (also Nemotron) are NOT
+// persisted, so we gross the recorded plan cost up by this factor to cover them. Mirrors
+// the worker's own model (agent-host/vm/mcp_toolserver.py `_real_token_cogs_cents`: real
+// plan usage.cost + a ~0.6× Read/brief estimate → ×1.6 total).
+const READ_BRIEF_GROSS_UP = 1.6
+
+// FALLBACK (run on a paid brain but usage.cost not recorded): estimate from the brain's
+// OpenRouter list rate × a conservative tokens/video estimate. Rates are USD per 1M tokens,
+// verified against OpenRouter (2026-06-29) and matching brain.py:
+//   ultra-paid  = nvidia/nemotron-3-ultra-550b-a55b : $0.50 in / $2.20 out per 1M
+//   super-paid  = nvidia/nemotron-3-super-120b-a12b : $0.09 in / $0.45 out per 1M (≈OR $0.085/$0.40)
+//   super-free  = nvidia/nemotron-3-super-120b-a12b:free : $0 / $0 (free tier — genuinely ~$0)
+const BRAIN_RATE_USD_PER_1M: Record<string, { input: number; output: number }> = {
+  'ultra-paid': { input: 0.5, output: 2.2 },
+  'super-paid': { input: 0.09, output: 0.45 },
+  'super-free': { input: 0, output: 0 },
+}
+// Conservative tokens/video for the estimate fallback (≈ the actuals observed: ~6.3k prompt
+// + ~0.75k completion per plan call). Grossed up the same ×1.6 for the Read/brief calls.
+const EST_PROMPT_TOKENS_PER_VIDEO = 6300
+const EST_COMPLETION_TOKENS_PER_VIDEO = 750
 
 // Estimated VO character count for a run — exact-ish from stored duration, else default.
 function voCharsFor(row: AnalyticsRunRow): number {
@@ -37,12 +63,29 @@ function voCharsFor(row: AnalyticsRunRow): number {
   return DEFAULT_VO_CHARS
 }
 
-// Real per-video COGS in CENTS: ElevenLabs (chars × rate) + token cost. Only delivered
-// videos incur production cost — a queued/failed run that never rendered cost ~nothing.
+// Per-run Nemotron token COGS in USD. ACTUAL recorded spend when present (×gross-up for the
+// un-persisted Read/brief calls); else a labeled estimate from the run's brain rate.
+// super-free (120B free tier) → $0, truthfully.
+function tokenUsdFor(row: AnalyticsRunRow): number {
+  if (row.planner_cost_usd != null && row.planner_cost_usd >= 0) {
+    return row.planner_cost_usd * READ_BRIEF_GROSS_UP
+  }
+  const rate = BRAIN_RATE_USD_PER_1M[(row.brain || 'super-free').toLowerCase()] ?? {
+    input: 0,
+    output: 0,
+  }
+  const est =
+    (EST_PROMPT_TOKENS_PER_VIDEO / 1_000_000) * rate.input +
+    (EST_COMPLETION_TOKENS_PER_VIDEO / 1_000_000) * rate.output
+  return est * READ_BRIEF_GROSS_UP
+}
+
+// Real per-video COGS in CENTS: ElevenLabs (chars × rate) + Nemotron token cost. Only
+// delivered videos incur production cost — a queued/failed run that never rendered cost ~nothing.
 function cogsCentsFor(row: AnalyticsRunRow): number {
   if (!DELIVERED.has(row.status)) return 0
   const elevenUsd = (voCharsFor(row) / 1000) * ELEVENLABS_USD_PER_1K_CHARS
-  return (elevenUsd + TOKEN_USD_PER_VIDEO) * 100
+  return (elevenUsd + tokenUsdFor(row)) * 100
 }
 
 type Loaded = { authorized: boolean; rows: AnalyticsRunRow[] }
@@ -215,8 +258,8 @@ export default function AnalyticsPage() {
         </div>
 
         <p className="mt-2.5 text-xs leading-relaxed text-slate-400">
-          COGS = real per-video model + voice cost (near-zero on the free Nemotron tier);
-          fixed infra not included.
+          COGS = real per-video voice (ElevenLabs) + Nemotron token cost — actual OpenRouter
+          spend per run (550B runs cost more than free 120B); fixed infra not included.
         </p>
 
         {/* Secondary metrics */}
@@ -349,10 +392,14 @@ export default function AnalyticsPage() {
         <p className="mt-5 text-xs leading-relaxed text-slate-400">
           Revenue reflects Stripe <span className="font-medium">test-mode</span> checkouts. COGS
           per delivered video = ElevenLabs voiceover ({ELEVENLABS_USD_PER_1K_CHARS.toFixed(2)}
-          {' '}$/1k chars, the main driver) + token cost (≈$0 on the free Nemotron tier).
-          It is <span className="font-medium">estimated</span> for older runs (exact VO
-          character counts weren&apos;t recorded — VO length is inferred from the rendered
-          video duration at ~{VO_CHARS_PER_SECOND} chars/sec) and exact for newer ones.
+          {' '}$/1k chars, the main driver) + <span className="font-medium">Nemotron token cost</span>.
+          The token line is the <span className="font-medium">actual</span> OpenRouter spend
+          recorded per run (planner <span className="font-mono">usage.cost</span>, grossed up
+          {' '}{READ_BRIEF_GROSS_UP}× for the un-logged Conversion Read + design-brief calls);
+          when a run didn&apos;t record it, it&apos;s estimated from the run&apos;s brain rate
+          (550B <span className="font-mono">ultra-paid</span> ≈ $0.0075/video; free 120B
+          {' '}<span className="font-mono">super-free</span> ≈ $0). VO length is exact when the
+          render duration was stored, else inferred at ~{VO_CHARS_PER_SECOND} chars/sec.
           Profit = price − COGS.
         </p>
       </main>

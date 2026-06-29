@@ -307,9 +307,9 @@ export async function readInsideRun(input: { runId: string; accessToken: string 
 // client bypasses RLS, so this is owner-only — the gate is a real security boundary,
 // not a cosmetic one. We verify the token server-side and require the verified email
 // to equal OWNER_EMAIL before reading a single row. A non-owner gets `authorized:
-// false` and NO data. (cogs_cents is ~0 on most runs today; a later pipeline pass
-// populates real token-cost COGS — profit = price − cogs auto-follows whatever's
-// stored, so the page needs no change once COGS is real.)
+// false` and NO data. (runs.cogs_cents is NULL on every run today, so the page does NOT
+// trust it — it recomputes COGS from ElevenLabs VO + REAL Nemotron token spend, reading
+// the per-run `brain` rate and `selection.planner_usage.cost` we surface below.)
 
 export interface AnalyticsRunRow {
   id: string
@@ -326,6 +326,15 @@ export interface AnalyticsRunRow {
    *  when both are present (else null). Used to estimate VO cost (ElevenLabs is billed per
    *  character; characters ≈ duration × speaking rate). Exact for runs that stored frames. */
   vo_seconds: number | null
+  /** The Nemotron BRAIN this run planned on (runs.brain column): 'ultra-paid' = 550B
+   *  (`nvidia/nemotron-3-ultra-550b-a55b`, the pricier flagship used on the Hermes path),
+   *  'super-free'/'super-paid' = 120B. Drives the per-run token-COGS rate (550B costs more). */
+  brain: string | null
+  /** REAL OpenRouter spend (USD) for this run's PLANNER call, read from
+   *  runs.selection.planner_usage.cost — the exact prompt+completion cost OpenRouter billed
+   *  (e.g. 0.0047 for a 550B plan). null when not recorded (older/free runs). The page uses
+   *  this ACTUAL when present; otherwise it estimates from the brain + storyboard size. */
+  planner_cost_usd: number | null
 }
 
 export interface AnalyticsPayload {
@@ -345,12 +354,12 @@ export async function readAnalytics(
 
   const db = adminClient()
   // Whole-business read: all runs, newest first. We only select the economics columns
-  // (no plan/props_edited blobs) so the payload stays light. `props` is selected to
-  // extract producer; we strip it to a single string before returning.
+  // (no plan/props_edited blobs) so the payload stays light. `props` → producer + duration;
+  // `brain` → the per-run token-COGS rate; `selection` → the REAL planner OpenRouter spend.
   const { data, error } = await db.database
     .from('runs')
     .select(
-      'id, created_at, brand, company_url, status, price_cents, cogs_cents, final_url, props',
+      'id, created_at, brand, company_url, status, price_cents, cogs_cents, final_url, brain, props, selection',
     )
     .order('created_at', { ascending: false })
   if (error) return { authorized: true, rows: [] }
@@ -371,6 +380,19 @@ export async function readAnalytics(
     const totalFrames = typeof props.total_frames === 'number' ? props.total_frames : null
     const voSeconds = fps && fps > 0 && totalFrames && totalFrames > 0 ? totalFrames / fps : null
 
+    // REAL planner token spend (USD). The pipeline stamps the exact OpenRouter cost at
+    // runs.selection.planner_usage.cost (older runs also mirror it under props.selection).
+    // We surface it as an ACTUAL so the page's token-COGS is real, not estimated, when present.
+    const selection = (row.selection && typeof row.selection === 'object'
+      ? row.selection
+      : props.selection && typeof props.selection === 'object'
+        ? props.selection
+        : {}) as Record<string, unknown>
+    const usage = (selection.planner_usage && typeof selection.planner_usage === 'object'
+      ? selection.planner_usage
+      : {}) as Record<string, unknown>
+    const plannerCostUsd = typeof usage.cost === 'number' && usage.cost >= 0 ? usage.cost : null
+
     return {
       id: String(row.id),
       created_at: String(row.created_at),
@@ -382,6 +404,8 @@ export async function readAnalytics(
       final_url: (row.final_url as string | null) ?? null,
       producer,
       vo_seconds: voSeconds,
+      brain: typeof row.brain === 'string' && row.brain ? row.brain : null,
+      planner_cost_usd: plannerCostUsd,
     }
   })
   return { authorized: true, rows }
