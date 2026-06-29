@@ -17,9 +17,17 @@ import { formatCents, type Run, type RunEvent } from '../../lib/types'
 // Pipeline stages in display order. `phases` lists every backend phase string
 // (from orchestrator.py / build_runner.py set_phase calls) that maps to it.
 const STAGES: { label: string; phases: string[] }[] = [
-  { label: 'Reading the site', phases: [] }, // implicit pre-planning step
+  // Reading now has a REAL backend phase ('analyzing'): the OPTION-A split runs a
+  // dedicated read->plan->price pass FIRST, so the Reading stage reflects genuine
+  // state instead of being purely implicit. ('reading' kept as an alias.)
+  { label: 'Reading the site', phases: ['analyzing', 'reading'] },
   { label: 'Planning', phases: ['planning'] },
-  { label: 'Pricing', phases: ['pricing', 'earning', 'awaiting_payment'] },
+  // 'awaiting_payment' is NO LONGER mapped onto Pricing's phases. In the OPTION-A
+  // flow read/plan/price genuinely complete BEFORE the pay prompt, so a parked run
+  // must show Reading+Planning+Pricing DONE and Pricing as the reached milestone —
+  // handled explicitly in activeStageIndex (NOT by listing awaiting_payment here,
+  // which would mis-mark the Pricing row's own done/active state).
+  { label: 'Pricing', phases: ['pricing', 'earning'] },
   { label: 'Producing scenes', phases: ['producing'] },
   { label: 'Voiceover', phases: ['voiceover'] },
   { label: 'Stitching', phases: ['stitching'] },
@@ -31,6 +39,11 @@ const STAGES: { label: string; phases: string[] }[] = [
 function activeStageIndex(phase: string | null): number {
   if (!phase) return 0
   const p = phase.toLowerCase()
+  // OPTION A: parked awaiting payment. Read/plan/price already ran, so anchor on
+  // the Pricing milestone (index 2): Reading + Planning show DONE, Pricing is the
+  // current/reached stage, Producing+ stay pending until payment clears. This is
+  // HONEST now that the plan pass runs before the gate (the old flow paid first).
+  if (p === 'awaiting_payment') return 2
   for (let i = STAGES.length - 1; i >= 0; i--) {
     if (STAGES[i].phases.includes(p)) return i
   }

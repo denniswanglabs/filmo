@@ -63,7 +63,22 @@ const RENDER_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS || 1500000) // 25
 const CLAIMER_MODE = (process.env.CLAIMER_MODE || 'direct').trim().toLowerCase()
 const HERMES_PRODUCER = process.env.HERMES_PRODUCER || 'hetzner-hermes'
 const HERMES_SANDBOX = process.env.HERMES_SANDBOX || 'filmo'
+// Single-conduct skill (the auto path / legacy single atomic conduct): runs all
+// five tools read->plan->price->gate->produce in one shot.
 const HERMES_SKILL = process.env.HERMES_SKILL || 'filmo-producer'
+// ── Option A: SPLIT conduct skills ──────────────────────────────────────────
+// The split lets us PARK at a REAL Stripe payment between the price and the
+// produce. Two scoped skills replace the single filmo-producer conduct for the
+// human-pay path (and, by default, the auto path too — see runHermesConduct below):
+//   HERMES_PLAN_SKILL    -> conversion_read, plan, price ONLY; prints
+//                           "Planned: plan_id=<id> price_cents=<n> (<N> scenes)."
+//   HERMES_PRODUCE_SKILL -> produce_and_ship ONLY, reusing the cached plan_id;
+//                           prints "Shipped: <url> (<N> scenes)."
+// Both are ADDITIVE — filmo-producer is left intact as a fallback. Reversibility:
+// set HERMES_SPLIT=false (env) to use the old single atomic conduct everywhere.
+const HERMES_PLAN_SKILL = process.env.HERMES_PLAN_SKILL || 'filmo-plan'
+const HERMES_PRODUCE_SKILL = process.env.HERMES_PRODUCE_SKILL || 'filmo-produce'
+const HERMES_SPLIT = String(process.env.HERMES_SPLIT ?? 'true').trim().toLowerCase() !== 'false'
 const HERMES_BUDGET_CENTS = Number(process.env.HERMES_BUDGET_CENTS || 5000)
 const HERMES_TIMEOUT_S = Number(process.env.HERMES_TIMEOUT_S || 900) // nemoclaw exec --timeout
 const NEMOCLAW_BIN = process.env.NEMOCLAW_BIN || 'nemoclaw'
@@ -392,53 +407,64 @@ function tagProducer(props) {
   return { ...base, producer: PRODUCER, produced_on: 'hetzner-vm' }
 }
 
-// ─────────────────────── Hermes-mode produce (Phase C) ───────────────────────
-// Conduct the produce step through the Hermes agent in the NemoClaw sandbox.
-// Hermes drives the 5 filmo-host MCP tools end-to-end; produce_and_ship renders
-// AND uploads to InsForge, returning a final_url. We parse `Shipped: <final_url>`.
-// Returns { ok, finalUrl, sceneCount, declined, raw } — NEVER throws (so the
-// caller can fall back deterministically on any failure).
-function runHermesConduct(url, goal, budgetCents, runId) {
+// OPTION A: stamp the cached plan handle onto the run's props so the run carries the
+// exact plan_id the produce pass will reuse (durable handle for debugging / audit /
+// a re-ship). Merges into existing props (never clobbers other keys).
+function tagPlanHandle(props, planId) {
+  const base = (props && typeof props === 'object') ? props : {}
+  return planId ? { ...base, plan_id: planId, plan_pass: 'hermes-split' } : base
+}
+
+// ─────────────────────── Hermes-mode conduct (Phase C / Option A) ─────────────
+// Run a Hermes conduct in the NemoClaw sandbox with a given skill + prompt, and
+// return the agent's raw final lines. The split (Option A) runs TWO conducts:
+//   1. PLAN pass  (filmo-plan)    -> conversion_read, plan, price; prints
+//      "Planned: plan_id=<id> price_cents=<n> (<N> scenes)." We park at a REAL
+//      Stripe payment between this and the produce pass.
+//   2. PRODUCE pass (filmo-produce) -> produce_and_ship ONLY, reusing the cached
+//      plan_id; prints "Shipped: <url> (<N> scenes)." (NO re-read/re-plan/re-price.)
+// runHermesSkill is the shared spawn+base64+capture plumbing; the two callers
+// (runHermesPlan / runHermesProduce) own the per-pass prompt + output parsing.
+
+// POSIX single-quote a string for safe embedding in `bash -lc '...'`.
+function shquote(s) { return `'` + String(s).replace(/'/g, `'\\''`) + `'` }
+
+// Spawn ONE `hermes chat -s <skill> -q <prompt>` conduct inside the sandbox and
+// resolve { ok, code, raw } with the agent's tail output. NEVER throws — every
+// failure is surfaced as { ok:false } so the caller can fall back deterministically.
+// (This is the exact proven Phase B plumbing extracted from the old single conduct:
+// base64 the whole inner script so the prompt survives every nested shell layer,
+// /dev/null stdin so nemoclaw exec doesn't hang, per-job .hermes hygiene wipe.)
+function runHermesSkill(skill, prompt) {
   return new Promise((resolve) => {
-    // Single-line prompt the filmo-producer skill conducts. The skill instructs
-    // Hermes to thread the plan_id HANDLE (not the full plan) between tools, which
-    // eliminates the unicode (u2014) corruption and cuts token cost. The run_id is
-    // threaded into EVERY tool call so each MCP tool emits a run_events row (the
-    // LIVE "watch the agent work" feed), sponsor-tagged via the actor column.
-    const prompt =
-      `Conduct the curated Filmo pipeline end-to-end for url=${url} ` +
-      `with goal=${JSON.stringify(goal)} and budget_cents=${budgetCents}. ` +
-      `Pass run_id=${runId} to EVERY one of the five filmo-host MCP tools so the ` +
-      `live activity feed records each step. ` +
-      `Call the five tools exactly once each in order ` +
-      `(conversion_read, plan, price, gate, produce_and_ship). Pass the plan_id ` +
-      `handle (not the full plan) from plan into price and produce_and_ship. ` +
-      `End with the Shipped line containing the final_url.`
-    // Inner sandbox script: source the OpenRouter key, run hermes headless (-Q),
-    // preload the filmo-producer skill, print the agent's final lines. We pass the
-    // ENTIRE inner script (prompt included) as a SINGLE base64 argv token and
-    // decode+run it inside the sandbox. This is the proven Phase B pattern: it
-    // eliminates ALL nested-quote fragility across the node->nemoclaw->openshell->
-    // bash layers (a mangled `-q` arg made hermes hang on interactive input —
-    // the observed "session alive, zero MCP calls" wedge). The base64 blob is
-    // opaque to every shell layer, so the prompt reaches `hermes -q` verbatim.
     // PER-JOB HYGIENE: wipe the agent's writable, job-carrying state in
     // /sandbox/.hermes BEFORE each conduct so one job cannot contaminate the next
     // (e.g. a prompt-injected job planting poisoned memory/session/db state). We
     // remove ONLY the mutable contamination surface — sessions, the session DB,
     // memories, logs, and caches — and PRESERVE config + credentials (.env,
     // config.yaml, auth.json, SOUL.md, bin/, skills/) so the conduct still runs.
+    // NOTE: in the SPLIT flow the plan pass and the produce pass are SEPARATE
+    // conducts; the cached plan lives in the PIPELINE (runs/<plan_id>/plan.json on
+    // the toolserver host), NOT in /sandbox/.hermes, so wiping sandbox state
+    // between the two passes does NOT lose the plan — the produce pass re-loads it
+    // by plan_id via the MCP tool. The hygiene only resets the agent's own memory.
     const hygiene =
       `for d in sessions memories logs cache audio_cache image_cache; do ` +
       `rm -rf "/sandbox/.hermes/$d" 2>/dev/null; done; ` +
       `rm -f /sandbox/.hermes/state.db /sandbox/.hermes/.skills_prompt_snapshot.json 2>/dev/null; ` +
       `true\n`
+    // Inner sandbox script: source the OpenRouter key, run hermes headless (-Q),
+    // preload the scoped skill, print the agent's final lines. We pass the ENTIRE
+    // inner script (prompt included) as a SINGLE base64 argv token and decode+run
+    // it inside the sandbox — eliminating ALL nested-quote fragility across the
+    // node->nemoclaw->openshell->bash layers (a mangled `-q` arg made hermes hang
+    // on interactive input — the observed "session alive, zero MCP calls" wedge).
     const inner =
       `export HOME=/sandbox\n` +
       `set -a; [ -f /sandbox/.orkey ] && . /sandbox/.orkey; set +a\n` +
       `cd /sandbox\n` +
       hygiene +
-      `hermes chat -Q -s ${HERMES_SKILL} -q ${shquote(prompt)} 2>&1 | tail -60\n`
+      `hermes chat -Q -s ${skill} -q ${shquote(prompt)} 2>&1 | tail -60\n`
     const b64 = Buffer.from(inner, 'utf8').toString('base64')
     // nemoclaw exec uses its OWN --timeout bound (do NOT wrap in a host timeout).
     // The single-quoted b64 has no special chars, so this argv is quote-safe.
@@ -452,27 +478,94 @@ function runHermesConduct(url, goal, budgetCents, runId) {
     // forever (observed: session alive, zero MCP calls, never returns). Ignoring
     // stdin makes the exec return as it does from an interactive shell.
     const child = spawn(NEMOCLAW_BIN, args, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
-    child.stdout.on('data', (d) => { out += d.toString(); try { process.stdout.write(`  [hermes] ${d}`) } catch {} })
-    child.stderr.on('data', (d) => { out += d.toString(); try { process.stderr.write(`  [hermes!] ${d}`) } catch {} })
-    child.on('error', (e) => { if (done) return; done = true; resolve({ ok: false, error: 'spawn error: ' + String(e), raw: out }) })
-    child.on('close', (code) => {
-      if (done) return; done = true
-      // Parse the conductor's final lines. Success: `Shipped: <url> (N scenes).`
-      const shipped = out.match(/Shipped:\s*(\S+)\s*(?:\((\d+)\s*scenes?\))?/i)
-      const declined = /Gate declined/i.test(out)
-      if (shipped && /^https?:\/\//i.test(shipped[1])) {
-        resolve({ ok: true, finalUrl: shipped[1].replace(/[.,)]+$/, ''), sceneCount: shipped[2] ? Number(shipped[2]) : null, raw: out })
-      } else if (declined) {
-        resolve({ ok: false, declined: true, error: 'gate declined', raw: out })
-      } else {
-        resolve({ ok: false, error: `no Shipped line (exit ${code})`, raw: out })
-      }
-    })
+    child.stdout.on('data', (d) => { out += d.toString(); try { process.stdout.write(`  [hermes:${skill}] ${d}`) } catch {} })
+    child.stderr.on('data', (d) => { out += d.toString(); try { process.stderr.write(`  [hermes:${skill}!] ${d}`) } catch {} })
+    child.on('error', (e) => { if (done) return; done = true; resolve({ ok: false, code: -1, error: 'spawn error: ' + String(e), raw: out }) })
+    child.on('close', (code) => { if (done) return; done = true; resolve({ ok: code === 0, code, raw: out }) })
   })
 }
 
-// POSIX single-quote a string for safe embedding in `bash -lc '...'`.
-function shquote(s) { return `'` + String(s).replace(/'/g, `'\\''`) + `'` }
+// PLAN pass (Option A, half 1): conduct conversion_read -> plan -> price via the
+// filmo-plan skill, parse the "Planned: plan_id=<id> price_cents=<n> (<N> scenes)."
+// line. Returns { ok, planId, priceCents, sceneCount, raw } — NEVER throws.
+function runHermesPlan(url, goal, runId) {
+  // Scoped prompt: the filmo-plan skill enforces the 3-tool order + the parseable
+  // final line, but we restate the scope in the prompt as belt-and-suspenders.
+  const prompt =
+    `Conduct ONLY the read->plan->price half of the curated Filmo pipeline for ` +
+    `url=${url} with goal=${JSON.stringify(goal)}. ` +
+    `Pass run_id=${runId} to EVERY tool so the live activity feed records each step. ` +
+    `Call exactly three tools, once each, in order: conversion_read, plan, price. ` +
+    `Do NOT call gate or produce_and_ship — production happens in a LATER pass ` +
+    `after the customer pays. Pass the plan_id handle (not the full plan) from ` +
+    `plan into price. ` +
+    `End with EXACTLY this line: ` +
+    `Planned: plan_id=<the plan_id> price_cents=<the integer price_cents> (<N> scenes).`
+  return runHermesSkill(HERMES_PLAN_SKILL, prompt).then((res) => {
+    const out = res.raw || ''
+    // Parse "Planned: plan_id=<id> price_cents=<n> (N scenes)." (order/spacing tolerant).
+    const planId = (out.match(/plan_id\s*[=:]\s*([A-Za-z0-9._-]+)/i) || [])[1] || null
+    const priceM = out.match(/price_cents\s*[=:]\s*(\d+)/i)
+    const priceCents = priceM ? Number(priceM[1]) : null
+    const sceneM = out.match(/\((\d+)\s*scenes?\)/i)
+    const sceneCount = sceneM ? Number(sceneM[1]) : null
+    if (planId && priceCents != null && priceCents > 0) {
+      return { ok: true, planId, priceCents, sceneCount, raw: out }
+    }
+    return { ok: false, error: `plan pass: no parseable Planned line (planId=${planId}, priceCents=${priceCents}, exit ${res.code})`, raw: out }
+  })
+}
+
+// PRODUCE pass (Option A, half 2): conduct produce_and_ship ONLY via the
+// filmo-produce skill, REUSING the cached plan_id (no re-read/re-plan/re-price).
+// Parse the "Shipped: <url> (N scenes)." line. Returns { ok, finalUrl, sceneCount,
+// raw } — NEVER throws.
+function runHermesProduce(url, planId, runId) {
+  const prompt =
+    `Conduct ONLY the produce->ship half of the curated Filmo pipeline. The ` +
+    `product was already read, planned, and priced, and the customer has PAID. ` +
+    `Reuse the EXISTING plan via its handle: call produce_and_ship exactly once ` +
+    `with url=${url}, plan_id=${planId}, and run_id=${runId}. ` +
+    `Do NOT call conversion_read, plan, price, or gate — they already ran and the ` +
+    `customer paid against that exact plan. ` +
+    `End with the Shipped line containing the final_url.`
+  return runHermesSkill(HERMES_PRODUCE_SKILL, prompt).then((res) => {
+    const out = res.raw || ''
+    const shipped = out.match(/Shipped:\s*(\S+)\s*(?:\((\d+)\s*scenes?\))?/i)
+    if (shipped && /^https?:\/\//i.test(shipped[1])) {
+      return { ok: true, finalUrl: shipped[1].replace(/[.,)]+$/, ''), sceneCount: shipped[2] ? Number(shipped[2]) : null, raw: out }
+    }
+    return { ok: false, error: `produce pass: no Shipped line (exit ${res.code})`, raw: out }
+  })
+}
+
+// SINGLE atomic conduct (legacy / fallback / auto path when HERMES_SPLIT=false):
+// the filmo-producer skill drives all five tools end-to-end in ONE conduct
+// (conversion_read -> plan -> price -> gate -> produce_and_ship) and prints the
+// Shipped line. Kept intact for reversibility — if the split is disabled this is
+// the exact previous behaviour. Returns { ok, finalUrl, sceneCount, declined, raw }.
+function runHermesConduct(url, goal, budgetCents, runId) {
+  const prompt =
+    `Conduct the curated Filmo pipeline end-to-end for url=${url} ` +
+    `with goal=${JSON.stringify(goal)} and budget_cents=${budgetCents}. ` +
+    `Pass run_id=${runId} to EVERY one of the five filmo-host MCP tools so the ` +
+    `live activity feed records each step. ` +
+    `Call the five tools exactly once each in order ` +
+    `(conversion_read, plan, price, gate, produce_and_ship). Pass the plan_id ` +
+    `handle (not the full plan) from plan into price and produce_and_ship. ` +
+    `End with the Shipped line containing the final_url.`
+  return runHermesSkill(HERMES_SKILL, prompt).then((res) => {
+    const out = res.raw || ''
+    const shipped = out.match(/Shipped:\s*(\S+)\s*(?:\((\d+)\s*scenes?\))?/i)
+    const declined = /Gate declined/i.test(out)
+    if (shipped && /^https?:\/\//i.test(shipped[1])) {
+      return { ok: true, finalUrl: shipped[1].replace(/[.,)]+$/, ''), sceneCount: shipped[2] ? Number(shipped[2]) : null, raw: out }
+    } else if (declined) {
+      return { ok: false, declined: true, error: 'gate declined', raw: out }
+    }
+    return { ok: false, error: `no Shipped line (exit ${res.code})`, raw: out }
+  })
+}
 
 // Deliver a Hermes-produced run: stamp final_url + producer=hetzner-hermes,
 // mark the job done, emit a producer line. Returns true on success.
@@ -528,8 +621,16 @@ function runGatePy(args) {
 // then polls get_session_status until 'paid' or timeout. Returns true when paid;
 // false on create-failure / timeout (caller must NOT proceed to produce). On any
 // non-paid outcome the run + job are left in a clean failed state.
-async function paymentGate(job, runId, runKey, safeUrl) {
-  const priceCents = GATE_PRICE_CENTS
+//
+// OPTION A: `realPriceCents` is the REAL price the plan pass computed (from the
+// price tool, already capped at $10 server-side). We charge that — NOT the flat
+// $10 cap. The GATE_PRICE_CENTS cap is kept as a defensive CEILING here:
+// price = min(real, cap), so a parsing slip can never overcharge. A missing/
+// non-positive real price falls back to the cap (the previous behaviour) so the
+// gate still produces a valid Checkout rather than refusing a $0 session.
+async function paymentGate(job, runId, runKey, safeUrl, realPriceCents) {
+  const haveReal = Number.isInteger(realPriceCents) && realPriceCents > 0
+  const priceCents = haveReal ? Math.min(realPriceCents, GATE_PRICE_CENTS) : GATE_PRICE_CENTS
   const brand = String(safeUrl || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0] || 'your product'
   const productName = `${brand} promo video`
   const successUrl = `${FILMO_PUBLIC_BASE}/runs/${runId}?paid=1`
@@ -556,9 +657,14 @@ async function paymentGate(job, runId, runKey, safeUrl) {
     const status = (st.ok && st.payment_status) ? st.payment_status : lastStatus
     lastStatus = status
     if (status === 'paid' || status === 'no_payment_required') {
-      await setRun(runId, { phase: 'planning' }) // clear awaiting_payment so the UI advances
+      // OPTION A: read/plan/price ALREADY ran (before this gate) \u2014 the next step is
+      // production. Clear awaiting_payment by advancing straight to 'producing' so
+      // the UI steps FORWARD (never back to Planning). The produce pass's
+      // produce_and_ship tool also _set_phase("producing") at its start; setting it
+      // here first avoids a flash of the old phase between paid and the conduct.
+      await setRun(runId, { phase: 'producing' })
       await emit(runId, `Payment received ($${(priceCents/100).toFixed(2)}, test 4242). Releasing production.`, 'stripe')
-      log(`  PAID run ${runKey} \u2014 proceeding to conduct`)
+      log(`  PAID run ${runKey} \u2014 proceeding to produce (plan already cached)`)
       return true
     }
     if (Date.now() >= deadline) {
@@ -705,24 +811,85 @@ async function processJob(job) {
     return
   }
 
-  // 0.4) PAYMENT GATE (human-pays): collect a REAL Stripe TEST payment BEFORE any
-  //      produce. Fires only when PAYMENTS_REQUIRED (default true) AND
-  //      pay_mode==='human'; auto jobs and a PAYMENTS_REQUIRED=false bypass go
-  //      straight to conduct. On create-fail / timeout the run is already marked
-  //      failed inside paymentGate \u2014 we return (NEVER conduct an unpaid job).
-  //      `paidViaGate` lets the deterministic FALLBACK path below auto-resolve its
-  //      own build_runner._payment_gate (PRODUCER_SIMULATE_PAID=1) so a fallback
-  //      after the gate can NEVER charge a second time.
+  // OPTION A flow: the payment gate now fires BETWEEN price and produce (inside the
+  // split block below), so it parks with the REAL computed price + the already-built
+  // plan. The gate fires only when PAYMENTS_REQUIRED (default true) AND
+  // pay_mode==='human'; auto jobs and PAYMENTS_REQUIRED=false go straight through.
+  // On create-fail / timeout the run is marked failed inside paymentGate and we
+  // return (NEVER produce an unpaid job).
+  //   `paidViaGate` lets the deterministic FALLBACK path below auto-resolve its own
+  //   build_runner._payment_gate (PRODUCER_SIMULATE_PAID=1) so a fallback after a
+  //   collected payment can NEVER charge a second time.
   let paidViaGate = false
-  if (PAYMENTS_REQUIRED && (p.pay_mode || 'auto') === 'human') {
-    const paid = await paymentGate(job, runId, runKey, safeUrl)
-    if (!paid) return
-    paidViaGate = true
-  }
+  const payMode = (p.pay_mode || 'auto')
 
-  // 0.5) HERMES MODE (Phase C): conduct the produce step via the Hermes agent.
-  //      On ANY failure/timeout, FALL BACK to the deterministic path below.
-  if (CLAIMER_MODE === 'hermes') {
+  // ── 0.5) HERMES MODE + OPTION A SPLIT ───────────────────────────────────────
+  // The CONDUCT is split so payment is parked between PRICE and PRODUCE:
+  //   read -> plan -> price  (PLAN pass, filmo-plan)
+  //     -> [human-pay] park at awaiting_payment with the REAL price + the plan
+  //     -> pay -> produce_and_ship (PRODUCE pass, filmo-produce, REUSES plan_id).
+  // Hermes still conducts BOTH halves. On ANY failure of either pass we FALL BACK
+  // to the deterministic build_runner path below (render NEVER fails). Reversibility:
+  // HERMES_SPLIT=false keeps the old single atomic conduct (after a flat-cap gate).
+  if (CLAIMER_MODE === 'hermes' && HERMES_SPLIT) {
+    try {
+      const goal = p.goal || 'A 30-second brand explainer'
+
+      // (a) PLAN pass — read -> plan -> price. Set 'analyzing' so the Reading stage
+      //     shows active while conversion_read runs; the plan tool then _set_phase
+      //     'planning' and the price tool 'pricing', so the stepper advances HONESTLY
+      //     (Reading/Planning/Pricing genuinely complete here, BEFORE any pay prompt).
+      //     Yields a real price_cents + plan_id.
+      await emit(runId, 'Conducting read -> plan -> price via Hermes agent (NemoClaw sandbox).', 'hermes')
+      await setRun(runId, { phase: 'analyzing' })
+      const planRes = await runHermesPlan(safeUrl, goal, runId)
+      if (!planRes.ok || !planRes.planId || !(planRes.priceCents > 0)) {
+        log(`  ! hermes PLAN pass failed (${planRes.error}); falling back to deterministic build_runner`)
+        await emit(runId, `Plan pass failed (${planRes.error || 'no plan'}); falling back to deterministic render.`, 'hermes', 'warn')
+        throw new Error('plan pass failed: ' + (planRes.error || 'no plan'))
+      }
+      const planId = planRes.planId
+      const realPriceCents = planRes.priceCents
+      // Persist the plan handle + the real price onto the run so the gate (and the
+      // run page) read the REAL computed price, not the flat cap.
+      await setRun(runId, { phase: 'pricing', price_cents: realPriceCents, props: tagPlanHandle(readProps(runKey), planId) })
+      log(`  PLAN pass ok: plan_id=${planId} price_cents=${realPriceCents} (${planRes.sceneCount ?? '?'} scenes)`)
+
+      // (b) PAYMENT GATE (human-pays only) — park at awaiting_payment with the REAL
+      //     price + the already-built plan. On create-fail / timeout the run is
+      //     marked failed inside paymentGate; we return (NEVER produce an unpaid job).
+      if (PAYMENTS_REQUIRED && payMode === 'human') {
+        const paid = await paymentGate(job, runId, runKey, safeUrl, realPriceCents)
+        if (!paid) return
+        paidViaGate = true
+      }
+
+      // (c) PRODUCE pass — produce_and_ship ONLY, REUSING the cached plan_id (no
+      //     re-read/re-plan/re-price, so no double charge and the customer gets the
+      //     exact plan they paid for).
+      await emit(runId, 'Payment cleared - producing the planned video via Hermes agent.', 'hermes')
+      await setRun(runId, { phase: 'producing' })
+      const prodRes = await runHermesProduce(safeUrl, planId, runId)
+      if (prodRes.ok && prodRes.finalUrl) {
+        await deliverHermesRun(job, runId, runKey, prodRes.finalUrl, prodRes.sceneCount ?? planRes.sceneCount, t0)
+        return
+      }
+      log(`  ! hermes PRODUCE pass failed (${prodRes.error}); falling back to deterministic build_runner`)
+      await emit(runId, `Produce pass failed (${prodRes.error}); falling back to deterministic render.`, 'hermes', 'warn')
+      // fall through to deterministic; paidViaGate (if set) prevents a 2nd charge.
+    } catch (e) {
+      log(`  ! hermes split mode threw (${String(e)}); falling back to deterministic build_runner`)
+      await emit(runId, `Hermes conduct error; falling back to deterministic render.`, 'hermes', 'warn')
+    }
+    // fall through to the deterministic path (render NEVER fails)
+  } else if (CLAIMER_MODE === 'hermes') {
+    // ── LEGACY / REVERSIBLE single-conduct path (HERMES_SPLIT=false): flat-cap
+    //    pre-conduct gate + ONE atomic conduct (read->plan->price->gate->produce).
+    if (PAYMENTS_REQUIRED && payMode === 'human') {
+      const paid = await paymentGate(job, runId, runKey, safeUrl) // flat cap (no real price yet)
+      if (!paid) return
+      paidViaGate = true
+    }
     try {
       await emit(runId, 'Conducting produce step via Hermes agent (NemoClaw sandbox)…', 'hermes')
       await setRun(runId, { phase: 'hermes_conducting' })
@@ -748,6 +915,16 @@ async function processJob(job) {
       await emit(runId, `Hermes conduct error; falling back to deterministic render.`, 'hermes', 'warn')
     }
     // fall through to the deterministic path (render NEVER fails)
+  }
+
+  // DIRECT mode (CLAIMER_MODE !== 'hermes'): no conduct above ran, so the human-pay
+  // gate must fire HERE (flat cap — the deterministic build_runner computes its own
+  // price inside its own _payment_gate; this pre-gate only collects payment for the
+  // human-pay path, mirroring the previous behaviour for non-hermes deployments).
+  if (CLAIMER_MODE !== 'hermes' && PAYMENTS_REQUIRED && payMode === 'human' && !paidViaGate) {
+    const paid = await paymentGate(job, runId, runKey, safeUrl)
+    if (!paid) return
+    paidViaGate = true
   }
 
   // 1) spawn the CURATED pipeline (build_runner.py --mode mock = real screenshots
