@@ -815,10 +815,17 @@ def enrich_brand_knowledge(name, url, brain):
     )
     messages = [{"role": "system", "content": _ENRICH_SYSTEM},
                 {"role": "user", "content": user}]
+    # bug-C2: vp.call_model() does sys.exit() (raises SystemExit) when the
+    # OpenRouter key is unset — SystemExit is NOT an Exception, so the old
+    # `except Exception` let it crash the whole planner instead of degrading.
+    # Pre-check the key so a missing key degrades to empty, and catch SystemExit
+    # belt-and-suspenders in case any other call path exits the interpreter.
+    if not brain_mod.brain_key():
+        return empty
     try:
         raw = vp.call_model(messages, brain=brain)
         obj = vp.extract_json(raw)
-    except Exception:
+    except (Exception, SystemExit):
         return empty
     if not isinstance(obj, dict):
         return empty

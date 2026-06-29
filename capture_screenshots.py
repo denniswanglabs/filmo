@@ -39,6 +39,7 @@ CLI
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import subprocess
@@ -1005,6 +1006,38 @@ def _norm_url(url: str) -> str:
     return url
 
 
+# English-by-default geo overrides. The capture host (the live VM) is in the EU, so
+# a BARE apex of a geo-routed site renders the local-language edition (verified:
+# stripe.com -> German from the EU IP). We pin the bare apex to the explicit
+# English path so the captured hero / Conversion-Read shot is English regardless of
+# the capture box's geolocation. Keyed by lowercase host; extend as needed.
+# Applied ONLY when the path is bare ("" or "/") — an explicit /en-us or any other
+# path is left untouched, so a deliberate locale choice is never rewritten.
+GEO_ENGLISH_OVERRIDES = {
+    "stripe.com": "https://stripe.com/en-us",
+}
+
+
+def _apply_geo_english_override(url: str) -> str:
+    """Rewrite a BARE geo-routed apex to its explicit English edition.
+
+    Bare = host is in GEO_ENGLISH_OVERRIDES and the path is "" or "/" with no
+    query/fragment. Anything else (an explicit /en-us, /pricing, ?q=…) passes
+    through unchanged. Best-effort: a parse failure returns the input untouched.
+    """
+    try:
+        pu = urlparse(url)
+        host = (pu.netloc or "").lower()
+        # strip a leading www. so www.stripe.com matches the override key too
+        host = host[4:] if host.startswith("www.") else host
+        if host in GEO_ENGLISH_OVERRIDES \
+                and pu.path in ("", "/") and not pu.query and not pu.fragment:
+            return GEO_ENGLISH_OVERRIDES[host]
+    except Exception:
+        pass
+    return url
+
+
 def _norm_and_guard_url(url: str) -> str:
     """Normalize a user-supplied URL, then SSRF-guard it BEFORE any navigation.
 
@@ -1015,6 +1048,9 @@ def _norm_and_guard_url(url: str) -> str:
     norm = _norm_url(url)
     if not norm:
         raise ValueError("refusing to capture empty URL")
+    # English-by-default: a bare geo-routed apex (e.g. stripe.com) is pinned to its
+    # English edition (/en-us) so the EU capture box doesn't ship a localized shot.
+    norm = _apply_geo_english_override(norm)
     assert_public_url(norm)
     return norm
 
@@ -2656,7 +2692,7 @@ def _capture_via_nemoclaw(url: str, out_dir: str,
     for line in out.splitlines():
         if line.startswith("STATUS ") and "TITLE " in line:
             try:
-                title = eval(line.split("TITLE ", 1)[1].strip())  # repr() literal
+                title = ast.literal_eval(line.split("TITLE ", 1)[1].strip())  # repr() literal
             except Exception:
                 title = ""
             break
