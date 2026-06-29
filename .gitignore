@@ -130,3 +130,7 @@ worker/*.log
 /pipeline-screenshot-hybrid.handoff.md
 /web/.audit-screenshots/
 /web/.hero-screenshots/
+
+# Local-only — scrubbed from the public repo; kept on disk for local use
+filmo-lab/
+notes/
