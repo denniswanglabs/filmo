@@ -697,9 +697,8 @@ def tool_price(args):
     # LIVE FEED: the priced decision. Tag actor=stripe (the money rail).
     _emit_event(
         run_id,
-        "Priced at $%.2f (capped at $%.2f) — real COGS $%.4f, profit $%.2f"
-        % (capped_price / 100.0, PRICE_CAP_CENTS / 100.0,
-           real_cogs_cents / 100.0, profit_cents / 100.0),
+        "Priced at $%.2f (capped at $%.2f)."
+        % (capped_price / 100.0, PRICE_CAP_CENTS / 100.0),
         actor="stripe")
 
     return {
@@ -1390,7 +1389,19 @@ def tool_produce_and_ship(args):
     video_bytes = os.path.getsize(video_path)
 
     # 4) upload to InsForge walk-videos -> final_url (idempotent remove+upload)
-    object_key = "%s/video.mp4" % run_key
+    #    G2 FIX: namespace the BUCKET object by the DB run UUID (run_id), NOT the
+    #    url-slug run_key. Two conducts of the SAME site share one slug run_key
+    #    (e.g. stripe-com-mcp) and the upload is remove-then-upload, so a slug key
+    #    let every same-url job overwrite the previous job's delivered video
+    #    (27 delivered runs all pointed at stripe-com-mcp/video.mp4). The DB run
+    #    UUID is unique per run, so conducts of the same site never collide. The
+    #    LOCAL render dir (run_dir / run_key) is unchanged -- only the bucket key
+    #    moves. Fall back to the slug key only if run_id is not a valid UUID (the
+    #    claimer recover lists run_id first, then the slug, so both schemes agree).
+    if run_id and _UUID_RE.match(str(run_id)):
+        object_key = "%s/video.mp4" % run_id
+    else:
+        object_key = "%s/video.mp4" % run_key
     final_url, up_info = _upload_to_insforge(video_path, object_key)
 
     # 4b) per-scene EDITOR assets: upload the staged logo / screenshot(s) / VO mp3s

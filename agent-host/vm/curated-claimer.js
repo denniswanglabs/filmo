@@ -81,6 +81,8 @@ const HERMES_PRODUCE_SKILL = process.env.HERMES_PRODUCE_SKILL || 'filmo-produce'
 const HERMES_SPLIT = String(process.env.HERMES_SPLIT ?? 'true').trim().toLowerCase() !== 'false'
 const HERMES_BUDGET_CENTS = Number(process.env.HERMES_BUDGET_CENTS || 5000)
 const HERMES_TIMEOUT_S = Number(process.env.HERMES_TIMEOUT_S || 900) // nemoclaw exec --timeout
+const PLAN_ATTEMPTS = Number(process.env.PLAN_ATTEMPTS || 3) // claimer-level retries of read->plan->price on a transient model/stream blip
+const PLAN_RETRY_DELAY_MS = Number(process.env.PLAN_RETRY_DELAY_MS || 4000)
 const NEMOCLAW_BIN = process.env.NEMOCLAW_BIN || 'nemoclaw'
 
 // ── Pre-conduct Stripe TEST payment gate (human-pays) ───────────────────────
@@ -98,6 +100,15 @@ const PAYMENT_TIMEOUT_MS = Number(process.env.PAYMENT_TIMEOUT_MS || 15 * 60 * 10
 const PAYMENT_POLL_MS = Number(process.env.PAYMENT_POLL_MS || 2500)                 // mirror build_runner 2.5s
 // Public base for the success/cancel return (the live run page). Env-driven.
 const FILMO_PUBLIC_BASE = (process.env.FILMO_PUBLIC_BASE || 'https://filmostudio.vercel.app').replace(/\/+$/, '')
+// Public site base used in the "video ready" delivery EMAIL link (where the customer
+// watches / edits / downloads). The marketing domain, NOT the Vercel deploy host used
+// for Stripe returns above. Env-overridable. The email links to <base>/runs/<runId>.
+const FILMO_SITE_BASE = (process.env.FILMO_SITE_BASE || 'https://filmo.dev').replace(/\/+$/, '')
+// AgentMail transactional-email sender (best-effort, see notifyVideoReady). The API key
+// is loaded by systemd from /root/.agentmail-key (EnvironmentFile); absent key -> the
+// notify step logs + skips, never failing or delaying a delivery.
+const AGENTMAIL_API_KEY = process.env.AGENTMAIL_API_KEY
+const AGENTMAIL_INBOX = process.env.AGENTMAIL_INBOX || 'filmo@agentmail.to'
 // gate.py sits beside this ESM file; resolve it via import.meta (no __dirname in ESM).
 const GATE_PY = process.env.GATE_PY || fileURLToPath(new URL('./gate.py', import.meta.url))
 // The produce toolserver, invoked as a SHORT-LIVED CLI (NOT the running MCP server) to
@@ -582,22 +593,63 @@ function runHermesConduct(url, goal, budgetCents, runId) {
 // Hermes-produced video (producer=hetzner-hermes, REAL price preserved) WITHOUT a
 // wasteful deterministic re-render that would also recompute (overwrite) the price.
 // Returns { finalUrl, sceneCount } or null if nothing shipped. NEVER throws.
-async function recoverShippedVideo(planId) {
-  if (!planId) return null
-  const { data, error } = await ifCall(`storage.list(recover ${planId})`,
-    () => db.storage.from(BUCKET).list({ prefix: `${planId}/`, limit: 200 }),
+async function recoverByPrefix(prefix) {
+  if (!prefix) return null
+  const { data, error } = await ifCall(`storage.list(recover ${prefix})`,
+    () => db.storage.from(BUCKET).list({ prefix: `${prefix}/`, limit: 200 }),
     { attempts: 2, timeoutMs: 10000 })
-  if (error) { log(`  ! recover list ${planId}`, JSON.stringify(error)); return null }
+  if (error) { log(`  ! recover list ${prefix}`, JSON.stringify(error)); return null }
   const objs = (data && data.data) || data || []
   let finalUrl = null
   let sceneCount = 0
   for (const o of objs) {
     const key = o.key || o.name || ''
-    if (key.endsWith('/video.mp4') || key === `${planId}/video.mp4`) finalUrl = o.url || null
+    if (key.endsWith('/video.mp4') || key === `${prefix}/video.mp4`) finalUrl = o.url || null
     if (/\/thumbs\/scene-\d+\.png$/.test(key)) sceneCount++
   }
   if (finalUrl && /^https?:\/\//i.test(finalUrl)) {
     return { finalUrl, sceneCount: sceneCount || null }
+  }
+  return null
+}
+
+// G5 DESYNC RECOVERY: unlike the Hermes recover (video.mp4 only), a desynced run
+// may be a DETERMINISTIC build whose video landed as final.mp4 under the run_key
+// prefix (e.g. web-...-c4bgo/final.mp4). Accept EITHER video.mp4 or final.mp4 under
+// the run-UUID prefix OR the run_key prefix, so the reaper links a real shipped
+// video instead of marking a deliverable run failed. Best-effort; NEVER throws.
+async function recoverAnyVideo(runId, runKey) {
+  for (const prefix of [runId, runKey]) {
+    if (!prefix) continue
+    const { data, error } = await ifCall(`storage.list(desync ${prefix})`,
+      () => db.storage.from(BUCKET).list({ prefix: `${prefix}/`, limit: 200 }),
+      { attempts: 2, timeoutMs: 10000 })
+    if (error) continue
+    const objs = (data && data.data) || data || []
+    for (const o of objs) {
+      const key = o.key || o.name || ''
+      if ((key.endsWith('/video.mp4') || key.endsWith('/final.mp4')) && o.url && /^https?:\/\//i.test(o.url)) {
+        return { finalUrl: o.url }
+      }
+    }
+  }
+  return null
+}
+
+// G2 FIX: the produce tool now uploads video.mp4 under the DB run UUID
+// (<run_id>/video.mp4), NOT the url-slug plan_id — so conducts of the same site
+// never overwrite each other. Recover therefore lists the per-run UUID prefix
+// FIRST. We still fall back to the legacy slug prefix (<planId>/) so this also
+// recovers a video shipped under the old scheme (e.g. a conduct mid-flight during
+// the toolserver swap) — runId is preferred because it can never collide.
+async function recoverShippedVideo(runId, planId) {
+  if (runId) {
+    const byRun = await recoverByPrefix(runId)
+    if (byRun && byRun.finalUrl) return byRun
+  }
+  if (planId) {
+    const bySlug = await recoverByPrefix(planId)
+    if (bySlug && bySlug.finalUrl) return bySlug
   }
   return null
 }
@@ -634,6 +686,113 @@ function healRecoveredRun(runId, planId) {
   })
 }
 
+// ── Delivery email (AgentMail) ───────────────────────────────────────────────
+// Resolve a run owner's email from their user_id via the InsForge admin auth API.
+// VERIFIED working endpoint (2026-06-30, READ-ONLY against live InsForge):
+//   GET <BASE_URL>/api/auth/users/<user_id>  (admin bearer) -> 200 { id, email, ... }
+// (The DB has no public.users table, and /api/auth/users?id=eq.<uid> IGNORES the
+// filter and lists ALL users — so we use the single-user path, which returns the
+// email for exactly that id.) Best-effort: NEVER throws; returns a trimmed email
+// string or null. Bounded so a hung request can't pin the worker.
+async function lookupUserEmail(userId) {
+  if (!userId || typeof userId !== 'string') return null
+  if (!API_KEY) { log('  notify: no INSFORGE_API_KEY for user-email lookup; skipping'); return null }
+  const url = `${BASE_URL.replace(/\/+$/, '')}/api/auth/users/${encodeURIComponent(userId)}`
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => { try { ctrl.abort() } catch {} }, 10000)
+    let res
+    try {
+      res = await fetch(url, { headers: { Authorization: `Bearer ${API_KEY}` }, signal: ctrl.signal })
+    } finally { clearTimeout(t) }
+    if (!res.ok) { log(`  notify: user-email lookup ${userId} -> HTTP ${res.status}; skipping email`); return null }
+    const j = await res.json().catch(() => null)
+    const email = j && typeof j.email === 'string' ? j.email.trim() : null
+    return email || null
+  } catch (e) {
+    log(`  notify: user-email lookup failed (${(e && e.message) || e}); skipping email`)
+    return null
+  }
+}
+
+// A pragmatic, deliverability-minded email sanity check (not RFC-perfect): one @, a
+// dotted domain, no spaces. Filters obviously non-deliverable values so we don't fire
+// the API at junk. (Synthetic test addresses like ...@walk.studio still pass shape —
+// AgentMail's own bounce handling is the backstop; we only gate on STRUCTURE here.)
+function looksLikeEmail(addr) {
+  return typeof addr === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr.trim())
+}
+
+// Best-effort "Your Filmo video is ready" email via AgentMail. NEVER throws. Logs a
+// success line with the returned message_id, or the reason it skipped / failed. Does
+// NOT block or delay the delivery (the caller already persisted the delivered state).
+// Skips cleanly when AGENTMAIL_API_KEY or a valid userEmail is missing.
+async function notifyVideoReady(runId, finalUrl, userEmail) {
+  try {
+    if (!AGENTMAIL_API_KEY) { log(`  notify: AGENTMAIL_API_KEY not set; skipping ready-email for run ${runId}`); return }
+    if (!looksLikeEmail(userEmail)) { log(`  notify: no valid user email for run ${runId} (got ${JSON.stringify(userEmail)}); skipping`); return }
+    const to = userEmail.trim()
+    const runLink = `${FILMO_SITE_BASE}/runs/${encodeURIComponent(String(runId))}`
+    const subject = '\u{1F3AC} Your Filmo video is ready'
+    const preheader = 'Your launch video is rendered — watch, edit, or download it now.'
+    const text = [
+      'Your Filmo video is ready.',
+      '',
+      'We’ve finished producing your launch video. Watch, edit, or download it here:',
+      runLink,
+      '',
+      '— Filmo',
+    ].join('\n')
+    const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f6f7f9;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">${preheader}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<tr><td align="center">
+<table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#ffffff;border:1px solid #eceef1;border-radius:16px;overflow:hidden;">
+<tr><td style="padding:32px 36px 0;">
+<div style="font-size:20px;font-weight:700;letter-spacing:-0.01em;color:#0b0f1a;">Filmo</div>
+</td></tr>
+<tr><td style="padding:20px 36px 0;">
+<div style="font-size:22px;line-height:1.3;font-weight:700;letter-spacing:-0.01em;color:#0b0f1a;">Your video is ready \u{1F3AC}</div>
+<p style="margin:12px 0 0;font-size:15px;line-height:1.55;color:#475067;">We’ve finished producing your launch video. Watch it, fine-tune it in the editor, or download the final cut.</p>
+</td></tr>
+<tr><td style="padding:24px 36px 4px;">
+<a href="${runLink}" style="display:inline-block;background:#3B82F6;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 22px;border-radius:10px;">Watch your video →</a>
+</td></tr>
+<tr><td style="padding:14px 36px 32px;">
+<p style="margin:0;font-size:12px;line-height:1.5;color:#8a93a6;">Or paste this link into your browser:<br><a href="${runLink}" style="color:#3B82F6;text-decoration:none;word-break:break-all;">${runLink}</a></p>
+</td></tr>
+</table>
+<div style="font-size:11px;color:#aab2c0;padding:18px 0 0;">Filmo — AI launch videos</div>
+</td></tr>
+</table>
+</body></html>`
+
+    const endpoint = `https://api.agentmail.to/v0/inboxes/${encodeURIComponent(AGENTMAIL_INBOX)}/messages/send`
+    const ctrl = new AbortController()
+    const t = setTimeout(() => { try { ctrl.abort() } catch {} }, 15000)
+    let res
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${AGENTMAIL_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, subject, html, text }),
+        signal: ctrl.signal,
+      })
+    } finally { clearTimeout(t) }
+    const bodyText = await res.text().catch(() => '')
+    if (!res.ok) {
+      log(`  notify: AgentMail send FAILED for run ${runId} -> HTTP ${res.status} ${bodyText.slice(0, 300)}`)
+      return
+    }
+    let parsed = null; try { parsed = JSON.parse(bodyText) } catch {}
+    const messageId = (parsed && parsed.message_id) || '(no message_id in 200 body)'
+    log(`  notify: ready-email SENT for run ${runId} to ${to} [message_id=${messageId}]`)
+  } catch (e) {
+    // Absolutely never let a notification problem touch the delivery path.
+    log(`  notify: ready-email errored for run ${runId} (${(e && e.message) || e}); ignored`)
+  }
+}
+
 // Deliver a Hermes-produced run: stamp final_url + producer=hetzner-hermes,
 // mark the job done, emit a producer line. Returns true on success.
 //
@@ -652,12 +811,13 @@ async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0, pl
   // price the OPTION-A plan pass wrote (price_cents=<real>) with a null mapped value
   // when the local ledger lacks pnl (the Hermes render ran inside the MCP tool, not
   // via build_runner, so runs/<runKey>/ledger.json usually has no pricing).
-  let curPrice = null, curCogs = null
+  let curPrice = null, curCogs = null, curUserId = null
   const { data: cur } = await ifCall('runs.select(props,price)',
-    () => db.database.from('runs').select('props, price_cents, cogs_cents').eq('id', runId).maybeSingle())
+    () => db.database.from('runs').select('props, price_cents, cogs_cents, user_id').eq('id', runId).maybeSingle())
   if (cur && cur.props && typeof cur.props === 'object') existingProps = cur.props
   if (cur && typeof cur.price_cents === 'number') curPrice = cur.price_cents
   if (cur && typeof cur.cogs_cents === 'number') curCogs = cur.cogs_cents
+  if (cur && typeof cur.user_id === 'string') curUserId = cur.user_id
   // On the Hermes path the render ran under run_key=<planId> (the MCP produce tool's
   // brand-derived run dir), so the rich props.json lives at runs/<planId>/props.json —
   // NOT runs/<jobRunKey>/ (which usually doesn't exist). Prefer it as the local rich
@@ -677,6 +837,29 @@ async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0, pl
   if (mapped.cogs_cents == null && curCogs != null) mapped.cogs_cents = curCogs
   await setRun(runId, { ...mapped, status: 'delivered', phase: 'delivered', final_url: finalUrl, props })
   await setJob(job.id, { status: 'done' })
+  // G4 FIX: setRun/setJob wrap ifCall and NEVER throw — on ultimate failure they
+  // just log and return, so a transient InsForge outage at this exact instant would
+  // leave a fully-produced video showing 'producing'/'running' forever with final_url
+  // null and no retry. Re-read the row; if the flip didn't land, re-stamp the run
+  // delivered with the KNOWN finalUrl and flag ship_retryable=true (mirroring the
+  // deterministic upload-failed guard) so the reaper / a sweep can re-stamp it
+  // instead of stranding it. Best-effort: never throws, never blocks the success path.
+  try {
+    const { data: chk } = await ifCall('runs.select(deliver-verify)',
+      () => db.database.from('runs').select('status, final_url').eq('id', runId).maybeSingle())
+    if (!chk || chk.status !== 'delivered' || !chk.final_url) {
+      log(`  !! deliver flip did NOT land for run ${runKey} (status=${chk && chk.status}, final_url=${chk && chk.final_url ? 'set' : 'null'}); re-stamping with ship_retryable + known final_url`)
+      await setRun(runId, { status: 'delivered', phase: 'delivered', final_url: finalUrl, props: { ...props, ship_retryable: true, recovered_final_url: finalUrl } })
+      await setJob(job.id, { status: 'done' })
+    }
+  } catch (e) { log('  deliver-verify failed', String(e && e.message || e)) }
+  // Best-effort "your video is ready" email. The deliver writes above are already
+  // persisted; this lookup + send is fire-and-forget and NEVER blocks, delays, or
+  // fails the delivery — notifyVideoReady swallows all errors internally and we still
+  // await it (it self-bounds) so its success/failure log lands in order. A run with
+  // no user_id (or a failed lookup) simply skips, logged.
+  const notifyEmail = curUserId ? await lookupUserEmail(curUserId) : null
+  await notifyVideoReady(runId, finalUrl, notifyEmail)
   const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
   await emit(runId, `Conducted by Hermes on Hetzner VM (producer=${HERMES_PRODUCER})${sceneCount ? `, ${sceneCount} scenes` : ''}. ${totalSec}s total.`, 'hermes')
   log(`  DELIVERED run ${runKey} -> ${finalUrl}  [${totalSec}s, producer=${HERMES_PRODUCER}, conducted_by=hermes]`)
@@ -931,9 +1114,23 @@ async function processJob(job) {
       //     Yields a real price_cents + plan_id.
       await emit(runId, 'Conducting read -> plan -> price via Hermes agent (NemoClaw sandbox).', 'hermes')
       await setRun(runId, { phase: 'analyzing' })
-      const planRes = await runHermesPlan(safeUrl, goal, runId)
+      // A healthy 550B can still drop a plan pass via a transient stream truncation
+      // ("Response payload is not completed"); the in-skill API retries share one
+      // session, so they all hit the same blip. Re-run the WHOLE plan pass in a FRESH
+      // nemoclaw exec (new session + upstream connection) up to PLAN_ATTEMPTS times - a
+      // transient blip clears on a clean retry. The plan pass is read+plan+price ONLY
+      // (no produce, no Stripe charge - the pay gate is AFTER), so a retry only
+      // re-spends ~$0.01 of Nemotron tokens and can never double-charge. Only after all
+      // attempts fail do we throw and fall back to the deterministic build_runner.
+      let planRes = await runHermesPlan(safeUrl, goal, runId)
+      for (let attempt = 2; (!planRes.ok || !planRes.planId || !(planRes.priceCents > 0)) && attempt <= PLAN_ATTEMPTS; attempt++) {
+        log(`  ~ hermes PLAN pass attempt ${attempt - 1}/${PLAN_ATTEMPTS} failed (${planRes.error}); retrying in a fresh exec`)
+        await emit(runId, `Plan hit a transient model error - retrying (attempt ${attempt}/${PLAN_ATTEMPTS})...`, 'hermes', 'warn')
+        await sleep(PLAN_RETRY_DELAY_MS)
+        planRes = await runHermesPlan(safeUrl, goal, runId)
+      }
       if (!planRes.ok || !planRes.planId || !(planRes.priceCents > 0)) {
-        log(`  ! hermes PLAN pass failed (${planRes.error}); falling back to deterministic build_runner`)
+        log(`  ! hermes PLAN pass failed after ${PLAN_ATTEMPTS} attempts (${planRes.error}); falling back to deterministic build_runner`)
         await emit(runId, `Plan pass failed (${planRes.error || 'no plan'}); falling back to deterministic render.`, 'hermes', 'warn')
         throw new Error('plan pass failed: ' + (planRes.error || 'no plan'))
       }
@@ -969,7 +1166,7 @@ async function processJob(job) {
       // recover it and deliver the Hermes-produced video (REAL price preserved)
       // instead of a wasteful deterministic re-render that recomputes the price.
       log(`  ! hermes PRODUCE pass failed (${prodRes.error}); checking if produce_and_ship already shipped…`)
-      const recovered = await recoverShippedVideo(planId)
+      const recovered = await recoverShippedVideo(runId, planId)
       if (recovered && recovered.finalUrl) {
         log(`  RECOVERED already-shipped video for plan_id=${planId} -> ${recovered.finalUrl}`)
         // The recover path bypasses produce_and_ship's rich-props merge + per-scene
@@ -1172,6 +1369,8 @@ async function enqueueTestJob(companyUrl = 'https://stripe.com') {
 // that ignores its kill, etc.) the daemon ALWAYS returns to polling. Set above both
 // inner ceilings so it only fires on a true wedge, never on a healthy long render.
 const JOB_WALLCLOCK_MS = Number(process.env.JOB_WALLCLOCK_MS || 30 * 60 * 1000) // 30 min
+const STALE_CLAIM_MS = Number(process.env.STALE_CLAIM_MS || 35 * 60 * 1000) // a job 'claimed' longer than this by a non-current worker is a zombie
+const STALE_SWEEP_INTERVAL_MS = Number(process.env.STALE_SWEEP_INTERVAL_MS || 2 * 60 * 1000)
 
 // Run processJob bounded by the wall-clock ceiling. processJob still owns its own
 // child kill + per-call ifCall bounds; this only guarantees the LOOP unblocks. The
@@ -1180,8 +1379,14 @@ const JOB_WALLCLOCK_MS = Number(process.env.JOB_WALLCLOCK_MS || 30 * 60 * 1000) 
 async function runJobBounded(job) {
   let timer
   const guard = new Promise((resolve) => {
-    timer = setTimeout(() => {
-      log(`  !! job wall-clock guard fired after ${(JOB_WALLCLOCK_MS / 60000) | 0}min (job ${job.id}); returning to polling`)
+    timer = setTimeout(async () => {
+      log(`  !! job wall-clock guard fired after ${(JOB_WALLCLOCK_MS / 60000) | 0}min (job ${job.id}); marking wedged + freeing the queue`)
+      // CRITICAL: never leave the run a permanent zombie. Mark it terminal so the UI
+      // stops spinning and claim_next_job/the reaper won't re-touch it. Best-effort.
+      try {
+        if (job.run_id) await setRun(job.run_id, { status: 'failed', phase: 'wedged' })
+        await setJob(job.id, { status: 'failed', error: 'wall-clock wedge (>30min)' })
+      } catch (e) { log('  wedge-mark failed', String(e && e.message || e)) }
       resolve('wallclock')
     }, JOB_WALLCLOCK_MS)
   })
@@ -1194,6 +1399,72 @@ async function runJobBounded(job) {
 }
 
 // ───────────────────────────── daemon loop ─────────────────────────────
+// Zombie reaper: a job left 'claimed' by a DEAD worker (restart / OOM / hang) is
+// invisible to claim_next_job (which only picks 'queued') and strands its run as
+// 'running' forever - a judge sees a permanent spinner. Periodically mark such stale
+// claims (and their runs) failed so nothing is ever permanently stuck. Scoped to claims
+// NOT held by THIS live worker and older than STALE_CLAIM_MS (> the 30-min wall-clock,
+// so a healthy long job is never swept). Best-effort, bounded, never throws.
+async function sweepStaleClaims() {
+  try {
+    const { data: claimed } = await ifCall('jobs.select(claimed)',
+      () => db.database.from('jobs').select('id, run_id, claimed_by, claimed_at').eq('status', 'claimed'))
+    const cutoffMs = Date.now() - STALE_CLAIM_MS
+    const stale = (claimed || []).filter((j) =>
+      j.claimed_by !== WORKER_ID && (!j.claimed_at || Date.parse(j.claimed_at) < cutoffMs))
+    let n = 0
+    for (const j of stale) {
+      await setJob(j.id, { status: 'failed', error: `stale claim reaped (claimed_by=${j.claimed_by || 'null'})` })
+      if (j.run_id) await setRun(j.run_id, { status: 'failed', phase: 'stale_reclaim' })
+      n++
+    }
+    if (n) log(`  reaper: failed ${n} stale-claimed zombie job(s)`)
+  } catch (e) { log('  reaper error', String(e && e.message || e)) }
+  // G5 FIX: status/phase desync. A run can be left status='running' while its job is
+  // already terminal (done/failed) — e.g. a partial/interleaved write, or a deliver
+  // flip (G4) that landed the job but not the run. claim_next_job ignores it (it only
+  // picks 'queued') so it spins forever in the UI. Reconcile: for each running run
+  // whose job is done -> mark delivered if a final_url (or a recoverable video) exists,
+  // else failed; whose job is failed -> mark failed. Best-effort, bounded, never throws.
+  try {
+    const { data: running } = await ifCall('runs.select(running-desync)',
+      () => db.database.from('runs').select('id, run_key, final_url').eq('status', 'running'))
+    if (running && running.length) {
+      let r = 0
+      for (const run of running) {
+        const { data: jrows } = await ifCall('jobs.select(by-run)',
+          () => db.database.from('jobs').select('status').eq('run_id', run.id))
+        const jobStatuses = (jrows || []).map((x) => x.status)
+        if (!jobStatuses.length) continue           // no job row -> leave for stale-claim / wall-clock paths
+        if (jobStatuses.includes('queued') || jobStatuses.includes('claimed')) continue  // still live; skip
+        const allDone = jobStatuses.every((st) => st === 'done')
+        const anyFailed = jobStatuses.includes('failed')
+        if (allDone) {
+          let finalUrl = run.final_url || null
+          if (!finalUrl) {
+            // accept video.mp4 (Hermes, run-UUID key) OR final.mp4 (deterministic, run_key)
+            const rec = await recoverAnyVideo(run.id, run.run_key)
+            if (rec && rec.finalUrl) finalUrl = rec.finalUrl
+          }
+          if (finalUrl) {
+            await setRun(run.id, { status: 'delivered', phase: 'delivered', final_url: finalUrl })
+            log(`  reaper: reconciled desync run ${run.run_key} -> delivered (job done, final_url ${run.final_url ? 'present' : 'recovered'})`)
+          } else {
+            await setRun(run.id, { status: 'failed', phase: 'desync_no_video' })
+            log(`  reaper: reconciled desync run ${run.run_key} -> failed (job done but no final_url/recoverable video)`)
+          }
+          r++
+        } else if (anyFailed) {
+          await setRun(run.id, { status: 'failed', phase: 'job_failed_desync' })
+          log(`  reaper: reconciled desync run ${run.run_key} -> failed (job failed, run left running)`)
+          r++
+        }
+      }
+      if (r) log(`  reaper: reconciled ${r} status/phase desync run(s)`)
+    }
+  } catch (e) { log('  reaper desync error', String(e && e.message || e)) }
+}
+
 async function main() {
   log(`Filmo curated claimer up — ${WORKER_ID}`)
   log(`  insforge: ${BASE_URL}`)
@@ -1201,7 +1472,12 @@ async function main() {
   log(`  mode: ${CLAIMER_MODE}${CLAIMER_MODE === 'hermes' ? ` (conduct via ${HERMES_SANDBOX}/${HERMES_SKILL}, fallback=direct)` : ' (deterministic build_runner)'}`)
   log(`  producer: ${CLAIMER_MODE === 'hermes' ? HERMES_PRODUCER : PRODUCER}`)
   log(`  resilience: InsForge calls bounded ${IF_TIMEOUT_MS}ms x${IF_ATTEMPTS}; job wall-clock ${(JOB_WALLCLOCK_MS / 60000) | 0}min`)
+  let lastSweepMs = 0
   for (;;) {
+    // Reaper pass (throttled): fail any job stuck 'claimed' by a dead worker so a
+    // worker death/restart can never strand a run forever.
+    const nowMs = Date.now()
+    if (nowMs - lastSweepMs > STALE_SWEEP_INTERVAL_MS) { lastSweepMs = nowMs; await sweepStaleClaims() }
     let job = null
     // claim_next_job is the FIRST InsForge call each loop — bound it so a hung claim
     // can never freeze the daemon before it even has a job.
