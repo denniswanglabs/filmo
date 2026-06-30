@@ -173,7 +173,9 @@ function ChatAvatar({ who }: { who: 'user' | 'agent' }) {
 // the edit loop feel like one continuous conversation.
 function BuildChat({ run, events }: { run: Run; events: RunEvent[] }) {
   // Chronological (oldest first) so the thread reads top-to-bottom like a chat.
-  const ordered = [...events].sort((a, b) => a.seq - b.seq)
+  // Hide internal infrastructure diagnostics (actor 'system', e.g. the asset verify-and-heal
+  // probe) from the live feed — they're ops/log noise, not the user-facing production story.
+  const ordered = [...events].filter((e) => e.actor !== 'system').sort((a, b) => a.seq - b.seq)
   const newestSeq = ordered.length ? ordered[ordered.length - 1].seq : -1
 
   // The user's opening request, assembled from the run's own fields.
@@ -329,7 +331,7 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
 
   // Most-recent activity first; the newest line gets a highlight so motion reads.
   // Show the FULL history (scrollable) so nothing scrolls out of reach on a long run.
-  const recent = [...events].sort((a, b) => b.seq - a.seq)
+  const recent = [...events].filter((e) => e.actor !== 'system').sort((a, b) => b.seq - a.seq)
 
   // Human-pays flow: the build is parked awaiting a real Stripe TEST payment.
   const awaitingPayment = run.phase === 'awaiting_payment' && !!run.checkout_url

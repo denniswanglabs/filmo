@@ -341,7 +341,10 @@ export default function RunPage() {
                   <p className="text-sm text-slate-400">No events yet.</p>
                 ) : (
                   <ul className="space-y-1.5">
-                    {events.map((e) => (
+                    {/* Hide internal infrastructure diagnostics (actor 'system', e.g. the
+                        asset verify-and-heal probe) — they're for ops/logs, not the user-facing
+                        production story, and shouldn't surface as red errors in the feed. */}
+                    {events.filter((e) => e.actor !== 'system').map((e) => (
                       <li
                         key={e.id}
                         className="flex items-start gap-3 rounded-lg border border-black/5 bg-white px-3.5 py-2.5"
