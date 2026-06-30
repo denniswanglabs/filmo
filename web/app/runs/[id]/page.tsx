@@ -53,6 +53,8 @@ export default function RunPage() {
   const [run, setRun] = useState<Run | null>(null)
   const [events, setEvents] = useState<RunEvent[]>([])
   const [notFound, setNotFound] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const errCount = useRef(0)
   const stopped = useRef(false)
   // Latest run, mirrored into a ref so `poll` can branch on terminal-vs-live WITHOUT
   // depending on `run` (a dep would tear down + recreate the 3s interval every update).
@@ -81,8 +83,14 @@ export default function RunPage() {
         .maybeSingle(),
     )
     // Transient error → keep the last good state and let the next 3s tick retry; never
-    // blank the view or flip a delivered run to an error on a network hiccup.
-    if (error) return
+    // blank the view or flip a delivered run to an error on a network hiccup. BUT if we
+    // have NOTHING loaded yet and errors persist (e.g. a stale session token 401s every
+    // call), don't sit on "Loading run…" forever — surface a re-auth/retry after a few.
+    if (error) {
+      errCount.current += 1
+      if (errCount.current >= 3 && !runRef.current) setLoadFailed(true)
+      return
+    }
     if (!data) {
       // Empty result. Only declare "not found" when we have NOTHING loaded yet — once a
       // run is on screen (esp. a delivered video), a transient empty/RLS race must never
@@ -93,6 +101,10 @@ export default function RunPage() {
       })
       return
     }
+
+    // Got a real row → clear any prior transient load-failure state.
+    errCount.current = 0
+    setLoadFailed(false)
 
     // Merge (terminal watch = partial row → patch onto the loaded run, keeping props)
     // or replace (full row). Either way `r` is the up-to-date run used below.
@@ -189,6 +201,30 @@ export default function RunPage() {
 
         {notFound ? (
           <p className="mt-10 text-slate-500">This run could not be found.</p>
+        ) : loadFailed && !run ? (
+          <div className="mt-10">
+            <p className="text-slate-500">
+              We had trouble loading this run — your session may have expired.
+            </p>
+            <div className="mt-4 flex gap-3">
+              <Link
+                href="/login"
+                className="inline-flex items-center justify-center rounded-lg bg-[#3B82F6] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#2f6fe0]"
+              >
+                Sign in again
+              </Link>
+              <button
+                onClick={() => {
+                  errCount.current = 0
+                  setLoadFailed(false)
+                  void poll()
+                }}
+                className="inline-flex items-center justify-center rounded-lg border border-black/10 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-black/[0.03]"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
         ) : !run ? (
           <p className="mt-10 text-slate-400">Loading run…</p>
         ) : (
