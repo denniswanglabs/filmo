@@ -19,6 +19,9 @@ const NAV_LINKS = [
 ] as const
 
 function displayName(user: { email?: string; [k: string]: unknown }): string {
+  // Operator account always shows a friendly first name so a screen-recording never
+  // exposes the email handle ("Dennis", not "denniswanglabs").
+  if ((user.email || '').toLowerCase() === OWNER_EMAIL) return 'Dennis'
   const meta = user.user_metadata as Record<string, unknown> | undefined
   const name =
     (user.name as string) ||

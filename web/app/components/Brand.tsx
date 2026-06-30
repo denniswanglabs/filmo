@@ -86,7 +86,14 @@ export function TopBar() {
                   Analytics
                 </Link>
               ) : null}
-              <span className="hidden text-slate-500 sm:inline">{user.email}</span>
+              {/* Privacy: never show the full email in the header — the operator account
+                  shows "Dennis" (clean for screen-recordings), everyone else shows just
+                  their local-part, never the @domain. */}
+              <span className="hidden text-slate-500 sm:inline">
+                {user.email?.toLowerCase() === OWNER_EMAIL
+                  ? 'Dennis'
+                  : user.email?.split('@')[0] || user.email}
+              </span>
               <button
                 onClick={handleSignOut}
                 className="rounded-lg border border-black/10 px-3 py-1.5 text-slate-600 transition hover:bg-black/[0.03]"
