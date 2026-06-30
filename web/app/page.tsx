@@ -99,9 +99,17 @@ export default function Home() {
           payMode: p.requirePay ? 'human' : 'auto',
         })
         router.push(`/runs/${runId}`)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+      } catch {
+        // A thrown server-action error is OPAQUE in production (the "Server Components
+        // render … digest" 500), so we can't read its real message. The dominant cause is
+        // a stale/expired session token: the UI still looks signed-in (optimistic localStorage
+        // restore), but the server's verifyUser rejected the token, so createBuild throws
+        // "Please sign in to start a build." Re-open the sign-in gate so the user re-auths
+        // cleanly — onSignedIn then re-runs the build with a FRESH token — instead of
+        // surfacing the scary opaque server error in the composer.
         setBuilding(false)
+        setError('Your session expired — please sign in again to start the build.')
+        setGateOpen(true)
       }
     },
     [router, getToken],
