@@ -133,8 +133,9 @@ function InsideInner() {
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-slate-500">
             Enter your developer key to unlock the inside view — the Conversion Read scores,
-            the autonomous Stripe decline, the in-sandbox capture, and the live P&amp;L behind
-            a build. Pairing sticks to your account, so you only do this once.
+            the Stripe checkout gate (with the autonomous self-decline path also built in),
+            the host-side real-site capture, and the live P&amp;L behind a build. Pairing
+            sticks to your account, so you only do this once.
           </p>
 
           {status === 'ok' ? (

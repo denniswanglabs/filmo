@@ -20,7 +20,7 @@ const STEPS: readonly Step[] = [
   {
     n: 3,
     title: 'Hermes clears the payment',
-    body: 'Hermes prices every job to turn a profit — capped at $10 — and takes payment on Stripe (test mode), no human in the loop.',
+    body: 'Hermes prices every job to turn a profit — capped at $10 — then presents a real Stripe checkout (test mode). You pay with card 4242 before it produces.',
   },
   {
     n: 4,

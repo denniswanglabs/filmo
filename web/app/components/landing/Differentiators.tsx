@@ -56,7 +56,7 @@ const FEATURES: Feature[] = [
   },
   {
     title: 'Prices & bills itself',
-    body: 'The agent quotes the job and charges through Stripe autonomously — and declines its own over-budget spend.',
+    body: 'The agent prices its own work and charges for it through Stripe — you pay the test checkout before it produces, so it funds its own job at a margin.',
     // Card / coin — prices and bills.
     icon: (
       <svg {...iconProps} aria-hidden="true">
