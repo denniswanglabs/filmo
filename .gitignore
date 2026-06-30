@@ -134,3 +134,6 @@ worker/*.log
 # Local-only — scrubbed from the public repo; kept on disk for local use
 filmo-lab/
 notes/
+
+# Local-only — internal demo script, not for the public repo
+DEMO-RUNBOOK.md
