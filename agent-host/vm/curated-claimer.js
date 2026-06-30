@@ -100,6 +100,12 @@ const PAYMENT_POLL_MS = Number(process.env.PAYMENT_POLL_MS || 2500)             
 const FILMO_PUBLIC_BASE = (process.env.FILMO_PUBLIC_BASE || 'https://filmostudio.vercel.app').replace(/\/+$/, '')
 // gate.py sits beside this ESM file; resolve it via import.meta (no __dirname in ESM).
 const GATE_PY = process.env.GATE_PY || fileURLToPath(new URL('./gate.py', import.meta.url))
+// The produce toolserver, invoked as a SHORT-LIVED CLI (NOT the running MCP server) to
+// reconstruct a recovered run's rich editor props + heal its per-scene assets — see
+// healRecoveredRun. It lives in PIPELINE_DIR (its runs/<plan_id>/props.json is the
+// render source), not beside this ESM file, so resolve it from PIPELINE_DIR.
+const TOOLSERVER_PY = process.env.TOOLSERVER_PY || join(PIPELINE_DIR, 'mcp_toolserver.py')
+const HEAL_TIMEOUT_MS = Number(process.env.HEAL_TIMEOUT_MS || 180000)
 
 if (!BASE_URL || !API_KEY) { console.error('FATAL: INSFORGE_URL / INSFORGE_API_KEY required (export $(cat /root/.insforge-key))'); process.exit(1) }
 const db = createAdminClient({ baseUrl: BASE_URL, apiKey: API_KEY })
@@ -596,9 +602,45 @@ async function recoverShippedVideo(planId) {
   return null
 }
 
+// RECOVER-PATH REPAIR: when recoverShippedVideo delivers an already-shipped Hermes
+// video, the rich render props live under runs/<planId>/props.json (the MCP produce
+// tool's brand-derived render run_key) — which deliverHermesRun's readProps(jobRunKey)
+// cannot see, so the run would be delivered with THIN props (editor shows 0 scenes +
+// blank logo/screenshot/VO). Re-run the produce tool's OWN asset verify-and-heal +
+// rich-props merge (mcp_toolserver.py --heal-recovered, a short-lived CLI process that
+// does NOT touch the running MCP server) against that local render dir, so runs.props
+// lands scenes[] and every editor asset resolves under the DB run_key namespace.
+// Best-effort + bounded: NEVER throws and can never pin the worker. Returns the parsed
+// summary (or { ok:false, ... }); deliverHermesRun then persists the now-rich props.
+function healRecoveredRun(runId, planId) {
+  return new Promise((resolve) => {
+    if (!runId || !planId) { resolve({ ok: false, error: 'missing runId/planId' }); return }
+    let out = '', err = '', done = false
+    let timer = null
+    const finish = (v) => { if (done) return; done = true; if (timer) clearTimeout(timer); resolve(v) }
+    const child = spawn(PYTHON_BIN, [TOOLSERVER_PY, '--heal-recovered', String(runId), String(planId)],
+      { cwd: PIPELINE_DIR, env: { ...process.env, PIPELINE_DIR, HOME: process.env.HOME || '/root' },
+        stdio: ['ignore', 'pipe', 'pipe'] })
+    timer = setTimeout(() => { try { child.kill('SIGKILL') } catch {}; finish({ ok: false, error: 'heal-recovered timeout' }) }, HEAL_TIMEOUT_MS)
+    child.stdout.on('data', (d) => { out += d.toString() })
+    child.stderr.on('data', (d) => { err += d.toString(); try { process.stderr.write(`  [heal!] ${d}`) } catch {} })
+    child.on('error', (e) => finish({ ok: false, error: 'spawn: ' + String(e) }))
+    child.on('close', (code) => {
+      // The helper prints exactly one JSON summary line to stdout (_log -> stderr).
+      let parsed = null
+      for (const line of out.trim().split('\n').reverse()) { try { parsed = JSON.parse(line); break } catch {} }
+      finish(parsed || { ok: code === 0, code, raw: (out || err).slice(-400) })
+    })
+  })
+}
+
 // Deliver a Hermes-produced run: stamp final_url + producer=hetzner-hermes,
 // mark the job done, emit a producer line. Returns true on success.
-async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0) {
+//
+// `planId` (optional): on the Hermes split path the render ran under run_key=<planId>,
+// so the rich props.json lives at runs/<planId>/props.json — pass it so we source the
+// rich props locally even when the JOB run_key dir is absent (the recover path).
+async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0, planId) {
   // Preserve any keys the MCP tools already wrote onto runs.props (the FILMSTRIP
   // scenes[] + scene_thumbs{} mirror is patched there mid-conduct). The Hermes
   // path's local runs/<runKey>/props.json may not exist (the render ran inside
@@ -616,7 +658,14 @@ async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0) {
   if (cur && cur.props && typeof cur.props === 'object') existingProps = cur.props
   if (cur && typeof cur.price_cents === 'number') curPrice = cur.price_cents
   if (cur && typeof cur.cogs_cents === 'number') curCogs = cur.cogs_cents
-  const localProps = readProps(runKey) || {}
+  // On the Hermes path the render ran under run_key=<planId> (the MCP produce tool's
+  // brand-derived run dir), so the rich props.json lives at runs/<planId>/props.json —
+  // NOT runs/<jobRunKey>/ (which usually doesn't exist). Prefer it as the local rich
+  // fallback; existingProps (freshly fetched — already enriched by the heal pass on the
+  // recover path, or by the MCP tool mid-conduct on the success path) still wins for
+  // shared keys, so we keep the healed full-URL asset refs. This is what makes a
+  // RECOVERED run land rich instead of thin.
+  const localProps = (planId && readProps(planId)) || readProps(runKey) || {}
   const props = { ...localProps, ...existingProps, producer: HERMES_PRODUCER, produced_on: 'hetzner-vm', conducted_by: 'hermes' }
   // The ledger may not exist (the render happened inside the MCP tool, not via
   // build_runner), so map conservatively and trust the agent's final_url.
@@ -911,7 +960,7 @@ async function processJob(job) {
       await setRun(runId, { phase: 'producing' })
       const prodRes = await runHermesProduce(safeUrl, planId, runId)
       if (prodRes.ok && prodRes.finalUrl) {
-        await deliverHermesRun(job, runId, runKey, prodRes.finalUrl, prodRes.sceneCount ?? planRes.sceneCount, t0)
+        await deliverHermesRun(job, runId, runKey, prodRes.finalUrl, prodRes.sceneCount ?? planRes.sceneCount, t0, planId)
         return
       }
       // ROBUSTNESS: the produce_and_ship tool uploads the video BEFORE the agent
@@ -923,8 +972,15 @@ async function processJob(job) {
       const recovered = await recoverShippedVideo(planId)
       if (recovered && recovered.finalUrl) {
         log(`  RECOVERED already-shipped video for plan_id=${planId} -> ${recovered.finalUrl}`)
+        // The recover path bypasses produce_and_ship's rich-props merge + per-scene
+        // asset upload, so the editor would otherwise load THIN props (0 scenes, blank
+        // assets). Reconstruct them from the local render dir (runs/<planId>) BEFORE
+        // delivering: heal every editor asset under the DB run_key namespace + merge
+        // scenes/theme/total_frames onto runs.props.
+        const heal = await healRecoveredRun(runId, planId)
+        log(`  heal-recovered ${heal && heal.ok ? 'ok' : 'FAILED'}: ${JSON.stringify((heal && (heal.asset_check || heal.error)) ?? heal)}`)
         await emit(runId, `Produce pass finished but did not echo the link; recovered the shipped video from storage.`, 'hermes', 'warn')
-        await deliverHermesRun(job, runId, runKey, recovered.finalUrl, recovered.sceneCount ?? planRes.sceneCount, t0)
+        await deliverHermesRun(job, runId, runKey, recovered.finalUrl, recovered.sceneCount ?? planRes.sceneCount, t0, planId)
         return
       }
       log(`  ! no shipped video found for plan_id=${planId}; falling back to deterministic build_runner`)

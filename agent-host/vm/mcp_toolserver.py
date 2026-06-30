@@ -1730,6 +1730,66 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, resp)
 
 
+# --------------------------------------------------------------------------- #
+# CLI REPAIR — heal a RECOVERED run (curated-claimer recoverShippedVideo path).
+#
+# When a Hermes produce conduct ships the video to the bucket but never echoes its
+# "Shipped:" line, the worker delivers via recoverShippedVideo + deliverHermesRun,
+# which reads props from the JOB run_key dir — but the render ran under run_key=
+# <plan_id> (the brand-derived MCP run dir), so the rich props.json the editor needs
+# is at runs/<plan_id>/props.json and the JOB dir does not exist. The delivered run
+# then carries THIN props -> the editor shows 0 scenes + blank logo/screenshot/VO.
+#
+# This entrypoint reruns the produce tail (steps 4+5 of tool_produce_and_ship) for an
+# ALREADY-shipped video: load runs/<plan_id>/props.json, verify-and-heal every editor
+# asset under the DB run_key namespace (so each HEAD-200s), then merge the rich keys
+# onto runs.props. Idempotent + best-effort; the running MCP server is untouched (this
+# is a separate short-lived process). Returns 0 on success, 2 on a hard precondition
+# failure. Usage: python3 mcp_toolserver.py --heal-recovered <run_id_uuid> <plan_run_key>
+# --------------------------------------------------------------------------- #
+def _heal_recovered_run(run_id, plan_run_key):
+    run_dir = _runs_dir(plan_run_key)
+    props_path = os.path.join(run_dir, "props.json")
+    if not os.path.isfile(props_path):
+        print(json.dumps({"ok": False, "error": "no props.json at %s" % props_path}))
+        return 2
+    try:
+        with open(props_path, "r", encoding="utf-8") as fh:
+            props = json.load(fh)
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": "props.json parse failed: %s" % e}))
+        return 2
+    if not isinstance(props, dict) or not _safe_scenes(props):
+        print(json.dumps({"ok": False, "error": "props has no scenes[] to recover"}))
+        return 2
+    # (4) verify-and-heal: upload every referenced editor asset under the DB run_key
+    #     namespace + rewrite refs to full URLs (mutates props in place). Identical to
+    #     the pass tool_produce_and_ship runs at the end of EVERY successful conduct.
+    asset_check = {}
+    try:
+        asset_check = _verify_and_heal_assets(run_id, props, run_dir)
+    except Exception as e:
+        _log("heal-recovered: verify-and-heal failed: %s" % e)
+        asset_check = {"error": str(e)}
+    # (5) rich-props merge: the editor's durable load source (scenes/theme/total_frames).
+    rich_patch = {}
+    for k in ("fps", "theme", "total_frames", "audio_path", "lang", "scenes", "scene_thumbs"):
+        if k in props:
+            rich_patch[k] = props[k]
+    merged_keys = []
+    if rich_patch:
+        try:
+            _merge_run_props(run_id, rich_patch)
+            merged_keys = sorted(rich_patch)
+            _log("heal-recovered: rich props merged to runs.props for run %s (keys=%s)"
+                 % (run_id, ",".join(merged_keys)))
+        except Exception as e:
+            _log("heal-recovered: rich props merge failed: %s" % e)
+    print(json.dumps({"ok": True, "run_id": run_id, "plan_run_key": plan_run_key,
+                      "merged_keys": merged_keys, "asset_check": asset_check}))
+    return 0
+
+
 def main():
     # #89-M1 SECURITY: bind loopback + the docker-bridge gateway the sandbox reaches
     # us on (172.18.0.1) instead of 0.0.0.0, so the tool-server is NOT exposed on
@@ -1762,4 +1822,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # CLI repair entrypoint (does NOT start the MCP server). See _heal_recovered_run.
+    if len(sys.argv) >= 2 and sys.argv[1] == "--heal-recovered":
+        if len(sys.argv) < 4:
+            print(json.dumps({"ok": False, "error": "usage: --heal-recovered <run_id> <plan_run_key>"}))
+            raise SystemExit(2)
+        raise SystemExit(_heal_recovered_run(sys.argv[2], sys.argv[3]))
     main()
