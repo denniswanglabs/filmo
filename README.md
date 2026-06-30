@@ -13,7 +13,7 @@ Give Filmo a product **URL + a goal**. It reads your real product, reads why the
 [![Hetzner](https://img.shields.io/badge/Worker-Hetzner%20VM%20(Railway%20fallback)-D50C2D?logo=hetzner&logoColor=white)](https://hetzner.com)
 
 > Entry for the **Hermes Hackathon — Nous Research × NVIDIA × Stripe** (due 2026-06-30).
-> **Live:** https://filmostudio.vercel.app
+> **Live:** https://filmo.dev
 
 ---
 
@@ -134,7 +134,7 @@ flowchart TD
 
 ## Status
 
-**Hackathon entry.** The full pipeline delivers real 1080p video — grounded in the live page, with the real logo, real screenshot, and the curated patterns. All three sponsor axes are wired: Hermes conducts the run, Nemotron is the brain, NemoClaw seals the agent, and Stripe runs the money (a human test-checkout gate by default, plus an implemented autonomous over-budget self-decline). Hosted for anyone at **https://filmostudio.vercel.app**.
+**Hackathon entry.** The full pipeline delivers real 1080p video — grounded in the live page, with the real logo, real screenshot, and the curated patterns. All three sponsor axes are wired: Hermes conducts the run, Nemotron is the brain, NemoClaw seals the agent, and Stripe runs the money (a human test-checkout gate by default, plus an implemented autonomous over-budget self-decline). Hosted for anyone at **https://filmo.dev**.
 
 ---
 
