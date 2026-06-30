@@ -373,7 +373,7 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
         <p className="mt-2 text-sm text-slate-500">
           {isQueued
             ? 'Reserved a worker — the agent will begin reading your product in a moment.'
-            : 'This usually takes 6–9 minutes — the agent reads your product, plans, prices, produces every scene, and renders. The larger models (Nemotron 550B) take longer to plan.'}
+            : 'This can take several minutes — the agent reads, plans, prices, and produces every scene on Nemotron 550B. Please be patient; your video appears here automatically the moment it’s ready.'}
         </p>
 
         {/* Concurrent-load expectation setter — the VM renders sequentially, so under
