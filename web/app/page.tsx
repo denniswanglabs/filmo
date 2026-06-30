@@ -91,14 +91,21 @@ export default function Home() {
           setGateOpen(true)
           return
         }
-        const { runId } = await createBuild({
+        const res = await createBuild({
           accessToken,
           url: p.url.trim(),
           brain: p.brain,
           mode: 'mock',
           payMode: p.requirePay ? 'human' : 'auto',
         })
-        router.push(`/runs/${runId}`)
+        // Beta cap (non-owner accounts) returns a structured { limit } instead of a run —
+        // show its message inline; it is NOT an auth/session error, so don't re-open the gate.
+        if ('limit' in res) {
+          setBuilding(false)
+          setError(res.message)
+          return
+        }
+        router.push(`/runs/${res.runId}`)
       } catch {
         // A thrown server-action error is OPAQUE in production (the "Server Components
         // render … digest" 500), so we can't read its real message. The dominant cause is

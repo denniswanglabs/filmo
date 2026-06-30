@@ -148,6 +148,10 @@ export function AuthGate({
         <p className="mx-auto mt-1.5 max-w-[19rem] text-center text-sm text-slate-500">
           Your prompt is ready. Sign in and Filmo picks up right where you left off.
         </p>
+        <p className="mx-auto mt-3 max-w-[19rem] rounded-lg bg-amber/[0.07] px-3 py-2 text-center text-xs leading-relaxed text-slate-600">
+          Filmo is in <span className="font-semibold text-ink">beta</span> — each account gets{' '}
+          <span className="font-semibold text-ink">3 free videos</span>.
+        </p>
 
         {/* Google — the hero */}
         <button
