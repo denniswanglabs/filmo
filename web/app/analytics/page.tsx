@@ -200,6 +200,28 @@ export default function AnalyticsPage() {
     )
   }
 
+  // The OWNER with an expired session lands here too: the client recognizes the owner
+  // email (optimistic restore) but the server returned authorized:false because
+  // verifyUser couldn't verify the stale token. Show a re-auth prompt — not a flat
+  // "not authorized" — so the operator can actually recover instead of being confused.
+  if (clientIsOwner && data && !data.authorized) {
+    return (
+      <>
+        <TopBar />
+        <main className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center px-5 text-center">
+          <h1 className="text-xl font-semibold text-ink">Your session expired</h1>
+          <p className="mt-2 text-sm text-slate-500">Sign in again to view your analytics.</p>
+          <Link
+            href="/login"
+            className="mt-6 inline-flex items-center justify-center rounded-lg bg-[#3B82F6] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2f6fe0]"
+          >
+            Sign in again
+          </Link>
+        </main>
+      </>
+    )
+  }
+
   // Not authorized: either no session, not the owner client-side, or the server
   // refused. A clean, data-free denial — no numbers ever rendered.
   if (!user || !clientIsOwner || (data && !data.authorized)) {
