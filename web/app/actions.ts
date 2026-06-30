@@ -104,7 +104,7 @@ export async function createBuild(input: {
   // must pay (test card 4242) before the build proceeds. Only the payment becomes
   // real — the render stays $0 mock.
   payMode?: 'auto' | 'human'
-}) {
+}): Promise<{ runId: string; runKey: string } | { limit: true; message: string }> {
   // Identity comes from the verified token, NEVER from the client. The owner of the
   // build is whoever the token belongs to.
   const me = await verifyUser(input.accessToken)
