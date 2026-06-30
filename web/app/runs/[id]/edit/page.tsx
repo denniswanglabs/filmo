@@ -7,10 +7,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { insforge, resilientRead } from '../../../../lib/insforge'
 import { useAuth } from '../../../../lib/auth'
 import { TopBar } from '../../../components/Brand'
-import { saveEditedProps, requestReRender } from '../../../actions'
+import { saveEditedProps, requestReRender, getRunForViewer } from '../../../actions'
 import { isDelivered, type Run } from '../../../../lib/types'
 import { Editor } from './_editor/Editor'
 
@@ -30,26 +29,33 @@ export default function EditRunPage() {
     if (loading || !user || !runId) return
     let cancelled = false
     ;(async () => {
-      // RLS scopes the anon client to rows the signed-in user owns, so this both
-      // loads the run and enforces ownership. This is a one-shot load (no poll), so a
-      // transient InsForge blip would otherwise strand the editor on "Loading…" forever
-      // — retry the timeout/5xx/network before giving up; a real 4xx still returns fast.
-      const { data, error } = await resilientRead(() =>
-        insforge.database.from('runs').select().eq('id', runId).maybeSingle(),
-      )
+      // AUTHORITATIVE read SERVER-SIDE (admin client, owner-scoped) via getRunForViewer,
+      // so the editor never depends on browser-token freshness — the same fix as the run
+      // page (a stale ~15-min session token used to make the RLS read return EMPTY and
+      // strand the editor on "could not be found"). The server action verifies the token
+      // and enforces ownership; a transient/thrown error just leaves the editor on its
+      // loading state (a real 4xx-equivalent maps to notFound/authError below).
+      const accessToken = await getToken()
+      let res
+      try {
+        res = await getRunForViewer({ runId, accessToken })
+      } catch {
+        return // transient blip — leave on loading; no false not-found
+      }
       if (cancelled) return
-      if (error) return
-      if (!data) {
+      // An expired/invalid token strands the load (no run row to show); we don't have a
+      // re-auth UI on the editor, so fall through to the not-found chrome (the run page,
+      // which the user reaches first, owns the "sign in again" prompt).
+      if ('authError' in res || 'notFound' in res) {
         setNotFound(true)
         return
       }
-      const r = data as Run
-      setRun(r)
+      setRun(res.run)
     })()
     return () => {
       cancelled = true
     }
-  }, [loading, user, runId])
+  }, [loading, user, runId, getToken])
 
   // Prefer a saved edit (props_edited) over the clean props so re-opening the editor
   // resumes the last save; fall back to the original render-ready props.

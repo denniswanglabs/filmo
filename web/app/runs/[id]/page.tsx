@@ -2,8 +2,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { insforge, resilientRead } from '../../../lib/insforge'
 import { useAuth } from '../../../lib/auth'
+import { getRunForViewer } from '../../actions'
 import { TopBar, StatusChip } from '../../components/Brand'
 import BuildProgress from '../../components/BuildProgress'
 import SceneFilmstrip from '../../components/SceneFilmstrip'
@@ -19,36 +19,25 @@ import {
 // terminal too, or polling never stops and the live tracker spins forever.
 const TERMINAL = new Set(['delivered', 'completed_with_warnings', 'failed'])
 
-// ── Heavy-props poll mitigation ──────────────────────────────────────────────
-// The `runs.props` blob is 2.7KB–42KB+ on real runs, and ~40KB of a heavy one is
-// `scenes[].data` (full render copy) — which THIS page never reads (the delivered
-// video is a URL; only the editor + the Remotion render consume `scenes[].data`).
-// Re-pulling that whole blob every 3s across the EU→Singapore hop is a documented
-// InsForge-timeout trigger (HANDOFF 2026-06-26) and is exactly what makes the run
-// page sit heavy while a user watches a delivered run.
+// ── Server-side authoritative read (token-freshness fix) ─────────────────────
+// The run + run_events + rerender-in-flight check are read SERVER-SIDE via the
+// `getRunForViewer` admin (service-key) action, owner-scoped. This is the core fix:
+// the page used to read these directly from the browser via the RLS-scoped anon
+// client, so a stale ~15-min session token (e.g. an emailed /runs link opened in a
+// cold tab) returned EMPTY and the page lied "could not be found." The server action
+// verifies the token (stale → authError → re-auth branch, never a false notFound) and
+// reads owner-scoped, so the view no longer depends on browser-token freshness.
 //
-// We can't strip `scenes[].data` in PostgREST (no array-element projection), and the
-// LIVE filmstrip genuinely needs the scenes (its card headlines read `scene.data`).
-// So we split the poll by regime instead:
-//   • NON-terminal (queued/running) + the very first load → full `select()` (default
-//     `*`): unchanged behavior, so the live filmstrip keeps its scene data and the
-//     curated-fallback "props is the floor" path is untouched.
-//   • TERMINAL (delivered / completed_with_warnings / failed) → the page keeps polling
-//     ONLY to catch a rerender's `edited_url`. Nothing about `scenes` can change now,
-//     so we poll a LIGHT column set (no `props`) and MERGE it into the already-loaded
-//     run — preserving the full props/scenes already in state. This drops the heavy
-//     blob from every post-delivery tick (the long-lived, page-freezing case) while
-//     never risking the live view or the delivered-video/editor paths.
-// Light columns the terminal watch needs: the rerender output + status/phase, so the
-// "Edited" cut and any late status change still appear without a manual refresh.
-const TERMINAL_WATCH_SELECT =
-  'id, status, phase, final_url, edited_url, updated_at'
-
+// The terminal-watch regime is preserved: once a TERMINAL run is loaded the only
+// reason to keep polling is to catch a rerender's `edited_url`, and the activity feed
+// is frozen — so we pass `terminalWatch: true` to skip re-pulling run_events every 3s,
+// and MERGE the returned row onto the loaded run (keeping the already-loaded
+// props/scenes/events) exactly as before.
 
 export default function RunPage() {
   const params = useParams<{ id: string }>()
   const runId = params?.id
-  const { user, loading } = useAuth()
+  const { user, loading, getToken } = useAuth()
 
   const [run, setRun] = useState<Run | null>(null)
   const [events, setEvents] = useState<RunEvent[]>([])
@@ -65,36 +54,43 @@ export default function RunPage() {
     if (!runId) return
 
     // Regime: once we already have a TERMINAL run loaded, the only reason we keep
-    // polling is to catch a rerender's edited_url — so poll the LIGHT watch columns
-    // (no heavy props) and merge. Otherwise (first load, or a live/non-terminal run)
-    // pull the full row so the filmstrip has its scene data. `runRef` reads the latest
-    // run without making `poll` depend on it (the 3s interval keeps a stable callback).
+    // polling is to catch a rerender's edited_url — so skip re-pulling the (frozen)
+    // events feed and merge the fresh row onto what's loaded. Otherwise (first load,
+    // or a live/non-terminal run) take the full row + events so the filmstrip + activity
+    // feed have their data. `runRef` reads the latest run without making `poll` depend
+    // on it (the 3s interval keeps a stable callback).
     const loaded = runRef.current
-    const terminalLoaded = loaded && TERMINAL.has(loaded.status)
+    const terminalLoaded = !!loaded && TERMINAL.has(loaded.status)
 
-    // Retry a transient InsForge blip (8s-timeout 408 / 5xx / network) inside a single
-    // poll tick so a stuck call doesn't drop a cycle. A real 4xx returns immediately.
-    const { data, error } = await resilientRead(() =>
-      (terminalLoaded
-        ? insforge.database.from('runs').select(TERMINAL_WATCH_SELECT)
-        : insforge.database.from('runs').select()
-      )
-        .eq('id', runId)
-        .maybeSingle(),
-    )
-    // Transient error → keep the last good state and let the next 3s tick retry; never
-    // blank the view or flip a delivered run to an error on a network hiccup. BUT if we
-    // have NOTHING loaded yet and errors persist (e.g. a stale session token 401s every
-    // call), don't sit on "Loading run…" forever — surface a re-auth/retry after a few.
-    if (error) {
+    // AUTHORITATIVE read happens SERVER-SIDE (admin client, owner-scoped) so it never
+    // depends on browser-token freshness. We pass the access token (getToken already
+    // falls back to the durable localStorage copy) so an expired in-memory token still
+    // resolves the persisted one; verifyUser re-validates it server-side either way.
+    const accessToken = await getToken()
+    let res
+    try {
+      res = await getRunForViewer({ runId, accessToken, terminalWatch: terminalLoaded })
+    } catch {
+      // A thrown server-action error (network/timeout to the server action) is treated
+      // as a transient blip: keep the last good state and let the next 3s tick retry;
+      // never blank the view or flip a delivered run to an error on a hiccup. If we have
+      // NOTHING loaded yet and it persists, surface the re-auth/retry branch after a few.
       errCount.current += 1
       if (errCount.current >= 3 && !runRef.current) setLoadFailed(true)
       return
     }
-    if (!data) {
-      // Empty result. Only declare "not found" when we have NOTHING loaded yet — once a
-      // run is on screen (esp. a delivered video), a transient empty/RLS race must never
-      // erase it to "could not be found". A real deletion is vanishingly rare here.
+
+    // Expired/invalid token → re-auth branch (NOT a false "not found"). This is the bug
+    // fix: a stale emailed-link token now prompts "Sign in again" instead of lying.
+    if ('authError' in res) {
+      errCount.current += 1
+      if (errCount.current >= 3 && !runRef.current) setLoadFailed(true)
+      return
+    }
+    if ('notFound' in res) {
+      // Only declare "not found" when we have NOTHING loaded yet — once a run is on
+      // screen (esp. a delivered video), a transient empty race must never erase it to
+      // "could not be found". A real deletion is vanishingly rare here.
       setRun((prev) => {
         if (!prev) setNotFound(true)
         return prev
@@ -106,49 +102,27 @@ export default function RunPage() {
     errCount.current = 0
     setLoadFailed(false)
 
-    // Merge (terminal watch = partial row → patch onto the loaded run, keeping props)
-    // or replace (full row). Either way `r` is the up-to-date run used below.
+    // Merge (terminal watch → patch the fresh row onto the loaded run, keeping the
+    // already-loaded props/scenes) or replace (full row on first/live load). Either way
+    // `r` is the up-to-date run used below.
     let r: Run
-    if (terminalLoaded) {
-      r = { ...loaded, ...(data as Partial<Run>) } as Run
+    if (terminalLoaded && loaded) {
+      r = { ...loaded, ...res.run } as Run
       setRun(r)
     } else {
-      r = data as Run
+      r = res.run
       setRun(r)
     }
 
-    // Events: skip the re-fetch on terminal ticks — the activity feed is already loaded
-    // and frozen once a run is terminal, so there's no need to re-pull it every 3s while
-    // we wait on a rerender. (BuildProgress's live feed only shows pre-terminal.)
-    if (!terminalLoaded) {
-      const { data: ev } = await resilientRead(() =>
-        insforge.database
-          .from('run_events')
-          .select()
-          .eq('run_id', runId)
-          .order('seq', { ascending: true }),
-      )
-      if (ev) setEvents(ev as RunEvent[])
-    }
+    // Events: the server action returns [] on a terminal-watch tick (the feed is frozen
+    // once terminal), so only overwrite the loaded feed on a non-terminal tick.
+    if (!terminalLoaded) setEvents(res.events)
 
     // A terminal build normally stops polling — but an editor Export enqueues a
-    // `rerender` job that produces runs.edited_url AFTER the run is already
-    // 'delivered'. So keep polling while a rerender is queued/claimed, so the new
-    // "Edited" cut appears without a manual refresh.
-    let rerenderInFlight = false
-    if (TERMINAL.has(r.status)) {
-      const { data: jobs } = await resilientRead(() =>
-        insforge.database
-          .from('jobs')
-          .select('id, type, status')
-          .eq('run_id', runId)
-          .eq('type', 'rerender')
-          .in('status', ['queued', 'claimed']),
-      )
-      rerenderInFlight = !!(jobs && jobs.length > 0)
-    }
-    stopped.current = TERMINAL.has(r.status) && !rerenderInFlight
-  }, [runId])
+    // `rerender` job that produces runs.edited_url AFTER delivery. Keep polling while one
+    // is queued/claimed (the server action derived this) so the new "Edited" cut appears.
+    stopped.current = TERMINAL.has(r.status) && !res.rerenderInFlight
+  }, [runId, getToken])
 
   useEffect(() => {
     if (loading || !user || !runId) return

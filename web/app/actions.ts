@@ -1,5 +1,6 @@
 'use server'
 import { adminClient, verifyUser } from '../lib/insforge'
+import type { Run, RunEvent } from '../lib/types'
 
 // The product owner — the ONLY account allowed to read the business-wide analytics
 // (every run's revenue/COGS/profit). Matches the run page's OWNER_EMAIL gate, but
@@ -320,6 +321,98 @@ export async function readInsideRun(input: { runId: string; accessToken: string 
     run: run as Record<string, unknown>,
     events: (events as Record<string, unknown>[]) ?? [],
   }
+}
+
+// ───────────────────────── Run page: server-side owner read ─────────────────────────
+// AUTHORITATIVE run read for the run page + editor, done SERVER-SIDE via the admin
+// (service-key) client so it NEVER depends on the freshness of the browser's RLS token.
+//
+// ROOT CAUSE this fixes: the run page used to read `runs`/`run_events`/`jobs` directly
+// from the browser via the anon (RLS-scoped) client. The session JWT is a ~15-min token
+// rehydrated from localStorage; when a user opens an EMAILED /runs/<id> link in a cold tab
+// long after that token expired, the RLS read returned EMPTY (no error) and the page lied
+// "This run could not be found." Moving the read here removes the token-freshness coupling:
+// we verify the token server-side (a stale token → authError, NOT notFound), then admin-read
+// the run owner-scoped. The admin client bypasses RLS, so the owner gate below is a REAL
+// security boundary (mirrors readAnalytics/readInsideRun): only the run's owner — or the
+// system owner (OWNER_EMAIL, who may view any run, matching the analytics gate) — gets data;
+// any other verified user is told notFound (privacy: they can't enumerate others' runs).
+
+// Discriminated result. The page maps: notFound → "could not be found"; authError → the
+// re-auth ("Sign in again") branch (an expired token now prompts re-auth instead of lying);
+// { run, events, rerenderInFlight } → render as today.
+export type RunForViewerResult =
+  | { authError: true }
+  | { notFound: true }
+  | { run: Run; events: RunEvent[]; rerenderInFlight: boolean }
+
+export async function getRunForViewer(input: {
+  runId: string
+  accessToken: string | null | undefined
+  // Terminal watch tick: the run page already has the (heavy) props loaded and only
+  // polls to catch a rerender's edited_url. When true we skip re-pulling run_events
+  // (frozen once terminal) — mirroring the page's old client-side terminal regime that
+  // avoided re-fetching the feed every 3s. The run row itself is always returned in full
+  // (the admin path doesn't pay the EU→Singapore anon-client heavy-blob penalty the same
+  // way, and the page merges it the same either way).
+  terminalWatch?: boolean
+}): Promise<RunForViewerResult> {
+  if (!input.runId) return { notFound: true }
+  // 1) Verify the caller server-side. A stale/expired token → authError (the page sends
+  //    this to the re-auth branch), NEVER a false notFound.
+  const me = await verifyUser(input.accessToken)
+  if (!me) return { authError: true }
+
+  const db = adminClient()
+  // 2) Admin-read the run by id (bypasses RLS).
+  const { data: runRow } = await db.database
+    .from('runs')
+    .select()
+    .eq('id', input.runId)
+    .maybeSingle()
+  if (!runRow) return { notFound: true }
+  const run = runRow as Run
+
+  // 3) Owner gate (the real security boundary now that RLS is bypassed): only the run's
+  //    owner, or the system owner, may view it. Anyone else → notFound (don't reveal it
+  //    exists). Matches readAnalytics' OWNER_EMAIL gate for the system-owner exception.
+  const isSystemOwner = (me.email || '').toLowerCase() === OWNER_EMAIL
+  if (run.user_id !== me.id && !isSystemOwner) return { notFound: true }
+
+  // 4) Events feed (ordered by seq asc), same as the page derived it. Skipped on a
+  //    terminal-watch tick (the feed is frozen once terminal — see input.terminalWatch).
+  let events: RunEvent[] = []
+  if (!input.terminalWatch) {
+    const { data: ev } = await db.database
+      .from('run_events')
+      .select()
+      .eq('run_id', input.runId)
+      .order('seq', { ascending: true })
+    events = (ev as RunEvent[]) ?? []
+  }
+
+  // 5) Rerender-in-flight: an editor Export enqueues a `rerender` job AFTER delivery, so
+  //    the page keeps polling while one is queued/claimed (to catch edited_url). Derived
+  //    the SAME way the page did client-side.
+  const rerenderInFlight = await isRerenderInFlight(db, input.runId)
+
+  return { run, events, rerenderInFlight }
+}
+
+// Shared: is a rerender job for this run queued or claimed? (Matches the run page's old
+// client check + requestReRender's dedupe.) Takes the already-built admin client so the
+// owner-gated caller doesn't spin up a second one.
+async function isRerenderInFlight(
+  db: ReturnType<typeof adminClient>,
+  runId: string,
+): Promise<boolean> {
+  const { data: jobs } = await db.database
+    .from('jobs')
+    .select('id, type, status')
+    .eq('run_id', runId)
+    .eq('type', 'rerender')
+    .in('status', ['queued', 'claimed'])
+  return !!(jobs && jobs.length > 0)
 }
 
 // ─────────────────────────────── Owner analytics ───────────────────────────────
