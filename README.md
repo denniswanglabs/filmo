@@ -55,9 +55,9 @@ flowchart LR
 - **conversion_read — the Conversion Read.** Filmo reads the page copy and asks **NVIDIA Nemotron** to score it across **six dimensions**: promise, outcome, proof, show, specificity, and CTA. The result (`conversion_read.json`) is the read — and it directly **seeds the plan**: the headline fix becomes the opening title, each weak dimension becomes a scene.
 - **plan.** The **Nemotron** planner turns the goal plus the read into a **strict scene-plan JSON**. One planner owns the whole storyboard, so the cut is coherent rather than stitched from disconnected sub-agents — and each scene is typed to a **curated pattern** (split-stat, logo mosaic, device screenshot, pull-quote, kinetic statement…).
 - **price.** Cost-plus pricing from the plan's projected cost, capped.
-- **gate.** A budget check on the price. The live default also opens a real Stripe **TEST** checkout *before* the agent conducts — the human pays (card `4242`), then produce runs. (The codebase also carries an autonomous Stripe Issuing spend-governance path — a card that declines its own over-budget charge — but the hosted default is the human checkout gate.)
-- **produce_and_ship.** A host tool captures the real page screenshot and logo (headless Playwright, behind the sandbox's per-job egress allowlist), renders the curated patterns in **Remotion**, narrates with **ElevenLabs** (with an automatic free-voice fallback so a render never fails), times words with whisper, stitches with ffmpeg, and uploads the MP4. The agent only conducts; the tools do the work.
-- **Delivered.** A finished `final.mp4` — proven on real sites (a stripe.com run delivers H.264 1920×1080, ~32s, with the real Stripe screenshot, real wordmark, and the customer-logo mosaic).
+- **gate.** The agent reads, plans, and prices **first** — *then* presents a real Stripe **TEST** checkout for that actual price; the human pays (card `4242`), and only then does produce run. So you see the real plan and price before you pay. (The codebase also carries a fully-autonomous Stripe Issuing path — a card that declines its own over-budget `issuing_authorization.request` from the live budget — implemented but not the hosted default.)
+- **produce_and_ship.** A host tool captures the real page screenshot and logo (headless Playwright **on the trusted host**, fetching only the one SSRF-vetted customer URL), renders the curated patterns in **Remotion**, narrates with **ElevenLabs** (with an automatic free-voice fallback so a render never fails), times words with whisper, stitches with ffmpeg, and uploads the MP4. The agent only conducts; the tools do the work.
+- **Delivered.** A finished `final.mp4` — proven on real sites (a github.com run delivers H.264 1920×1080 / AAC, ~26s, Hermes-conducted, with the real screenshot, wordmark, and customer-logo mosaic).
 
 ---
 
@@ -72,7 +72,7 @@ Filmo is built squarely on the hackathon's three sponsors — one for the agent 
 **Nemotron is the brain** behind *every* reasoning call — the Conversion Read **and** the storyboard planner — served via OpenRouter. The hosted default is the **`ultra-paid` 550B flagship** (`nvidia/nemotron-3-ultra-550b-a55b`), with cheaper `super-paid` / `super-free` 120B tiers selectable and used as fallbacks. **NemoClaw / OpenShell is the secure sandbox**: the agent is contained inside it, and the host capture tool it triggers screenshots a **per-job-vetted URL** behind an egress allowlist (OpenRouter + NVIDIA for inference, the host tool-server, Stripe, and the one SSRF-vetted customer URL). The pitch: *the agent that could go rogue is sealed in NVIDIA's sandbox and can only pull the levers we sanctioned.*
 
 ### Stripe — the money layer
-Stripe handles pricing and payment in test mode. The hosted default is a **human checkout gate**: the agent prices the job and presents a real Stripe **TEST** checkout, and the user pays (card `4242`) before produce runs. The codebase also implements the autonomous angle — a **Stripe Issuing** card that *declines its own over-budget charge* without a human — wired through a real `issuing_authorization.request` webhook; it's the agentic-spend thesis, available but not the live default path.
+Stripe handles pricing and payment in test mode. The hosted default is a **human checkout gate**: the agent reads, plans, and prices the job, then presents a real Stripe **TEST** checkout for that price — the user pays (card `4242`) before produce runs. That payment is **autonomous commerce**: it covers what the agent just spent on Nemotron + ElevenLabs and still turns a margin — the agent prices and funds its own work. The codebase also implements a second, fully-autonomous angle — a **Stripe Issuing** card that *declines its own over-budget charge* via a real `issuing_authorization.request` webhook — implemented but not the live default path.
 
 ---
 
@@ -140,4 +140,4 @@ flowchart TD
 
 ## Credits
 
-Built for the **Hermes Hackathon — Nous Research × NVIDIA × Stripe**. The aesthetic is grounded in a curated launch-film pattern library. Private during development.
+Built for the **Hermes Hackathon — Nous Research × NVIDIA × Stripe**. The aesthetic is grounded in a curated launch-film pattern library.
