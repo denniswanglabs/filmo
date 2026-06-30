@@ -39,6 +39,7 @@ import subprocess
 import threading
 import urllib.request
 import urllib.error
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1038,6 +1039,169 @@ def _upload_run_assets_to_insforge(run_id, slug_run_key):
     return {"db_run_key": db_run_key, "uploaded": uploaded, "failed": failed}
 
 
+# --------------------------------------------------------------------------- #
+# VERIFY-AND-HEAL — the permanent guarantee that every editor asset resolves.
+#
+# The generic upload above (_upload_run_assets_to_insforge) covers the happy path,
+# but two failure modes can still ship a video with editor assets that 404 while
+# scrubbing: (a) _db_run_key returns None (non-UUID run_id / DB blip) so the upload
+# is skipped entirely; (b) the worker's recoverShippedVideo fallback ships a video
+# WITHOUT re-running the per-scene upload. This bug ("logo + screenshot blank in the
+# editor") has recurred across #50/#106/#111 because the upload was best-effort and
+# nothing verified it AFTER the fact.
+#
+# This pass makes the upload SELF-CORRECTING and runs at the END of EVERY produce so
+# it cannot be skipped. It is fully DATA-DRIVEN: it walks the FINAL props for every
+# asset-ish string (so a NEW scene type / field is covered automatically — no
+# hardcoded list), and for each:
+#   - skips inline data: URIs and already-full http(s) URLs (those always resolve);
+#   - resolves a bare/relative name against the DB run_key namespace (exactly what
+#     the editor's makeResolveAsset builds), then HEAD/GETs it;
+#   - on miss (404/non-200) RE-UPLOADS the staged file from studio/public/ and
+#     REWRITES the props field to the FULL https URL (prefix-independent: it then
+#     resolves regardless of run_key, and Remotion renders full URLs fine), then
+#     re-checks;
+#   - if it STILL can't resolve after healing, logs a LOUD error AND records a
+#     run_event (actor=system, level=error) so the failure is VISIBLE, never silent.
+# Returns a summary {checked, healed:[...], unresolved:[...]} and the (possibly
+# rewritten) props are persisted by the caller's rich-props merge.
+# --------------------------------------------------------------------------- #
+
+# Fields whose string values are asset references. Used only to DECIDE which leaf
+# strings to check while walking props generically; the walk itself is structural
+# (recurses every dict/list) so a new scene archetype is covered without edits here.
+_ASSET_FIELD_HINTS = (
+    "logoSrc", "imageSrc", "videoSrc", "audioSrc", "src", "music",
+    "audio_path", "music_path", "cornerMark", "posterSrc", "bgSrc",
+)
+# File extensions that mark a bare/relative string as a real asset to verify.
+_ASSET_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif",
+               ".mp3", ".wav", ".m4a", ".aac", ".mp4", ".webm", ".mov")
+
+
+def _looks_like_asset_value(key, val):
+    """True iff `val` is a bare/relative asset filename we should verify+heal.
+
+    Skips inline data: URIs and full http(s) URLs (always resolvable). Catches a
+    value either because its KEY is a known asset field OR because the string ends
+    in a known asset extension — so an unknown new field still gets verified."""
+    if not isinstance(val, str) or not val.strip():
+        return False
+    low = val.strip().lower()
+    if low.startswith("data:") or low.startswith("http://") or low.startswith("https://"):
+        return False
+    if val.startswith("/"):  # absolute public path — render-only, not bucketed
+        return False
+    key_hit = isinstance(key, str) and (key in _ASSET_FIELD_HINTS)
+    ext_hit = low.endswith(_ASSET_EXTS)
+    return key_hit or ext_hit
+
+
+def _walk_asset_refs(node, key=None):
+    """Yield (container, container_key_or_index, value) for every asset-ish leaf
+    string in `node`, recursing all dicts/lists. The container+key let the caller
+    REWRITE the value in place (props mutated -> persisted by the rich-props merge)."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if _looks_like_asset_value(k, v):
+                yield (node, k, v)
+            elif isinstance(v, (dict, list)):
+                yield from _walk_asset_refs(v, k)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            if _looks_like_asset_value(key, v):
+                yield (node, i, v)
+            elif isinstance(v, (dict, list)):
+                yield from _walk_asset_refs(v, key)
+
+
+def _object_url_resolves(object_key):
+    """HEAD/GET walk-videos/objects/<object_key>; True iff it ultimately 200s.
+
+    Mirrors what the editor + a browser do: the storage endpoint 302-redirects to
+    the object, so we follow redirects and accept only a final 200. Bounded; any
+    error (network/timeout) is treated as 'does not resolve' so we heal it."""
+    base = INSFORGE_URL.rstrip("/") + "/api/storage/buckets/walk-videos/objects/"
+    url = base + urllib.parse.quote(object_key, safe="")
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return 200 <= getattr(resp, "status", resp.getcode()) < 300
+    except Exception:
+        return False
+
+
+def _verify_and_heal_assets(run_id, props, run_dir):
+    """Walk FINAL props; ensure every asset reference resolves in storage. Heal any
+    that don't (re-upload from studio/public/ or the run dir, rewrite props to the
+    full URL), and LOUDLY report anything still unresolved. Best-effort; never
+    raises. Mutates `props` in place. Returns a summary dict."""
+    summary = {"checked": 0, "ok": 0, "healed": [], "unresolved": [], "skipped_no_run_key": False}
+    if not isinstance(props, dict):
+        return summary
+    db_run_key = _db_run_key(run_id)
+    if not db_run_key:
+        # Without the DB run_key we cannot build the editor's namespace. This is the
+        # exact silent-skip hole — make it LOUD instead of returning quietly.
+        summary["skipped_no_run_key"] = True
+        _log("ASSET-CHECK: no DB run_key for run %s — cannot verify editor assets" % run_id)
+        _emit_event(run_id,
+                    "asset_check: no DB run_key, editor assets unverifiable for run %s" % run_id,
+                    actor="system", level="error")
+        return summary
+    pub = _studio_public_dir()
+    base_url = (INSFORGE_URL.rstrip("/")
+                + "/api/storage/buckets/walk-videos/objects/")
+    seen = {}  # filename -> resolved full url (so we check/heal each object once)
+    for container, ckey, val in list(_walk_asset_refs(props)):
+        name = val.strip().lstrip("/")
+        summary["checked"] += 1
+        object_key = "%s/%s" % (db_run_key, name)
+        full_url = base_url + urllib.parse.quote(object_key, safe="")
+        # Resolve once per unique filename.
+        if name in seen:
+            container[ckey] = seen[name]
+            continue
+        if _object_url_resolves(object_key):
+            summary["ok"] += 1
+            container[ckey] = full_url        # rewrite to prefix-independent URL
+            seen[name] = full_url
+            continue
+        # MISS -> heal: find the staged source (studio/public first, then run dir).
+        src = None
+        for cand in (os.path.join(pub, name), os.path.join(run_dir or "", name)):
+            if cand and os.path.isfile(cand):
+                src = cand
+                break
+        if not src:
+            _log("ASSET-CHECK: %s 404 and no local source to heal (run %s)" % (name, run_id))
+            _emit_event(run_id, "asset_check: %s unresolved (no local source)" % name,
+                        actor="system", level="error")
+            summary["unresolved"].append(name)
+            continue
+        url, _info = _upload_to_insforge(src, object_key)
+        if url and _object_url_resolves(object_key):
+            container[ckey] = full_url
+            seen[name] = full_url
+            summary["healed"].append(name)
+            _log("ASSET-CHECK: healed %s -> %s (run %s)" % (name, object_key, run_id))
+        else:
+            _log("ASSET-CHECK: %s STILL unresolved after heal (run %s): %s"
+                 % (name, run_id, _info.get("error") if isinstance(_info, dict) else _info))
+            _emit_event(run_id, "asset_check: %s unresolved after re-upload" % name,
+                        actor="system", level="error")
+            summary["unresolved"].append(name)
+    _log("ASSET-CHECK run %s: checked=%d ok=%d healed=%d unresolved=%d"
+         % (run_id, summary["checked"], summary["ok"],
+            len(summary["healed"]), len(summary["unresolved"])))
+    if summary["unresolved"]:
+        _emit_event(run_id,
+                    "asset_check: %d editor asset(s) unresolved: %s"
+                    % (len(summary["unresolved"]), ", ".join(summary["unresolved"])),
+                    actor="system", level="error")
+    return summary
+
+
 def _scene_thumb_time_s(scene, fps, total_frames):
     """Pick a representative timestamp (seconds) inside a scene to grab a frame.
 
@@ -1282,6 +1446,7 @@ def tool_produce_and_ship(args):
     # _merge_run_props read-modify-writes, so producer/conducted_by/produced_on/
     # scene_thumbs are preserved (they're not in this patch). Best-effort: a props
     # write must never fail a (paid, delivered) conduct.
+    asset_check = {}
     try:
         if not isinstance(rendered_props, dict):
             pj = os.path.join(run_dir, "props.json")
@@ -1289,9 +1454,21 @@ def tool_produce_and_ship(args):
                 with open(pj, "r", encoding="utf-8") as fh:
                     rendered_props = json.load(fh)
         if isinstance(rendered_props, dict):
+            # VERIFY-AND-HEAL (intrinsic to produce; runs on EVERY conduct): walk the
+            # FINAL props, ensure every editor asset (logo / screenshot / VO / music /
+            # scene_thumbs / any new asset field) resolves in storage, re-upload +
+            # rewrite-to-full-URL any that 404, and LOUDLY flag anything still broken.
+            # Mutates rendered_props IN PLACE so the rewritten full URLs are what the
+            # rich-props merge below persists to runs.props.
+            try:
+                asset_check = _verify_and_heal_assets(run_id, rendered_props, run_dir)
+            except Exception as e:
+                _log("asset verify-and-heal skipped: %s" % e)
             rich_patch = {}
+            # scene_thumbs is a top-level asset map healed above; persist it too so the
+            # editor's durable (no-event) source carries verified URLs.
             for k in ("fps", "theme", "total_frames", "audio_path", "lang",
-                      "scenes"):
+                      "scenes", "scene_thumbs"):
                 if k in rendered_props:
                     rich_patch[k] = rendered_props[k]
             if rich_patch:
@@ -1314,6 +1491,7 @@ def tool_produce_and_ship(args):
         "montage_path": (res or {}).get("montage_path") if isinstance(res, dict) else None,
         "scene_thumbs": scene_thumbs,
         "run_assets": run_assets,
+        "asset_check": asset_check,
     }
 
 
