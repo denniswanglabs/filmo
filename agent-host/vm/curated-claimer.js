@@ -567,6 +567,35 @@ function runHermesConduct(url, goal, budgetCents, runId) {
   })
 }
 
+// OPTION A robustness: recover an already-shipped video after a produce-pass that
+// FAILED to print its Shipped line. The produce_and_ship MCP tool uploads the
+// rendered video to walk-videos under `<plan_id>/video.mp4` BEFORE the agent emits
+// its final reply — so if the agent stalls on the closing line (550B reply latency)
+// and the conduct times out, the video is ALREADY in the bucket. We list the bucket
+// for that object and return its public URL so the claimer can deliver the
+// Hermes-produced video (producer=hetzner-hermes, REAL price preserved) WITHOUT a
+// wasteful deterministic re-render that would also recompute (overwrite) the price.
+// Returns { finalUrl, sceneCount } or null if nothing shipped. NEVER throws.
+async function recoverShippedVideo(planId) {
+  if (!planId) return null
+  const { data, error } = await ifCall(`storage.list(recover ${planId})`,
+    () => db.storage.from(BUCKET).list({ prefix: `${planId}/`, limit: 200 }),
+    { attempts: 2, timeoutMs: 10000 })
+  if (error) { log(`  ! recover list ${planId}`, JSON.stringify(error)); return null }
+  const objs = (data && data.data) || data || []
+  let finalUrl = null
+  let sceneCount = 0
+  for (const o of objs) {
+    const key = o.key || o.name || ''
+    if (key.endsWith('/video.mp4') || key === `${planId}/video.mp4`) finalUrl = o.url || null
+    if (/\/thumbs\/scene-\d+\.png$/.test(key)) sceneCount++
+  }
+  if (finalUrl && /^https?:\/\//i.test(finalUrl)) {
+    return { finalUrl, sceneCount: sceneCount || null }
+  }
+  return null
+}
+
 // Deliver a Hermes-produced run: stamp final_url + producer=hetzner-hermes,
 // mark the job done, emit a producer line. Returns true on success.
 async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0) {
@@ -577,15 +606,26 @@ async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0) {
   // fetch the live runs.props column and merge the producer tags into it. This
   // keeps the durable, no-parse filmstrip source intact instead of clobbering it.
   let existingProps = {}
-  const { data: cur } = await ifCall('runs.select(props)',
-    () => db.database.from('runs').select('props').eq('id', runId).maybeSingle())
+  // Also fetch the run's already-persisted price/cogs so we NEVER clobber the REAL
+  // price the OPTION-A plan pass wrote (price_cents=<real>) with a null mapped value
+  // when the local ledger lacks pnl (the Hermes render ran inside the MCP tool, not
+  // via build_runner, so runs/<runKey>/ledger.json usually has no pricing).
+  let curPrice = null, curCogs = null
+  const { data: cur } = await ifCall('runs.select(props,price)',
+    () => db.database.from('runs').select('props, price_cents, cogs_cents').eq('id', runId).maybeSingle())
   if (cur && cur.props && typeof cur.props === 'object') existingProps = cur.props
+  if (cur && typeof cur.price_cents === 'number') curPrice = cur.price_cents
+  if (cur && typeof cur.cogs_cents === 'number') curCogs = cur.cogs_cents
   const localProps = readProps(runKey) || {}
   const props = { ...localProps, ...existingProps, producer: HERMES_PRODUCER, produced_on: 'hetzner-vm', conducted_by: 'hermes' }
   // The ledger may not exist (the render happened inside the MCP tool, not via
   // build_runner), so map conservatively and trust the agent's final_url.
   const ledger = readLedger(runKey) || {}
   const mapped = mapLedgerToRun(ledger)
+  // Price/cogs: prefer the ledger value, else KEEP the already-persisted real value
+  // (do not write null over the plan pass's real price).
+  if (mapped.price_cents == null && curPrice != null) mapped.price_cents = curPrice
+  if (mapped.cogs_cents == null && curCogs != null) mapped.cogs_cents = curCogs
   await setRun(runId, { ...mapped, status: 'delivered', phase: 'delivered', final_url: finalUrl, props })
   await setJob(job.id, { status: 'done' })
   const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
@@ -874,7 +914,20 @@ async function processJob(job) {
         await deliverHermesRun(job, runId, runKey, prodRes.finalUrl, prodRes.sceneCount ?? planRes.sceneCount, t0)
         return
       }
-      log(`  ! hermes PRODUCE pass failed (${prodRes.error}); falling back to deterministic build_runner`)
+      // ROBUSTNESS: the produce_and_ship tool uploads the video BEFORE the agent
+      // emits its Shipped line. If the agent stalled on that line (550B reply
+      // latency) and the conduct timed out, the video is ALREADY in the bucket —
+      // recover it and deliver the Hermes-produced video (REAL price preserved)
+      // instead of a wasteful deterministic re-render that recomputes the price.
+      log(`  ! hermes PRODUCE pass failed (${prodRes.error}); checking if produce_and_ship already shipped…`)
+      const recovered = await recoverShippedVideo(planId)
+      if (recovered && recovered.finalUrl) {
+        log(`  RECOVERED already-shipped video for plan_id=${planId} -> ${recovered.finalUrl}`)
+        await emit(runId, `Produce pass finished but did not echo the link; recovered the shipped video from storage.`, 'hermes', 'warn')
+        await deliverHermesRun(job, runId, runKey, recovered.finalUrl, recovered.sceneCount ?? planRes.sceneCount, t0)
+        return
+      }
+      log(`  ! no shipped video found for plan_id=${planId}; falling back to deterministic build_runner`)
       await emit(runId, `Produce pass failed (${prodRes.error}); falling back to deterministic render.`, 'hermes', 'warn')
       // fall through to deterministic; paidViaGate (if set) prevents a 2nd charge.
     } catch (e) {

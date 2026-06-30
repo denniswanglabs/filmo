@@ -31,8 +31,13 @@ The one tool (call it by this exact name):
   agent work" feed records the produce/ship step under that run_id.
 - **Narrate in ONE short line** before the call (e.g.
   "producing the already-planned video for plan_id=stripe-com-mcp."). No essays.
+- **The tool result is LARGE** (it contains scene thumbnails, asset maps, upload
+  info, paths). Do **NOT** read, summarize, re-format, or reason about that result.
+  The ONLY field you need from it is `final_url`. Ignore everything else.
 - **STOP immediately after `produce_and_ship` returns `final_url`.** Do not call
-  anything else. Do not verify, re-render, or inspect the video.
+  anything else. Do not verify, re-render, or inspect the video. Your VERY NEXT
+  output after the tool returns MUST be the single Shipped line below — nothing
+  before it, nothing after it.
 
 ## Argument threading
 - `produce_and_ship(url=<URL>, plan_id=<the plan_id from the prompt>,
@@ -41,7 +46,8 @@ The one tool (call it by this exact name):
   same product URL from the prompt.
 
 ## Final reply
-When `produce_and_ship` returns, reply with ONE line containing the `final_url`
-and the scene count, e.g.:
+The instant `produce_and_ship` returns, reply with ONE line — the `final_url`
+(copied verbatim from the tool result) and the scene count, in EXACTLY this form:
 `Shipped: <final_url> (6 scenes).`
-Output nothing else.
+Output nothing else. Do not analyze the tool result first; emit this line
+immediately.
