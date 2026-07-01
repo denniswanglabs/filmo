@@ -140,9 +140,17 @@ export async function createBuild(input: {
   if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
     const { data: mine } = await db.database
       .from('runs')
-      .select('id')
+      .select('id, run_key, status')
       .eq('user_id', me.id)
-    if (mine && mine.length >= BETA_VIDEO_LIMIT) {
+    // A "chance" is consumed ONLY by a video the user actually MADE: a run that
+    // DELIVERED (status delivered / completed_with_warnings) AND is NOT an operator
+    // gift (run_key does not start with 'gift-'). Failed/abandoned attempts
+    // (blocked_url, payment_timeout, failed) and gift runs do NOT count.
+    const used = (mine || []).filter((r) =>
+      (r.status === 'delivered' || r.status === 'completed_with_warnings') &&
+      !(r.run_key || '').startsWith('gift-'),
+    ).length
+    if (used >= BETA_VIDEO_LIMIT) {
       return {
         limit: true as const,
         message: `You've used all ${BETA_VIDEO_LIMIT} of your beta videos. Filmo is in beta — each account gets ${BETA_VIDEO_LIMIT} videos. Thanks for trying it!`,
