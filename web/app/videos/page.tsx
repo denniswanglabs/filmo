@@ -1,13 +1,15 @@
 'use client'
 // /videos — the signed-in user's own builds, given a roomy full-page home.
 // This is the SAME list that used to live under the home composer: identical
-// `runs` query + identical run-card rendering, just relocated here and scoped
-// (by RLS, via the user-scoped insforge client) to the signed-in user's runs.
-// Signed-out visitors get a sign-in prompt — never any data.
+// `runs` columns + ordering + run-card rendering. The read is now SERVER-SIDE
+// (listMyRuns admin action, owner-scoped) instead of the browser anon/RLS client,
+// so a stale/expired session token (e.g. after a Stripe-payment redirect) no longer
+// returns a misleading EMPTY list — it surfaces the sign-in gate instead (same fix
+// as the run page). Signed-out / auth-error visitors get a sign-in prompt, never data.
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { insforge, resilientRead } from '../../lib/insforge'
 import { useAuth } from '../../lib/auth'
+import { listMyRuns } from '../actions'
 import { StatusChip } from '../components/Brand'
 import FloatingNav from '../components/landing/FloatingNav'
 import SiteFooter from '../components/landing/SiteFooter'
@@ -15,26 +17,35 @@ import LandingBackdrop from '../components/landing/LandingBackdrop'
 import { type Run } from '../../lib/types'
 
 export default function VideosPage() {
-  const { user, loading } = useAuth()
+  const { user, loading, getToken } = useAuth()
 
-  // Recents — same shape + query as the old home list.
+  // Recents — same shape + list as before. `authError` mirrors the run page's re-auth
+  // branch: a stale token routes to the sign-in gate rather than a false-empty list.
   const [runs, setRuns] = useState<Run[] | null>(null)
+  const [authError, setAuthError] = useState(false)
 
   const loadRuns = useCallback(async () => {
-    // One-shot list load. Retry a transient InsForge blip so the post-sign-in builds
-    // list doesn't sit on "Loading runs…" forever after a 30s-style timeout; a real
-    // 4xx returns immediately and leaves the list untouched (no false-empty).
-    const { data, error } = await resilientRead(() =>
-      insforge.database
-        .from('runs')
-        .select(
-          'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at',
-        )
-        .order('created_at', { ascending: false })
-        .limit(20),
-    )
-    if (!error) setRuns((data as Run[]) ?? [])
-  }, [])
+    // AUTHORITATIVE list read SERVER-SIDE (admin client, owner-scoped) via listMyRuns,
+    // so it never depends on browser-token freshness. Pass the access token (getToken
+    // falls back to the durable localStorage copy); verifyUser re-validates server-side.
+    // A thrown server-action error (network/timeout) is a transient blip — leave the last
+    // state and let a manual Refresh retry; never blank the list on a hiccup.
+    const accessToken = await getToken()
+    let res
+    try {
+      res = await listMyRuns(accessToken)
+    } catch {
+      return
+    }
+    // Expired/invalid token → sign-in gate (NOT a false-empty list). Same fix as the run
+    // page: a stale post-payment token now prompts sign-in instead of lying "No builds yet".
+    if ('authError' in res) {
+      setAuthError(true)
+      return
+    }
+    setAuthError(false)
+    setRuns(res.runs)
+  }, [getToken])
 
   useEffect(() => {
     if (user) void loadRuns()
@@ -65,10 +76,12 @@ export default function VideosPage() {
           {/* Auth resolving — neutral placeholder, never flash the signed-out prompt. */}
           {loading ? (
             <p className="text-center text-sm text-[#5A6472]">Loading…</p>
-          ) : !user ? (
-            // Signed out → sign-in prompt only. No data is queried or exposed.
+          ) : !user || authError ? (
+            // Signed out OR a stale/expired session token (authError from the server read)
+            // → sign-in prompt only. No data is queried or exposed. The authError branch is
+            // the post-payment fix: a logged-out tab prompts sign-in, never a false-empty list.
             <div className="mx-auto max-w-md rounded-2xl border border-[#D4E2FB] bg-white/95 px-6 py-12 text-center shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] backdrop-blur-sm">
-              <p className="text-lg font-semibold text-[#0E1320]">Sign in to see your videos</p>
+              <p className="text-lg font-semibold text-[#0E1320]">Please sign in to view your videos</p>
               <p className="mx-auto mt-2 max-w-xs text-sm text-[#5A6472]">
                 Your launch videos live in your account. Sign in to pick up where you left off.
               </p>

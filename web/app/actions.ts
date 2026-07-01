@@ -423,6 +423,39 @@ async function isRerenderInFlight(
   return !!(jobs && jobs.length > 0)
 }
 
+// ───────────────────────── /videos: server-side owner list ─────────────────────────
+// AUTHORITATIVE list of the signed-in user's own runs for the "Your Videos" page, read
+// SERVER-SIDE via the admin (service-key) client so it NEVER depends on the freshness of
+// the browser's RLS token. SAME bug/fix as the run page (getRunForViewer): the /videos
+// page used to read `runs` directly from the browser via the anon (RLS-scoped) client, so
+// a stale/expired ~15-min session token (e.g. after a Stripe-payment redirect logged the
+// tab out) returned EMPTY with no error — the user saw a misleading "No builds yet" empty
+// list instead of their videos. We verify the token server-side (stale → authError, which
+// the page routes to the "sign in" gate, NOT a false empty), then admin-read that user's
+// runs owner-scoped. The admin client bypasses RLS, and the `.eq('user_id', me.id)` filter
+// IS the owner boundary (a verified user can only ever list their own runs).
+export type MyRunsResult = { authError: true } | { runs: Run[] }
+
+export async function listMyRuns(accessToken: string | null | undefined): Promise<MyRunsResult> {
+  // 1) Verify the caller server-side. A stale/expired token → authError (the page shows
+  //    the sign-in gate), NEVER a false-empty list.
+  const me = await verifyUser(accessToken)
+  if (!me) return { authError: true }
+
+  // 2) Admin-read this user's runs, owner-scoped. Same columns + ordering + limit the
+  //    page used client-side, so the rendered list is byte-for-byte what it showed before.
+  const db = adminClient()
+  const { data } = await db.database
+    .from('runs')
+    .select(
+      'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at',
+    )
+    .eq('user_id', me.id)
+    .order('created_at', { ascending: false })
+    .limit(20)
+  return { runs: (data as Run[]) ?? [] }
+}
+
 // ─────────────────────────────── Owner analytics ───────────────────────────────
 // The business-wide P&L: EVERY run's revenue / COGS / profit, plus splits. Admin
 // client bypasses RLS, so this is owner-only — the gate is a real security boundary,
