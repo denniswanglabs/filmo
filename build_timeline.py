@@ -652,30 +652,15 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
         total_frames = out_scenes[-1]["out_frame"]
         if honor_plan_durations and target_duration_s and target_duration_s > 0:
             target_frames = round(float(target_duration_s) * fps)
-            # Per-scene content FLOOR = max(VO span, media) — the length the scene must
-            # hold so narration is never cut and a clip is never truncated. We may
-            # GROW a scene above its floor (a hold) or SHRINK a hold back toward it,
-            # but NEVER below the floor.
-            floors = [max(s.get("_span_frames", 0), s.get("_media_frames", 0))
-                      for s in out_scenes]
-
+            # CEILING REMOVED (Dennis 2026-07-02). Only GROW a too-SHORT film UP toward the
+            # target (distribute padding holds across scenes — this never cuts anything). A
+            # film that OVERRUNS the target is LEFT AT ITS NATURAL LENGTH: every scene keeps
+            # its full read/VO/media time, so a rich card (process-pipeline / stat / mosaic)
+            # is NEVER crushed to hit a time budget ("cut off early"). The dense
+            # `_shrink_holds_to_ceiling` path was deleted — trimming to a hard ~30s ceiling
+            # flashed read-heavy scenes past (YC "How it works" held 1.5s vs its planned 8s).
             if target_frames > total_frames:
-                # SPARSE plan (Super, 23.6s on a 30s target): DISTRIBUTE the deficit
-                # across scenes — each grows toward the per-scene budget — instead of
-                # dumping it all on the last scene (which the 9s cap then blocked,
-                # leaving the film short). Spreading the hold across every scene fills
-                # the target more evenly and keeps any one card from staring.
                 _grow_scenes_to_target(out_scenes, target_frames, fps)
-            else:
-                # DENSE plan (Ultra, 33.1s): if the laid-out film overruns the target
-                # beyond tolerance, SHRINK the holds (scene length above its content
-                # floor) proportionally back down toward the ceiling. Never cut a VO
-                # span or a media clip (floors are hard). The VO condense already does
-                # most of this upstream; this is the safety net for a plan that still
-                # overruns (e.g. a brain that ignored the budget entirely).
-                ceiling = round(target_frames * (1.0 + _OVER_TARGET_TOL))
-                if total_frames > ceiling:
-                    _shrink_holds_to_ceiling(out_scenes, floors, ceiling)
             total_frames = out_scenes[-1]["out_frame"]
     else:
         total_frames = max(audio_frames, 0)

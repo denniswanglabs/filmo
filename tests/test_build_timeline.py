@@ -263,18 +263,19 @@ class TestDurationRobustness(unittest.TestCase):
             self.assertGreaterEqual(s["out_frame"] - s["in_frame"], 10 * FPS - 1,
                                     "a VO span was cut by the shrink")
 
-    def test_dense_with_holds_shrinks_holds_to_floor(self):
-        # Generous duration_s gives each window HOLD slack above its VO span; the
-        # shrink removes that slack (never the VO) when the film overruns the ceiling.
+    def test_dense_plan_is_not_shrunk_keeps_full_holds(self):
+        # CEILING REMOVED (2026-07-02): a plan that overruns the target is LEFT at its
+        # natural length — never trimmed to hit the time budget. Generous duration_s (4x11s
+        # = 44s > 30s target) is kept in full so a read-heavy card is never cut off early.
         scenes = [{"id": f"s{i}", "archetype": "kinetic", "type": "screenshot",
                    "duration_s": 11.0} for i in range(4)]  # 11s hold > 10s VO span
         tl = bt.build_timeline(scenes, _dense_alignment(), fps=FPS,
                                target_duration_s=30)
-        # Floors (4x10s=40s) > ceiling, so the shrink removes ALL hold slack (11->10s)
-        # and stops at the floor — never below the VO.
-        self.assertLessEqual(tl["total_frames"], 40 * FPS + 4)
+        # No shrink: total stays at the natural ~44s (never crushed back toward 30s).
+        self.assertGreaterEqual(tl["total_frames"], 44 * FPS - 4)
         for s in tl["scenes"]:
-            self.assertGreaterEqual(s["out_frame"] - s["in_frame"], 10 * FPS - 1)
+            # every scene keeps its FULL 11s planned hold (the old ceiling crushed it to 10s).
+            self.assertGreaterEqual(s["out_frame"] - s["in_frame"], 11 * FPS - 1)
 
     def test_apportion_never_loops_and_respects_caps(self):
         # Largest-remainder split: sums to min(amount, sum caps), never exceeds a cap.
