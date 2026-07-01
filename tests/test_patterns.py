@@ -375,5 +375,52 @@ class TestStoryShapeStatSeeding(unittest.TestCase):
         self.assertEqual(len(seeded), 1)
 
 
+class TestPageWinsOverEnrich(unittest.TestCase):
+    """The REAL page (story_shape) must WIN over model memory (enrich). A page-grounded beat
+    is off-limits to the enrich pass -- so a name-collision (beacons.fyi -> beacons.AI) can
+    never override real page customers with wrong features."""
+
+    def _plan(self, n=3):
+        scenes = [{"id": "s%d" % i, "type": "motion_graphic", "data": {}} for i in range(n)]
+        beats = [{"scene_id": "s%d" % i, "text": "generic"} for i in range(n)]
+        return {"scenes": scenes, "voiceover": {"beats": beats}}
+
+    def _briefs(self, plan):
+        return " ".join(s.get("brief") or "" for s in plan["scenes"])
+
+    def test_page_customers_win_over_collision_entities(self):
+        plan = self._plan(3)
+        grounded = set()
+        # real page customers
+        plan_job._seed_feature_beats_from_story_shape(
+            plan, {"customers": ["Stripe", "NVIDIA", "Vercel"]}, reserve=0, grounded=grounded)
+        # model-memory NAME COLLISION (wrong company's features)
+        plan_job._seed_feature_beats_from_enrichment(
+            plan, {"entities": ["Media Kit", "Email Marketing", "Online Store", "W-9 Generator"]},
+            grounded=grounded)
+        b = self._briefs(plan)
+        self.assertIn("Stripe", b)            # real page customers survive
+        self.assertNotIn("Media Kit", b)      # the hallucinated mosaic is suppressed
+
+    def test_enrich_never_overrides_grounded_stat(self):
+        plan = self._plan(2)
+        grounded = set()
+        plan_job._seed_feature_beats_from_story_shape(
+            plan, {"stats": [{"value": "100M+", "label": "transactions"}]}, reserve=0, grounded=grounded)
+        plan_job._seed_feature_beats_from_enrichment(
+            plan, {"stats": [{"value": "999", "label": "fake"}], "entities": ["A", "B", "C"]},
+            grounded=grounded)
+        self.assertIn("100M+", self._briefs(plan))   # real page stat untouched
+
+    def test_enrich_still_fills_when_page_has_no_customers(self):
+        # no page customers -> enrich mosaic still fires (no regression for model-known brands)
+        plan = self._plan(3)
+        grounded = set()
+        plan_job._seed_feature_beats_from_story_shape(plan, {}, reserve=0, grounded=grounded)
+        plan_job._seed_feature_beats_from_enrichment(
+            plan, {"entities": ["Airbnb", "Stripe", "Dropbox"]}, grounded=grounded)
+        self.assertIn("Airbnb", self._briefs(plan))
+
+
 if __name__ == "__main__":
     unittest.main()

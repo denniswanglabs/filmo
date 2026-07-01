@@ -368,20 +368,25 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     except Exception as e:  # never let enrichment break a build
         enrich = {}
         print("[planner] verified-knowledge enrich skipped (%s)" % e, file=sys.stderr)
-    # CONTENT-FIT seeding from the Design Brief's story_shape (process_steps ->
-    # process-pipeline, testimonial -> pull-quote) so each company surfaces the patterns
-    # its REAL story supports. No-op on empty story_shape.
+    # CONTENT-FIT seeding from the Design Brief's story_shape (REAL page copy): process_steps
+    # -> process-pipeline, testimonial -> pull-quote, stats -> split-stat, customers ->
+    # split-mosaic. `_grounded` marks every page-seeded beat so the enrich pass (model MEMORY,
+    # collision-prone) can NEVER override it -- the REAL PAGE wins (kills the beacons.fyi ->
+    # beacons.AI name-collision mosaic). No-op on empty story_shape. Defined before the try so
+    # the corrective re-plan below can reuse `_story_shape` / `_reserve`.
+    _story_shape = ((conversion_read or {}).get("design_brief") or {}).get("story_shape") or {}
+    _ss_customers = len([c for c in (_story_shape.get("customers") or []) if str(c or "").strip()])
+    # Reserve a beat for enrich's mosaic ONLY when the page has NO customer list of its own --
+    # the page's real customers win the mosaic; don't hold a slot for model-memory entities.
+    _reserve = 1 if (len([e for e in (enrich.get("entities") or [])
+                          if str(e or "").strip()]) >= 3 and _ss_customers < 3) else 0
     try:
-        _story_shape = ((conversion_read or {}).get("design_brief") or {}).get("story_shape") or {}
-        _reserve = 1 if len([e for e in (enrich.get("entities") or [])
-                             if str(e or "").strip()]) >= 3 else 0
-        plan = _seed_feature_beats_from_story_shape(plan, _story_shape, reserve=_reserve)
-    except Exception as e:
-        print("[planner] story_shape seeding skipped (%s)" % e, file=sys.stderr)
-    try:
-        plan = _seed_feature_beats_from_enrichment(plan, enrich)
-    except Exception as e:  # never let enrichment break a build
-        print("[planner] verified-knowledge enrich seed skipped (%s)" % e, file=sys.stderr)
+        _grounded = set()
+        plan = _seed_feature_beats_from_story_shape(
+            plan, _story_shape, reserve=_reserve, grounded=_grounded)
+        plan = _seed_feature_beats_from_enrichment(plan, enrich, grounded=_grounded)
+    except Exception as e:  # never let seeding break a build
+        print("[planner] feature seeding skipped (%s)" % e, file=sys.stderr)
     # Card-treatment RULES GUARD + HONESTY GUARD (runs for BOTH the LLM and template
     # paths, while `_company_facts` is still on job so it can verify real data): for
     # each motion_graphic/explainer-card scene, keep a valid LLM-picked treatment whose
@@ -437,8 +442,11 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
             # "How it works" beat, that TRIGGERS this very re-plan, and the retry then loses
             # all the stat seeding). `_story_shape` / `_reserve` / `enrich` are in scope.
             try:
-                retry = _seed_feature_beats_from_story_shape(retry, _story_shape, reserve=_reserve)
-                retry = _seed_feature_beats_from_enrichment(retry, enrich)
+                _grounded_retry = set()
+                retry = _seed_feature_beats_from_story_shape(
+                    retry, _story_shape, reserve=_reserve, grounded=_grounded_retry)
+                retry = _seed_feature_beats_from_enrichment(
+                    retry, enrich, grounded=_grounded_retry)
             except Exception as e:
                 print("[planner] re-plan feature seeding skipped (%s)" % e, file=sys.stderr)
             retry = _assign_card_treatments(retry)
@@ -907,9 +915,14 @@ def _beat_already_has_entities(scene, beat_text):
     return len(_mine_named_entities(corpus)) >= 3
 
 
-def _seed_feature_beats_from_enrichment(plan, enrich):
+def _seed_feature_beats_from_enrichment(plan, enrich, grounded=None):
     """Deterministically + HONESTLY seed feature (motion_graphic) beats with the brand's
     verified-knowledge stats/entities so style_fill derives data-rich card TITLES.
+
+    `grounded` (optional set of scene ids): beats the PAGE seeder already claimed from
+    REAL page copy. Enrichment (model MEMORY) is collision-prone (e.g. beacons.fyi ->
+    beacons.AI), so the real page always WINS: enrich never touches a grounded beat, and
+    if the page already grounded an entity mosaic, enrich adds no entities at all.
 
     HOW THE TITLE IS DRIVEN (verified against style_fill): a feature card's title is
     derived by `_shape_explainer` from `data._text` (the threaded VO beat text) FIRST,
@@ -970,22 +983,30 @@ def _seed_feature_beats_from_enrichment(plan, enrich):
     # This now ALSO respects the content-fit seeder that runs BEFORE us: a beat already
     # carrying steps / quote / metrics / compare is a story_shape (process-pipeline /
     # pull-quote) claim -- enrich must fill the REMAINING beats, never clobber it.
+    _grounded = grounded if isinstance(grounded, (set, frozenset)) else set()
     consumed = set()
     for s in feature_scenes:
         bt = _beat_text_for(s.get("id"))
         dd = s.get("data") if isinstance(s.get("data"), dict) else {}
-        if (_beat_already_has_stat(s, bt) or _beat_already_has_entities(s, bt)
+        # PAGE WINS: a beat the page seeder grounded is off-limits to model memory.
+        if (s.get("id") in _grounded
+                or _beat_already_has_stat(s, bt) or _beat_already_has_entities(s, bt)
                 or dd.get("steps") or dd.get("quote") or dd.get("metrics")
                 or dd.get("compare")):
             consumed.add(id(s))
 
-    # 1) ENTITY-LIST — exactly ONE mosaic total (variety). If a mosaic beat already
-    #    exists (the LLM made one), REUSE it (replace its list with the richer verified
-    #    one) instead of adding a 2nd; else seed a still-generic beat.
-    if len(entities) >= 3:
+    # 1) ENTITY-LIST — exactly ONE mosaic total (variety). If the PAGE already grounded a
+    #    mosaic (real customers), enrich adds NONE (real page wins over model memory). Else,
+    #    if a NON-grounded mosaic exists (the LLM made one), REUSE it (replace its list with
+    #    the richer verified one); otherwise seed a still-generic beat.
+    page_mosaic = any(
+        s.get("id") in _grounded
+        and _beat_already_has_entities(s, _beat_text_for(s.get("id")))
+        for s in feature_scenes)
+    if not page_mosaic and len(entities) >= 3:
         existing_mosaic = next(
-            (s for s in feature_scenes
-             if _beat_already_has_entities(s, _beat_text_for(s.get("id")))), None)
+            (s for s in feature_scenes if id(s) not in consumed
+             and _beat_already_has_entities(s, _beat_text_for(s.get("id")))), None)
         target = existing_mosaic or next(
             (s for s in feature_scenes if id(s) not in consumed), None)
         if target is not None:
@@ -1020,11 +1041,16 @@ def _voice_quote(quote):
     return " ".join(words[:18]).rstrip(",.;:") + "…"
 
 
-def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0):
+def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0, grounded=None):
     """CONTENT-FIT seeding (Design Brief): stamp REAL story_shape material onto feature
     beats so the post-fill router renders the matching pattern -- process_steps ->
-    process-pipeline, testimonial -> pull-quote. Honesty: only real material; empty
-    story_shape -> no-op; never override a beat already carrying data. Never raises.
+    process-pipeline, testimonial -> pull-quote, stats -> split-stat, customers ->
+    split-mosaic. Honesty: only real page material; empty story_shape -> no-op; never
+    override a beat already carrying data. Never raises.
+
+    `grounded` (optional set): every scene id we seed is added to it. The enrich pass
+    reads it and REFUSES to touch a page-grounded beat -- so the REAL PAGE always wins
+    over model memory (e.g. a name-collision can never override real page customers).
 
     `reserve` = feature beats to LEAVE FREE for the enrich pass (its mosaic / stats) so
     the final mix stays diverse. We claim at most (free - reserve) beats.
@@ -1056,6 +1082,9 @@ def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0):
             b = {"scene_id": sid, "text": text}
             beats.append(b)
             beat_by_id[sid] = b
+        # Mark this beat as PAGE-GROUNDED so the enrich pass leaves it alone (page wins).
+        if grounded is not None and sid is not None:
+            grounded.add(sid)
 
     # Don't override a beat that already carries real data (stat/entities/metrics/etc.).
     consumed = set()
@@ -1110,15 +1139,27 @@ def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0):
             _seed_scene(target, _voice_quote(quote))
             consumed.add(id(target))
 
+    # customers -> split-mosaic (>= 3 real named customers FROM THE PAGE). Claimed BEFORE
+    # the stats below so a logo wall gets a slot instead of a 2nd stat -- the most diverse
+    # ALL-REAL mix (e.g. beacons: process + real-customer logos + a stat). Real page names
+    # are honest, and because they are `grounded` the enrich pass can never override them
+    # with model-memory entities (the beacons.fyi -> beacons.AI name-collision).
+    customers = [str(c).strip() for c in (story_shape.get("customers") or [])
+                 if str(c or "").strip()]
+    if len(customers) >= 3:
+        target = _claim_target()
+        if target is not None:
+            _seed_scene(target, ", ".join(customers[:6]))
+            consumed.add(id(target))
+
     # stats -> split-stat. Seed the SAME way the enrich pass does (brief + matching VO
     # beat text carry the "value label"), so style_fill derives a stat card downstream AND
     # `_stat_is_real` corroborates the number against the seeded brief. Design-Brief stats
     # are REAL page copy (same trust as process_steps / testimonial above) -- never
     # invented. This closes the gap where a brand the MODEL doesn't know (empty enrich) but
     # whose page shows real numbers (e.g. beacons.fyi) floored every feature card to
-    # icon-headline. Cap at 2 so the mix stays diverse (a remaining beat can still take a
-    # mosaic or the honest floor). Respects `reserve` via _claim_target, so it never eats
-    # the beat held for the enrich mosaic.
+    # icon-headline. Fill the REMAINING beats (cap 2) so the mix stays diverse. Respects
+    # `reserve` via _claim_target.
     stats = [s for s in (story_shape.get("stats") or [])
              if isinstance(s, dict) and str(s.get("value") or "").strip()
              and _STAT_NUMBER_RE.search(str(s.get("value")))]
@@ -1131,17 +1172,6 @@ def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0):
         seed_text = ("%s %s" % (value, label)).strip() if label else value
         _seed_scene(target, seed_text)
         consumed.add(id(target))
-
-    # customers -> split-mosaic (>= 3 real named customers from the page). ONE mosaic total,
-    # via _claim_target so it respects `reserve` and never collides with the enrich pass's
-    # own mosaic. Real names from the page -> honest, no invention.
-    customers = [str(c).strip() for c in (story_shape.get("customers") or [])
-                 if str(c or "").strip()]
-    if len(customers) >= 3:
-        target = _claim_target()
-        if target is not None:
-            _seed_scene(target, ", ".join(customers[:6]))
-            consumed.add(id(target))
 
     return plan
 
