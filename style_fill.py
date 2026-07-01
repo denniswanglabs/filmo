@@ -139,9 +139,12 @@ def _plan_scenes(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
 _VO_WORDS_PER_SEC = 2.15
 # An absolute per-beat word ceiling: even a long scene must not narrate a wall of
 # text (keeps any single beat readable / on-pace regardless of its duration_s). At
-# ~2.05 w/s, 22 words ≈ 10.7s — already past the 9s/scene pacing budget, so this is
-# a hard upper guard the per-scene cap normally beats.
-_VO_BEAT_MAX_WORDS = 22
+# ~2.15 w/s, 30 words ≈ 14s. D (Dennis 2026-07-02): raised 22 -> 30 so a read-heavy
+# beat (a full testimonial pull-quote given a 13s read-time hold) can SPEAK to a clean
+# stop instead of being clamped mid-sentence. The per-scene cap (duration_s * rate)
+# still governs every SHORT beat, and the whole-film GLOBAL squeeze still caps the
+# total VO — so only a genuinely long-read-time scene ever uses the extra room.
+_VO_BEAT_MAX_WORDS = 30
 # A per-beat FLOOR so condensing never strips a beat below a speakable line.
 _VO_BEAT_MIN_WORDS = 6
 # Hard ceiling for the split-layout SUPPORTING line (the muted secondary sentence in

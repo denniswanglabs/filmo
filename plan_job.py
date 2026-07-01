@@ -1029,16 +1029,20 @@ def _seed_feature_beats_from_enrichment(plan, enrich, grounded=None):
 
 
 def _voice_quote(quote):
-    """The VO line for a pull-quote beat = the testimonial itself (trimmed so it never
-    drags), so the narration MATCHES what's on screen and the scene lasts long enough to
-    read -- instead of a 3-word "what customers say" label that flashes by (Dennis's
-    Zapier note). Pull-quote ignores the derived title, so voicing the quote is safe."""
-    words = str(quote or "").split()
-    if not words:
-        return "What customers say"
-    if len(words) <= 18:
-        return quote
-    return " ".join(words[:18]).rstrip(",.;:") + "…"
+    """The VO line for a pull-quote beat = the testimonial ITSELF (in full), so the
+    narration MATCHES what's on screen -- instead of a 3-word "what customers say" label
+    that flashes by (Dennis's Zapier note). Pull-quote ignores the derived title, so
+    voicing the quote is safe.
+
+    D (Dennis 2026-07-02): NO naive word cap here. The old `words[:18] + "…"` guillotined a
+    long quote MID-SENTENCE ("...that it…"), so the narration ended abruptly. Now (a) the
+    read-time hold floors the scene to its `duration_s` so a testimonial has room to
+    breathe, and (b) the downstream BOUNDARY-AWARE whole-film condense (style_fill
+    `_condense_vo_beats` -> `_condense_to_words`) trims to the scene's budget ending on a
+    CLEAN clause -- never a dangling connector, never an ellipsis. So return the quote WHOLE
+    and let those two govern length."""
+    q = str(quote or "").strip()
+    return q if q else "What customers say"
 
 
 def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0, grounded=None):
@@ -1128,14 +1132,18 @@ def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0, grounded=
             dd = target.setdefault("data", {})
             dd["quote"] = quote
             dd["quoteAttribution"] = who
-            # READ TIME: the testimonial must stay on screen long enough to READ (the
-            # Zapier quote flashed because its VO beat was a 3-word label). Floor the hold
-            # to ~the reading time of the visible quote, and VOICE the quote so the
-            # narration matches the screen. Pull-quote ignores the title -> safe.
-            # Word-scaled (~4 wps target): 6w->5s, 18w->8s, 24w+->9s -- so a long real
-            # testimonial (Zapier's 27w joined excerpt) holds 9s, not a brisk 8s.
+            # READ TIME: the testimonial must stay on screen long enough to READ AND to
+            # NARRATE without getting guillotined. The whole-film VO condense budgets each
+            # beat at ~duration_s * speaking_rate, so a too-low read-time cap forced a long
+            # quote to be trimmed mid-thought. D (Dennis 2026-07-02): raise the cap 9->13s
+            # so a ~27-30-word testimonial gets enough speaking time to finish its sentence
+            # (the read-time hold in build_timeline then keeps the card on screen to match).
+            # SPEAKING-rate-scaled (~2.2 w/s + 1s breath) so the VO-condense budget
+            # (duration_s * rate) is large enough to SPEAK the quote to a clean stop rather
+            # than clip it: 6w->5s, 18w->9s, 27w->13s. Capped at 13s so an over-long quote
+            # still trims (cleanly, via the boundary-aware condense) instead of dragging.
             words = len(quote.split())
-            target["duration_s"] = max(5, min(9, 4 + words // 4))
+            target["duration_s"] = max(5, min(13, round(words / 2.2) + 1))
             _seed_scene(target, _voice_quote(quote))
             consumed.add(id(target))
 
