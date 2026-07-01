@@ -643,13 +643,19 @@ async function recoverAnyVideo(runId, runKey) {
 // recovers a video shipped under the old scheme (e.g. a conduct mid-flight during
 // the toolserver swap) — runId is preferred because it can never collide.
 async function recoverShippedVideo(runId, planId) {
+  // FRESHNESS-SAFE recover: ONLY the per-run UUID prefix. The video the produce
+  // tool ships for THIS run lands at <run_id>/video.mp4 (G2: unique per run), so a
+  // recovered runId object can only be THIS run's video. The legacy slug prefix
+  // (planId, e.g. `stripe-com-mcp/`) is SHARED by every conduct of the same URL —
+  // an ancient object left there was being re-delivered as a "fresh" paid video
+  // (this silently re-shipped one Jun-30 stripe render for ~1.3 days). If nothing
+  // fresh exists under runId (e.g. the render FAILED and produce uploaded nothing),
+  // return null so the caller falls through to a FRESH deterministic re-render
+  // (curated-claimer.js:1183) instead of shipping a stale slug object. planId is
+  // retained in the signature for call-site compatibility but intentionally unused.
   if (runId) {
     const byRun = await recoverByPrefix(runId)
     if (byRun && byRun.finalUrl) return byRun
-  }
-  if (planId) {
-    const bySlug = await recoverByPrefix(planId)
-    if (bySlug && bySlug.finalUrl) return bySlug
   }
   return null
 }

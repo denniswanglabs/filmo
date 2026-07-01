@@ -1368,6 +1368,14 @@ def tool_produce_and_ship(args):
 
     # 3) the curated assembler + render -> runs/<run_key>/video.mp4
     #    (entityLogos + screenshots + page logo staged inside run_pipeline)
+    #    FRESHNESS GUARD (critical): the run dir is keyed by the URL SLUG
+    #    (e.g. stripe-com-mcp), so a STALE video.mp4 from a PRIOR conduct can be
+    #    sitting here. style_fill logs "render FAILED" but does NOT raise, so if
+    #    this render fails, os.path.exists(video_path) is STILL True for the old
+    #    file -> we must not treat that as success and ship a days-old video (this
+    #    silently re-shipped one Jun-30 stripe render for ~1.3 days). Require the
+    #    file to have been WRITTEN by THIS render (mtime >= our start time).
+    _render_t0 = time.time()
     try:
         res = style_fill.run_pipeline(
             plan_path, brand_path, build_runner.VO_ENGINE_STYLE, run_dir,
@@ -1376,14 +1384,26 @@ def tool_produce_and_ship(args):
     except Exception as e:
         return {"ok": False, "error": "run_pipeline render failed: %s" % e}
 
+    def _is_fresh(p):
+        try:
+            return bool(p) and os.path.exists(p) and os.path.getmtime(p) >= _render_t0 - 2
+        except OSError:
+            return False
+
     video_path = os.path.join(run_dir, "video.mp4")
-    if not os.path.exists(video_path):
-        # fall back to whatever run_pipeline reported, else fail honestly
+    if not _is_fresh(video_path):
+        # this render did not write a FRESH video.mp4. Try run_pipeline's reported
+        # path; else FAIL HONESTLY (never pass off a stale slug-dir artifact as a
+        # successful render — the caller/claimer then fails loudly / re-renders
+        # instead of delivering an old video).
         rp = (res or {}).get("video_path") if isinstance(res, dict) else None
-        if rp and os.path.exists(rp):
+        if _is_fresh(rp):
             video_path = rp
         else:
-            return {"ok": False, "error": "render produced no video.mp4 in %s" % run_dir,
+            stale = os.path.exists(video_path)
+            return {"ok": False,
+                    "error": ("render FAILED — no fresh video.mp4 in %s (stale artifact "
+                              "present=%s)" % (run_dir, stale)),
                     "run_pipeline_result_keys": sorted((res or {}).keys()) if isinstance(res, dict) else None}
 
     video_bytes = os.path.getsize(video_path)

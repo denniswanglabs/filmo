@@ -105,7 +105,16 @@ def _resolve_domain(name: str) -> Optional[str]:
 
 
 def _mime_from_magic(data: bytes) -> str:
-    """Sniff the image MIME from leading magic bytes. Defaults to PNG."""
+    """Sniff the image MIME from leading magic bytes. Defaults to PNG.
+
+    Definitive binary raster magics are checked first; SVG/XML is detected by
+    content sniff. WHY SVG matters: some brands (e.g. Stripe) return an SVG
+    favicon. A data URI that labels SVG bytes as `image/png` makes Chrome /
+    Remotion's <Img> try the PNG decoder on XML -> "EncodingError: The source
+    image cannot be decoded" -> the ENTIRE render aborts (one bad logo tile
+    silently killed every stripe.com render for ~1.3 days). Labeling it honestly
+    as image/svg+xml routes it to the browser's SVG renderer instead.
+    """
     if data.startswith(_PNG_MAGIC):
         return "image/png"
     if data.startswith(_JPEG_MAGIC):
@@ -114,6 +123,9 @@ def _mime_from_magic(data: bytes) -> str:
         return "image/gif"
     if data.startswith(_ICO_MAGIC):
         return "image/x-icon"
+    sniff = data[:512].lstrip().lower()
+    if sniff.startswith(b"<?xml") or sniff.startswith(b"<svg") or b"<svg" in sniff:
+        return "image/svg+xml"
     return "image/png"  # DDG's documented default; render handles a generic data:image/png
 
 
