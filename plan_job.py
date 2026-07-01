@@ -429,6 +429,19 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
                                     conversion_read=conversion_read, extra_user=fix)
         if retry is not None:
             retry = seed_plan_with_read(retry, conversion_read)
+            # Re-apply the SAME feature-beat seeders + card-treatment guard the primary
+            # plan already got (they ran on the PRE-retry plan). Without this the corrective
+            # re-plan silently drops every story_shape / enrichment stat + mosaic + process
+            # seed AND never runs the honesty/rules card guard -> data-rich cards floor to
+            # icon-headline (the beacons.fyi regression: its process_steps seed a short
+            # "How it works" beat, that TRIGGERS this very re-plan, and the retry then loses
+            # all the stat seeding). `_story_shape` / `_reserve` / `enrich` are in scope.
+            try:
+                retry = _seed_feature_beats_from_story_shape(retry, _story_shape, reserve=_reserve)
+                retry = _seed_feature_beats_from_enrichment(retry, enrich)
+            except Exception as e:
+                print("[planner] re-plan feature seeding skipped (%s)" % e, file=sys.stderr)
+            retry = _assign_card_treatments(retry)
             retry_problems = validate_plan(retry)
             if not retry_problems:
                 plan = retry
@@ -1095,6 +1108,39 @@ def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0):
             words = len(quote.split())
             target["duration_s"] = max(5, min(9, 4 + words // 4))
             _seed_scene(target, _voice_quote(quote))
+            consumed.add(id(target))
+
+    # stats -> split-stat. Seed the SAME way the enrich pass does (brief + matching VO
+    # beat text carry the "value label"), so style_fill derives a stat card downstream AND
+    # `_stat_is_real` corroborates the number against the seeded brief. Design-Brief stats
+    # are REAL page copy (same trust as process_steps / testimonial above) -- never
+    # invented. This closes the gap where a brand the MODEL doesn't know (empty enrich) but
+    # whose page shows real numbers (e.g. beacons.fyi) floored every feature card to
+    # icon-headline. Cap at 2 so the mix stays diverse (a remaining beat can still take a
+    # mosaic or the honest floor). Respects `reserve` via _claim_target, so it never eats
+    # the beat held for the enrich mosaic.
+    stats = [s for s in (story_shape.get("stats") or [])
+             if isinstance(s, dict) and str(s.get("value") or "").strip()
+             and _STAT_NUMBER_RE.search(str(s.get("value")))]
+    for stat in stats[:2]:
+        target = _claim_target()
+        if target is None:
+            break
+        value = str(stat.get("value") or "").strip()
+        label = str(stat.get("label") or "").strip()
+        seed_text = ("%s %s" % (value, label)).strip() if label else value
+        _seed_scene(target, seed_text)
+        consumed.add(id(target))
+
+    # customers -> split-mosaic (>= 3 real named customers from the page). ONE mosaic total,
+    # via _claim_target so it respects `reserve` and never collides with the enrich pass's
+    # own mosaic. Real names from the page -> honest, no invention.
+    customers = [str(c).strip() for c in (story_shape.get("customers") or [])
+                 if str(c or "").strip()]
+    if len(customers) >= 3:
+        target = _claim_target()
+        if target is not None:
+            _seed_scene(target, ", ".join(customers[:6]))
             consumed.add(id(target))
 
     return plan
