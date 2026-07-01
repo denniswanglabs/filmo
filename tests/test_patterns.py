@@ -1,6 +1,7 @@
 """Deterministic ($0) tests for the curated pattern catalog + assembler selection."""
 import unittest
 import patterns_catalog
+import plan_job
 import style_fill
 
 
@@ -295,6 +296,130 @@ class TestDesignBriefParse(unittest.TestCase):
         import analyze
         read = analyze.minimal_read("https://example.com")
         self.assertEqual(read["design_brief"], {"story_shape": {}, "brand_vibe": {}})
+
+
+class TestStoryShapeStatSeeding(unittest.TestCase):
+    """`_seed_feature_beats_from_story_shape` must seed REAL page-copy stats/customers
+    onto feature beats so a data-rich brand the model doesn't KNOW (empty enrich) still
+    gets split-stat / split-mosaic cards instead of flooring to icon-headline
+    (the beacons.fyi regression). The seeded number must survive into a split-stat via
+    style_fill's copy-driven selection."""
+
+    def _plan(self, n=3):
+        scenes = [{"id": "s%d" % i, "type": "motion_graphic", "data": {}} for i in range(n)]
+        beats = [{"scene_id": "s%d" % i, "text": "generic line"} for i in range(n)]
+        return {"scenes": scenes, "voiceover": {"beats": beats}}
+
+    def _briefs(self, plan):
+        return [s.get("brief") or "" for s in plan["scenes"]]
+
+    def test_stats_seed_feature_beats(self):
+        plan = self._plan(3)
+        ss = {"stats": [{"value": "100M+", "label": "agentic transactions"},
+                        {"value": "14,000+", "label": "MCP servers scored"}]}
+        out = plan_job._seed_feature_beats_from_story_shape(plan, ss, reserve=0)
+        joined = " ".join(self._briefs(out))
+        self.assertIn("100M+", joined)
+        self.assertIn("14,000+", joined)
+        # and the matching VO beat text carries it too (title derivation reads beat first)
+        texts = " ".join(b.get("text", "") for b in out["voiceover"]["beats"])
+        self.assertIn("100M+", texts)
+
+    def test_seeded_stat_text_selects_split_stat(self):
+        # end-to-end: the seeded brief -> title -> style_fill selects split-stat (not floor)
+        plan = self._plan(2)
+        ss = {"stats": [{"value": "100M+", "label": "agentic transactions"}]}
+        plan_job._seed_feature_beats_from_story_shape(plan, ss, reserve=0)
+        seeded = next(s for s in plan["scenes"] if "100M+" in (s.get("brief") or ""))
+        out, scene = {"title": seeded["brief"]}, {"data": {"title": seeded["brief"]}}
+        style_fill._assign_treatment_from_filled_copy(out, scene, {"wordmark": "Beacons"})
+        self.assertEqual(out.get("treatment"), "split-stat")
+
+    def test_stats_capped_at_two_for_variety(self):
+        plan = self._plan(4)
+        ss = {"stats": [{"value": "1", "label": "a"}, {"value": "2", "label": "b"},
+                        {"value": "3", "label": "c"}]}
+        plan_job._seed_feature_beats_from_story_shape(plan, ss, reserve=0)
+        seeded = [b for b in self._briefs(plan) if b]
+        self.assertEqual(len(seeded), 2)
+
+    def test_customers_seed_mosaic_when_three_plus(self):
+        plan = self._plan(3)
+        ss = {"customers": ["Stripe", "NVIDIA", "Vercel"]}
+        plan_job._seed_feature_beats_from_story_shape(plan, ss, reserve=0)
+        joined = " ".join(self._briefs(plan))
+        for name in ("Stripe", "NVIDIA", "Vercel"):
+            self.assertIn(name, joined)
+
+    def test_two_customers_no_mosaic(self):
+        plan = self._plan(3)
+        plan_job._seed_feature_beats_from_story_shape(plan, {"customers": ["Stripe", "NVIDIA"]}, reserve=0)
+        self.assertTrue(all(not b for b in self._briefs(plan)))
+
+    def test_stat_without_number_ignored(self):
+        plan = self._plan(2)
+        plan_job._seed_feature_beats_from_story_shape(plan, {"stats": [{"value": "lots", "label": "x"}]}, reserve=0)
+        self.assertTrue(all(not b for b in self._briefs(plan)))
+
+    def test_empty_story_shape_is_noop(self):
+        plan = self._plan(2)
+        plan_job._seed_feature_beats_from_story_shape(plan, {"brand_vibe": {}}, reserve=0)
+        self.assertTrue(all(not b for b in self._briefs(plan)))
+
+    def test_reserve_leaves_a_beat_free(self):
+        # reserve=1 must leave one feature beat unseeded (for the enrich mosaic pass)
+        plan = self._plan(2)
+        ss = {"stats": [{"value": "100M+", "label": "a"}, {"value": "14,000+", "label": "b"}]}
+        plan_job._seed_feature_beats_from_story_shape(plan, ss, reserve=1)
+        seeded = [b for b in self._briefs(plan) if b]
+        self.assertEqual(len(seeded), 1)
+
+
+class TestPageWinsOverEnrich(unittest.TestCase):
+    """The REAL page (story_shape) must WIN over model memory (enrich). A page-grounded beat
+    is off-limits to the enrich pass -- so a name-collision (beacons.fyi -> beacons.AI) can
+    never override real page customers with wrong features."""
+
+    def _plan(self, n=3):
+        scenes = [{"id": "s%d" % i, "type": "motion_graphic", "data": {}} for i in range(n)]
+        beats = [{"scene_id": "s%d" % i, "text": "generic"} for i in range(n)]
+        return {"scenes": scenes, "voiceover": {"beats": beats}}
+
+    def _briefs(self, plan):
+        return " ".join(s.get("brief") or "" for s in plan["scenes"])
+
+    def test_page_customers_win_over_collision_entities(self):
+        plan = self._plan(3)
+        grounded = set()
+        # real page customers
+        plan_job._seed_feature_beats_from_story_shape(
+            plan, {"customers": ["Stripe", "NVIDIA", "Vercel"]}, reserve=0, grounded=grounded)
+        # model-memory NAME COLLISION (wrong company's features)
+        plan_job._seed_feature_beats_from_enrichment(
+            plan, {"entities": ["Media Kit", "Email Marketing", "Online Store", "W-9 Generator"]},
+            grounded=grounded)
+        b = self._briefs(plan)
+        self.assertIn("Stripe", b)            # real page customers survive
+        self.assertNotIn("Media Kit", b)      # the hallucinated mosaic is suppressed
+
+    def test_enrich_never_overrides_grounded_stat(self):
+        plan = self._plan(2)
+        grounded = set()
+        plan_job._seed_feature_beats_from_story_shape(
+            plan, {"stats": [{"value": "100M+", "label": "transactions"}]}, reserve=0, grounded=grounded)
+        plan_job._seed_feature_beats_from_enrichment(
+            plan, {"stats": [{"value": "999", "label": "fake"}], "entities": ["A", "B", "C"]},
+            grounded=grounded)
+        self.assertIn("100M+", self._briefs(plan))   # real page stat untouched
+
+    def test_enrich_still_fills_when_page_has_no_customers(self):
+        # no page customers -> enrich mosaic still fires (no regression for model-known brands)
+        plan = self._plan(3)
+        grounded = set()
+        plan_job._seed_feature_beats_from_story_shape(plan, {}, reserve=0, grounded=grounded)
+        plan_job._seed_feature_beats_from_enrichment(
+            plan, {"entities": ["Airbnb", "Stripe", "Dropbox"]}, grounded=grounded)
+        self.assertIn("Airbnb", self._briefs(plan))
 
 
 if __name__ == "__main__":
