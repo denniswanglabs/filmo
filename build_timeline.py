@@ -581,9 +581,18 @@ def build_timeline(scenes: List[Dict[str, Any]], alignment: Dict[str, Any],
                 length = max(1, round(DEFAULT_HOLD_S * fps))
             out_frame = in_frame + length
         elif span_frames > 0 or beat_audio_frames > 0:
-            # Legacy: voiced scene length == its voice (max of the word span and the
-            # per-beat mp3 speech length), never shorter than a real clip's length.
-            out_frame = in_frame + max(span_frames, media_frames, beat_audio_frames)
+            # Voiced scene (aligned-VO mode, honor_plan_durations=False). Hold at least its
+            # VOICE (word span / per-beat mp3), its MEDIA clip, AND its planner READ-TIME
+            # floor (duration_s -> plan_frames). Adding plan_frames here is the REAL fix for
+            # "scenes cut off early" (Dennis 2026-07-02): otherwise a read-heavy card
+            # (stat / process-pipeline / mosaic) with a SHORT VO line was held for only its
+            # ~1s narration and flashed past (YC "How it works"/"stat-alumni" 8s -> 1.3s).
+            # The scene now holds long enough to READ, holding silent after the narration
+            # when its VO is short — video may exceed total VO, the deliberate trade to
+            # never cut a card. (Cues stay inside the scene; the next scene's VO just
+            # starts at the grown boundary, so narration stays in sync.)
+            out_frame = in_frame + max(span_frames, media_frames, beat_audio_frames,
+                                       plan_frames)
         else:
             # Legacy unvoiced hold (advisory only), floored by the clip length.
             hold_s = plan_hold_s if plan_hold_s > 0 else DEFAULT_HOLD_S
