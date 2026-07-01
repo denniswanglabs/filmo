@@ -14,6 +14,7 @@ Give Filmo a product **URL + a goal**. It reads your real product, reads why the
 
 > Entry for the **Hermes Hackathon — Nous Research × NVIDIA × Stripe** (due 2026-06-30).
 > **Live:** https://filmo.dev
+> **Launch post:** https://x.com/dennis_wang19/status/2071945390048542803
 
 ---
 
