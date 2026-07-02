@@ -14,13 +14,15 @@ import { isDelivered } from '../../../../../lib/types'
 export const dynamic = 'force-dynamic'
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
   if (!id) {
     return new NextResponse('Missing run id', { status: 400 })
   }
+  // `?cut=original` forces the pre-edit render; default prefers the edited cut below.
+  const wantOriginal = new URL(req.url).searchParams.get('cut') === 'original'
 
   // ── IDOR note (ACCEPTED hackathon risk) ───────────────────────────────────
   // This route streams a delivered run's MP4 by id WITHOUT an ownership check, so
@@ -41,7 +43,7 @@ export async function GET(
   const db = adminClient()
   const { data, error } = await db.database
     .from('runs')
-    .select('id, status, final_url')
+    .select('id, status, final_url, edited_url')
     .eq('id', id)
     .maybeSingle()
 
@@ -49,17 +51,29 @@ export async function GET(
     return new NextResponse('Run not found', { status: 404 })
   }
 
-  const run = data as { id: string; status?: string | null; final_url?: string | null }
+  const run = data as {
+    id: string
+    status?: string | null
+    final_url?: string | null
+    edited_url?: string | null
+  }
   // `completed_with_warnings` ships a real video too — gate on delivered-ish, not
   // strictly 'delivered', so its Download button doesn't 404.
   if (!isDelivered(run.status) || !run.final_url) {
     return new NextResponse('No video available for this run', { status: 404 })
   }
 
+  // THE CUT THAT DOWNLOADS = THE CUT THE PAGE PLAYS. When an editor Export has
+  // produced an edited cut (runs.edited_url), the run page shows it FIRST — so the
+  // Download button must serve the SAME cut, not silently hand back the pre-edit
+  // render (users lost their saved edits on download). `?cut=original` opts out.
+  const src = (!wantOriginal && run.edited_url) || run.final_url
+  const cutTag = src === run.edited_url ? '-edited' : ''
+
   // Server-side fetch the MP4 from InsForge storage (no CORS, no exposed URL).
   let upstream: Response
   try {
-    upstream = await fetch(run.final_url, { cache: 'no-store' })
+    upstream = await fetch(src, { cache: 'no-store' })
   } catch {
     return new NextResponse('Failed to fetch the video', { status: 502 })
   }
@@ -69,7 +83,7 @@ export async function GET(
 
   const headers = new Headers()
   headers.set('Content-Type', 'video/mp4')
-  headers.set('Content-Disposition', `attachment; filename="filmo-${run.id}.mp4"`)
+  headers.set('Content-Disposition', `attachment; filename="filmo-${run.id}${cutTag}.mp4"`)
   const len = upstream.headers.get('content-length')
   if (len) headers.set('Content-Length', len)
   headers.set('Cache-Control', 'no-store')
