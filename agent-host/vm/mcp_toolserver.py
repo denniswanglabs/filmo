@@ -932,9 +932,33 @@ def _upload_to_insforge(mp4_path, object_key):
     env.setdefault("INSFORGE_URL", INSFORGE_URL)
     if not env.get("INSFORGE_API_KEY"):
         return None, {"error": "INSFORGE_API_KEY not in env"}
-    attempts = int(os.environ.get("UPLOAD_ATTEMPTS", "3"))
+    # RETRY (hardened, 2026-07-02): the video is ALREADY rendered on disk, so retrying
+    # loops ONLY the ~7s upload — never a re-render. Default 6 attempts with EXPONENTIAL
+    # backoff (2,4,8,16,32s) absorbs a transient InsForge 408 REQUEST_TIMEOUT blip so
+    # produce_and_ship returns a real final_url on the FIRST call and the Hermes agent
+    # never re-calls it (a re-call re-runs capture+render — the ~15min loop we saw on
+    # insforge.dev). A total wall-time budget bounds the worst case if InsForge is truly
+    # down (retrying can't help then; fail cleanly instead of stalling the conduct).
+    attempts = int(os.environ.get("UPLOAD_ATTEMPTS", "6"))
     per_attempt_timeout = int(os.environ.get("UPLOAD_TIMEOUT", "180"))
+    backoff_base = float(os.environ.get("UPLOAD_BACKOFF_BASE", "2.0"))
+    backoff_cap = float(os.environ.get("UPLOAD_BACKOFF_CAP", "32"))
+    total_budget = float(os.environ.get("UPLOAD_TOTAL_BUDGET_S", "150"))
+    _t_start = time.time()
     last_info = {"error": "upload not attempted"}
+
+    def _retry_ok(i):
+        # Sleep before the next attempt, unless we're out of attempts OR over the
+        # wall-time budget. Returns True to `continue` (retry), False to stop.
+        if i >= attempts - 1:
+            return False
+        if (time.time() - _t_start) >= total_budget:
+            _log("upload %s: retry budget %.0fs exhausted after %d attempts"
+                 % (object_key, total_budget, i + 1))
+            return False
+        time.sleep(min(backoff_base * (2 ** i), backoff_cap))
+        return True
+
     for i in range(attempts):
         try:
             proc = subprocess.run(
@@ -945,9 +969,9 @@ def _upload_to_insforge(mp4_path, object_key):
         except subprocess.TimeoutExpired:
             last_info = {"error": "upload timed out (attempt %d/%d)" % (i + 1, attempts)}
             _log("upload %s: %s" % (object_key, last_info["error"]))
-            if i < attempts - 1:
-                time.sleep(1.5 * (2 ** i))  # 1.5s, 3s
-            continue
+            if _retry_ok(i):
+                continue
+            break
         out = (proc.stdout or "").strip().splitlines()
         last = out[-1] if out else ""
         try:
@@ -955,15 +979,15 @@ def _upload_to_insforge(mp4_path, object_key):
         except Exception:
             last_info = {"error": "non-JSON upload output", "stderr": (proc.stderr or "")[-800:],
                          "stdout": (proc.stdout or "")[-800:]}
-            if i < attempts - 1:
-                time.sleep(1.5 * (2 ** i))
-            continue
+            if _retry_ok(i):
+                continue
+            break
         if not res.get("ok"):
             last_info = {"error": res.get("error"), "stderr": (proc.stderr or "")[-800:]}
             _log("upload %s failed (attempt %d/%d): %s" % (object_key, i + 1, attempts, res.get("error")))
-            if i < attempts - 1:
-                time.sleep(1.5 * (2 ** i))
-            continue
+            if _retry_ok(i):
+                continue
+            break
         return res.get("url"), {"key": res.get("key"), "bucket": res.get("bucket")}
     return None, last_info
 
