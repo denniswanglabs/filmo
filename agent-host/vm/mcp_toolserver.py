@@ -1457,6 +1457,13 @@ def tool_produce_and_ship(args):
         object_key = "%s/video.mp4" % run_key
     _emit_event(run_id, "Video rendered (%.1f MB) — uploading to storage…" % (video_bytes / 1e6), actor="render")
     final_url, up_info = _upload_to_insforge(video_path, object_key)
+    # B (surface the ship moment early): the DELIVERABLE (the video) is now in the bucket.
+    # The remaining ~20 small editor-asset + filmstrip uploads below are best-effort editor
+    # niceties, not the deliverable, and on an InsForge-brownout day they dominate the tail.
+    # Emit the "ready" signal here so the user sees their film is done the instant it uploads,
+    # not after the whole asset tail finishes.
+    if final_url:
+        _emit_event(run_id, "Video uploaded — your film is ready; finalizing the editable version…", actor="render")
 
     # 4b) per-scene EDITOR assets: upload the staged logo / screenshot(s) / VO mp3s
     #     / music to walk-videos under the DB runs.run_key namespace (matching the

@@ -80,7 +80,7 @@ const HERMES_PLAN_SKILL = process.env.HERMES_PLAN_SKILL || 'filmo-plan'
 const HERMES_PRODUCE_SKILL = process.env.HERMES_PRODUCE_SKILL || 'filmo-produce'
 const HERMES_SPLIT = String(process.env.HERMES_SPLIT ?? 'true').trim().toLowerCase() !== 'false'
 const HERMES_BUDGET_CENTS = Number(process.env.HERMES_BUDGET_CENTS || 5000)
-const HERMES_TIMEOUT_S = Number(process.env.HERMES_TIMEOUT_S || 900) // nemoclaw exec --timeout
+const HERMES_TIMEOUT_S = Number(process.env.HERMES_TIMEOUT_S || 1200) // nemoclaw exec --timeout (20min: slowest brand = stripe.com, ~12min render + a long InsForge-brownout upload tail was exceeding the old 900s and falling to recovery)
 const PLAN_ATTEMPTS = Number(process.env.PLAN_ATTEMPTS || 3) // claimer-level retries of read->plan->price on a transient model/stream blip
 const PLAN_RETRY_DELAY_MS = Number(process.env.PLAN_RETRY_DELAY_MS || 4000)
 const NEMOCLAW_BIN = process.env.NEMOCLAW_BIN || 'nemoclaw'
@@ -1369,7 +1369,7 @@ async function enqueueTestJob(companyUrl = 'https://stripe.com') {
   return runKey
 }
 
-// Job wall-clock ceiling. The conduct is bounded by nemoclaw --timeout (15min) and
+// Job wall-clock ceiling. The conduct is bounded by nemoclaw --timeout (20min) and
 // the deterministic render by RENDER_TIMEOUT_MS (25min); this is a BELT-AND-SUSPENDERS
 // outer bound so that even if some unforeseen await hangs (an InsForge path, a child
 // that ignores its kill, etc.) the daemon ALWAYS returns to polling. Set above both
