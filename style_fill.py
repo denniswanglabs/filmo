@@ -246,8 +246,18 @@ def _condense_vo_beats(plan: Dict[str, Any], fps: int = 30) -> List[Dict[str, An
     n = max(1, len(beats))
     fair_share_s = (target_s / n) if target_s > 0 else 0.0
     per_budgets: List[int] = []
-    for b in beats:
+    protected = set()
+    for i, b in enumerate(beats):
         sc = scenes_by_id.get(b.get("scene_id")) or {}
+        # PULL-QUOTE / testimonial: SPEAK THE FULL QUOTE. The card renders the whole quote
+        # (data.quote), so the VO must too — never trim a testimonial to the word cap or the
+        # voice ends mid-thought while the card still shows the rest (Dennis 2026-07-02). The
+        # read-time hold already sizes the scene to fit it, and ElevenLabs speaks faster than
+        # the condense's conservative estimate, so a real testimonial lands inside its hold.
+        if str((sc.get("data") or {}).get("quote") or "").strip():
+            per_budgets.append(_word_count(b.get("text", "")))
+            protected.add(i)
+            continue
         try:
             dur = float(sc.get("duration_s") or 0.0)
         except (TypeError, ValueError):
@@ -283,6 +293,10 @@ def _condense_vo_beats(plan: Dict[str, Any], fps: int = 30) -> List[Dict[str, An
                     _VO_BEAT_MIN_WORDS + int(round((p - _VO_BEAT_MIN_WORDS) * scale)))
                 for p in planned
             ]
+            # A protected testimonial keeps its FULL quote even under the global squeeze —
+            # the other beats absorb the compression rather than clipping the quote.
+            for i in protected:
+                per_budgets[i] = _word_count(beats[i].get("text", ""))
 
     for b, budget in zip(beats, per_budgets):
         text = str(b.get("text") or "").strip()
