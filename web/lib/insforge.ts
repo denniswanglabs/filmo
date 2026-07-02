@@ -252,19 +252,23 @@ export async function verifyUser(
       const { data, error } = await client.auth.getCurrentUser()
       if (error) {
         const status = (error as { statusCode?: number })?.statusCode
-        // 401/403 = the token is genuinely rejected → null now (don't retry, don't
-        // mask a real auth failure). Any other error (408 timeout / 5xx / network) is
-        // transient → retry a few times before giving up.
-        if (status === 401 || status === 403 || attempt >= 3) return null
+        // 401/403 = the token is genuinely rejected → null now (→ authError, "sign in").
+        // Any other error (408 timeout / 5xx / network) is transient: retry, then THROW —
+        // never return null — so a brownout can't false-reject a VALID token and strand a
+        // signed-in / paying user behind a "session expired" wall (a null here reads as
+        // authError). A throw is caught upstream as a transient blip that keeps retrying.
+        if (status === 401 || status === 403) return null
+        if (attempt >= 3) throw new Error('verifyUser: auth service unreachable (transient)')
       } else {
         const u = (data?.user ?? null) as { id?: string; email?: string } | null
         return u?.id ? { id: u.id, email: u.email } : null
       }
     } catch (e) {
       // Thrown (rather than returned) errors: same treatment. A thrown 401/403 is a
-      // real rejection; anything else is transient and worth a retry.
+      // real rejection (→ null); anything else is transient → retry, then re-throw.
       const status = (e as { statusCode?: number })?.statusCode
-      if (status === 401 || status === 403 || attempt >= 3) return null
+      if (status === 401 || status === 403) return null
+      if (attempt >= 3) throw new Error('verifyUser: auth service unreachable (transient)')
     }
     await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
   }

@@ -42,7 +42,8 @@ export default function RunPage() {
   const [run, setRun] = useState<Run | null>(null)
   const [events, setEvents] = useState<RunEvent[]>([])
   const [notFound, setNotFound] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false) // transient (server/network) — keep retrying
+  const [authFailed, setAuthFailed] = useState(false) // token genuinely rejected — prompt sign-in
   const errCount = useRef(0)
   const stopped = useRef(false)
   // Latest run, mirrored into a ref so `poll` can branch on terminal-vs-live WITHOUT
@@ -80,11 +81,12 @@ export default function RunPage() {
       return
     }
 
-    // Expired/invalid token → re-auth branch (NOT a false "not found"). This is the bug
-    // fix: a stale emailed-link token now prompts "Sign in again" instead of lying.
+    // GENUINE token rejection (verifyUser saw a real 401/403). A transient brownout no
+    // longer reaches here — verifyUser THROWS on that, handled as a transient blip in the
+    // catch above (keep retrying, never a false "sign in"). So this branch means the token
+    // is actually bad → prompt re-auth, but only when we have nothing loaded to preserve.
     if ('authError' in res) {
-      errCount.current += 1
-      if (errCount.current >= 3 && !runRef.current) setLoadFailed(true)
+      if (!runRef.current) setAuthFailed(true)
       return
     }
     if ('notFound' in res) {
@@ -98,9 +100,10 @@ export default function RunPage() {
       return
     }
 
-    // Got a real row → clear any prior transient load-failure state.
+    // Got a real row → clear any prior transient / auth failure state.
     errCount.current = 0
     setLoadFailed(false)
+    setAuthFailed(false)
 
     // Merge (terminal watch → patch the fresh row onto the loaded run, keeping the
     // already-loaded props/scenes) or replace (full row on first/live load). Either way
@@ -175,18 +178,25 @@ export default function RunPage() {
 
         {notFound ? (
           <p className="mt-10 text-slate-500">This run could not be found.</p>
-        ) : loadFailed && !run ? (
+        ) : authFailed && !run ? (
           <div className="mt-10">
-            <p className="text-slate-500">
-              We had trouble loading this run — your session may have expired.
-            </p>
-            <div className="mt-4 flex gap-3">
+            <p className="text-slate-500">Your session has expired — please sign in again.</p>
+            <div className="mt-4">
               <Link
                 href="/login"
                 className="inline-flex items-center justify-center rounded-lg bg-[#3B82F6] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#2f6fe0]"
               >
                 Sign in again
               </Link>
+            </div>
+          </div>
+        ) : loadFailed && !run ? (
+          <div className="mt-10">
+            <p className="text-slate-500">
+              Having trouble reaching the server — this can happen under heavy load. We&rsquo;re
+              retrying automatically, and your video keeps producing in the background.
+            </p>
+            <div className="mt-4">
               <button
                 onClick={() => {
                   errCount.current = 0
@@ -195,7 +205,7 @@ export default function RunPage() {
                 }}
                 className="inline-flex items-center justify-center rounded-lg border border-black/10 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-black/[0.03]"
               >
-                Retry
+                Retry now
               </button>
             </div>
           </div>
