@@ -5,6 +5,7 @@ import {
   persistSession,
   readPersistedSession,
   rehydrateSessionIntoClient,
+  ensureFreshAccessToken,
 } from './insforge'
 
 interface AuthUser {
@@ -51,6 +52,10 @@ const AuthContext = createContext<AuthState>({
 // auth object / its token manager; we probe the known shapes defensively so a minor
 // SDK version bump can't silently break auth.
 async function readAccessToken(): Promise<string | null> {
+  // Freshness first: if the current token is expired/expiring and we hold a body-mode
+  // refresh credential, mint a fresh one BEFORE reading — server actions verify this
+  // bearer server-side, so handing them a dead token = the "signed out after paying" wall.
+  await ensureFreshAccessToken()
   const a = insforge.auth as unknown as {
     getAccessToken?: () => string | null
     getSession?: () => { accessToken?: string } | null
@@ -97,6 +102,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async (): Promise<AuthUser | null> => {
+    // Mint a fresh session (body-mode refresh) BEFORE getCurrentUser: with an expired token
+    // the SDK's memory is empty and getCurrentUser would fall into its cookie-mode
+    // refreshSession() — the cross-site path that always 401s and erases the session.
+    // After this, getCurrentUser resolves from the freshly saved in-memory session.
+    await ensureFreshAccessToken()
     const { data, error } = await insforge.auth.getCurrentUser()
     const u = error ? null : ((data?.user as AuthUser) ?? null)
     setUser(u)
@@ -174,6 +184,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // (timeout/5xx/network → keep whatever we restored; do NOT wipe a valid session on a
       // blip). `restored` is the optimistically-painted user; we only override it on a clear
       // signal.
+      //
+      // FRESHNESS FIRST (the stay-signed-in-after-Stripe fix): with an EXPIRED restored
+      // token the SDK's memory is empty, and getCurrentUser would fall into its cookie-mode
+      // refreshSession() — the cross-site path that always 401s — and that 401 reads as a
+      // definitive signout below, ERASING a recoverable session. Mint a fresh session via
+      // the body-mode refresh (no cookie, no CSRF) BEFORE asking who the user is.
+      await ensureFreshAccessToken()
+      if (cancelled) return
       let u: AuthUser | null = restored as AuthUser | null
       let definitive = false
       for (let attempt = 0; ; attempt++) {
