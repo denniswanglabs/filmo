@@ -914,19 +914,23 @@ def _upload_to_insforge(mp4_path, object_key):
     the video — produce_and_ship returns final_url=None and the caller can re-ship."""
     if not os.path.exists(INSFORGE_UPLOADER):
         return None, {"error": "uploader missing: %s" % INSFORGE_UPLOADER}
-    # 413 GUARD: the InsForge gateway hard-rejects bodies over ~20-30MB (HTTP 413,
-    # deterministic, independent of timeout/plan). Skip the upload over UPLOAD_MAX_BYTES
-    # (default 18MB) instead of burning retries on a guaranteed 413 — the file stays on
-    # disk so produce_and_ship returns final_url=None and the run is re-shippable.
-    upload_max = int(os.environ.get("UPLOAD_MAX_BYTES", str(18 * 1024 * 1024)))
+    # SIZE CAP (corrected 2026-07-02): the @insforge/sdk .upload() PRESIGNS and sends the
+    # bytes DIRECT to AWS S3 — verified by tracing a real upload: the InsForge gateway only
+    # handles the small strategy/confirm calls, it does NOT proxy the body (so there is no
+    # gateway 413; the old "20-30MB gateway limit" note was wrong). The real ceiling is the
+    # instance's storage max_file_size, checked at strategy time: empirically ~50MB on this
+    # instance (a 40MB upload succeeds; 90MB is rejected 400 BEFORE any bytes move). Cap at
+    # 45MB (safe margin under ~50MB) so an over-limit file is skipped here — kept on disk,
+    # produce_and_ship returns final_url=None, re-shippable — instead of a doomed attempt.
+    upload_max = int(os.environ.get("UPLOAD_MAX_BYTES", str(45 * 1024 * 1024)))
     try:
         sz = os.path.getsize(mp4_path)
     except OSError as e:
         return None, {"error": "stat failed: %s" % e}
     if sz > upload_max:
-        _log("upload %s SKIPPED: %.1fMB > %dMB cap (would 413); file kept at %s"
+        _log("upload %s SKIPPED: %.1fMB > %dMB cap (over instance storage max_file_size); file kept at %s"
              % (object_key, sz / 1048576.0, upload_max // 1048576, mp4_path))
-        return None, {"error": "file too large for gateway (%.1fMB > %dMB); kept on disk for re-ship"
+        return None, {"error": "file too large (%.1fMB > %dMB storage cap); kept on disk for re-ship"
                       % (sz / 1048576.0, upload_max // 1048576), "too_large": True}
     env = dict(os.environ)
     env.setdefault("INSFORGE_URL", INSFORGE_URL)
