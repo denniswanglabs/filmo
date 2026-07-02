@@ -1369,6 +1369,10 @@ def tool_produce_and_ship(args):
             _shutil.rmtree(stale_read, ignore_errors=True)
     except Exception as e:
         _log("produce_and_ship: could not clear stale screenshots: %s" % e)
+    # PROGRESS: the produce->ship tail (capture -> render -> upload) is otherwise
+    # silent for ~13 min, so the run page freezes on "producing". Emit a checkpoint
+    # at each boundary so the live feed advances honestly. _emit_event never raises.
+    _emit_event(run_id, "Capturing the live site for the storyboard…", actor="render")
     try:
         build_runner._capture_screenshots_for_run(url, run_dir)
     except Exception as e:
@@ -1403,6 +1407,7 @@ def tool_produce_and_ship(args):
     #    file -> we must not treat that as success and ship a days-old video (this
     #    silently re-shipped one Jun-30 stripe render for ~1.3 days). Require the
     #    file to have been WRITTEN by THIS render (mtime >= our start time).
+    _emit_event(run_id, "Rendering your video — this is the longest step; image-heavy sites take several minutes…", actor="render")
     _render_t0 = time.time()
     try:
         res = style_fill.run_pipeline(
@@ -1450,6 +1455,7 @@ def tool_produce_and_ship(args):
         object_key = "%s/video.mp4" % run_id
     else:
         object_key = "%s/video.mp4" % run_key
+    _emit_event(run_id, "Video rendered (%.1f MB) — uploading to storage…" % (video_bytes / 1e6), actor="render")
     final_url, up_info = _upload_to_insforge(video_path, object_key)
 
     # 4b) per-scene EDITOR assets: upload the staged logo / screenshot(s) / VO mp3s
