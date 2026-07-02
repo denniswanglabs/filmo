@@ -92,6 +92,48 @@ def tokenize(text):
     return _WORD_RE.findall(text or "")
 
 
+# --- Spoken-number normalization (2026-07-02) --------------------------------- #
+# The VO TEXT sent to TTS gets compact number forms expanded to how a NARRATOR
+# would SAY them, WITHOUT touching on-screen text (the plan's scene.data renders
+# "12.0k"/"$1.3T" visually; only the SPOKEN script is normalized here so ElevenLabs
+# says "12 thousand" not "twelve point oh k", and an over-precise percent is
+# rounded for speech). Applied inside build_word_index so the synth script AND the
+# alignment tokens use the SAME normalized text (they must match or VO desyncs).
+# Conservative: only clear compact patterns change; plain integers ("11 tools")
+# are left for the TTS engine, which reads them fine.
+_MAG_WORDS = {"k": "thousand", "m": "million", "b": "billion", "t": "trillion"}
+# Skip "4K/8K monitor" (resolution, not a magnitude); "$4K" or "4K downloads" still expand.
+_RES_NOUNS = r"(?!\s*(?i:monitors?|displays?|screens?|resolution|tvs?|uhd|footage|cameras?|webcams?|projectors?)\b)"
+_MAG_RE = re.compile(r"(\$)?(\d[\d,]*(?:\.\d+)?)\s*([kKmMbBtT])(\+)?(?![A-Za-z0-9])" + _RES_NOUNS)
+_LONGPCT_RE = re.compile(r"(\d+\.\d{3,})\s*%")
+_PLUS_RE = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*|\d+)\+(?!\d)")
+
+
+def _clean_mantissa(m):
+    m = m.replace(",", "")
+    return m[:-2] if m.endswith(".0") else m
+
+
+def normalize_spoken_numbers(text):
+    """Expand compact number forms for TTS only (leaves plain ints for the engine)."""
+    if not text:
+        return text
+
+    def _mag(mm):
+        dollar, num, suf, plus = mm.group(1), mm.group(2), mm.group(3).lower(), mm.group(4)
+        words = "%s %s" % (_clean_mantissa(num), _MAG_WORDS[suf])
+        if dollar:
+            words += " dollars"
+        if plus:
+            words = "over " + words
+        return words
+
+    text = _MAG_RE.sub(_mag, text)
+    text = _LONGPCT_RE.sub(lambda m: ("%.2f%%" % float(m.group(1))), text)
+    text = _PLUS_RE.sub(lambda m: "over " + m.group(1), text)
+    return text
+
+
 def build_word_index(beats):
     """Concatenate beat texts and record the cumulative WORD-INDEX range each
     beat owns, so every script word knows its scene.
@@ -105,13 +147,18 @@ def build_word_index(beats):
     clean = []
     for b in beats or []:
         sid = b.get("scene_id")
-        text = (b.get("text") or "").strip()
-        if not sid or not text:
+        orig = (b.get("text") or "").strip()
+        if not sid or not orig:
             continue
-        toks = tokenize(text)
+        # `spoken` = number-normalized text used for BOTH the TTS script AND the
+        # alignment tokens (so the audio and the word-index MATCH — no desync).
+        # clean_beats["text"] stays ORIGINAL so downstream ON-SCREEN copy derivation
+        # (stat value / headline) keeps "12.0k", never the spoken "twelve thousand".
+        spoken = normalize_spoken_numbers(orig)
+        toks = tokenize(spoken)
         if not toks:
             continue
-        clean.append({"scene_id": sid, "text": text})
+        clean.append({"scene_id": sid, "text": orig, "spoken": spoken})
         for _ in toks:
             owners.append(sid)
         script_tokens.extend(toks)
@@ -514,7 +561,9 @@ def align(beats, out_path, *, tier="free", lang="en", voice=None,
     owners, script_tokens, clean_beats = build_word_index(beats)
     if not clean_beats:
         raise AlignError("no usable beats (every beat had empty scene_id/text)")
-    script = " ".join(b["text"] for b in clean_beats).strip()
+    # synth from `spoken` (number-normalized) so the AUDIO says "twelve thousand";
+    # clean_beats["text"] (original) still drives on-screen copy downstream.
+    script = " ".join((b.get("spoken") or b["text"]) for b in clean_beats).strip()
 
     synth = synth_full_script(
         script, voice, out_path.rsplit(".", 1)[0] + ".audio.mp3"

@@ -347,6 +347,18 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
       )
     : { transform: "translate(0px,0px) scale(1)", scale: 1, p: 0 };
 
+  // #6 SLOW KEN-BURNS (2026-07-02): mirror of the studio archetype — a plain homepage
+  // shot (no focus / zoom-punch) freezes after the settle; a gentle continuous push
+  // (1.0 -> 1.045 from settle to scene end) keeps the long hold alive. Skipped when a
+  // zoom-punch is active. Keep in sync with studio/src/timeline/archetypes/AppleScreenshot.tsx.
+  const kenBurns = zoomTarget
+    ? 1
+    : interpolate(frame, [shotAt + ARRIVE, durationInFrames], [1, 1.045], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+        easing: EASE_OUT_QUART,
+      });
+
   // cursor path (card-local normalized -> px in the shot window). Default: travel
   // to the focus center and click, if a focus exists and no explicit path given.
   const cursorPath: CursorKeyframe[] | null =
@@ -451,7 +463,7 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
                 position: "absolute",
                 inset: 0,
                 opacity: shotOpacity,
-                transform: `${zoom.transform} scale(${shotScale})`,
+                transform: `${zoom.transform} scale(${shotScale * kenBurns})`,
                 transformOrigin: "0 0",
               }}
             >

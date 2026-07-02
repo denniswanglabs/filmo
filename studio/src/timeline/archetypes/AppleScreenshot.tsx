@@ -347,6 +347,20 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
       )
     : { transform: "translate(0px,0px) scale(1)", scale: 1, p: 0 };
 
+  // #6 SLOW KEN-BURNS (2026-07-02): a plain homepage shot (no focus / zoom-punch)
+  // freezes after the settle, so a long read-time hold sits static. Add a gentle
+  // continuous push (1.0 -> 1.045 from the settle to scene end) so the hold breathes
+  // instead of freezing. Skipped when a zoom-punch is active (it already moves the
+  // camera). Shares transformOrigin 0 0 with shotScale/zoom -> a subtle drift; the
+  // 4.5% max is small enough to never crop meaningful content.
+  const kenBurns = zoomTarget
+    ? 1
+    : interpolate(frame, [shotAt + ARRIVE, durationInFrames], [1, 1.045], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+        easing: EASE_OUT_QUART,
+      });
+
   // cursor path (card-local normalized -> px in the shot window). Default: travel
   // to the focus center and click, if a focus exists and no explicit path given.
   const cursorPath: CursorKeyframe[] | null =
@@ -451,7 +465,7 @@ const SplitScreenshot: React.FC<ScreenshotProps> = ({
                 position: "absolute",
                 inset: 0,
                 opacity: shotOpacity,
-                transform: `${zoom.transform} scale(${shotScale})`,
+                transform: `${zoom.transform} scale(${shotScale * kenBurns})`,
                 transformOrigin: "0 0",
               }}
             >
