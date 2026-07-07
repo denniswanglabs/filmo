@@ -40,6 +40,8 @@ The wedge, in one line: **grounded + diagnostic + curated, vs. generic + halluci
 
 ## How it works
 
+![How Filmo works — a product link goes in, a sealed agent reads, plans, prices, takes payment, and a 1080p video comes out](docs/media/how-filmo-works.png)
+
 You give Filmo a URL and a goal. The Hermes agent then conducts **five host MCP tools** — once each, in strict order — each one an explicit, inspectable step that streams to the live feed.
 
 ```mermaid
