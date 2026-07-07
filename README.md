@@ -1,6 +1,6 @@
 # Filmo
 
-![Filmo — Reads. Plans. Prices. Ships.](docs/media/filmo-thumbnail.png)
+![Filmo — URL in, Launch Video Out](docs/media/filmo-thumbnail.png)
 
 **Your product launch, produced by an AI agent.**
 
