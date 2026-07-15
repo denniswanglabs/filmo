@@ -137,7 +137,18 @@ export async function createBuild(input: {
   // is exempt. We RETURN a structured { limit } (not throw) so the UI shows the friendly
   // message inline rather than the opaque "Server Components render" server-action error.
   const BETA_VIDEO_LIMIT = 3
+  // The free allowance runs for LAUNCH WEEK only — through end of Tue Jul 21 2026,
+  // US Central (one week from the 2026-07-14 Discord launch). After that, non-owner
+  // builds pause with a friendly message. Bump this one date to extend the window.
+  const BETA_FREE_WINDOW_ENDS = Date.parse('2026-07-22T06:00:00Z')
   if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
+    if (Date.now() >= BETA_FREE_WINDOW_ENDS) {
+      return {
+        limit: true as const,
+        message:
+          'Filmo’s free launch week has ended, so new builds are paused for now. Thanks for trying it!',
+      }
+    }
     const dayStart = new Date(Date.now() - 24 * 60 * 60_000).toISOString()
     const { data: mine } = await db.database
       .from('runs')

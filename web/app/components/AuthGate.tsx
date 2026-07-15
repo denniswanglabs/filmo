@@ -148,7 +148,8 @@ export function AuthGate({
         </p>
         <p className="mx-auto mt-3 max-w-[19rem] rounded-lg bg-amber/[0.07] px-3 py-2 text-center text-xs leading-relaxed text-slate-600">
           Filmo is in <span className="font-semibold text-ink">beta</span> — each account gets{' '}
-          <span className="font-semibold text-ink">3 free videos a day</span>.
+          <span className="font-semibold text-ink">3 free videos a day</span> during launch week
+          (through Jul 21).
         </p>
 
         {/* Google — the hero */}
