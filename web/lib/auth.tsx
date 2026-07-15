@@ -17,8 +17,6 @@ interface AuthUser {
 interface AuthState {
   user: AuthUser | null
   loading: boolean
-  /** True when a shared demo account is configured (NEXT_PUBLIC_DEMO_*). */
-  demoAvailable: boolean
   /** Re-read the session; returns the current user (or null). */
   refresh: () => Promise<AuthUser | null>
   /**
@@ -30,22 +28,15 @@ interface AuthState {
   signOut: () => Promise<void>
   /** Redirect to Google. The browser leaves the page and returns to `redirectTo`. */
   signInWithGoogle: (redirectTo?: string) => Promise<void>
-  /** One-tap sign-in with the shared demo account (no redirect). */
-  signInDemo: () => Promise<{ user?: AuthUser; error?: string }>
 }
-
-const DEMO_EMAIL = process.env.NEXT_PUBLIC_DEMO_EMAIL
-const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD
 
 const AuthContext = createContext<AuthState>({
   user: null,
   loading: true,
-  demoAvailable: false,
   refresh: async () => null,
   getToken: async () => null,
   signOut: async () => {},
   signInWithGoogle: async () => {},
-  signInDemo: async () => ({ error: 'not ready' }),
 })
 
 // Read the current access token from the InsForge client. The SDK exposes it on the
@@ -133,14 +124,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       additionalParams: { prompt: 'select_account' },
     })
   }, [])
-
-  const signInDemo = useCallback(async (): Promise<{ user?: AuthUser; error?: string }> => {
-    if (!DEMO_EMAIL || !DEMO_PASSWORD) return { error: 'Demo account not configured' }
-    const r = await insforge.auth.signInWithPassword({ email: DEMO_EMAIL, password: DEMO_PASSWORD })
-    if (r.error) return { error: r.error.message || 'Demo sign-in failed' }
-    const u = await refresh()
-    return u ? { user: u } : { error: 'Demo sign-in failed' }
-  }, [refresh])
 
   useEffect(() => {
     let cancelled = false
@@ -230,12 +213,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         loading,
-        demoAvailable: !!(DEMO_EMAIL && DEMO_PASSWORD),
         refresh,
         getToken,
         signOut,
         signInWithGoogle,
-        signInDemo,
       }}
     >
       {children}

@@ -32,12 +32,12 @@ export function AuthGate({
   /** Called right before a redirecting provider (Google) navigates away. */
   onBeforeRedirect: () => void
 }) {
-  const { signInWithGoogle, signInDemo, demoAvailable } = useAuth()
+  const { signInWithGoogle } = useAuth()
   const [showEmail, setShowEmail] = useState(false)
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState<null | 'google' | 'email' | 'demo'>(null)
+  const [busy, setBusy] = useState<null | 'google' | 'email'>(null)
   const [error, setError] = useState<string | null>(null)
   // Google-only accounts have no password in InsForge and there is no reset flow, so a
   // failed password sign-in nudges toward Google. (Provider isn't knowable client-side,
@@ -75,19 +75,6 @@ export function AuthGate({
       setBusy(null)
       setError(err instanceof Error ? err.message : 'Could not start Google sign-in')
     }
-  }
-
-  async function demo() {
-    setError(null)
-    setShowGoogleHint(false)
-    setBusy('demo')
-    const r = await signInDemo()
-    if (r.error || !r.user) {
-      setBusy(null)
-      setError(r.error || 'Demo sign-in failed')
-      return
-    }
-    onSignedIn(r.user)
   }
 
   async function emailSubmit(e: React.FormEvent) {
@@ -247,18 +234,6 @@ export function AuthGate({
           </form>
         )}
 
-        {/* Demo bypass — only when a shared demo account is configured. */}
-        {demoAvailable && (
-          <div className="mt-5 border-t border-black/5 pt-4 text-center">
-            <button
-              onClick={demo}
-              disabled={!!busy}
-              className="text-sm text-slate-400 transition hover:text-ink disabled:opacity-50"
-            >
-              {busy === 'demo' ? 'Signing in…' : 'Or continue with the demo account'}
-            </button>
-          </div>
-        )}
       </div>
     </div>
   )
