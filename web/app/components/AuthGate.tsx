@@ -39,11 +39,16 @@ export function AuthGate({
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState<null | 'google' | 'email' | 'demo'>(null)
   const [error, setError] = useState<string | null>(null)
+  // Google-only accounts have no password in InsForge and there is no reset flow, so a
+  // failed password sign-in nudges toward Google. (Provider isn't knowable client-side,
+  // so the hint shows on every credentials failure by design.)
+  const [showGoogleHint, setShowGoogleHint] = useState(false)
 
   // Reset transient state whenever the gate is reopened.
   useEffect(() => {
     if (open) {
       setError(null)
+      setShowGoogleHint(false)
       setBusy(null)
     }
   }, [open])
@@ -60,6 +65,7 @@ export function AuthGate({
 
   async function google() {
     setError(null)
+    setShowGoogleHint(false)
     setBusy('google')
     try {
       onBeforeRedirect()
@@ -73,6 +79,7 @@ export function AuthGate({
 
   async function demo() {
     setError(null)
+    setShowGoogleHint(false)
     setBusy('demo')
     const r = await signInDemo()
     if (r.error || !r.user) {
@@ -86,6 +93,7 @@ export function AuthGate({
   async function emailSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    setShowGoogleHint(false)
     setBusy('email')
     try {
       if (mode === 'signup') {
@@ -100,7 +108,10 @@ export function AuthGate({
         }
       } else {
         const { error } = await insforge.auth.signInWithPassword({ email, password })
-        if (error) throw new Error(error.message || 'Sign in failed')
+        if (error) {
+          setShowGoogleHint(true)
+          throw new Error(error.message || 'Sign in failed')
+        }
       }
       const { data } = await insforge.auth.getCurrentUser()
       const u = (data?.user as AuthUser) ?? null
@@ -163,7 +174,16 @@ export function AuthGate({
           {busy === 'google' ? 'Redirecting to Google…' : 'Continue with Google'}
         </button>
 
-        {error && <p className="mt-4 text-center text-sm text-red-600">{error}</p>}
+        {error && (
+          <div className="mt-4 text-center">
+            <p className="text-sm text-red-600">{error}</p>
+            {showGoogleHint && (
+              <p className="mt-1.5 text-xs text-slate-500">
+                Signed up with Google? Use Continue with Google above.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Email fallback */}
         {!showEmail ? (

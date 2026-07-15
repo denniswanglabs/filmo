@@ -16,6 +16,9 @@ export default function LoginPage() {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Google-only accounts have no password in InsForge (and no reset flow) — a failed
+  // password sign-in nudges toward Google. Provider isn't knowable client-side.
+  const [showGoogleHint, setShowGoogleHint] = useState(false)
   // Verification fallback (only used if the project still requires email verification)
   const [needsCode, setNeedsCode] = useState(false)
   const [code, setCode] = useState('')
@@ -28,6 +31,7 @@ export default function LoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    setShowGoogleHint(false)
     setBusy(true)
     try {
       if (mode === 'signup') {
@@ -48,7 +52,10 @@ export default function LoginPage() {
       }
       // sign in
       const { error } = await insforge.auth.signInWithPassword({ email, password })
-      if (error) throw new Error(error.message || 'Sign in failed')
+      if (error) {
+        setShowGoogleHint(true)
+        throw new Error(error.message || 'Sign in failed')
+      }
       await refresh()
       router.replace('/')
     } catch (err) {
@@ -61,6 +68,7 @@ export default function LoginPage() {
   async function onVerify(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    setShowGoogleHint(false)
     setBusy(true)
     try {
       const { error } = await insforge.auth.verifyEmail({ email, otp: code })
@@ -167,7 +175,16 @@ export default function LoginPage() {
                 required
               />
 
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && (
+                <div>
+                  <p className="text-sm text-red-600">{error}</p>
+                  {showGoogleHint && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Signed up with Google? Use Continue with Google above.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <button
                 disabled={busy}
