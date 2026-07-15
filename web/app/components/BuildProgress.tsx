@@ -285,8 +285,11 @@ function PayPanel({ run }: { run: Run }) {
         <span className="text-xs font-normal text-white/80">— test card 4242·4242·4242·4242</span>
       </a>
 
-      <p className="mt-2.5 text-center text-[11px] text-[#5A6472]">
-        Stripe test checkout — no real charge. You&rsquo;ll return here automatically after paying.
+      <p className="mx-auto mt-2.5 max-w-md text-center text-[11px] leading-relaxed text-[#5A6472]">
+        Filmo is in beta, so this is a Stripe test checkout — you won&rsquo;t actually be charged.
+        Use test card <span className="font-medium text-[#0E1320]">4242 4242 4242 4242</span> with
+        any future expiry, any CVC, and any name and email. You&rsquo;ll return here automatically
+        after paying.
       </p>
     </div>
   )
