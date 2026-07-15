@@ -130,21 +130,23 @@ export async function createBuild(input: {
     throw new Error('Too many builds in a short window — give it a minute and try again.')
   }
 
-  // Beta cap: every account EXCEPT the owner gets a TOTAL of N videos (lifetime, not
-  // per-day) while Filmo is in beta — this protects the Nemotron/ElevenLabs budget from a
-  // stranger draining it. Identity is the server-verified token (never the client) and the
-  // admin count bypasses RLS, so it can't be gamed. The owner is exempt. We RETURN a
-  // structured { limit } (not throw) so the UI shows the friendly message inline rather than
-  // the opaque "Server Components render" server-action error.
+  // Beta cap: every account EXCEPT the owner gets N videos per rolling 24h DAY while
+  // Filmo is in beta — protects the Nemotron/ElevenLabs budget from a stranger draining
+  // it, while letting people come back tomorrow. Identity is the server-verified token
+  // (never the client) and the admin count bypasses RLS, so it can't be gamed. The owner
+  // is exempt. We RETURN a structured { limit } (not throw) so the UI shows the friendly
+  // message inline rather than the opaque "Server Components render" server-action error.
   const BETA_VIDEO_LIMIT = 3
   if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
+    const dayStart = new Date(Date.now() - 24 * 60 * 60_000).toISOString()
     const { data: mine } = await db.database
       .from('runs')
       .select('id, run_key, status')
       .eq('user_id', me.id)
-    // A "chance" is consumed ONLY by a video the user actually MADE: a run that
-    // DELIVERED (status delivered / completed_with_warnings) AND is NOT an operator
-    // gift (run_key does not start with 'gift-'). Failed/abandoned attempts
+      .gte('created_at', dayStart)
+    // A "chance" is consumed ONLY by a video the user actually MADE in the last 24h:
+    // a run that DELIVERED (status delivered / completed_with_warnings) AND is NOT an
+    // operator gift (run_key does not start with 'gift-'). Failed/abandoned attempts
     // (blocked_url, payment_timeout, failed) and gift runs do NOT count.
     const used = (mine || []).filter((r) =>
       (r.status === 'delivered' || r.status === 'completed_with_warnings') &&
@@ -153,7 +155,7 @@ export async function createBuild(input: {
     if (used >= BETA_VIDEO_LIMIT) {
       return {
         limit: true as const,
-        message: `You've used all ${BETA_VIDEO_LIMIT} of your beta videos. Filmo is in beta — each account gets ${BETA_VIDEO_LIMIT} videos. Thanks for trying it!`,
+        message: `You've used your ${BETA_VIDEO_LIMIT} beta videos for today. Filmo is in beta — each account gets ${BETA_VIDEO_LIMIT} videos a day. Come back tomorrow!`,
       }
     }
   }
