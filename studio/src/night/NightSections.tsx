@@ -12,11 +12,14 @@ import { CONTENT_W } from "./Stage";
 const resolveAsset = (path: string): string =>
   path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
 
-const Section: React.FC<{ children: React.ReactNode; frame: number; fps: number }> = ({
-  children,
-  frame,
-  fps,
-}) => (
+const Section: React.FC<{
+  children: React.ReactNode;
+  frame: number;
+  fps: number;
+  t?: NightTokens;
+  wordmark?: string;
+  index?: number;
+}> = ({ children, frame, fps, t, wordmark, index }) => (
   <div
     style={{
       position: "absolute",
@@ -26,6 +29,38 @@ const Section: React.FC<{ children: React.ReactNode; frame: number; fps: number 
       justifyContent: "center",
     }}
   >
+    {/* Structural header (reference grammar): the film's wordmark + a muted
+        section index pin every beat to the one engineered surface. */}
+    {t && wordmark ? (
+      <div
+        style={{
+          position: "absolute",
+          top: 54,
+          left: 0,
+          right: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 14,
+          opacity: pop(frame, 4, fps).opacity * 0.85,
+          fontFamily: t.fontBody,
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.22em",
+          color: t.inkDim,
+        }}
+      >
+        <span>{wordmark.toUpperCase()}</span>
+        {typeof index === "number" ? (
+          <>
+            <span style={{ width: 26, height: 1, background: t.panelLine }} />
+            <span style={{ color: t.accent, opacity: 0.75 }}>
+              {String(index + 1).padStart(2, "0")}
+            </span>
+          </>
+        ) : null}
+      </div>
+    ) : null}
     <div
       style={{
         width: CONTENT_W,
@@ -319,14 +354,45 @@ export const NightLadder: React.FC<{
   frame: number;
   fps: number;
   data: { headline?: string; chips?: string[]; secondary?: string[]; activeIndex?: number };
-}> = ({ t, frame, fps, data }) => {
+  wordmark?: string;
+  index?: number;
+}> = ({ t, frame, fps, data, wordmark, index }) => {
   const chips = data.chips ?? [];
   const secondary = data.secondary ?? [];
   const head = pop(frame, 2, fps, 260);
   const base = Math.round(0.5 * fps);
   const secondaryStart = base + ladderStart(chips.length, fps) + Math.round(0.2 * fps);
+  // Statement mode (no chips to ladder): the headline IS the beat — set it big,
+  // accent its strongest word, and let the words pop in as a group sequence.
+  const statement = chips.length === 0;
+  const words = String(data.headline ?? "").split(/\s+/).filter(Boolean);
+  const accentWord = words.reduce((a, b) =>
+    (b.replace(/[.,!?]/g, "").length > a.replace(/[.,!?]/g, "").length ? b : a), "");
   return (
-    <Section frame={frame} fps={fps}>
+    <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
+      {statement ? (
+        <div
+          style={{
+            fontFamily: t.fontDisplay,
+            fontSize: 84,
+            fontWeight: 700,
+            letterSpacing: "-0.025em",
+            lineHeight: 1.12,
+            maxWidth: 1150,
+            textAlign: "center",
+          }}
+        >
+          {words.map((w, i) => {
+            const p = pop(frame, Math.round(0.12 * fps) + Math.round(i * 0.055 * fps), fps);
+            const isAccent = w === accentWord && w.replace(/[.,!?]/g, "").length >= 6;
+            return (
+              <span key={i} style={{ opacity: p.opacity, color: isAccent ? t.accent : t.ink }}>
+                {w}{" "}
+              </span>
+            );
+          })}
+        </div>
+      ) : (
       <div
         style={{
           ...popStyle(head),
@@ -342,6 +408,7 @@ export const NightLadder: React.FC<{
       >
         {data.headline}
       </div>
+      )}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", maxWidth: 1000 }}>
         {chips.map((c, i) => (
           <div key={i} style={popStyle(pop(frame, base + ladderStart(i, fps), fps))}>

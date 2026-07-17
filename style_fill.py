@@ -4514,8 +4514,16 @@ def _shape_night_credibility(scene: Dict[str, Any], brand: Dict[str, Any]) -> Di
     d = scene.get("data") or {}
     stat = d.get("stat") or {}
     raw = str(d.get("_text") or scene.get("brief") or "")
-    label = stat.get("label") or _grounded_headline(raw, brand) or ""
-    return {"eyebrow": None, "stat": {"value": stat.get("value") or "", "label": label}}
+    value = str(stat.get("value") or "").strip()
+    label = str(stat.get("label") or "").strip()
+    if not value:
+        head = _grounded_headline(raw, brand) or _title_from_text(raw) or ""
+        parsed = _night_stat_from_headline(head)
+        if parsed:
+            value, label = parsed
+    if not label:
+        label = _grounded_headline(raw, brand) or ""
+    return {"eyebrow": None, "stat": {"value": value, "label": label}}
 
 
 def _shape_night_terminal(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
@@ -4568,6 +4576,27 @@ def _shape_night_close(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str
     }
 
 
+_NIGHT_STAT_RE = re.compile(
+    r"^\s*(?P<value>[$€£]?\d[\d,.]*(?:\s?[%kKmMbBxX+])?\+?)\s+(?P<label>\S.*)$")
+
+
+def _night_stat_from_headline(headline: str):
+    """(value, label) when a REAL headline leads with a stat token — "$500B+ Annual
+    payment volume" -> ("$500B+", "Annual payment volume"). Long raw decimals are
+    display-rounded (1.68249730% -> 1.68%) — formatting, never new facts. None when
+    the headline isn't stat-led."""
+    m = _NIGHT_STAT_RE.match(str(headline or ""))
+    if not m:
+        return None
+    value, label = m.group("value").strip(), m.group("label").strip()
+    dm = re.match(r"^([$€£]?)(\d+\.\d{3,})(.*)$", value)
+    if dm:
+        value = f"{dm.group(1)}{float(dm.group(2)):.2f}{dm.group(3)}"
+    if len(label.split()) < 2:
+        return None
+    return value, label
+
+
 _NIGHT_TREATMENT_ARCH = {
     "pull-quote": "night-quote",
     "split-stat": "night-credibility",
@@ -4611,6 +4640,10 @@ class NightStyle(Style):
         entities = d.get("featureEntities") or []
         if isinstance(entities, list) and len(entities) >= 3:
             return "night-ecosystem"
+        raw = str(d.get("_text") or scene.get("brief") or "")
+        head = _grounded_headline(raw, {}) or _title_from_text(raw) or ""
+        if _night_stat_from_headline(head):
+            return "night-credibility"
         return "night-ladder"
 
 

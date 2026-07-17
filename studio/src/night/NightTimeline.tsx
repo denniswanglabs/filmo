@@ -25,7 +25,7 @@ import { GLIDE_EASE } from "./motion";
 
 // Sections are TIGHTER than the viewport so neighbors peek at the frame edges —
 // the film reads as one continuous tall page, and mid-glide never crosses a void.
-const SECTION_H = 900;
+const SECTION_H = 860;
 const GLIDE_S = 0.95; // 0.8–1.4s band (spec §6)
 // v2 camera: the film NEVER holds still — during each beat the camera crawls
 // through ±DRIFT_PX around the section anchor, then the boundary glide eases into
@@ -86,7 +86,8 @@ const NightSection: React.FC<{
   fps: number;
   wordmark: string;
   logoSrc?: string;
-}> = ({ t, scene, frame, fps, wordmark, logoSrc }) => {
+  index?: number;
+}> = ({ t, scene, frame, fps, wordmark, logoSrc, index }) => {
   const local = Math.max(0, frame - scene.in_frame);
   const kind = String(scene.archetype);
   const data = (scene.data ?? {}) as Record<string, unknown>;
@@ -102,7 +103,7 @@ const NightSection: React.FC<{
     case "night-terminal":
       return <NightTerminal t={t} frame={local} fps={fps} data={data} />;
     case "night-ladder":
-      return <NightLadder t={t} frame={local} fps={fps} data={data} />;
+      return <NightLadder t={t} frame={local} fps={fps} data={data} wordmark={wordmark} index={index} />;
     case "night-ecosystem":
       return <NightEcosystem t={t} frame={local} fps={fps} data={data} />;
     case "night-close":
@@ -171,6 +172,7 @@ export const NightTimeline: React.FC<TimelineData> = (props) => {
               fps={fps}
               wordmark={props.theme.wordmark}
               logoSrc={props.theme.logoSrc}
+              index={i}
             />
           </div>
         ))}
