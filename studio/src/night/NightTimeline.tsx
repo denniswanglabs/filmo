@@ -21,7 +21,7 @@ import {
   NightQuote,
   NightTerminal,
 } from "./NightSections";
-import { GLIDE_EASE } from "./motion";
+import { GLIDE_EASE, snapToBeat, type BeatGrid } from "./motion";
 
 // Sections are TIGHTER than the viewport so neighbors peek at the frame edges —
 // the film reads as one continuous tall page, and mid-glide never crosses a void.
@@ -89,6 +89,7 @@ const NightSection: React.FC<{
   index?: number;
 }> = ({ t, scene, frame, fps, wordmark, logoSrc, index }) => {
   const local = Math.max(0, frame - scene.in_frame);
+  const hold = Math.max(1, scene.out_frame - scene.in_frame);
   const kind = String(scene.archetype);
   const data = (scene.data ?? {}) as Record<string, unknown>;
   switch (kind) {
@@ -99,11 +100,11 @@ const NightSection: React.FC<{
     case "night-quote":
       return <NightQuote t={t} frame={local} fps={fps} data={data} />;
     case "night-credibility":
-      return <NightCredibility t={t} frame={local} fps={fps} data={data} />;
+      return <NightCredibility t={t} frame={local} fps={fps} data={data} holdFrames={hold} />;
     case "night-terminal":
       return <NightTerminal t={t} frame={local} fps={fps} data={data} />;
     case "night-ladder":
-      return <NightLadder t={t} frame={local} fps={fps} data={data} wordmark={wordmark} index={index} />;
+      return <NightLadder t={t} frame={local} fps={fps} data={data} wordmark={wordmark} index={index} holdFrames={hold} />;
     case "night-ecosystem":
       return <NightEcosystem t={t} frame={local} fps={fps} data={data} />;
     case "night-close":
@@ -131,6 +132,16 @@ export const NightTimeline: React.FC<TimelineData> = (props) => {
 
   const hasPerSceneAudio = scenes.some((s) => s.audio?.src);
   const music = props.theme.music || music_path;
+  // §B beat grid (frames) from the per-run bed mapping; undefined -> no snapping.
+  const grid: BeatGrid | undefined = props.theme.musicMeta;
+  // §A camera-distance focus: how centered section i is in the viewport RIGHT NOW.
+  // 1 at dead center, falling to 0 one full section away. Sections dim to a 30%
+  // peek and UNDIM as the camera glides in — the reference's dim/undim vocabulary.
+  const focusOf = (i: number): number => {
+    const center = i * SECTION_H + SECTION_H / 2;
+    const viewCenter = y + 540; // camera viewport middle in world coords
+    return Math.max(0, 1 - Math.abs(center - viewCenter) / SECTION_H);
+  };
 
   return (
     <NightStage t={t}>
@@ -160,22 +171,35 @@ export const NightTimeline: React.FC<TimelineData> = (props) => {
           willChange: "transform",
         }}
       >
-        {scenes.map((scene, i) => (
-          <div
-            key={scene.id}
-            style={{ position: "absolute", left: 0, top: i * SECTION_H, width: FRAME_W, height: SECTION_H }}
-          >
-            <NightSection
-              t={t}
-              scene={scene}
-              frame={frame}
-              fps={fps}
-              wordmark={props.theme.wordmark}
-              logoSrc={props.theme.logoSrc}
-              index={i}
-            />
-          </div>
-        ))}
+        {scenes.map((scene, i) => {
+          const focus = focusOf(i);
+          return (
+            <div
+              key={scene.id}
+              style={{
+                position: "absolute",
+                left: 0,
+                top: i * SECTION_H,
+                width: FRAME_W,
+                height: SECTION_H,
+                // §A dim/undim: the focused section is full ink; neighbors peek
+                // at ~30% and brighten as the camera arrives. Smoothstep keeps
+                // the transition part of the glide, not a separate event.
+                opacity: 0.3 + 0.7 * (focus * focus * (3 - 2 * focus)),
+              }}
+            >
+              <NightSection
+                t={t}
+                scene={scene}
+                frame={frame}
+                fps={fps}
+                wordmark={props.theme.wordmark}
+                logoSrc={props.theme.logoSrc}
+                index={i}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Audio: per-scene VO beats at each scene's in_frame (pipeline convention),
@@ -205,7 +229,10 @@ export const NightTimeline: React.FC<TimelineData> = (props) => {
         for (let r = 0; r < rungs; r++) {
           pops.push({ at: scene.in_frame + Math.round(0.5 * fps) + Math.round(r * 0.29 * fps), key: `rung-${scene.id}-${r}` });
         }
+        // §B: each pop lands ON the nearest musical beat when one is close
+        // (±4 frames); VO-locked arrivals that sit off-grid stay put.
         return pops
+          .map((p) => ({ ...p, at: snapToBeat(p.at, grid) }))
           .filter((p) => p.at < total_frames - fps)
           .map((p, j) => (
             <Sequence key={p.key} from={p.at} durationInFrames={Math.round(0.7 * fps)}>

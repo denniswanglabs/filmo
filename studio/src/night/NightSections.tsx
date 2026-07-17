@@ -5,7 +5,7 @@
 import React from "react";
 import { Img, staticFile } from "remotion";
 import { NIGHT_TYPE, type NightTokens } from "./theme";
-import { ladderStart, microDrift, pop, typedChars } from "./motion";
+import { countUp, ladderStart, microDrift, pop, rise, riseStyle, typedChars } from "./motion";
 import { Chip, Eyebrow, popStyle } from "./ui";
 import { CONTENT_W } from "./Stage";
 
@@ -84,12 +84,15 @@ export const NightPanel: React.FC<{
   data: { imageSrc?: string; caption?: string };
 }> = ({ t, frame, fps, data }) => {
   const p = pop(frame, Math.round(0.15 * fps), fps, 260);
+  // §C two-stage arrival: the browser frame lands first, THEN the captured page
+  // fades in inside it — the panel reads as a surface receiving content.
+  const shotIn = pop(frame, Math.round(0.5 * fps), fps, 300);
   // Slow push-in over the hold so the shot never freezes.
   const push = 1 + Math.min(0.05, (frame / fps) * 0.009);
   return (
     <Section frame={frame} fps={fps}>
       {data.caption ? (
-        <div style={popStyle(pop(frame, 2, fps))}>
+        <div style={riseStyle(rise(frame, Math.round(0.9 * fps), fps))}>
           <Eyebrow t={t}>{data.caption}</Eyebrow>
         </div>
       ) : null}
@@ -114,7 +117,13 @@ export const NightPanel: React.FC<{
           {data.imageSrc ? (
             <Img
               src={resolveAsset(data.imageSrc)}
-              style={{ width: "100%", display: "block", transform: `scale(${push})`, transformOrigin: "50% 20%" }}
+              style={{
+                width: "100%",
+                display: "block",
+                opacity: shotIn.opacity,
+                transform: `scale(${push})`,
+                transformOrigin: "50% 20%",
+              }}
             />
           ) : (
             <div style={{ height: 560, background: "#0B0B0B" }} />
@@ -206,18 +215,52 @@ export const NightQuote: React.FC<{
   );
 };
 
-/** Credibility beat: badge + one strong stat, given air (spec §5.5). */
+/** Split a stat value into prefix / numeric part / suffix so the NUMBER can
+ *  count up while the currency sign and unit stay put. "$1.9tn" -> ["$", "1.9",
+ *  "tn"]; "99.999%" -> ["", "99.999", "%"]; non-numeric values -> no animation. */
+export function splitStatValue(value: string): { prefix: string; num: number | null; decimals: number; grouped: boolean; suffix: string } {
+  const m = /^([^0-9]*)(\d[\d,]*(?:\.\d+)?)(.*)$/.exec(value.trim());
+  if (!m) return { prefix: "", num: null, decimals: 0, grouped: false, suffix: "" };
+  const raw = m[2];
+  const grouped = raw.includes(",");
+  const num = parseFloat(raw.replace(/,/g, ""));
+  const decimals = raw.includes(".") ? raw.split(".")[1].length : 0;
+  if (!isFinite(num)) return { prefix: "", num: null, decimals: 0, grouped: false, suffix: "" };
+  return { prefix: m[1], num, decimals, grouped, suffix: m[3] };
+}
+
+/** Format a count-up sample exactly like the target's own notation (same decimal
+ *  places, same digit grouping) — display math only, never a new fact. */
+export function formatStatNumber(n: number, decimals: number, grouped: boolean): string {
+  const fixed = n.toFixed(decimals);
+  if (!grouped) return fixed;
+  const [int, frac] = fixed.split(".");
+  const g = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return frac ? `${g}.${frac}` : g;
+}
+
+/** Credibility beat: badge + one strong stat, given air (spec §5.5).
+ *  Development pass §C: the numeric part COUNTS UP to the real value over ~0.7s
+ *  (formatting preserved), the label rises in after, the underline draws last —
+ *  the beat develops instead of landing all at once. */
 export const NightCredibility: React.FC<{
   t: NightTokens;
   frame: number;
   fps: number;
   data: { eyebrow?: string; stat?: { value?: string; label?: string } };
+  holdFrames?: number;
 }> = ({ t, frame, fps, data }) => {
   const value = data.stat?.value ?? "";
   const label = data.stat?.label ?? "";
   const badge = pop(frame, 2, fps);
-  const num = pop(frame, Math.round(0.28 * fps), fps, 260);
-  const under = Math.min(1, Math.max(0, (frame - 0.75 * fps) / (0.5 * fps)));
+  const numStart = Math.round(0.28 * fps);
+  const num = pop(frame, numStart, fps, 260);
+  const parts = splitStatValue(value);
+  const progress = countUp(frame, numStart, fps, 700);
+  const shown = parts.num === null
+    ? value
+    : `${parts.prefix}${formatStatNumber(parts.num * progress, parts.decimals, parts.grouped)}${parts.suffix}`;
+  const under = Math.min(1, Math.max(0, (frame - 1.05 * fps) / (0.5 * fps)));
   return (
     <Section frame={frame} fps={fps}>
       {data.eyebrow ? (
@@ -236,14 +279,15 @@ export const NightCredibility: React.FC<{
           letterSpacing: "-0.03em",
           lineHeight: 1,
           color: t.ink,
+          fontVariantNumeric: "tabular-nums",
         }}
       >
-        {value}
+        {shown}
       </div>
       <div style={{ width: 180 * under, height: 4, borderRadius: 2, background: t.accent }} />
       <div
         style={{
-          ...popStyle(pop(frame, Math.round(0.55 * fps), fps)),
+          ...riseStyle(rise(frame, Math.round(0.8 * fps), fps)),
           fontFamily: t.fontBody,
           fontSize: NIGHT_TYPE.lede,
           color: t.inkMuted,
@@ -330,11 +374,19 @@ export const NightTerminal: React.FC<{
           const chars = typedChars(frame, lineStart(i), fps, line);
           if (chars <= 0) return <div key={i} style={{ minHeight: 38 }} />;
           const active = chars < line.length;
+          // §C development: once the command finishes typing, a dim exit-status
+          // tick fades in at the end of the line — mechanical UI chrome (never a
+          // brand claim), so the panel keeps living between commands.
+          const doneAt = lineStart(i) + Math.ceil((line.length / 34) * fps) + Math.round(0.25 * fps);
+          const tick = pop(frame, doneAt, fps);
           return (
             <div key={i} style={{ color: t.inkMuted, whiteSpace: "pre" }}>
               <span style={{ color: t.accent }}>{"❯ "}</span>
               <span style={{ color: t.ink }}>{line.slice(0, chars)}</span>
               {active && cursorOn ? <span style={{ color: t.accent }}>▍</span> : null}
+              {!active ? (
+                <span style={{ opacity: tick.opacity * 0.7, color: t.accent }}>{"  ✓"}</span>
+              ) : null}
             </div>
           );
         })}
@@ -348,26 +400,45 @@ export const NightTerminal: React.FC<{
   );
 };
 
-/** Capability section: headline + a ladder of chips popping in sequence. */
+/** Capability section: headline + a ladder of chips popping in sequence.
+ *  Development pass §C: after the last chip lands the ACTIVE highlight sweeps
+ *  across the row once and settles on `activeIndex`; statement mode gains a
+ *  grounded support line (~55% of the hold) + an accent underline draw — the
+ *  beat keeps developing across its whole hold. */
 export const NightLadder: React.FC<{
   t: NightTokens;
   frame: number;
   fps: number;
-  data: { headline?: string; chips?: string[]; secondary?: string[]; activeIndex?: number };
+  data: { headline?: string; chips?: string[]; secondary?: string[]; activeIndex?: number; support?: string };
   wordmark?: string;
   index?: number;
-}> = ({ t, frame, fps, data, wordmark, index }) => {
+  holdFrames?: number;
+}> = ({ t, frame, fps, data, wordmark, index, holdFrames }) => {
   const chips = data.chips ?? [];
   const secondary = data.secondary ?? [];
   const head = pop(frame, 2, fps, 260);
   const base = Math.round(0.5 * fps);
   const secondaryStart = base + ladderStart(chips.length, fps) + Math.round(0.2 * fps);
+  const hold = holdFrames ?? Math.round(4 * fps);
+  // §C sweep: once every chip is in, the highlight scans the row (one chip per
+  // 0.45s) and settles on the shaped activeIndex.
+  const sweepStart = base + ladderStart(chips.length - 1, fps) + Math.round(0.5 * fps);
+  const sweepStep = Math.round(0.45 * fps);
+  let activeIdx = data.activeIndex ?? 0;
+  if (chips.length > 1 && frame >= sweepStart) {
+    const k = Math.floor((frame - sweepStart) / sweepStep);
+    activeIdx = k < chips.length ? k : (data.activeIndex ?? 0);
+  } else if (chips.length > 1) {
+    activeIdx = -1; // nothing highlighted until the sweep begins
+  }
   // Statement mode (no chips to ladder): the headline IS the beat — set it big,
   // accent its strongest word, and let the words pop in as a group sequence.
   const statement = chips.length === 0;
   const words = String(data.headline ?? "").split(/\s+/).filter(Boolean);
   const accentWord = words.reduce((a, b) =>
     (b.replace(/[.,!?]/g, "").length > a.replace(/[.,!?]/g, "").length ? b : a), "");
+  const supportStart = Math.round(hold * 0.55);
+  const underlineP = Math.min(1, Math.max(0, (frame - hold * 0.7) / (0.5 * fps)));
   return (
     <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
       {statement ? (
@@ -409,10 +480,28 @@ export const NightLadder: React.FC<{
         {data.headline}
       </div>
       )}
+      {statement && underlineP > 0 ? (
+        <div style={{ width: 170 * underlineP, height: 4, borderRadius: 2, background: t.accent, marginTop: -6 }} />
+      ) : null}
+      {statement && data.support ? (
+        <div
+          style={{
+            ...riseStyle(rise(frame, supportStart, fps)),
+            fontFamily: t.fontBody,
+            fontSize: NIGHT_TYPE.lede,
+            color: t.inkMuted,
+            maxWidth: 860,
+            textAlign: "center",
+            lineHeight: 1.5,
+          }}
+        >
+          {data.support}
+        </div>
+      ) : null}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", maxWidth: 1000 }}>
         {chips.map((c, i) => (
           <div key={i} style={popStyle(pop(frame, base + ladderStart(i, fps), fps))}>
-            <Chip t={t} active={i === (data.activeIndex ?? 0)}>
+            <Chip t={t} active={i === activeIdx}>
               {c}
             </Chip>
           </div>

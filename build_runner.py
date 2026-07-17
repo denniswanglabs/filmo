@@ -484,8 +484,17 @@ def _run_vo_engine(plan, run_id, url, run_dir):
                 target_climax = scenes[-1].get("in_frame", 0) / fps + 1.0
                 bed_name = f"night-bed-{run_id}.mp3"
                 bed_out = os.path.join(style_fill.STUDIO_DIR, "public", bed_name)
-                if night_music.build_bed(target_climax, total_s, bed_out):
-                    props.setdefault("theme", {})["music"] = bed_name
+                bed = night_music.build_bed(target_climax, total_s, bed_out)
+                if bed:
+                    theme = props.setdefault("theme", {})
+                    theme["music"] = bed_name
+                    # §B beat grid: lets NightTimeline snap SFX + within-hold
+                    # arrivals to the bed's musical beats (frames, output time).
+                    if bed.get("spb_s"):
+                        theme["musicMeta"] = {
+                            "spbFrames": bed["spb_s"] * fps,
+                            "phaseFrames": bed.get("first_beat_s", 0.0) * fps,
+                        }
                     with open(props_path, "w") as f:
                         json.dump(props, f)
                     print(f"[night] music mapped: climax -> {target_climax:.2f}s "

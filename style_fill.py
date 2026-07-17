@@ -3987,6 +3987,11 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
     plan_scenes = _plan_scenes(plan)
     by_id = _scene_by_id(plan_scenes)
 
+    # Development pass §D: expose the plan's Design Brief to shapers through the
+    # brand dict they already receive (same channel as _night_terminal_lines).
+    # Real, honesty-guarded material only — story_shape is guarded upstream.
+    brand["_plan_design_brief"] = plan.get("design_brief") or {}
+
     # The run's emphasis (user-supplied feature/area). The walkthrough shaper uses
     # this for the overlay title so the title bar stays on the emphasized feature,
     # not whatever flow the planner's free-text VO happened to narrate.
@@ -4445,14 +4450,48 @@ if __name__ == "__main__":
 # inherited: every shaper reads plan/brand data the classic path already
 # guards — nothing is invented here.
 
+_NIGHT_BREAK_STOPWORDS = {
+    "a", "an", "the", "of", "to", "in", "for", "your", "every", "with",
+    "and", "or", "on", "at", "by", "into", "from", "is", "are",
+}
+
+
+def _night_balanced_split(words: List[str]) -> List[List[str]]:
+    """Split words into two lines at the boundary that minimizes CHARACTER-length
+    imbalance PLUS a break-quality penalty (development pass §C). The penalty
+    discourages breaking right after a stopword or a short word — that's how
+    "…independent real / estate agent…" happened: a perfectly balanced cut can
+    still land mid-phrase, so near-balanced candidates that end on a strong word
+    win instead."""
+    if len(words) <= 3:
+        return [words]
+    lens = [len(w) for w in words]
+    total = sum(lens) + len(words) - 1
+
+    def _penalty(before: str) -> int:
+        w = before.strip(".,!?").lower()
+        if w in _NIGHT_BREAK_STOPWORDS:
+            return 8
+        return max(0, 6 - len(w)) * 3
+
+    best_i, best_score = 1, float("inf")
+    running = 0
+    for i in range(1, len(words)):
+        running += lens[i - 1] + (1 if i > 1 else 0)
+        score = abs(running - (total - running - 1)) + _penalty(words[i - 1])
+        if score < best_score:
+            best_i, best_score = i, score
+    return [words[:best_i], words[best_i:]]
+
+
 def _night_accent_split(headline: str) -> List[List[Dict[str, Any]]]:
-    """Two headline lines with ONE accent phrase: split at the word midpoint and
-    accent the longest content word (>=6 chars) — deterministic, brand-agnostic."""
+    """Two headline lines with ONE accent phrase: split at the length-balanced
+    boundary and accent the longest content word (>=6 chars) — deterministic,
+    brand-agnostic."""
     words = [w for w in str(headline or "").split() if w]
     if not words:
         return [[{"text": ""}]]
-    mid = max(1, round(len(words) / 2))
-    lines = [words[:mid], words[mid:]] if len(words) > 3 else [words]
+    lines = _night_balanced_split(words)
     accent_word = max(words, key=lambda w: len(w.strip(".,!?")))
     if len(accent_word.strip(".,!?")) < 6:
         accent_word = None
@@ -4552,14 +4591,54 @@ def _shape_night_ecosystem(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict
     }
 
 
+def _night_harvest_chips(d: Dict[str, Any], brand: Dict[str, Any]) -> List[str]:
+    """Chips for the ladder from ALREADY-GUARDED real material only (development
+    pass §D): scene entities -> brand page-harvested features -> the design
+    brief's story_shape features -> the scene's step titles. Empty when the brand
+    honestly has nothing — the ladder then renders statement mode as before."""
+    def _titles(items) -> List[str]:
+        out = []
+        for it in items or []:
+            text = (it.get("title") or it.get("label") or it.get("text") or "") if isinstance(it, dict) else str(it or "")
+            text = str(text).strip()
+            if 2 <= len(text) <= 32 and text.lower() not in {t.lower() for t in out}:
+                out.append(text)
+        return out
+
+    sources = [
+        d.get("featureEntities"),
+        _titles(brand.get("features")),
+        _titles((((brand.get("_plan_design_brief") or {}).get("story_shape")) or {}).get("features")),
+    ]
+    # Steps are the LAST resort and only when the film has no terminal beat —
+    # the terminal already types those exact lines, and a chip row repeating
+    # them would make the film rhyme with itself.
+    if not brand.get("_night_terminal_lines"):
+        sources.append(_titles(d.get("steps")))
+    for source in sources:
+        chips = [str(c).strip() for c in (source or []) if str(c or "").strip()]
+        if len(chips) >= 2:
+            return chips[:6]
+    return []
+
+
 def _shape_night_ladder(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
     d = scene.get("data") or {}
-    chips = d.get("featureEntities") or []
+    chips = _night_harvest_chips(d, brand)
     raw = str(d.get("_text") or scene.get("brief") or "")
+    headline = _grounded_headline(raw, brand) or _title_from_text(raw) or ""
+    # §C statement support: the beat's own (spoken) sentence, shown only when it
+    # carries more than the compressed headline — no new material, ever.
+    support = ""
+    if not chips:
+        full = " ".join(str(d.get("_text") or "").split())
+        if full and full.lower() != headline.lower() and len(full) > len(headline) + 12:
+            support = full if len(full) <= 150 else (full[:150].rsplit(" ", 1)[0].rstrip(",;:.") + "…")
     return {
-        "headline": _grounded_headline(raw, brand) or _title_from_text(raw) or "",
-        "chips": chips[:6],
+        "headline": headline,
+        "chips": chips,
         "activeIndex": 0,
+        "support": support or None,
     }
 
 

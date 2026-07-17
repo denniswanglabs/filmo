@@ -31,6 +31,9 @@ export const nightFixture: TimelineData = {
     wordmark: "INSFORGE",
     logoSrc: "night-demo/brand-logo.ico",
     music: "night-demo/music.mp3",
+    // Development pass §B: the bed's measured 99.4 BPM as a frame grid
+    // (60/99.4 s per beat @ 30fps), phase 0 — exercises SFX quantization.
+    musicMeta: { spbFrames: 18.11, phaseFrames: 0 },
   },
   scenes: [
     {

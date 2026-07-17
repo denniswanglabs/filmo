@@ -277,6 +277,11 @@ export interface Theme {
   // = no music track (current behavior). May also be supplied at the top level
   // as `music_path` (theme.music wins if both are set).
   music?: string;
+  // OPTIONAL musical beat grid for the staged track, emitted by the Night bed
+  // mapper (night_music.build_bed through the per-run trim/atempo). Lets the
+  // NightTimeline snap SFX and within-hold element arrivals to the beat. ABSENT
+  // = no quantization (classic Timeline ignores it entirely).
+  musicMeta?: { spbFrames: number; phaseFrames: number };
 }
 
 // Index signature so TimelineData satisfies Remotion's `Record<string, unknown>`

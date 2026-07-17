@@ -25,15 +25,36 @@ BED_META = os.path.join(ASSETS, "bed-60.json")
 ATEMPO_MIN, ATEMPO_MAX = 0.92, 1.08
 
 
-def build_bed(target_climax_s: float, total_s: float, out_path: str) -> bool:
+def beat_grid(trim_head_s: float, atempo: float, bpm: float) -> dict:
+    """Output-time beat grid for the mapped bed (development pass §B).
+
+    The bed's beats sit on a bpm grid anchored at t=0 of the ORIGINAL file (we
+    record bpm only, so phase 0 is the anchor). After trimming `trim_head_s` and
+    speeding by `atempo`, an original-time beat n*spb lands at output time
+    (n*spb - trim_head)/atempo. Returns {"spb_s", "first_beat_s"} in OUTPUT time.
+    """
+    spb_in = 60.0 / max(1e-6, float(bpm))
+    import math
+    n0 = math.ceil((trim_head_s - 1e-9) / spb_in)
+    first_out = max(0.0, (n0 * spb_in - trim_head_s) / max(1e-6, atempo))
+    return {"spb_s": spb_in / max(1e-6, atempo), "first_beat_s": first_out}
+
+
+def build_bed(target_climax_s: float, total_s: float, out_path: str):
     """Write a bed whose climax hits `target_climax_s`, at least `total_s` long
-    (the composition's own volume envelope handles the tail fade). True on success."""
+    (the composition's own volume envelope handles the tail fade).
+
+    Returns a dict {"ok": True, "spb_s": float, "first_beat_s": float} on success
+    (the output-time beat grid for §B quantization), else None — so the return is
+    truthy exactly when the bed was written and legacy `if build_bed(...)`
+    callers keep working unchanged."""
     try:
         meta = json.load(open(BED_META))
         bed_climax = float(meta["climax_s"])
         bed_dur = float(meta["duration_s"])
+        bpm = float(meta.get("bpm") or 0)
         if target_climax_s <= 3 or total_s <= 4 or not os.path.exists(BED):
-            return False
+            return None
 
         trim_head = 0.0
         atempo = 1.0
@@ -53,6 +74,11 @@ def build_bed(target_climax_s: float, total_s: float, out_path: str) -> bool:
                "-af", af, "-t", f"{total_s + 2.0:.3f}", "-c:a", "libmp3lame",
                "-b:a", "160k", out_path]
         subprocess.run(cmd, check=True, timeout=120)
-        return os.path.exists(out_path) and os.path.getsize(out_path) > 10_000
+        if not (os.path.exists(out_path) and os.path.getsize(out_path) > 10_000):
+            return None
+        out = {"ok": True}
+        if bpm > 0:
+            out.update(beat_grid(trim_head, atempo, bpm))
+        return out
     except Exception:
-        return False
+        return None

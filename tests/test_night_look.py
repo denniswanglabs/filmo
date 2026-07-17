@@ -74,11 +74,85 @@ class NightRegistry(unittest.TestCase):
         self.assertIn("production-ready", joined)
 
 
+class NightDevelopmentPass(unittest.TestCase):
+    """docs/night-development-pass.md — §C/§D acceptance at the shaper level."""
+
+    def setUp(self):
+        self.style = style_fill.STYLES["engineered-night"]
+
+    def test_balanced_split_keeps_real_estate_together(self):
+        # The observed hero bug: "…independent real / estate agent…". The
+        # penalty-balanced split must not break right after the short word.
+        lines = style_fill._night_balanced_split(
+            "Give every independent real estate agent a professional site".split())
+        self.assertEqual(len(lines), 2)
+        self.assertFalse(lines[0][-1].lower() == "real",
+                         f"split still breaks the compound: {lines}")
+
+    def test_balanced_split_prefers_natural_boundary(self):
+        lines = style_fill._night_balanced_split(
+            "Launch a professional real estate agent site".split())
+        self.assertEqual(lines[0], ["Launch", "a", "professional"])
+
+    def test_chips_harvest_priority_entities_first(self):
+        d = {"featureEntities": ["Alpha", "Beta", "Gamma"]}
+        brand = {"features": [{"title": "PageFeat"}]}
+        self.assertEqual(style_fill._night_harvest_chips(d, brand)[:2], ["Alpha", "Beta"])
+
+    def test_chips_harvest_falls_back_to_brand_features(self):
+        brand = {"features": [{"title": "Collect inquiries"}, {"title": "Publish fast"}]}
+        chips = style_fill._night_harvest_chips({}, brand)
+        self.assertEqual(chips, ["Collect inquiries", "Publish fast"])
+
+    def test_chips_harvest_reads_story_shape(self):
+        brand = {"_plan_design_brief": {"story_shape": {
+            "features": [{"title": "Ship Faster"}, {"title": "Safe for Agents"}]}}}
+        chips = style_fill._night_harvest_chips({}, brand)
+        self.assertEqual(chips, ["Ship Faster", "Safe for Agents"])
+
+    def test_chips_harvest_empty_stays_honest(self):
+        # One item is not a ladder; nothing real -> [] -> statement mode.
+        self.assertEqual(style_fill._night_harvest_chips({"featureEntities": ["Solo"]}, {}), [])
+        self.assertEqual(style_fill._night_harvest_chips({}, {}), [])
+
+    def test_chips_harvest_steps_only_without_terminal(self):
+        d = {"steps": [{"title": "Choose your name"}, {"title": "Create your site"}]}
+        # No terminal in the film -> steps may ladder.
+        self.assertEqual(len(style_fill._night_harvest_chips(d, {})), 2)
+        # Terminal already types these lines -> chips must NOT repeat them.
+        self.assertEqual(
+            style_fill._night_harvest_chips(d, {"_night_terminal_lines": ["Choose your name"]}), [])
+
+    def test_statement_support_threads_spoken_text_only(self):
+        s = scene(treatment=None, data={
+            "_text": "A client messages on WhatsApp and the structured request lands in your inbox."})
+        out = style_fill._shape_night_ladder(s, {})
+        self.assertEqual(out["chips"], [])
+        self.assertTrue(out["support"])
+        self.assertIn("WhatsApp", out["support"])
+
+    def test_statement_support_absent_when_headline_is_the_text(self):
+        s = scene(treatment=None, data={"_text": "Collect every inquiry"})
+        out = style_fill._shape_night_ladder(s, {})
+        self.assertFalse(out.get("support"))
+
+    def test_build_props_stashes_design_brief_for_shapers(self):
+        # §D channel: build_props must expose plan.design_brief on the brand dict.
+        import inspect
+        src = inspect.getsource(style_fill.build_props)
+        self.assertIn("_plan_design_brief", src)
+
+
 class NightMusic(unittest.TestCase):
     def test_bed_maps_climax_earlier_than_source(self):
         out = "/tmp/test-night-bed.mp3"
         ok = night_music.build_bed(target_climax_s=30.0, total_s=34.0, out_path=out)
         self.assertTrue(ok)
+        # §B: the mapper now reports the output-time beat grid.
+        self.assertTrue(ok.get("ok"))
+        self.assertGreater(ok.get("spb_s", 0), 0.3)
+        self.assertGreaterEqual(ok.get("first_beat_s", -1), 0.0)
+        self.assertLess(ok["first_beat_s"], ok["spb_s"] + 1e-6)
         dur = float(subprocess.check_output(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", out]).strip())
@@ -87,6 +161,17 @@ class NightMusic(unittest.TestCase):
 
     def test_bed_refuses_degenerate_targets(self):
         self.assertFalse(night_music.build_bed(1.0, 2.0, "/tmp/nope.mp3"))
+
+    def test_beat_grid_math(self):
+        g = night_music.beat_grid(trim_head_s=22.9, atempo=1.0, bpm=99.4)
+        spb = 60.0 / 99.4
+        self.assertAlmostEqual(g["spb_s"], spb, places=6)
+        self.assertGreaterEqual(g["first_beat_s"], 0.0)
+        self.assertLess(g["first_beat_s"], spb)
+        # atempo speeds the audio: beats get closer together in output time.
+        fast = night_music.beat_grid(0.0, 1.08, 99.4)
+        self.assertAlmostEqual(fast["spb_s"], spb / 1.08, places=6)
+        self.assertAlmostEqual(fast["first_beat_s"], 0.0, places=6)
 
 
 if __name__ == "__main__":
