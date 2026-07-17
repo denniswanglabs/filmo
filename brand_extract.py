@@ -471,11 +471,28 @@ def _is_perceptible_accent(accent_hex, bg_hex, ink_hex):
     return gap_vs_bg >= _MIN_ACCENT_CONTRAST and gap_vs_ink >= _MIN_ACCENT_CONTRAST
 
 
+def _truncate_words(s, limit):
+    """Truncate to <=limit chars on a WORD boundary — never mid-word (the
+    'Homefeed.me builds client-ready real' bug). Whole string fits -> as-is. When
+    there is no space at/before the limit (a single long token, or a short hex like
+    '#31BE2D'), fall back to a hard slice so we never exceed the limit. A boundary
+    cut strips trailing connectors so it reads as a clean (if shortened) phrase."""
+    if not isinstance(s, str) or len(s) <= limit:
+        return s
+    cut = s[:limit]
+    sp = cut.rfind(" ")
+    # Only honor the boundary if it isn't absurdly early (avoids cutting a long
+    # string down to one word when the first space is at position 2).
+    if sp >= max(1, int(limit * 0.5)):
+        cut = cut[:sp]
+    return cut.rstrip(" ,;:.-–—")
+
+
 def _clean_str(v, limit):
     if not isinstance(v, str):
         return ""
     s = v.strip().strip("\"'").strip()
-    return s[:limit]
+    return _truncate_words(s, limit)
 
 
 def _parse_fetch_payload(text):
@@ -927,7 +944,7 @@ def _parse_html_brand(html):
         mt = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
         if mt:
             name = _clean_title(mt.group(1))
-    out["name"] = name[:50]
+    out["name"] = _truncate_words(name, 50)
 
     # TAGLINE: meta description -> og:description -> first <h1>. Reject UI/nav
     # chrome (a cart toast / nav-tab pair must never become the tagline).
@@ -939,7 +956,7 @@ def _parse_html_brand(html):
             tagline = _strip_tags(mh.group(1))
     if _is_ui_label(tagline):
         tagline = ""
-    out["tagline"] = tagline[:80]
+    out["tagline"] = _truncate_words(tagline, 80)
 
     # ACCENT (preferred): <meta name="theme-color"> if it is a usable, perceptible
     # hex. Many sites ship a near-white/near-black theme-color (allbirds #ECE9E2,
@@ -984,7 +1001,7 @@ def _parse_html_brand(html):
         if _is_ui_label(t):       # drop cart toasts / nav tabs / account chrome
             continue
         seen.add(low)
-        feats.append({"title": t[:40], "sub": ""})
+        feats.append({"title": _truncate_words(t, 40), "sub": ""})
         if len(feats) >= 5:
             break
     out["features"] = feats

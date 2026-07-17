@@ -664,10 +664,21 @@ def _copy_from_brief(scene, brief, palette):
     # never the raw scene direction.
     if scene.get("type") == "motion_graphic":
         return _section_label(brief), "", "", "2"
-    # generic title fallback from the brief
+    # generic title fallback from the brief. Build up to the char cap on WORD
+    # boundaries so a long first word is never sliced mid-token.
     words = (brief or "Title").split()
-    title = " ".join(words[:4])[:42] or "Title"
-    return title, " ".join(words[4:10])[:60], "Section", "01"
+
+    def _fit(ws, cap):
+        out = ""
+        for w in ws:
+            nxt = (out + " " + w).strip()
+            if len(nxt) > cap:
+                break
+            out = nxt
+        return out or (ws[0][:cap] if ws else "")
+
+    title = _fit(words[:4], 42) or "Title"
+    return title, _fit(words[4:10], 60), "Section", "01"
 
 
 if __name__ == "__main__":
