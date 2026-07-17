@@ -13,7 +13,7 @@ import SiteFooter from '../components/landing/SiteFooter'
 export const metadata = {
   title: 'How it works — Filmo',
   description:
-    'How Filmo turns a URL into a finished launch video: it reads your product on NVIDIA Nemotron, plans the cut, fills your real facts into a curated library of designer-made motion patterns, and renders a real MP4 with Remotion.',
+    'How Filmo turns a URL into a finished launch video: it reads your product, plans the cut, fills your real facts into a curated library of designer-made motion patterns, and renders a finished MP4.',
 }
 
 export default function HowItWorksPage() {
@@ -30,8 +30,8 @@ export default function HowItWorksPage() {
             From a link to a launch video.
           </h1>
           <p className="section-lede mx-auto max-w-xl text-lg">
-            Paste your URL. Filmo reads your product on NVIDIA Nemotron, plans the cut, fills your
-            real facts into a curated library of designer-made patterns, and renders a finished MP4.
+            Paste your URL. Filmo reads your product, plans the cut, fills your real facts
+            into a curated library of designer-made patterns, and renders a finished MP4.
           </p>
         </div>
       </header>

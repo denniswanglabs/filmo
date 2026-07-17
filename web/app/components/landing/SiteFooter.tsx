@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { Wordmark } from '../Brand'
-import PoweredBy from './PoweredBy'
 
 const SECTION_LINKS = [
   { href: '/#examples', label: 'Examples' },
@@ -33,12 +32,8 @@ export default function SiteFooter() {
           </nav>
         </div>
 
-        <div className="mt-8 border-t border-[#D4E2FB] pt-6">
-          <PoweredBy compact />
-        </div>
-
-        <p className="mt-6 text-pretty text-xs leading-relaxed text-[#8A94A6]">
-          © 2026 Filmo · Built for the Hermes Hackathon — Nous Research × NVIDIA × Stripe
+        <p className="mt-8 border-t border-[#D4E2FB] pt-6 text-pretty text-xs leading-relaxed text-[#8A94A6]">
+          © 2026 Filmo
         </p>
       </div>
     </footer>

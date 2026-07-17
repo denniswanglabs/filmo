@@ -55,14 +55,14 @@ const FEATURES: Feature[] = [
     ),
   },
   {
-    title: 'Prices & bills itself',
-    body: 'The agent prices its own work and charges for it through Stripe — you pay the test checkout before it produces, so it funds its own job at a margin.',
-    // Card / coin — prices and bills.
+    title: 'Your brand, extracted',
+    body: 'Filmo pulls your real palette, logo, and voice from the page itself — the video ships in your brand system, not a template skin.',
+    // Overlapping swatches — brand palette.
     icon: (
       <svg {...iconProps} aria-hidden="true">
-        <rect x="2.5" y="6" width="19" height="12" rx="2" />
-        <path d="M2.5 10h19" />
-        <path d="M6.5 14.5h3" />
+        <circle cx="9" cy="10" r="5.5" />
+        <circle cx="15" cy="10" r="5.5" />
+        <circle cx="12" cy="15" r="5.5" />
       </svg>
     ),
   },

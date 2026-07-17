@@ -104,7 +104,9 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-40 px-4 sm:top-5 sm:px-6">
-      <nav className="pointer-events-auto mx-auto flex w-full max-w-6xl items-center gap-3 py-2 lg:gap-4 xl:gap-6">
+      {/* Glass pill: low-opacity white + backdrop blur + hairline border, so the nav
+          text always separates from content scrolling underneath it. */}
+      <nav className="pointer-events-auto mx-auto flex w-full max-w-6xl items-center gap-3 rounded-full border border-white/70 bg-white/75 px-4 py-2 shadow-[0_10px_34px_-16px_rgba(30,58,120,0.35)] backdrop-blur-xl sm:px-5 lg:gap-4 xl:gap-6">
         {/* Left — brand */}
         <Link href="/" className="relative z-10 shrink-0">
           <Wordmark tone="dark" inkClassName="text-[#0E1320]" size="nav" />

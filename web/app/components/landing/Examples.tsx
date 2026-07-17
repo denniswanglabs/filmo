@@ -3,7 +3,6 @@
 import { useRef } from 'react'
 import { Reveal, RevealGroup, RevealItem, SlidingPanel } from './Motion'
 import FeaturedPlayer from './FeaturedPlayer'
-import PoweredBy from './PoweredBy'
 
 interface Card {
   slug: string
@@ -168,10 +167,6 @@ export default function Examples() {
             Real cuts the pipeline produced end to end — read, planned, priced, and shipped.
             Press play below, or hover any card to watch it move.
           </p>
-        </Reveal>
-
-        <Reveal className="mt-8 flex justify-center">
-          <PoweredBy compact />
         </Reveal>
 
         <Reveal className="mt-12">
