@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { insforge } from '../../lib/insforge'
 import { useAuth } from '../../lib/auth'
 import { Wordmark } from './Brand'
@@ -124,18 +124,22 @@ export function AuthGate({
         className="absolute inset-0 cursor-default bg-ink/40 backdrop-blur-sm"
       />
 
-      {/* Card */}
-      <div className="relative w-full max-w-sm rounded-2xl border border-black/5 bg-white p-7 shadow-[0_24px_70px_-24px_rgba(20,23,28,0.45)]">
+      {/* Card — split panel: auth on the left, the landing hero demo playing on the
+          right (so there's something worth watching while deciding to sign in).
+          On small screens the video panel is hidden — mobile keeps the fast gate. */}
+      <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_24px_70px_-24px_rgba(20,23,28,0.45)] md:max-w-4xl md:flex-row">
         <button
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-black/[0.04] hover:text-ink"
+          className="absolute right-4 top-4 z-10 grid h-7 w-7 place-items-center rounded-full text-slate-400 transition hover:bg-black/[0.04] hover:text-ink"
         >
           <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
           </svg>
         </button>
 
+        {/* Left: the auth column */}
+        <div className="w-full p-7 md:w-[380px] md:shrink-0">
         <div className="mb-5 flex justify-center">
           <Wordmark className="text-lg" />
         </div>
@@ -234,7 +238,127 @@ export function AuthGate({
             </p>
           </form>
         )}
+        </div>
 
+        {/* Right: the same hero demo the landing plays — muted autoplay, tap for
+            sound, and a tick-ruler scrubber. Something to watch while signing in. */}
+        <div className="relative hidden min-w-0 flex-1 flex-col justify-center bg-[#F5F8FE] p-5 md:flex">
+          <GateDemo />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Compact variant of the landing FeaturedPlayer for the sign-in gate: /hero-demo.mp4
+// on muted autoplay + the same tap-for-sound chip, plus a Hera-style tick ruler with
+// a playhead (rAF-driven via direct style writes — no per-frame re-renders) that
+// doubles as a click-to-seek scrubber.
+function GateDemo() {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const fillRef = useRef<HTMLDivElement>(null)
+  const headRef = useRef<HTMLDivElement>(null)
+  const [muted, setMuted] = useState(true)
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+    void el.play().catch(() => {
+      /* autoplay blocked — poster stays up; the ruler simply doesn't advance */
+    })
+    let raf = 0
+    const tick = () => {
+      if (el.duration > 0) {
+        const p = (el.currentTime / el.duration) * 100
+        if (fillRef.current) fillRef.current.style.width = `${p}%`
+        if (headRef.current) headRef.current.style.left = `calc(${p}% - 3px)`
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
+  function toggleSound() {
+    const el = videoRef.current
+    if (!el) return
+    const next = !muted
+    setMuted(next)
+    el.muted = next
+    if (!next) void el.play().catch(() => {})
+  }
+
+  function seek(e: React.MouseEvent<HTMLDivElement>) {
+    const el = videoRef.current
+    if (!el || !el.duration) return
+    const r = e.currentTarget.getBoundingClientRect()
+    const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    el.currentTime = frac * el.duration
+  }
+
+  // Hera-style ruler: thin ticks; the played portion re-draws in the accent color.
+  const ticks = 'repeating-linear-gradient(90deg, currentColor 0 2px, transparent 2px 7px)'
+
+  return (
+    <div>
+      <div className="relative overflow-hidden rounded-xl bg-[#0B0F1A] shadow-[0_18px_50px_-22px_rgba(30,58,120,0.45)]">
+        <video
+          ref={videoRef}
+          src="/hero-demo.mp4"
+          poster="/hero-demo-poster.jpg"
+          autoPlay
+          muted={muted}
+          loop
+          playsInline
+          preload="metadata"
+          className="aspect-video w-full object-cover"
+        />
+        <button
+          type="button"
+          onClick={toggleSound}
+          className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/80 px-3 py-1.5 text-xs font-medium text-[#0E1320] shadow-sm backdrop-blur-md transition hover:bg-white"
+        >
+          <span
+            aria-hidden="true"
+            className={`grid h-4 w-4 place-items-center rounded-full ${
+              muted ? 'bg-amber/15 text-amber' : 'bg-amber text-white'
+            }`}
+          >
+            <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="currentColor" aria-hidden="true">
+              <path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" />
+              {muted ? (
+                <path d="M16 9 L21 14 M21 9 L16 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+              ) : (
+                <path d="M16 8 Q19 12 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+              )}
+            </svg>
+          </span>
+          {muted ? 'Tap for sound' : 'Sound on'}
+        </button>
+      </div>
+
+      <p className="mt-3 text-center text-xs text-slate-500">
+        A real launch cut Filmo produced end to end — while you sign in.
+      </p>
+
+      {/* Tick ruler + playhead; click anywhere to seek. */}
+      <div
+        onClick={seek}
+        className="relative mt-2 h-5 cursor-pointer"
+        role="presentation"
+        aria-hidden="true"
+      >
+        <div className="absolute inset-0 text-[#D4E2FB]" style={{ backgroundImage: ticks }} />
+        <div
+          ref={fillRef}
+          className="absolute inset-y-0 left-0 w-0 overflow-hidden text-amber"
+          style={{ backgroundImage: ticks }}
+        />
+        <div
+          ref={headRef}
+          className="absolute top-1/2 h-7 w-1.5 -translate-y-1/2 rounded-full bg-amber shadow-[0_1px_6px_rgba(59,130,246,0.5)]"
+          style={{ left: 'calc(0% - 3px)' }}
+        />
       </div>
     </div>
   )
