@@ -47,11 +47,14 @@ function scrollToHash(href: string) {
 interface FloatingNavProps {
   /** When logged in, nav Build stays disabled until URL is valid. Logged-out Build always opens auth. */
   buildEnabled?: boolean
+  /** Hide the nav's own Build CTA (the landing docks a composer bar with the
+      build arrow INSIDE it, so a second Build button is redundant there). */
+  showBuild?: boolean
   /** Hero-aligned Build: scroll to composer; logged-out visitors also open AuthGate via page.tsx. */
   onBuildClick?: () => void
 }
 
-export default function FloatingNav({ buildEnabled = true, onBuildClick }: FloatingNavProps) {
+export default function FloatingNav({ buildEnabled = true, onBuildClick, showBuild = true }: FloatingNavProps) {
   const { user, loading, signOut } = useAuth()
   const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -235,14 +238,16 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick }: Float
               </button>
             </>
           )}
-          <button
-            type="button"
-            onClick={handleBuildClick}
-            disabled={user ? !buildEnabled : false}
-            className={buildClass}
-          >
-            Build
-          </button>
+          {showBuild && (
+            <button
+              type="button"
+              onClick={handleBuildClick}
+              disabled={user ? !buildEnabled : false}
+              className={buildClass}
+            >
+              Build
+            </button>
+          )}
         </div>
       </nav>
     </div>

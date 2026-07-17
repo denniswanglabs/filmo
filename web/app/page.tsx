@@ -197,12 +197,87 @@ export default function Home() {
     <div className="landing-dark min-h-screen">
       <LandingBackdrop />
       <div className="relative z-[1]">
-      <FloatingNav buildEnabled={canBuild} onBuildClick={handleNavBuild} />
+      <FloatingNav buildEnabled={canBuild} onBuildClick={handleNavBuild} showBuild={false} />
+
+      {/* The composer bar — Filmo's single prompt surface. Docked under the nav and
+          ALWAYS on screen (from first paint), minimized to just the bar: URL input,
+          advanced toggle, and Build as the arrow button INSIDE the bar. */}
+      <div className="pointer-events-none fixed inset-x-0 top-[64px] z-40 px-4 sm:top-[74px] sm:px-6">
+        <div className="pointer-events-auto mx-auto w-full max-w-xl">
+          <form
+            onSubmit={onBuild}
+            className="flex items-center gap-1 rounded-full border border-white/70 bg-white/90 py-1.5 pl-4 pr-1.5 shadow-[0_16px_48px_-18px_rgba(30,58,120,0.42)] backdrop-blur-xl"
+          >
+            <span className="select-none text-sm text-[#9AA6B8]">https://</span>
+            <input
+              id="hero-url"
+              value={url.replace(/^https?:\/\//, '')}
+              onChange={(e) => setUrl('https://' + e.target.value.replace(/^https?:\/\//, ''))}
+              placeholder="acme.com"
+              className="min-w-0 flex-1 bg-transparent py-2 text-[15px] text-[#0E1320] outline-none placeholder:text-[#9AA6B8]"
+            />
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              aria-expanded={advancedOpen}
+              aria-label="Advanced options"
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-full transition ${
+                advancedOpen ? 'bg-[#EAF1FF] text-[#2563EB]' : 'text-[#8A94A6] hover:bg-black/[0.04] hover:text-[#0E1320]'
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M4 7h10M18 7h2M4 17h2M10 17h10" strokeLinecap="round" />
+                <circle cx="16" cy="7" r="2.2" />
+                <circle cx="8" cy="17" r="2.2" />
+              </svg>
+            </button>
+            <button
+              type="submit"
+              disabled={!canBuild}
+              aria-label={building ? 'Starting build' : 'Build'}
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition active:scale-95 ${
+                canBuild
+                  ? 'bg-amber text-white shadow-[0_8px_22px_-8px_rgba(59,130,246,0.7)] hover:opacity-90'
+                  : 'cursor-not-allowed bg-[#EAF1FF] text-[#9AA6B8]'
+              } ${building ? 'animate-pulse' : ''}`}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                <path d="M12 19V5M6 11l6-6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </form>
+
+          {advancedOpen && (
+            <div className="mt-2 rounded-2xl border border-[#EAF1FF] bg-white/95 p-3.5 shadow-[0_16px_48px_-18px_rgba(30,58,120,0.35)] backdrop-blur-xl">
+              <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A94A6]">
+                Model
+              </span>
+              <select
+                value={brain}
+                onChange={(e) => setBrain(e.target.value)}
+                className="w-full rounded-lg border border-[#D4E2FB] bg-white px-2.5 py-1.5 text-sm text-[#0E1320] outline-none focus:border-amber"
+              >
+                {BRAINS.map((b) => (
+                  <option key={b.value} value={b.value} className="bg-white text-[#0E1320]">
+                    {b.label} ({b.note})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {error && (
+            <p className="mt-2 rounded-2xl border border-red-100 bg-white/95 px-4 py-2 text-center text-sm text-red-600 shadow-[0_12px_36px_-16px_rgba(30,58,120,0.3)] backdrop-blur-xl">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
 
       <PinnedHero
         ref={heroRef}
         id="start"
-        className="mx-auto max-w-3xl"
+        className="mx-auto max-w-3xl pt-16 sm:pt-20"
         decoration={
           <>
             <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
@@ -228,87 +303,11 @@ export default function Home() {
               a finished launch video — on autopilot.
             </p>
 
-            {/* Composer card — centered block, left-aligned internals */}
-            <form
-              onSubmit={onBuild}
-              className="mx-auto mt-8 w-full rounded-2xl border border-[#D4E2FB] bg-white/95 p-5 text-left shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] backdrop-blur-sm sm:rounded-3xl sm:p-6"
-            >
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-[#0E1320]">Website URL</span>
-              <div className="flex items-center rounded-lg border border-[#D4E2FB] bg-[#F8FAFF] transition focus-within:border-amber focus-within:bg-white">
-                <span className="select-none pl-3.5 pr-1 text-[#9AA6B8]">https://</span>
-                <input
-                  id="hero-url"
-                  value={url.replace(/^https?:\/\//, '')}
-                  onChange={(e) => setUrl('https://' + e.target.value.replace(/^https?:\/\//, ''))}
-                  placeholder="acme.com"
-                  className="w-full rounded-lg bg-transparent py-3 pr-3.5 text-[#0E1320] outline-none placeholder:text-[#9AA6B8]"
-                />
-              </div>
-            </label>
-
-            <div className="mt-5 border-t border-[#EAF1FF] pt-4">
-              <button
-                type="button"
-                onClick={() => setAdvancedOpen((o) => !o)}
-                aria-expanded={advancedOpen}
-                className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-left text-sm font-medium text-[#5A6472] transition hover:text-[#0E1320]"
-              >
-                <span>Advanced</span>
-                <svg
-                  viewBox="0 0 24 24"
-                  className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  aria-hidden="true"
-                >
-                  <path d="M6 9 L12 15 L18 9" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-
-              {advancedOpen && (
-                <div className="mt-3 space-y-3 rounded-lg border border-[#EAF1FF] bg-[#FAFCFF] p-3.5">
-                  <div>
-                    <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A94A6]">
-                      Model
-                    </span>
-                    <select
-                      value={brain}
-                      onChange={(e) => setBrain(e.target.value)}
-                      className="w-full rounded-lg border border-[#D4E2FB] bg-white px-2.5 py-1.5 text-sm text-[#0E1320] outline-none focus:border-amber"
-                    >
-                      {BRAINS.map((b) => (
-                        <option key={b.value} value={b.value} className="bg-white text-[#0E1320]">
-                          {b.label} ({b.note})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                </div>
-              )}
-            </div>
-
-            {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={!canBuild}
-              className={`mt-6 w-full rounded-xl py-3 font-semibold transition active:scale-[0.99] ${
-                canBuild
-                  ? 'bg-amber text-white shadow-[0_10px_30px_-10px_rgba(59,130,246,0.6)] hover:opacity-90'
-                  : 'cursor-not-allowed border border-[#D4E2FB] bg-[#EAF1FF] text-[#9AA6B8] shadow-none'
-              }`}
-            >
-              {building ? 'Starting build…' : 'Build'}
-            </button>
-              {!user && !loading && (
-                <p className="mt-3 text-center text-xs leading-relaxed text-[#8A94A6]">
-                  Sign in with Google to start — your prompt is saved.
-                </p>
-              )}
-            </form>
+            {!user && !loading && (
+              <p className="mx-auto mt-6 text-center text-xs leading-relaxed text-[#8A94A6]">
+                Paste your URL in the bar above — sign in with Google to start, your prompt is saved.
+              </p>
+            )}
           </>
         }
       />

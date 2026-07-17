@@ -17,6 +17,7 @@ const BRAND: Record<string, { logo: string; tint: string }> = {
   'Y Combinator': { logo: '/examples/logos/ycombinator.svg', tint: '#FFF4EE' },
   'Nous Research': { logo: '/examples/logos/nousresearch.svg', tint: '#F4F1FD' },
   ElevenLabs: { logo: '/examples/logos/elevenlabs.svg', tint: '#EAF1FD' },
+  InsForge: { logo: '/examples/logos/insforge.svg', tint: '#EDF9F0' },
 }
 
 const CARDS: readonly Card[] = [
@@ -43,6 +44,14 @@ const CARDS: readonly Card[] = [
     brand: 'ElevenLabs',
     sourceUrl: 'https://elevenlabs.io',
     descriptor: 'A voice-AI story, planned and produced on autopilot.',
+  },
+  {
+    slug: 'insforge-wide',
+    src: '/examples/insforge.mp4',
+    poster: '/examples/insforge.jpg',
+    brand: 'InsForge',
+    sourceUrl: 'https://insforge.dev',
+    descriptor: 'An agent-native backend story, read from the live site.',
   },
 ]
 
@@ -173,7 +182,7 @@ export default function Examples() {
           <FeaturedPlayer />
         </Reveal>
 
-        <RevealGroup className="mt-8 grid grid-cols-1 gap-0 overflow-hidden rounded-2xl border border-[#D4E2FB] shadow-[0_30px_80px_-40px_rgba(30,58,120,0.32)] sm:rounded-3xl md:grid-cols-3">
+        <RevealGroup className="mt-8 grid grid-cols-1 gap-0 overflow-hidden rounded-2xl border border-[#D4E2FB] shadow-[0_30px_80px_-40px_rgba(30,58,120,0.32)] sm:rounded-3xl md:grid-cols-2">
           {CARDS.map((card, i) => (
             <RevealItem key={card.slug} index={i} className="block">
               <GalleryCard card={card} />
