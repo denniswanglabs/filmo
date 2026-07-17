@@ -276,14 +276,23 @@ async function assertPublicUrl(rawUrl) {
   return { url: u, host: low }
 }
 
-// ── actor classification (mirrors the Railway worker): tag each ledger line ──
-const NEMOTRON_CUES = ['storyboard decided', 'planner', 'brain=', 'llm plan', 'nemotron', 'plan unavailable', 'falling back to deterministic', 're-planned']
+// ── actor classification: the product speaks as FILMO; only payment lines keep the
+//    stripe tag (they surface solely on the dormant human-pay path). The old
+//    hermes/nemotron actor labels retired with the Hermes conduct (2026-07-16). ──
 const STRIPE_CUES = ['payment link', 'issuing', 'spending_limit', 'spending limit', 'authorization', 'authoriz', 'provision', 'earn', 'cardholder', 'virtual card', ' card ', 'charge', 'payout', 'checkout']
 function classifyActor(msg) {
   const m = (msg || '').toLowerCase()
-  if (NEMOTRON_CUES.some((c) => m.includes(c))) return 'nemotron'
   if (STRIPE_CUES.some((c) => m.includes(c))) return 'stripe'
-  return 'hermes'
+  return 'filmo'
+}
+
+// Payment THEATER lines from build_runner's simulated gate (PRODUCER_SIMULATE_PAID):
+// with payments off, users never see a checkout, so narrating one is pure confusion.
+// Filtered out of run_events whenever the job is not human-pay.
+const PAYMENT_THEATER_CUES = ['payment gate', 'awaiting payment', 'customer paid', 'payment received', 'payment cleared', 'stripe test checkout', 'paymentintent', 'checkout.stripe.com', 'test card 4242', 'payment_timeout']
+function isPaymentTheater(msg) {
+  const m = (msg || '').toLowerCase()
+  return PAYMENT_THEATER_CUES.some((c) => m.includes(c))
 }
 
 function readLedger(runKey) {
@@ -298,14 +307,17 @@ function readProps(runKey) {
   try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null }
 }
 
-async function syncEvents(runId, ledger, lastSeq) {
+async function syncEvents(runId, ledger, lastSeq, suppressPayments = false) {
   const events = (ledger && ledger.events) || []
   const fresh = events.filter((e) => (e.seq || 0) > lastSeq)
   if (!fresh.length) return lastSeq
-  const rows = fresh.map((e) => ({
-    run_id: runId, seq: e.seq, level: e.level || 'info',
-    actor: classifyActor(e.msg), msg: e.msg || '',
-  }))
+  const rows = fresh
+    .filter((e) => !(suppressPayments && isPaymentTheater(e.msg)))
+    .map((e) => ({
+      run_id: runId, seq: e.seq, level: e.level || 'info',
+      actor: classifyActor(e.msg), msg: e.msg || '',
+    }))
+  if (!rows.length) return fresh.reduce((mx, e) => Math.max(mx, e.seq || 0), lastSeq)
   const { error } = await ifCall('run_events.insert', () => db.database.from('run_events').insert(rows))
   if (error) { log('  ! run_events.insert', JSON.stringify(error)); return lastSeq }
   return Math.max(lastSeq, ...fresh.map((e) => e.seq || 0))
@@ -409,7 +421,7 @@ async function setJob(jobId, patch) {
   if (error) log('  ! jobs.update', JSON.stringify(error))
 }
 
-async function emit(runId, msg, actor = 'hermes', level = 'info') {
+async function emit(runId, msg, actor = 'filmo', level = 'info') {
   if (!runId) return
   const seq = Date.now() % 1000000000
   const { error } = await ifCall('run_events.insert(emit)',
@@ -1269,7 +1281,10 @@ async function processJob(job) {
   child.stdout.on('data', (d) => { try { process.stdout.write(`  [py] ${d}`) } catch {} })
   child.stderr.on('data', (d) => { try { process.stderr.write(`  [py!] ${d}`) } catch {} })
 
-  // stream ledger events while the build runs
+  // stream ledger events while the build runs. When the job is not human-pay,
+  // the simulated gate's payment theater is suppressed end to end: no theater
+  // events, no checkout_url on the run, no awaiting_payment flash on the page.
+  const suppressPay = (p.pay_mode || 'auto') !== 'human'
   let lastSeq = 0
   let alive = true
   const streamer = (async () => {
@@ -1277,11 +1292,12 @@ async function processJob(job) {
       try {
         const led = readLedger(runKey)
         if (led) {
-          lastSeq = await syncEvents(runId, led, lastSeq)
+          lastSeq = await syncEvents(runId, led, lastSeq, suppressPay)
           if (led.phase) {
             const patch = { phase: led.phase }
+            if (suppressPay && patch.phase === 'awaiting_payment') patch.phase = 'producing'
             const checkoutUrl = led.earn && led.earn.checkout_url
-            if (checkoutUrl) patch.checkout_url = checkoutUrl
+            if (checkoutUrl && !suppressPay) patch.checkout_url = checkoutUrl
             await setRun(runId, patch)
           }
         }
@@ -1298,7 +1314,7 @@ async function processJob(job) {
   await streamer
 
   const ledger = readLedger(runKey) || {}
-  await syncEvents(runId, ledger, lastSeq)   // final flush
+  await syncEvents(runId, ledger, lastSeq, suppressPay)   // final flush
   const mapped = mapLedgerToRun(ledger)
 
   if (code === 0 && (mapped.status === 'delivered' || mapped.status === 'completed_with_warnings')) {

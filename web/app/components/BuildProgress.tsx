@@ -129,18 +129,25 @@ function useElapsed(createdAt: string): string {
 }
 
 const ACTOR_STYLES: Record<string, string> = {
-  hermes: 'bg-amber/10 text-amber',
-  nemotron: 'bg-nemo/10 text-nemo',
+  filmo: 'bg-amber/10 text-amber',
   stripe: 'bg-indigo-50 text-indigo-600',
 }
 
+// Legacy runs carry hermes/nemotron actors from the retired conduct era — they
+// render as FILMO so old run pages match the current brand voice.
+const LEGACY_ACTOR_DISPLAY: Record<string, string> = {
+  hermes: 'filmo',
+  nemotron: 'filmo',
+}
+
 function ActorBadge({ actor }: { actor: string }) {
-  const style = ACTOR_STYLES[actor] || 'bg-slate-100 text-slate-500'
+  const display = LEGACY_ACTOR_DISPLAY[actor] ?? actor
+  const style = ACTOR_STYLES[display] || 'bg-slate-100 text-slate-500'
   return (
     <span
       className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${style}`}
     >
-      {actor}
+      {display}
     </span>
   )
 }
@@ -376,7 +383,7 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
         <p className="mt-2 text-sm text-slate-500">
           {isQueued
             ? 'Reserved a worker — the agent will begin reading your product in a moment.'
-            : 'This can take several minutes — the agent reads, plans, prices, and produces every scene on Nemotron 550B. Please be patient; your video appears here automatically the moment it’s ready.'}
+            : 'This can take several minutes — Filmo reads your site, plans the cut, and produces every scene. Please be patient; your video appears here automatically the moment it’s ready.'}
         </p>
 
         {/* Concurrent-load expectation setter — the VM renders sequentially, so under
