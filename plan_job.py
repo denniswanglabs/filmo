@@ -2612,10 +2612,11 @@ def _template_plan(company_url, goal, target_duration_s, style="standard",
 
 
 def _brand_name(url):
-    u = (url or "").lower().replace("https://", "").replace("http://", "").replace("www.", "")
-    host = u.split("/")[0].split(".")
-    name = host[-2] if len(host) >= 2 else (host[0] if host else "the product")
-    return name.capitalize()
+    # Delegate to the canonical resolver so PaaS subdomains (taipei-flix.
+    # onrender.com -> "Taipei Flix") and multi-part TLDs (tripadvisor.com.tw ->
+    # "Tripadvisor", not "Com") brand identically across the whole pipeline.
+    import remotion_codegen as rc
+    return rc._brand_name(url)
 
 
 if __name__ == "__main__":

@@ -89,6 +89,27 @@ _MULTI_TLDS = frozenset((
     "co.th", "org.uk", "net.au", "ne.jp", "or.jp", "gov.uk", "ac.uk",
 ))
 
+# Known PaaS / free-hosting suffixes where the registrable domain is the
+# PLATFORM, not the product: taipei-flix.onrender.com is "Taipei Flix", never
+# "Onrender" (the shipped run-af097f39 bug). Each acts as an EFFECTIVE TLD when
+# a product subdomain sits to its left: the brand label is that subdomain and
+# the CTA host keeps the full product host. The platform root itself
+# (onrender.com with no subdomain) still resolves as a normal domain.
+_PAAS_SUFFIXES = frozenset((
+    "onrender.com", "vercel.app", "netlify.app", "fly.dev", "pages.dev",
+    "github.io", "herokuapp.com", "zeabur.app", "railway.app", "web.app",
+    "firebaseapp.com",
+))
+
+
+def _paas_suffix(parts):
+    """The matched PaaS suffix when the host is a PRODUCT hosted on a known
+    platform (['taipei-flix','onrender','com'] -> 'onrender.com'); '' for normal
+    domains and for the platform root itself (no product subdomain)."""
+    if len(parts) >= 3 and ".".join(parts[-2:]) in _PAAS_SUFFIXES:
+        return ".".join(parts[-2:])
+    return ""
+
 
 def _host_labels(url):
     """Strip scheme/www/path/port and return the dotted host's labels.
@@ -109,6 +130,8 @@ def _registrable_label(parts):
     app.example.com -> 'example'. Returns '' when there is no label left of the TLD."""
     if not parts:
         return ""
+    if _paas_suffix(parts):
+        return parts[-3]               # product subdomain left of a PaaS suffix
     if len(parts) >= 3 and ".".join(parts[-2:]) in _MULTI_TLDS:
         return parts[-3]               # label left of a 2-part public suffix
     if len(parts) >= 2:
@@ -118,17 +141,32 @@ def _registrable_label(parts):
 
 def _brand_name(url):
     """Display brand name from a URL: https://docs.stripe.com -> 'Stripe';
-    https://www.tripadvisor.com.tw -> 'Tripadvisor'; foo.co.uk -> 'Foo'."""
-    name = _registrable_label(_host_labels(url))
-    return name.capitalize() if name else "The product"
+    https://www.tripadvisor.com.tw -> 'Tripadvisor'; foo.co.uk -> 'Foo';
+    https://taipei-flix.onrender.com -> 'Taipei Flix' (PaaS product slug)."""
+    parts = _host_labels(url)
+    name = _registrable_label(parts)
+    if not name:
+        return "The product"
+    if _paas_suffix(parts):
+        # A PaaS subdomain is a product SLUG — humanize it ("taipei-flix" ->
+        # "Taipei Flix"). Normal registrable labels keep the historical
+        # capitalize() exactly (coca-cola.com stays "Coca-cola").
+        words = [w for w in name.replace("_", "-").split("-") if w]
+        if words:
+            return " ".join(w.capitalize() for w in words)
+    return name.capitalize()
 
 
 def _root_host(url):
     """Bare REGISTRABLE host for the CTA: https://docs.stripe.com -> 'stripe.com';
-    https://www.tripadvisor.com.tw -> 'tripadvisor.com.tw'; foo.co.uk -> 'foo.co.uk'."""
+    https://www.tripadvisor.com.tw -> 'tripadvisor.com.tw'; foo.co.uk -> 'foo.co.uk'.
+    On a PaaS suffix the platform root is NOT the product, so the product host
+    survives whole: api.taipei-flix.onrender.com -> 'taipei-flix.onrender.com'."""
     parts = _host_labels(url)
     if not parts:
         return ""
+    if _paas_suffix(parts):
+        return ".".join(parts[-3:])    # product + platform suffix, never the root
     if len(parts) >= 3 and ".".join(parts[-2:]) in _MULTI_TLDS:
         return ".".join(parts[-3:])    # brand + 2-part public suffix
     if len(parts) >= 2:

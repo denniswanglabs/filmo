@@ -284,6 +284,13 @@ _WELL_KNOWN_NAMES = {
 }
 
 
+def _norm_brand_key(s):
+    """Brand-identity key: lowercase with spaces/hyphens/underscores removed, so
+    'Taipei Flix' == 'TaipeiFlix' == 'taipei-flix'. Used to decide whether a
+    fetched page name is the SAME brand as a host-derived label."""
+    return re.sub(r"[\s\-_]+", "", (s or "").lower())
+
+
 def _resolve_display_name(label, fetched_name, host):
     """Restore a real multi-word display name for a collapsed registrable label.
 
@@ -548,6 +555,14 @@ def extract_brand(url, name_override=None, fetcher=None, logo_from=None):
         fetched = payload["name"]
         if label.lower() in fetched.lower() and len(fetched) <= len(label) + 6:
             name = fetched
+        elif rc._paas_suffix(rc._host_labels(url)):
+            # PaaS-hosted product (taipei-flix.onrender.com): the label is a
+            # humanized URL slug, so the page's own og:site_name/<title> carries
+            # the authoritative casing ("TaipeiFlix"). Adopt it ONLY when it is
+            # the SAME brand — its de-spaced form must equal the slug's — so a
+            # junk SPA title ("Vite + React") can never hijack the name.
+            if _norm_brand_key(fetched) and _norm_brand_key(fetched) == _norm_brand_key(label):
+                name = fetched
 
     # COLLAPSED MULTI-WORD NAME REPAIR (R8): the host-derived registrable label
     # despaces the brand ("theverge.com" -> "Theverge"), so a multi-word wordmark
