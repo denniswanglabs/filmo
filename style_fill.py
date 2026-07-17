@@ -4577,14 +4577,15 @@ _NIGHT_TREATMENT_ARCH = {
 
 
 class NightStyle(Style):
-    """Role routing + TREATMENT refinement: feature beats pick their night
-    archetype from the card treatment the classic router already assigned."""
+    """Role routing + DATA-SIGNAL refinement. The classic card-treatment tag is
+    honored when present, but it is assigned LATE in the classic flow — at night
+    routing time feature beats usually carry only their seeded data. So the
+    router inspects the same honest signals the treatment assigner uses:
+    a real quote, a real stat, real process steps, a real entity set."""
 
     def archetype_for(self, scene: Dict[str, Any]) -> str:
         role = _scene_role(scene)
         if role in ("open", "hero", "title", "intro"):
-            # A title scene that closes the film routes via id in role_map users;
-            # plan ids mark closes — check the id the planner uses.
             sid = str(scene.get("id") or "").lower()
             if "clos" in sid or "cta" in sid or "outro" in sid:
                 return "night-close"
@@ -4593,8 +4594,24 @@ class NightStyle(Style):
             return "night-close"
         if role in ("screenshot", "site"):
             return "night-panel"
-        treatment = str(((scene.get("data") or {}).get("treatment")) or "").strip().lower()
-        return _NIGHT_TREATMENT_ARCH.get(treatment, "night-ladder")
+        d = scene.get("data") or {}
+        treatment = str(d.get("treatment") or "").strip().lower()
+        if treatment in _NIGHT_TREATMENT_ARCH:
+            return _NIGHT_TREATMENT_ARCH[treatment]
+        # Data-signal routing (honesty-inherited: these keys only exist when the
+        # plan seeded REAL page/enrichment material).
+        if str(d.get("quote") or "").strip() and str(d.get("quoteAttribution") or "").strip():
+            return "night-quote"
+        stat = d.get("stat") or {}
+        if str(stat.get("value") or "").strip():
+            return "night-credibility"
+        steps = d.get("steps") or []
+        if isinstance(steps, list) and len(steps) >= 2:
+            return "night-terminal"
+        entities = d.get("featureEntities") or []
+        if isinstance(entities, list) and len(entities) >= 3:
+            return "night-ecosystem"
+        return "night-ladder"
 
 
 STYLES["engineered-night"] = NightStyle(

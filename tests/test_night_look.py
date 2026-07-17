@@ -39,6 +39,18 @@ class NightRegistry(unittest.TestCase):
         self.assertEqual(self.style.archetype_for(scene(treatment="icon-headline")), "night-ladder")
         self.assertEqual(self.style.archetype_for(scene()), "night-ladder")
 
+    def test_data_signal_routing_without_treatment_tags(self):
+        # The hosted regression: treatments are assigned late in the classic flow,
+        # so night routing must read the seeded data directly.
+        self.assertEqual(self.style.archetype_for(scene(
+            data={"quote": "Real quote from the page here.", "quoteAttribution": "P. Person"})), "night-quote")
+        self.assertEqual(self.style.archetype_for(scene(
+            data={"stat": {"value": "135+", "label": "currencies"}})), "night-credibility")
+        self.assertEqual(self.style.archetype_for(scene(
+            data={"steps": [{"label": "a"}, {"label": "b"}]})), "night-terminal")
+        self.assertEqual(self.style.archetype_for(scene(
+            data={"featureEntities": ["Amazon", "Shopify", "Instacart"]})), "night-ecosystem")
+
     def test_quote_shaper_scales_hold_to_duration(self):
         s = scene(treatment="pull-quote", dur=13,
                   data={"quote": "Real words here from the page.", "quoteAttribution": "A. Person"})
