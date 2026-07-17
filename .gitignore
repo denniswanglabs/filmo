@@ -137,3 +137,9 @@ notes/
 
 # Local-only — internal demo script, not for the public repo
 DEMO-RUNBOOK.md
+
+# Engineered Night runtime assets: these SHIP (in git AND in the railway upload —
+# railway up applies these patterns to its tarball, so negations are load-bearing).
+!studio/public/night-sfx/*.mp3
+!assets/night/bed-60.mp3
+!web/public/examples/*.mp4
