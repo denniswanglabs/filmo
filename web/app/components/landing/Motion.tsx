@@ -519,13 +519,17 @@ export function scrollToHeroComposer(behavior: ScrollBehavior = 'smooth') {
 interface PinnedHeroProps {
   title: ReactNode
   body: ReactNode
+  /** Always-visible slot right below the title (the composer bar, Hera-style):
+      rides the title group's y-drift but is NEVER opacity-choreographed — it is
+      interactive from first paint, before any scroll. */
+  composer?: ReactNode
   className?: string
   decoration?: ReactNode
   id?: string
 }
 
 export const PinnedHero = forwardRef<HTMLElement, PinnedHeroProps>(function PinnedHero(
-  { title, body, className = '', decoration, id },
+  { title, body, composer = null, className = '', decoration, id },
   forwardedRef,
 ) {
   const sectionRef = useRef<HTMLElement | null>(null)
@@ -578,6 +582,7 @@ export const PinnedHero = forwardRef<HTMLElement, PinnedHeroProps>(function Pinn
         {decoration}
         <div className={`relative z-10 mx-auto w-full text-center ${className}`}>
           {title}
+          {composer}
           {body}
         </div>
       </section>
@@ -602,6 +607,7 @@ export const PinnedHero = forwardRef<HTMLElement, PinnedHeroProps>(function Pinn
               <HeroCornerBrackets />
               {title}
             </div>
+            {composer}
             <div className="pointer-events-none opacity-0" aria-hidden>
               {body}
             </div>
@@ -645,6 +651,8 @@ export const PinnedHero = forwardRef<HTMLElement, PinnedHeroProps>(function Pinn
               </motion.div>
               {title}
             </motion.div>
+
+            {composer && <div className="w-full shrink-0">{composer}</div>}
 
             <motion.div
               className={`w-full shrink-0 ${
