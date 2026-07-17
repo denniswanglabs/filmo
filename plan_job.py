@@ -482,6 +482,67 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
         "reason": planner_meta.get("reason") or ("ok" if plan_source == "llm" else "fallback"),
         "usage": planner_meta.get("usage"),
     }
+    plan = _ensure_screenshot_beat(plan)
+    return plan
+
+
+def _ensure_screenshot_beat(plan):
+    """Deterministic guard (defense-in-depth, same spirit as _enforce_quality): the
+    hybrid shape REQUIRES exactly one homepage `screenshot` scene, but the planner
+    LLM occasionally omits it — taipei-flix 2026-07-14 planned 5 scenes with no
+    screenshot while the same URL 13 minutes later planned one. The screenshot is
+    the single most grounding beat (the user's REAL page), so when it's missing we
+    insert it right after the opening title instead of re-rolling the planner.
+    D (Dennis 2026-07-17): enforce deterministically.
+
+    Copy is honesty-safe by construction: the brief describes what the scene IS
+    (the live homepage) and the VO names the brand only — no invented claims.
+    Never raises; on any surprise it returns the plan untouched."""
+    try:
+        scenes = plan.get("scenes")
+        if not isinstance(scenes, list) or not scenes:
+            return plan
+        if any((s or {}).get("type") == "screenshot" for s in scenes):
+            return plan
+
+        job = plan.get("job") or {}
+        brand = _brand_name(job.get("company_url")) or "the product"
+
+        sid = "homepage-screenshot"
+        taken = {(s or {}).get("id") for s in scenes}
+        if sid in taken:
+            sid = "homepage-screenshot-guard"
+
+        scene = {
+            "id": sid,
+            "type": "screenshot",
+            "brief": ("The company's real homepage, captured live — a general look at "
+                      "what %s is." % brand),
+            "model": None,
+            "duration_s": 6,
+            "input_image": None,
+        }
+        # Canonical slot: right after the opening title; index 0 if the plan
+        # (unusually) doesn't open on a title.
+        at = 1 if (scenes[0] or {}).get("type") == "title" else 0
+        scenes.insert(at, scene)
+
+        vo = plan.get("voiceover")
+        if isinstance(vo, dict) and isinstance(vo.get("beats"), list):
+            beats = vo["beats"]
+            line = "This is %s — the real product, straight from the live site." % brand
+            beat = {"scene_id": sid, "text": line}
+            if at == 0:
+                beats.insert(0, beat)
+            else:
+                prev_id = (scenes[0] or {}).get("id")
+                idx = next((j + 1 for j, b in enumerate(beats)
+                            if (b or {}).get("scene_id") == prev_id), len(beats))
+                beats.insert(idx, beat)
+        print("[planner] screenshot guard: inserted %r at index %d (plan had none)"
+              % (sid, at), file=sys.stderr)
+    except Exception as e:
+        print("[planner] screenshot guard skipped (%s)" % e, file=sys.stderr)
     return plan
 
 
@@ -1033,6 +1094,32 @@ def _seed_feature_beats_from_enrichment(plan, enrich, grounded=None):
     return plan
 
 
+def _trim_quote_sentences(quote, max_words=26):
+    """Trim a testimonial to WHOLE SENTENCES within ~max_words. D (Dennis 2026-07-17):
+    cap the pull-quote beat — full 40-50-word quotes were holding the card ~18s of a
+    45s film (the read-time hold follows the ON-SCREEN text, so trimming only the VO
+    was not enough). This trims at the SOURCE, before the quote is stamped on the
+    card, so card text + VO + duration all derive from the SAME short quote — and it
+    never cuts mid-sentence (the 2026-07-02 rule that removed the old word guillotine
+    stands: we drop trailing sentences, we do not truncate one).
+
+    Keeps at least the first sentence even when it alone exceeds the budget."""
+    q = str(quote or "").strip()
+    if not q:
+        return q
+    sentences = re.split(r"(?<=[.!?])\s+", q)
+    out, count = [], 0
+    for s in sentences:
+        w = len(s.split())
+        if out and count + w > max_words:
+            break
+        out.append(s)
+        count += w
+        if count >= max_words:
+            break
+    return " ".join(out) if out else q
+
+
 def _voice_quote(quote):
     """The VO line for a pull-quote beat = the testimonial ITSELF (in full), so the
     narration MATCHES what's on screen -- instead of a 3-word "what customers say" label
@@ -1127,9 +1214,11 @@ def _seed_feature_beats_from_story_shape(plan, story_shape, reserve=0, grounded=
             _seed_scene(target, "How it works")
             consumed.add(id(target))
 
-    # testimonial -> pull-quote (real quote >= 6 words + attribution)
+    # testimonial -> pull-quote (real quote >= 6 words + attribution). The quote is
+    # trimmed to whole sentences (~26 words) BEFORE stamping, so the card, the VO,
+    # and the read-time hold all agree on the same short quote (see _trim_quote_sentences).
     t = story_shape.get("testimonial") or {}
-    quote = str((t or {}).get("quote") or "").strip()
+    quote = _trim_quote_sentences(str((t or {}).get("quote") or "").strip())
     who = str((t or {}).get("who") or "").strip()
     if quote and who and len(quote.split()) >= 6:
         target = _claim_target()
