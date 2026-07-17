@@ -1,7 +1,9 @@
 # Filmo cloud worker image.
-# Bundles the python pipeline (build_runner.py + deps) and the Node worker (run.js)
-# into one container for Railway. Standard quality only for v1: Remotion render +
-# Playwright capture + edge-tts VO + whisper word-timing (no NemoClaw, no Higgsfield).
+# Bundles the python pipeline (build_runner.py + deps) and the Node claimer
+# (agent-host/vm/curated-claimer.js, CLAIMER_MODE=curated — the same deterministic
+# path production ran on Hetzner) into one container for Railway. Remotion render +
+# Playwright capture + ElevenLabs VO via env key (edge-tts fallback) + whisper
+# word-timing. No Hermes, no NemoClaw, no Higgsfield.
 FROM node:22-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -53,7 +55,14 @@ RUN rm -f /app/studio/node_modules \
 # ── music bed: the real BGM tracks ship via `COPY . /app` at assets/music/*.mp3,
 #    exactly where style_fill's repo-relative _MUSIC_DIR resolves. No placeholder. ──
 
-# ── Node worker deps ──
-RUN cd /app/worker && npm install --no-audit --no-fund
+# ── Node worker deps (@insforge/sdk — also the claimer's only external import).
+#    The root symlink lets agent-host/vm/curated-claimer.js resolve them. ──
+RUN cd /app/worker && npm install --no-audit --no-fund \
+    && ln -s /app/worker/node_modules /app/node_modules
 
-CMD ["node", "/app/worker/run.js"]
+# Deterministic claimer defaults; override per-environment in Railway variables.
+ENV CLAIMER_MODE=curated \
+    PRODUCER=railway-curated \
+    PYTHON_BIN=python3
+
+CMD ["node", "/app/agent-host/vm/curated-claimer.js"]
