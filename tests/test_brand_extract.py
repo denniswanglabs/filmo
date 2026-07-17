@@ -58,26 +58,26 @@ class UnknownBrandHonesty(unittest.TestCase):
         # clean LIGHT default bg (NOT the old dark #0A0D0C+mint that rendered
         # blank cards), and not a leaked known-brand palette.
         self.assertEqual(t["palette"]["bg"], "#FFFFFF")
-        # R7 GENERALITY: an unknown brand with no learnable accent gets a
-        # DETERMINISTIC, brand-specific, perceptible accent — NOT the old shared
-        # generic blue (#2563EB-for-all) and NEVER an invisible white.
+        # POLICY 2026-07-17 (supersedes R7 hash-distinctness): the accent is the
+        # site's REAL color (pixels/fetch) or the honest shared neutral — never
+        # a synthesized per-brand hue. The homefeed.me user saw hash-green on a
+        # cream/orange site and flagged it instantly. No capture here -> neutral.
         acc = t["palette"]["accent"].upper()
-        self.assertNotEqual(acc, "#2563EB", "must not collapse to the shared default blue")
-        self.assertNotEqual(acc, "#FFFFFF", "accent must never be invisible white")
+        self.assertEqual(acc, be._LIGHT_DEFAULT["accent"].upper())
         self.assertTrue(
             be._is_perceptible_accent(acc, t["palette"]["bg"], t["palette"]["ink"]),
-            "deterministic accent must be perceptible vs both bg and ink")
+            "the neutral accent must be perceptible vs both bg and ink")
 
-    def test_distinct_unknown_brands_get_distinct_accents(self):
-        # R7 GENERALITY: two different unknown brands must NOT resolve to the same
-        # accent (the 12-brand failure: allbirds/airbnb/theverge/huckberry all blue).
+    def test_unknown_brands_share_the_honest_neutral_without_capture(self):
+        # POLICY 2026-07-17: with NO captured pixels and no learnable accent, two
+        # unknown brands correctly SHARE the neutral — per-brand distinctness now
+        # comes from real pixel extraction (every hosted run captures the page),
+        # never from an invented hash hue.
         a = be.extract_brand("https://alpha-co.example", fetcher=_no_fetch)
         b = be.extract_brand("https://beta-co.example", fetcher=_no_fetch)
-        self.assertNotEqual(a["palette"]["accent"].upper(),
-                            b["palette"]["accent"].upper())
-        # ...and deterministic: the same brand always gets the same accent.
-        a2 = be.extract_brand("https://alpha-co.example", fetcher=_no_fetch)
-        self.assertEqual(a["palette"]["accent"], a2["palette"]["accent"])
+        self.assertEqual(a["palette"]["accent"].upper(),
+                         be._LIGHT_DEFAULT["accent"].upper())
+        self.assertEqual(a["palette"]["accent"], b["palette"]["accent"])
 
     def test_no_leaked_brand_strings_anywhere(self):
         # The old _copy_from_brief leaked "Stripe" into every non-Stripe build.
@@ -390,6 +390,65 @@ class CliWritesValidJson(unittest.TestCase):
                 data = json.load(f)
             self.assertEqual(data["name"], "Stripe")
             self.assertIn("palette", data)
+
+
+class PixelAccent(unittest.TestCase):
+    """The accent comes from the site's REAL pixels, never a synthesized hue
+    (the homefeed.me green bug: hash("homefeed") -> #31BE2D on a cream/orange
+    site, spotted by the user immediately)."""
+
+    def _make(self, color, name):
+        import subprocess
+        path = os.path.join(tempfile.gettempdir(), f"px-{name}.png")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                        "-i", f"color=c={color}:s=48x48", "-frames:v", "1", path],
+                       check=True, timeout=30)
+        return path
+
+    def test_saturated_brand_color_is_read_from_pixels(self):
+        p = self._make("0xE8734A", "orange")
+        got = be._accent_from_pixels([p], "#FFFFFF", "#0F2338")
+        self.assertIsNotNone(got)
+        r, g, b = (int(got[i:i + 2], 16) for i in (1, 3, 5))
+        self.assertGreater(r, g)   # warm: red dominates
+        self.assertGreater(g, b)
+        os.remove(p)
+
+    def test_near_white_image_yields_none(self):
+        p = self._make("0xFAFAFA", "white")
+        self.assertIsNone(be._accent_from_pixels([p], "#FFFFFF", "#0F2338"))
+        os.remove(p)
+
+    def test_missing_paths_yield_none(self):
+        self.assertIsNone(be._accent_from_pixels(["/nope/x.png", None], "#FFFFFF", "#0F2338"))
+        self.assertIsNone(be._accent_from_pixels([], "#FFFFFF", "#0F2338"))
+
+    def test_no_capture_stays_honest_neutral_never_hash(self):
+        # Unknown brand with no capture: the honest shared neutral — and NEVER
+        # the old deterministic hash color for the domain.
+        t = be.extract_brand("https://homefeed.me")
+        self.assertEqual(t["palette"]["accent"], be._LIGHT_DEFAULT["accent"])
+        self.assertNotEqual(t["palette"]["accent"].upper(), "#31BE2D")
+
+    def test_capture_pixels_win_over_neutral(self):
+        # A synthetic capture layout: manifest + logo of a saturated brand color.
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            shots = os.path.join(d, "screenshots-read")
+            brand = os.path.join(shots, "brand")
+            os.makedirs(brand)
+            logo = os.path.join(brand, "logo.png")
+            subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                            "-i", "color=c=0xCB7C5A:s=48x48", "-frames:v", "1", logo],
+                           check=True, timeout=30)
+            with open(os.path.join(shots, "manifest.json"), "w") as f:
+                json.dump({"shots": [], "logo": {"file": "logo.png", "path": logo,
+                                                 "source": "test"}}, f)
+            t = be.extract_brand("https://homefeed.me", logo_from=d)
+            got = t["palette"]["accent"]
+            r, g, b = (int(got[i:i + 2], 16) for i in (1, 3, 5))
+            self.assertGreater(r, b)  # warm terracotta family, not blue/green
+            self.assertNotEqual(got, be._LIGHT_DEFAULT["accent"])
 
 
 if __name__ == "__main__":

@@ -181,7 +181,10 @@ def _resolve_brand_theme(url, run_dir):
     if theme is None:
         # No curated fixture — extract honestly (real name + palette + empty copy).
         import brand_extract
-        theme = brand_extract.extract_brand(url)
+        # logo_from=run_dir: the accent chain samples the run's CAPTURED logo +
+        # homepage pixels (real page colors — never an invented hue), and the
+        # captured logo asset threads into theme.logo_src as before.
+        theme = brand_extract.extract_brand(url, logo_from=run_dir)
 
     out = os.path.join(run_dir, "brand_theme.json")
     with open(out, "w") as f:

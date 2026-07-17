@@ -433,6 +433,84 @@ def _deterministic_brand_accent(seed):
     return _hsl_to_hex(hue, 0.62, 0.46)
 
 
+def _shot_path_from_manifest(manifest_path):
+    """First page-shot path recorded in the capture manifest that EXISTS, else
+    None. Tolerant of moved run dirs (resolves the basename next to the
+    manifest). Never raises."""
+    if not manifest_path or not os.path.isfile(manifest_path):
+        return None
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return None
+    for shot in (data or {}).get("shots") or []:
+        p = (shot or {}).get("path") or ""
+        if p and os.path.isfile(p):
+            return p
+        base = os.path.join(os.path.dirname(os.path.abspath(manifest_path)),
+                            os.path.basename(p))
+        if p and os.path.isfile(base):
+            return base
+    return None
+
+
+def _accent_from_pixels(paths, bg_hex, ink_hex):
+    """The REAL brand accent read from captured pixels (Dennis 2026-07-17: "use
+    the colors of the actual website" — the invented hash-green on homefeed.me
+    was the user-visible failure this replaces).
+
+    Downscales each image with ffmpeg (rawvideo out, stdlib parsing — no Pillow
+    dependency on the worker), drops near-white/near-black/low-saturation pixels,
+    quantizes the rest to a coarse RGB grid, and picks the most REPEATED color.
+    Brand UI hues repeat exactly (buttons, links, logo fills) while photo noise
+    spreads across the grid, so exact repetition separates brand identity from
+    imagery. Logo first, page shot second. Returns a perceptible #RRGGBB or None
+    — NEVER a synthesized color."""
+    import subprocess as _sp
+    from collections import Counter
+
+    for path in paths or []:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            raw = _sp.run(
+                ["ffmpeg", "-v", "error", "-i", path, "-vf", "scale=48:48",
+                 "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                capture_output=True, timeout=30).stdout
+        except Exception:
+            continue
+        if not raw or len(raw) < 3:
+            continue
+        counts = Counter()
+        buckets = {}
+        for i in range(0, len(raw) - 2, 3):
+            r, g, b = raw[i], raw[i + 1], raw[i + 2]
+            lum = (r * 299 + g * 587 + b * 114) // 1000
+            if lum > 238 or lum < 22:
+                continue
+            mx, mn = max(r, g, b), min(r, g, b)
+            if mx == 0 or (mx - mn) / mx < 0.30:
+                continue
+            q = (r // 24, g // 24, b // 24)
+            counts[q] += 1
+            buckets.setdefault(q, []).append((r, g, b))
+        if not counts:
+            continue
+        q, n = counts.most_common(1)[0]
+        # Concentration floor: a real brand hue repeats; scattered photo tones
+        # never clear it. 8 of 2304 samples ≈ a visible UI element.
+        if n < 8:
+            continue
+        px = buckets[q]
+        cand = "#%02X%02X%02X" % (sum(p[0] for p in px) // n,
+                                  sum(p[1] for p in px) // n,
+                                  sum(p[2] for p in px) // n)
+        if _is_perceptible_accent(cand, bg_hex, ink_hex):
+            return cand
+    return None
+
+
 def _is_valid_accent(hex_color):
     """True when the hex is a real saturated brand color — not near-white (L>240)
     or near-black (L<15). Those are structural/background colors, not accents."""
@@ -628,6 +706,17 @@ def extract_brand(url, name_override=None, fetcher=None, logo_from=None):
     registrable = (palette.get("_name") or "").lower().replace(" ", "")
     host_seed = host or registrable or name
 
+    # REAL pixel sources for the accent chain (captured logo first — brand
+    # identity in its purest pixels — then the rendered homepage shot). Derived
+    # from `logo_from` (run dir / screenshots dir / manifest path); [] when the
+    # caller has no capture, which simply skips the pixel step.
+    _pixel_manifest = _find_capture_manifest(logo_from)
+    _pixel_logo = _captured_logo_from_manifest(_pixel_manifest)
+    _pixel_sources = [p for p in (
+        (_pixel_logo or {}).get("path"),
+        _shot_path_from_manifest(_pixel_manifest),
+    ) if p]
+
     def _first_perceptible(*candidates):
         """First candidate that is a perceptible accent vs the current bg/ink."""
         for c in candidates:
@@ -658,12 +747,21 @@ def extract_brand(url, name_override=None, fetcher=None, logo_from=None):
                 payload.get("brand_color"),
             )
             if not new_accent:
-                # Last resort: a deterministic, brand-SPECIFIC saturated hue so two
-                # unknown brands never collapse to the same colour. Guaranteed
-                # perceptible by construction (sat 0.62 / lightness 0.46).
-                new_accent = _deterministic_brand_accent(host_seed)
-            theme["palette"]["accent"] = new_accent
-            theme["wordmark_svg"] = _wordmark_svg(name, new_accent, ink)
+                # The REAL page: sample the captured logo + homepage pixels
+                # (Dennis 2026-07-17 — "use the colors of the actual website").
+                # This replaces the old domain-hash invention: the hash painted
+                # homefeed.me green when the site is cream/orange, and the user
+                # noticed immediately.
+                new_accent = _accent_from_pixels(_pixel_sources, bg, ink)
+            if not new_accent and not _is_perceptible_accent(current_accent, bg, ink):
+                # Nothing real anywhere AND the current accent is unusable
+                # (near-bg / near-ink): fall back to the honest shared neutral.
+                # Two unknown brands sharing a neutral blue is correct; an
+                # invented per-brand hue is not.
+                new_accent = _LIGHT_DEFAULT["accent"]
+            if new_accent:
+                theme["palette"]["accent"] = new_accent
+                theme["wordmark_svg"] = _wordmark_svg(name, new_accent, ink)
     else:
         # KNOWN brand: the curated palette is authoritative EXCEPT when its accent
         # is imperceptible against its own surfaces — e.g. Vercel's curated accent
@@ -675,7 +773,7 @@ def extract_brand(url, name_override=None, fetcher=None, logo_from=None):
             new_accent = _first_perceptible(
                 world_accent,
                 palette.get("accent2"),     # curated secondary brand hue
-            ) or _deterministic_brand_accent(host_seed)
+            ) or _accent_from_pixels(_pixel_sources, bg, ink) or _LIGHT_DEFAULT["accent"]
             theme["palette"]["accent"] = new_accent
             theme["wordmark_svg"] = _wordmark_svg(name, new_accent, ink)
 
