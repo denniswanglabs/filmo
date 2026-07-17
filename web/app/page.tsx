@@ -23,8 +23,9 @@ const PENDING_KEY = 'ws_pending_build'
 interface PendingBuild {
   url: string
   brain: string
-  // Require a REAL Stripe TEST payment (4242 card) before the build proceeds.
-  // Default TRUE (the gate is the default path); per-build untickable to auto-pay.
+  // Stripe TEST payment gate. DORMANT since the open beta: always false → pay_mode
+  // 'auto' (simulated payment, no checkout). The full Stripe path stays in the
+  // codebase — flip the useState default back to true to re-enable it.
   requirePay: boolean
 }
 
@@ -47,9 +48,9 @@ export default function Home() {
   const [url, setUrl] = useState('')
   // Default to the flagship paid Ultra; Super (free) stays selectable in the dropdown.
   const [brain, setBrain] = useState<string>('ultra-paid')
-  // Human-pays toggle (default ON → a real Stripe TEST checkout, 4242 card, is the
-  // default gate before production). Untick it per-build to fall back to auto-pay.
-  const [requirePay, setRequirePay] = useState(true)
+  // Payments are OFF for the open beta (no Stripe roadblock for new users) — every
+  // build goes pay_mode 'auto'. The checkout UI + claimer gate remain in the codebase.
+  const [requirePay] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [building, setBuilding] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -162,7 +163,8 @@ export default function Home() {
     // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
     setUrl(p.url ?? '')
     setBrain(p.brain ?? 'ultra-paid')
-    setRequirePay(p.requirePay ?? true)
+    // NOTE: deliberately NOT restoring p.requirePay — stashes from before payments
+    // were turned off carry requirePay:true and would resurrect the checkout gate.
     // Auto-resume the build only when we returned signed-in AND the stashed URL is real.
     // A blank/garbage stash (e.g. the nav "Build" button opened the gate with an empty
     // composer) must NOT auto-fire createBuild — that would throw server-side and crash
@@ -284,22 +286,6 @@ export default function Home() {
                     </select>
                   </div>
 
-                  <label className="flex cursor-pointer items-start gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={requirePay}
-                      onChange={(e) => setRequirePay(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-amber"
-                    />
-                    <span className="min-w-0">
-                      <span className="block text-sm text-[#5A6472]">
-                        Require payment (Stripe test)
-                      </span>
-                      <span className="block text-xs text-[#8A94A6]">
-                        Pay with test card 4242 before render. No real charge.
-                      </span>
-                    </span>
-                  </label>
                 </div>
               )}
             </div>
