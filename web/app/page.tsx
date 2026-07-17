@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../lib/auth'
 import { createBuild } from './actions'
@@ -53,6 +54,9 @@ export default function Home() {
   const [requirePay] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [building, setBuilding] = useState(false)
+  // Portal guard: document.body only exists client-side.
+  const [composerMounted, setComposerMounted] = useState(false)
+  useEffect(() => setComposerMounted(true), [])
   const [error, setError] = useState<string | null>(null)
 
   // Sign-in gate (opens when a logged-out visitor hits Build)
@@ -200,8 +204,11 @@ export default function Home() {
       <FloatingNav buildEnabled={canBuild} onBuildClick={handleNavBuild} showBuild={false} />
 
       {/* The composer bar — Filmo's single prompt surface. Docked under the nav and
-          ALWAYS on screen (from first paint), minimized to just the bar: URL input,
-          advanced toggle, and Build as the arrow button INSIDE the bar. */}
+          ALWAYS on screen, minimized to just the bar: URL input, advanced toggle, and
+          Build as the arrow button INSIDE the bar. PORTALED to document.body so no
+          ancestor transform (template.tsx's route transition, the pinned-hero scroll
+          choreography) can ever turn its position:fixed into scroll-along absolute. */}
+      {composerMounted && createPortal(
       <div className="pointer-events-none fixed inset-x-0 top-[64px] z-40 px-4 sm:top-[74px] sm:px-6">
         <div className="pointer-events-auto mx-auto w-full max-w-xl">
           <form
@@ -272,7 +279,8 @@ export default function Home() {
             </p>
           )}
         </div>
-      </div>
+      </div>,
+      document.body)}
 
       <PinnedHero
         ref={heroRef}
