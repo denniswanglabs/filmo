@@ -183,8 +183,9 @@ def synth_full_script(script, voice, out_path, tier, *, synth_fn=None,
     ElevenLabs failure -- missing key, HTTP 401, quota_exceeded, network/timeout,
     or any other exception -- we AUTOMATICALLY FALL BACK to the FREE path
     (edge-tts synth + local whisper-cli alignment) so the render NEVER fails on
-    VO. ElevenLabs is currently out of credits, so in practice the fallback fires;
-    the returned `vo_engine`/`vo_fallback`/`fallback_reason` make that visible.
+    VO. (A 2026-07 note claiming ElevenLabs was out of credits is OBSOLETE — the
+    account has credits and the path is verified working; on any failure the
+    returned `vo_engine`/`vo_fallback`/`fallback_reason` make it visible.)
 
     `tier` is kept (the cost-plus menu threads it from style_fill) but it no
     longer GATES ElevenLabs -- ElevenLabs is tried by default at any tier. The
