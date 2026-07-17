@@ -10,8 +10,8 @@ are already out of the hot path (CLAIMER_MODE=curated on Hetzner since 2026-07-1
 - [x] Hetzner flipped to curated + e2e verified (run `e2e-curated-*`).
 
 ## Blocked on Dennis
-- [ ] `railway login` (token expired — invalid_grant). Interactive browser OAuth.
-- [ ] `gh auth login` (push the pending commits).
+- [x] `railway login` — done 2026-07-16.
+- [x] `gh auth login` — done 2026-07-16; commits pushed.
 
 ## Deploy (run from repo root, after railway login)
 1. `cd ~/Desktop/Projects/Hackathons/walk-studio-hosted && railway status` — confirm
