@@ -58,10 +58,15 @@ export const NightStage: React.FC<{
 export const WorldSurface: React.FC<{
   t: NightTokens;
   height: number;
+  /** v4: the world is 2D — the surface spans the full layout width. Defaults to
+   *  one frame for callers that still render a single column. */
+  width?: number;
   children?: React.ReactNode;
-}> = ({ t, height, children }) => {
+}> = ({ t, height, width = FRAME_W, children }) => {
   // 1px grid lines every 40px, both axes — drawn at the spec color but only 1px
   // wide, so over black the field reads ≤7% luminance ("felt, not seen").
+  // Rails moved into each section CELL (NightTimeline) so they travel with the
+  // beat in the 2D layout instead of striping the whole world.
   const line = t.grid;
   return (
     <div
@@ -69,15 +74,12 @@ export const WorldSurface: React.FC<{
         position: "absolute",
         left: 0,
         top: 0,
-        width: FRAME_W,
+        width,
         height,
         backgroundImage: `repeating-linear-gradient(0deg, ${line} 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, ${line} 0 1px, transparent 1px 40px)`,
         backgroundSize: "40px 40px, 40px 40px",
       }}
     >
-      {/* Vertical rails bounding the content column. */}
-      <div style={{ position: "absolute", left: RAIL_X, top: 0, bottom: 0, width: 1, background: "rgba(255,255,255,0.10)" }} />
-      <div style={{ position: "absolute", right: RAIL_X, top: 0, bottom: 0, width: 1, background: "rgba(255,255,255,0.10)" }} />
       {children}
     </div>
   );

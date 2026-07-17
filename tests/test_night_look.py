@@ -136,6 +136,24 @@ class NightDevelopmentPass(unittest.TestCase):
         out = style_fill._shape_night_ladder(s, {})
         self.assertFalse(out.get("support"))
 
+    def test_statement_gets_shot_fragment_when_capture_exists(self):
+        # v4: with a stashed capture, a statement beat carries a page fragment.
+        brand = {"_night_shot_raw": "/runs/x/screenshots/shot-01.png"}
+        s = scene(treatment=None, data={"_text": "Collect every inquiry from one link today"})
+        out = style_fill._shape_night_ladder(s, brand)
+        self.assertEqual(out["chips"], [])
+        self.assertEqual(out["imageSrc"], "/runs/x/screenshots/shot-01.png")
+        # No capture -> no fragment key (renders the centered statement).
+        out2 = style_fill._shape_night_ladder(s, {})
+        self.assertNotIn("imageSrc", out2)
+
+    def test_close_recaps_the_chip_family(self):
+        brand = {"features": [{"title": "Payments"}, {"title": "Billing"}]}
+        ladder = style_fill._shape_night_ladder(scene(treatment=None, data={}), brand)
+        self.assertEqual(ladder["chips"], ["Payments", "Billing"])
+        close = style_fill._shape_night_close(scene(role="title", treatment=None, data={}), brand)
+        self.assertEqual(close["recapChips"], ["Payments", "Billing"])
+
     def test_build_props_stashes_design_brief_for_shapers(self):
         # §D channel: build_props must expose plan.design_brief on the brand dict.
         import inspect

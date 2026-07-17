@@ -35,21 +35,24 @@ export const Eyebrow: React.FC<{
 export const Chip: React.FC<{
   t: NightTokens;
   active?: boolean;
+  /** Launch-video scale (v4): ladder/recap chips render BIG — the small pills
+   *  read as an afterthought at 1080p. Default stays small for eyebrow uses. */
+  big?: boolean;
   children: React.ReactNode;
   style?: React.CSSProperties;
-}> = ({ t, active = false, children, style }) => (
+}> = ({ t, active = false, big = false, children, style }) => (
   <div
     style={{
       display: "inline-flex",
       alignItems: "center",
-      padding: "10px 18px",
+      padding: big ? "18px 34px" : "10px 18px",
       borderRadius: 999,
       border: `1px solid ${active ? t.accent : t.panelLine}`,
       background: active ? t.accentSoft : t.panel,
       color: active ? t.ink : t.inkMuted,
       fontFamily: t.fontBody,
-      fontSize: NIGHT_TYPE.label,
-      fontWeight: 500,
+      fontSize: big ? 24 : NIGHT_TYPE.label,
+      fontWeight: big ? 600 : 500,
       whiteSpace: "nowrap",
       ...style,
     }}

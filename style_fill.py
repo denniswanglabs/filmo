@@ -4536,6 +4536,10 @@ def _shape_night_panel(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str
     base = _shape_screenshot(scene, brand)
     # Keep the classic `imageSrc` key so the archetype-agnostic public stager
     # (build_props tail) copies the capture into studio/public and rewrites it.
+    # v4: stash the RAW capture path so later statement beats can show a cropped
+    # fragment of the SAME real page (content, honestly sourced).
+    if base.get("imageSrc"):
+        brand["_night_shot_raw"] = base["imageSrc"]
     return {"imageSrc": base.get("imageSrc"), "caption": base.get("caption") or None}
 
 
@@ -4634,12 +4638,20 @@ def _shape_night_ladder(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[st
         full = " ".join(str(d.get("_text") or "").split())
         if full and full.lower() != headline.lower() and len(full) > len(headline) + 12:
             support = full if len(full) <= 150 else (full[:150].rsplit(" ", 1)[0].rstrip(",;:.") + "…")
-    return {
+    out = {
         "headline": headline,
         "chips": chips,
         "activeIndex": 0,
         "support": support or None,
     }
+    if chips:
+        # v4: remember the film's chip family so the close can recap it.
+        brand.setdefault("_night_chips", chips)
+    elif brand.get("_night_shot_raw"):
+        # v4 content: statement beats carry a cropped fragment of the real
+        # captured homepage (the public stager stages any data.imageSrc).
+        out["imageSrc"] = brand["_night_shot_raw"]
+    return out
 
 
 def _shape_night_close(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
@@ -4652,6 +4664,7 @@ def _shape_night_close(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str
         "accentWord": accent_word,
         "chip": None,
         "terminalLines": brand.get("_night_terminal_lines") or None,
+        "recapChips": brand.get("_night_chips") or None,
     }
 
 

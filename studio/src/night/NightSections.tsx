@@ -12,6 +12,60 @@ import { CONTENT_W } from "./Stage";
 const resolveAsset = (path: string): string =>
   path.startsWith("http") || path.startsWith("/") ? path : staticFile(path);
 
+/** v4 content: a cropped fragment of the REAL captured homepage in a small
+ *  browser card — fills text-only beats with honest product surface. `region`
+ *  picks which slice of the page shows (varied per beat, deterministic). */
+export const ShotFragment: React.FC<{
+  t: NightTokens;
+  frame: number;
+  fps: number;
+  imageSrc: string;
+  start: number;
+  region?: number;
+  width?: number;
+  height?: number;
+}> = ({ t, frame, fps, imageSrc, start, region = 0, width = 560, height = 360 }) => {
+  const card = pop(frame, start, fps, 280);
+  const shot = pop(frame, start + Math.round(0.25 * fps), fps, 300);
+  const positions = ["50% 0%", "50% 34%", "50% 68%", "50% 100%"];
+  const push = 1 + Math.min(0.04, Math.max(0, (frame - start) / fps) * 0.008);
+  return (
+    <div
+      style={{
+        ...popStyle(card),
+        width,
+        borderRadius: 14,
+        border: `1px solid ${t.panelLine}`,
+        background: t.panel,
+        padding: 8,
+        boxShadow: "0 40px 100px -50px rgba(0,0,0,0.9)",
+        overflow: "hidden",
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: "flex", gap: 6, padding: "3px 5px 8px" }}>
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{ width: 8, height: 8, borderRadius: 4, background: "rgba(255,255,255,0.16)" }} />
+        ))}
+      </div>
+      <div style={{ borderRadius: 8, overflow: "hidden", height }}>
+        <Img
+          src={resolveAsset(imageSrc)}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: positions[region % positions.length],
+            opacity: shot.opacity,
+            transform: `scale(${push})`,
+            transformOrigin: "50% 30%",
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
 const Section: React.FC<{
   children: React.ReactNode;
   frame: number;
@@ -82,7 +136,9 @@ export const NightPanel: React.FC<{
   frame: number;
   fps: number;
   data: { imageSrc?: string; caption?: string };
-}> = ({ t, frame, fps, data }) => {
+  wordmark?: string;
+  index?: number;
+}> = ({ t, frame, fps, data, wordmark, index }) => {
   const p = pop(frame, Math.round(0.15 * fps), fps, 260);
   // §C two-stage arrival: the browser frame lands first, THEN the captured page
   // fades in inside it — the panel reads as a surface receiving content.
@@ -90,7 +146,7 @@ export const NightPanel: React.FC<{
   // Slow push-in over the hold so the shot never freezes.
   const push = 1 + Math.min(0.05, (frame / fps) * 0.009);
   return (
-    <Section frame={frame} fps={fps}>
+    <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
       {data.caption ? (
         <div style={riseStyle(rise(frame, Math.round(0.9 * fps), fps))}>
           <Eyebrow t={t}>{data.caption}</Eyebrow>
@@ -144,7 +200,10 @@ export const NightQuote: React.FC<{
   frame: number;
   fps: number;
   data: { quote?: string; quoteAttribution?: string; holdFrames?: number };
-}> = ({ t, frame, fps, data }) => {
+  wordmark?: string;
+  index?: number;
+  logoSrc?: string;
+}> = ({ t, frame, fps, data, wordmark, index, logoSrc }) => {
   const quote = data.quote ?? "";
   const words = quote.split(/\s+/).filter(Boolean);
   const third = Math.ceil(words.length / 3);
@@ -158,59 +217,84 @@ export const NightQuote: React.FC<{
   const chunkStart = (i: number) => Math.round(0.3 * fps + (i * 0.7 * hold) / Math.max(1, chunks.length));
   const whoStart = Math.round(hold * 0.78);
   const mark = pop(frame, 2, fps);
+  const card = pop(frame, Math.round(0.08 * fps), fps, 280);
   const underline = Math.min(1, Math.max(0, (frame - whoStart) / (0.5 * fps)));
   return (
-    <Section frame={frame} fps={fps}>
-      <div style={{ ...popStyle(mark), fontFamily: t.fontDisplay, fontSize: 120, lineHeight: 0.6, color: t.accent, fontWeight: 700 }}>
-        &ldquo;
-      </div>
+    <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
+      {/* v4: the testimonial lives ON a surface (wide panel card), not floating
+          in the void — the beat reads as content, and the logo anchors it. */}
       <div
         style={{
-          fontFamily: t.fontDisplay,
-          fontSize: 44,
-          fontWeight: 600,
-          letterSpacing: "-0.02em",
-          lineHeight: 1.34,
-          maxWidth: 1040,
-          textAlign: "center",
+          ...popStyle(card),
+          width: 1160,
+          borderRadius: 20,
+          border: `1px solid ${t.panelLine}`,
+          background: t.panel,
+          padding: "56px 72px 48px",
+          boxShadow: "0 60px 140px -60px rgba(0,0,0,0.9)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 26,
         }}
       >
-        {chunks.map((chunk, i) => {
-          const p = pop(frame, chunkStart(i), fps, 260);
-          // The chunk being read is ink; earlier chunks settle to muted.
-          const isCurrent = i === chunks.length - 1
-            ? frame >= chunkStart(i)
-            : frame >= chunkStart(i) && frame < chunkStart(i + 1);
-          return (
-            <span
-              key={i}
+        <div style={{ ...popStyle(mark), fontFamily: t.fontDisplay, fontSize: 120, lineHeight: 0.6, color: t.accent, fontWeight: 700 }}>
+          &ldquo;
+        </div>
+        <div
+          style={{
+            fontFamily: t.fontDisplay,
+            fontSize: 44,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
+            lineHeight: 1.34,
+            maxWidth: 980,
+            textAlign: "center",
+          }}
+        >
+          {chunks.map((chunk, i) => {
+            const p = pop(frame, chunkStart(i), fps, 260);
+            // The chunk being read is ink; earlier chunks settle to muted.
+            const isCurrent = i === chunks.length - 1
+              ? frame >= chunkStart(i)
+              : frame >= chunkStart(i) && frame < chunkStart(i + 1);
+            return (
+              <span
+                key={i}
+                style={{
+                  opacity: p.opacity,
+                  color: isCurrent ? t.ink : t.inkMuted,
+                  transition: "none",
+                }}
+              >
+                {chunk}{" "}
+              </span>
+            );
+          })}
+        </div>
+        {data.quoteAttribution ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 150 * underline, height: 3, borderRadius: 2, background: t.accent }} />
+            <div
               style={{
-                opacity: p.opacity,
-                color: isCurrent ? t.ink : t.inkMuted,
-                transition: "none",
+                ...popStyle(pop(frame, whoStart, fps)),
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                fontFamily: t.fontBody,
+                fontSize: 19,
+                fontWeight: 500,
+                color: t.inkMuted,
               }}
             >
-              {chunk}{" "}
-            </span>
-          );
-        })}
-      </div>
-      {data.quoteAttribution ? (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 150 * underline, height: 3, borderRadius: 2, background: t.accent }} />
-          <div
-            style={{
-              ...popStyle(pop(frame, whoStart, fps)),
-              fontFamily: t.fontBody,
-              fontSize: NIGHT_TYPE.label,
-              fontWeight: 500,
-              color: t.inkMuted,
-            }}
-          >
-            — {data.quoteAttribution}
+              {logoSrc ? (
+                <Img src={resolveAsset(logoSrc)} style={{ width: 30, height: 30, objectFit: "contain", borderRadius: 8 }} />
+              ) : null}
+              — {data.quoteAttribution}
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </Section>
   );
 };
@@ -249,7 +333,9 @@ export const NightCredibility: React.FC<{
   fps: number;
   data: { eyebrow?: string; stat?: { value?: string; label?: string } };
   holdFrames?: number;
-}> = ({ t, frame, fps, data }) => {
+  wordmark?: string;
+  index?: number;
+}> = ({ t, frame, fps, data, wordmark, index }) => {
   const value = data.stat?.value ?? "";
   const label = data.stat?.label ?? "";
   const badge = pop(frame, 2, fps);
@@ -262,7 +348,7 @@ export const NightCredibility: React.FC<{
     : `${parts.prefix}${formatStatNumber(parts.num * progress, parts.decimals, parts.grouped)}${parts.suffix}`;
   const under = Math.min(1, Math.max(0, (frame - 1.05 * fps) / (0.5 * fps)));
   return (
-    <Section frame={frame} fps={fps}>
+    <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
       {data.eyebrow ? (
         <div style={popStyle(badge)}>
           <Chip t={t} active>
@@ -329,7 +415,9 @@ export const NightTerminal: React.FC<{
   frame: number;
   fps: number;
   data: { title?: string; lines?: string[]; status?: string; toggle?: { left: string; right: string } };
-}> = ({ t, frame, fps, data }) => {
+  wordmark?: string;
+  index?: number;
+}> = ({ t, frame, fps, data, wordmark, index }) => {
   const lines = data.lines ?? [];
   const panel = pop(frame, Math.round(0.12 * fps), fps, 260);
   const lineStart = (i: number) => Math.round(0.55 * fps) + Math.round(i * 0.52 * fps);
@@ -337,7 +425,7 @@ export const NightTerminal: React.FC<{
   const status = pop(frame, allDone, fps);
   const cursorOn = Math.floor(frame / (fps * 0.4)) % 2 === 0;
   return (
-    <Section frame={frame} fps={fps}>
+    <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
       {data.title ? (
         <div style={popStyle(pop(frame, 2, fps))}>
           <Eyebrow t={t} accent>
@@ -409,7 +497,7 @@ export const NightLadder: React.FC<{
   t: NightTokens;
   frame: number;
   fps: number;
-  data: { headline?: string; chips?: string[]; secondary?: string[]; activeIndex?: number; support?: string };
+  data: { headline?: string; chips?: string[]; secondary?: string[]; activeIndex?: number; support?: string; imageSrc?: string };
   wordmark?: string;
   index?: number;
   holdFrames?: number;
@@ -439,30 +527,90 @@ export const NightLadder: React.FC<{
     (b.replace(/[.,!?]/g, "").length > a.replace(/[.,!?]/g, "").length ? b : a), "");
   const supportStart = Math.round(hold * 0.55);
   const underlineP = Math.min(1, Math.max(0, (frame - hold * 0.7) / (0.5 * fps)));
+  // v4 content: statement beats stop being text-on-a-void — when the run has a
+  // captured homepage, a cropped fragment of it fills the other half of the
+  // frame (region varies by section index so consecutive beats show different
+  // slices of the real page).
+  const fragment = statement && data.imageSrc;
+  const statementWords = (sizePx: number, maxW: number, align: "center" | "left") => (
+    <div
+      style={{
+        fontFamily: t.fontDisplay,
+        fontSize: sizePx,
+        fontWeight: 700,
+        letterSpacing: "-0.025em",
+        lineHeight: 1.12,
+        maxWidth: maxW,
+        textAlign: align,
+      }}
+    >
+      {words.map((w, i) => {
+        const p = pop(frame, Math.round(0.12 * fps) + Math.round(i * 0.055 * fps), fps);
+        const isAccent = w === accentWord && w.replace(/[.,!?]/g, "").length >= 6;
+        return (
+          <span key={i} style={{ opacity: p.opacity, color: isAccent ? t.accent : t.ink }}>
+            {w}{" "}
+          </span>
+        );
+      })}
+    </div>
+  );
   return (
     <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
-      {statement ? (
-        <div
-          style={{
-            fontFamily: t.fontDisplay,
-            fontSize: 84,
-            fontWeight: 700,
-            letterSpacing: "-0.025em",
-            lineHeight: 1.12,
-            maxWidth: 1150,
-            textAlign: "center",
-          }}
-        >
-          {words.map((w, i) => {
-            const p = pop(frame, Math.round(0.12 * fps) + Math.round(i * 0.055 * fps), fps);
-            const isAccent = w === accentWord && w.replace(/[.,!?]/g, "").length >= 6;
-            return (
-              <span key={i} style={{ opacity: p.opacity, color: isAccent ? t.accent : t.ink }}>
-                {w}{" "}
-              </span>
-            );
-          })}
+      {fragment ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 56, width: 1240 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 24, flex: 1 }}>
+            {statementWords(64, 620, "left")}
+            {underlineP > 0 ? (
+              <div style={{ width: 170 * underlineP, height: 4, borderRadius: 2, background: t.accent }} />
+            ) : null}
+            {data.support ? (
+              <div
+                style={{
+                  ...riseStyle(rise(frame, supportStart, fps)),
+                  fontFamily: t.fontBody,
+                  fontSize: NIGHT_TYPE.lede,
+                  color: t.inkMuted,
+                  maxWidth: 560,
+                  textAlign: "left",
+                  lineHeight: 1.5,
+                }}
+              >
+                {data.support}
+              </div>
+            ) : null}
+          </div>
+          <ShotFragment
+            t={t}
+            frame={frame}
+            fps={fps}
+            imageSrc={data.imageSrc as string}
+            start={Math.round(0.35 * fps)}
+            region={(index ?? 0) % 4}
+          />
         </div>
+      ) : statement ? (
+        <>
+          {statementWords(84, 1150, "center")}
+          {underlineP > 0 ? (
+            <div style={{ width: 170 * underlineP, height: 4, borderRadius: 2, background: t.accent, marginTop: -6 }} />
+          ) : null}
+          {data.support ? (
+            <div
+              style={{
+                ...riseStyle(rise(frame, supportStart, fps)),
+                fontFamily: t.fontBody,
+                fontSize: NIGHT_TYPE.lede,
+                color: t.inkMuted,
+                maxWidth: 860,
+                textAlign: "center",
+                lineHeight: 1.5,
+              }}
+            >
+              {data.support}
+            </div>
+          ) : null}
+        </>
       ) : (
       <div
         style={{
@@ -480,28 +628,10 @@ export const NightLadder: React.FC<{
         {data.headline}
       </div>
       )}
-      {statement && underlineP > 0 ? (
-        <div style={{ width: 170 * underlineP, height: 4, borderRadius: 2, background: t.accent, marginTop: -6 }} />
-      ) : null}
-      {statement && data.support ? (
-        <div
-          style={{
-            ...riseStyle(rise(frame, supportStart, fps)),
-            fontFamily: t.fontBody,
-            fontSize: NIGHT_TYPE.lede,
-            color: t.inkMuted,
-            maxWidth: 860,
-            textAlign: "center",
-            lineHeight: 1.5,
-          }}
-        >
-          {data.support}
-        </div>
-      ) : null}
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", maxWidth: 1000 }}>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", maxWidth: 1180 }}>
         {chips.map((c, i) => (
           <div key={i} style={popStyle(pop(frame, base + ladderStart(i, fps), fps))}>
-            <Chip t={t} active={i === activeIdx}>
+            <Chip t={t} big active={i === activeIdx}>
               {c}
             </Chip>
           </div>
@@ -514,7 +644,7 @@ export const NightLadder: React.FC<{
           style={{
             ...popStyle(pop(frame, secondaryStart, fps)),
             fontFamily: t.fontBody,
-            fontSize: NIGHT_TYPE.label,
+            fontSize: 19,
             fontWeight: 500,
             color: t.inkDim,
             letterSpacing: "0.02em",
@@ -533,11 +663,13 @@ export const NightEcosystem: React.FC<{
   frame: number;
   fps: number;
   data: { headline?: string; entities?: string[]; logos?: string[] };
-}> = ({ t, frame, fps, data }) => {
+  wordmark?: string;
+  index?: number;
+}> = ({ t, frame, fps, data, wordmark, index }) => {
   const entities = data.entities ?? [];
   const base = Math.round(0.45 * fps);
   return (
-    <Section frame={frame} fps={fps}>
+    <Section frame={frame} fps={fps} t={t} wordmark={wordmark} index={index}>
       {data.headline ? (
         <div style={popStyle(pop(frame, 2, fps, 260))}>
           <Eyebrow t={t}>{data.headline}</Eyebrow>
@@ -551,9 +683,9 @@ export const NightEcosystem: React.FC<{
               key={i}
               style={{
                 ...popStyle(pop(frame, base + ladderStart(i, fps), fps)),
-                width: 150,
-                height: 120,
-                borderRadius: 16,
+                width: 214,
+                height: 168,
+                borderRadius: 18,
                 border: `1px solid ${t.panelLine}`,
                 background: t.panel,
                 display: "flex",
@@ -564,26 +696,26 @@ export const NightEcosystem: React.FC<{
               }}
             >
               {logo ? (
-                <Img src={resolveAsset(logo)} style={{ width: 40, height: 40, objectFit: "contain" }} />
+                <Img src={resolveAsset(logo)} style={{ width: 58, height: 58, objectFit: "contain" }} />
               ) : (
                 <div
                   style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 12,
+                    width: 58,
+                    height: 58,
+                    borderRadius: 16,
                     background: t.accentSoft,
                     color: t.accent,
                     display: "grid",
                     placeItems: "center",
                     fontFamily: t.fontDisplay,
                     fontWeight: 700,
-                    fontSize: 20,
+                    fontSize: 26,
                   }}
                 >
                   {name.slice(0, 1).toUpperCase()}
                 </div>
               )}
-              <div style={{ fontFamily: t.fontBody, fontSize: 14, fontWeight: 500, color: t.inkMuted }}>{name}</div>
+              <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 500, color: t.inkMuted }}>{name}</div>
             </div>
           );
         })}
@@ -606,6 +738,8 @@ export const NightClose: React.FC<{
     /** Recurring-motif bookend: the film's terminal returns, small and muted,
         under the lockup (the reference closes exactly this way). */
     terminalLines?: string[];
+    /** v4: the film's chip family returns as a recap row under the lockup. */
+    recapChips?: string[];
   };
 }> = ({ t, frame, fps, data }) => {
   const tagline = data.tagline ?? "";
@@ -634,15 +768,15 @@ export const NightClose: React.FC<{
         {pre}
         {accentWord ? <span style={{ color: t.accent }}>{accentWord}</span> : null}
       </div>
-      <div style={{ ...popStyle(lockup), display: "flex", alignItems: "center", gap: 18, marginTop: 14 }}>
+      <div style={{ ...popStyle(lockup), display: "flex", alignItems: "center", gap: 20, marginTop: 14 }}>
         {data.logoSrc ? (
-          <Img src={resolveAsset(data.logoSrc)} style={{ width: 54, height: 54, objectFit: "contain", borderRadius: 12 }} />
+          <Img src={resolveAsset(data.logoSrc)} style={{ width: 66, height: 66, objectFit: "contain", borderRadius: 14 }} />
         ) : null}
         <div
           style={{
             fontFamily: t.fontDisplay,
             fontWeight: 700,
-            fontSize: 40,
+            fontSize: 48,
             letterSpacing: "0.22em",
             color: t.ink,
           }}
@@ -650,9 +784,21 @@ export const NightClose: React.FC<{
           {data.wordmark}
         </div>
       </div>
-      {data.chip ? (
+      {data.recapChips?.length ? (
+        // v4 recap: the film's chip family returns under the lockup, laddering
+        // in one last time — the close carries content, not just the name.
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", maxWidth: 1100, marginTop: 6 }}>
+          {data.recapChips.slice(0, 5).map((c, i) => (
+            <div key={i} style={popStyle(pop(frame, Math.round(1.5 * fps) + ladderStart(i, fps), fps))}>
+              <Chip t={t} big active={i === 0}>
+                {c}
+              </Chip>
+            </div>
+          ))}
+        </div>
+      ) : data.chip ? (
         <div style={popStyle(chip)}>
-          <Chip t={t}>{data.chip}</Chip>
+          <Chip t={t} big>{data.chip}</Chip>
         </div>
       ) : null}
       {data.terminalLines?.length ? (
@@ -660,14 +806,14 @@ export const NightClose: React.FC<{
           style={{
             ...popStyle(pop(frame, Math.round(1.9 * fps), fps, 260)),
             marginTop: 18,
-            width: 640,
-            borderRadius: 12,
+            width: 900,
+            borderRadius: 14,
             border: `1px solid ${t.panelLine}`,
             background: t.panel,
-            padding: "16px 22px",
+            padding: "20px 28px",
             fontFamily: t.fontMono,
-            fontSize: 15,
-            lineHeight: 1.8,
+            fontSize: 17,
+            lineHeight: 1.85,
             textAlign: "left",
             opacity: 0.9,
           }}
