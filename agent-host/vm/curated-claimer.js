@@ -1308,6 +1308,7 @@ async function processJob(job) {
     '--brain', p.brain || 'super-free',
     '--duration', String(p.duration || 30)]
   if (p.emphasis) args.push('--emphasis', p.emphasis)
+  if (p.look === 'engineered-night') args.push('--look', 'engineered-night')
   // ElevenLabs is the DEFAULT VO: set WS_VO_PROVIDER=elevenlabs so the pipeline
   // (align_vo.py) tries ElevenLabs FIRST. On ANY ElevenLabs failure (401 /
   // quota_exceeded / network / no key) align_vo AUTOMATICALLY falls back to the

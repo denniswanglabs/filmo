@@ -23,6 +23,7 @@ const PENDING_KEY = 'ws_pending_build'
 interface PendingBuild {
   url: string
   brain: string
+  look?: string
   // Stripe TEST payment gate. DORMANT since the open beta: always false → pay_mode
   // 'auto' (simulated payment, no checkout). The full Stripe path stays in the
   // codebase — flip the useState default back to true to re-enable it.
@@ -48,6 +49,8 @@ export default function Home() {
   const [url, setUrl] = useState('')
   // Default to the flagship paid Ultra; Super (free) stays selectable in the dropdown.
   const [brain, setBrain] = useState<string>('ultra-paid')
+  // Visual style family — 'classic' light or the Engineered Night dark one-world look.
+  const [look, setLook] = useState<string>('classic')
   // Payments are OFF for the open beta (no Stripe roadblock for new users) — every
   // build goes pay_mode 'auto'. The checkout UI + claimer gate remain in the codebase.
   const [requirePay] = useState(false)
@@ -96,6 +99,7 @@ export default function Home() {
           accessToken,
           url: p.url.trim(),
           brain: p.brain,
+          look: p.look === 'engineered-night' ? 'engineered-night' : 'classic',
           mode: 'mock',
           payMode: p.requirePay ? 'human' : 'auto',
         })
@@ -124,8 +128,8 @@ export default function Home() {
   )
 
   const currentPending = useCallback(
-    (): PendingBuild => ({ url, brain, requirePay }),
-    [url, brain, requirePay],
+    (): PendingBuild => ({ url, brain, look, requirePay }),
+    [url, brain, look, requirePay],
   )
 
   function stashPending() {
@@ -163,6 +167,7 @@ export default function Home() {
     // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
     setUrl(p.url ?? '')
     setBrain(p.brain ?? 'ultra-paid')
+    setLook(p.look === 'engineered-night' ? 'engineered-night' : 'classic')
     // NOTE: deliberately NOT restoring p.requirePay — stashes from before payments
     // were turned off carry requirePay:true and would resurrect the checkout gate.
     // Auto-resume the build only when we returned signed-in AND the stashed URL is real.

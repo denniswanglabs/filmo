@@ -41,6 +41,7 @@ python3 -m unittest tests.test_adapters_stitch_mixed_res -v   || fail=1
 python3 -m unittest tests.test_build_timeline -v              || fail=1
 python3 -m unittest tests.test_brand_extract -v               || fail=1
 python3 -m unittest tests.test_paas_branding -v               || fail=1
+python3 -m unittest tests.test_night_look -v                 || fail=1
 python3 -m unittest tests.test_plan_guards -v                 || fail=1
 python3 -m unittest tests.test_style_fill -v                  || fail=1
 python3 -m unittest tests.test_pricing -v                     || fail=1

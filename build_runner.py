@@ -67,8 +67,12 @@ ANALYZE_BRAIN = os.environ.get("ANALYZE_BRAIN", "ultra-paid")
 # authorize + ledger/P&L) runs UNCHANGED either way — the engine only replaces the
 # final.mp4 picture, never the money/ledger flow.
 VO_ENGINE_ENV = "WS_VO_ENGINE"
-# The curated style the engine fills. Only one style ships today; default to it.
+# The curated style the engine fills for the classic look.
 VO_ENGINE_STYLE = "orinovate-kinetic-light"
+# Visual style family (--look): "classic" renders the light Timeline; "engineered-night"
+# renders the dark one-world NightTimeline (style_fill STYLES["engineered-night"]).
+# Module-level so the render seam reads it without threading a new param through run().
+ACTIVE_LOOK = "classic"
 
 
 def vo_engine_enabled():
@@ -459,9 +463,35 @@ def _run_vo_engine(plan, run_id, url, run_dir):
     # real ElevenLabs VO (read inside align_vo.synth_full_script) — so a
     # `--quality standard` build (Higgsfield OFF) still gets premium ElevenLabs VO.
     # We don't pass tier="premium" here; the env switch alone selects the provider.
-    res = style_fill.run_pipeline(plan_path, brand_path, VO_ENGINE_STYLE, run_dir,
+    engine_style = "engineered-night" if ACTIVE_LOOK == "engineered-night" else VO_ENGINE_STYLE
+    res = style_fill.run_pipeline(plan_path, brand_path, engine_style, run_dir,
                                   fps=30, do_align=True, do_render=False)
     props_path = res["props_path"]
+
+    # ENGINEERED NIGHT audio grammar: swap the staged bed for the Night build,
+    # time-mapped so the climax lands on the brand-lockup resolve (close scene
+    # arrival + ~1s lockup pop). Best-effort — on any failure the run keeps
+    # whatever music the classic stager picked.
+    if ACTIVE_LOOK == "engineered-night":
+        try:
+            import night_music
+            with open(props_path) as f:
+                props = json.load(f)
+            fps = props.get("fps") or 30
+            scenes = props.get("scenes") or []
+            total_s = (props.get("total_frames") or 0) / fps
+            if scenes and total_s > 4:
+                target_climax = scenes[-1].get("in_frame", 0) / fps + 1.0
+                bed_name = f"night-bed-{run_id}.mp3"
+                bed_out = os.path.join(style_fill.STUDIO_DIR, "public", bed_name)
+                if night_music.build_bed(target_climax, total_s, bed_out):
+                    props.setdefault("theme", {})["music"] = bed_name
+                    with open(props_path, "w") as f:
+                        json.dump(props, f)
+                    print(f"[night] music mapped: climax -> {target_climax:.2f}s "
+                          f"of {total_s:.2f}s film", file=sys.stderr)
+        except Exception as e:
+            print(f"[night] music mapping skipped ({e})", file=sys.stderr)
 
     # Render the Timeline composition with the props into the run's final.mp4 — the
     # exact path the dashboard/stitch already point at, so nothing downstream changes.
@@ -482,7 +512,8 @@ def _run_vo_engine(plan, run_id, url, run_dir):
     env = dict(os.environ, PATH=os.path.join(studio, "node_modules", ".bin")
                + os.pathsep + os.environ.get("PATH", ""))
     import subprocess
-    cmd = ["remotion", "render", "src/index.ts", "Timeline", os.path.abspath(tmp),
+    composition = "NightTimeline" if ACTIVE_LOOK == "engineered-night" else "Timeline"
+    cmd = ["remotion", "render", "src/index.ts", composition, os.path.abspath(tmp),
            "--codec=h264", "--concurrency=50%", "--props=%s" % abs_props]
     r = subprocess.run(cmd, cwd=studio, env=env)
     if r.returncode != 0 or not os.path.exists(tmp):
@@ -1036,11 +1067,15 @@ def main():
                     help="video quality (the upfront cost-plus choice): standard "
                          "(Remotion + edge-tts, no Higgsfield/ElevenLabs, ~$5) | premium "
                          "(cinematic Higgsfield + ElevenLabs VO, ~$6-9)")
+    ap.add_argument("--look", choices=["classic", "engineered-night"], default="classic",
+                    help="visual style family: classic light Timeline, or the "
+                         "Engineered Night one-world dark style")
     ap.add_argument("--brain", choices=list(brain_mod.VALID_BRAINS), default=brain_mod.DEFAULT_BRAIN,
                     help="planner LLM (operator), all via OpenRouter: ultra-paid | "
                          "super-free (default, $0) | super-paid")
     a = ap.parse_args()
     goal = a.goal or ("%d-second promo plus a short product walkthrough" % a.duration)
+    globals()["ACTIVE_LOOK"] = a.look
     run(a.url, goal, a.run_id, a.mode, a.duration, a.pace, a.style,
         quality=a.quality, brain=a.brain, emphasis=a.emphasis)
 

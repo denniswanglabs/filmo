@@ -4434,3 +4434,184 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# ENGINEERED NIGHT  (docs/references/engineered-night-design-language.md)
+# ---------------------------------------------------------------------------
+# Dennis's dark one-world style as a second registry entry (2026-07-17). The
+# NightTimeline composition consumes the SAME props contract; this block only
+# routes scenes to night-* archetypes and shapes their data. Copy honesty is
+# inherited: every shaper reads plan/brand data the classic path already
+# guards — nothing is invented here.
+
+def _night_accent_split(headline: str) -> List[List[Dict[str, Any]]]:
+    """Two headline lines with ONE accent phrase: split at the word midpoint and
+    accent the longest content word (>=6 chars) — deterministic, brand-agnostic."""
+    words = [w for w in str(headline or "").split() if w]
+    if not words:
+        return [[{"text": ""}]]
+    mid = max(1, round(len(words) / 2))
+    lines = [words[:mid], words[mid:]] if len(words) > 3 else [words]
+    accent_word = max(words, key=lambda w: len(w.strip(".,!?")))
+    if len(accent_word.strip(".,!?")) < 6:
+        accent_word = None
+    out = []
+    for line in lines:
+        if not line:
+            continue
+        parts, buf = [], []
+        for w in line:
+            if accent_word is not None and w == accent_word:
+                if buf:
+                    parts.append({"text": " ".join(buf) + " "})
+                    buf = []
+                parts.append({"text": w, "accent": True})
+                accent_word = None  # accent only the first occurrence
+                buf = [""]
+            else:
+                buf.append(w)
+        tail = " ".join([b for b in buf if b])
+        if tail:
+            parts.append({"text": (" " if parts else "") + tail})
+        out.append(parts or [{"text": " ".join(line)}])
+    return out
+
+
+def _shape_night_hero(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    base = _shape_hero(scene, brand)
+    headline = base.get("title") or base.get("headline") or brand.get("wordmark") or ""
+    sub = base.get("subtitle") or base.get("sub") or ""
+    if _is_truncated_meta(sub):
+        sub = ""
+    cta = ((brand.get("copy") or {}).get("cta") or "").strip() or None
+    return {
+        "eyebrow": base.get("eyebrow") or None,
+        "lines": _night_accent_split(headline),
+        "sub": sub or None,
+        "ctaPrimary": cta,
+    }
+
+
+def _shape_night_panel(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    base = _shape_screenshot(scene, brand)
+    # Keep the classic `imageSrc` key so the archetype-agnostic public stager
+    # (build_props tail) copies the capture into studio/public and rewrites it.
+    return {"imageSrc": base.get("imageSrc"), "caption": base.get("caption") or None}
+
+
+def _shape_night_quote(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    d = scene.get("data") or {}
+    dur = scene.get("duration_s") or 8
+    return {
+        "quote": d.get("quote") or "",
+        "quoteAttribution": d.get("quoteAttribution") or "",
+        "holdFrames": int(round(float(dur) * 30)),
+    }
+
+
+def _shape_night_credibility(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    d = scene.get("data") or {}
+    stat = d.get("stat") or {}
+    raw = str(d.get("_text") or scene.get("brief") or "")
+    label = stat.get("label") or _grounded_headline(raw, brand) or ""
+    return {"eyebrow": None, "stat": {"value": stat.get("value") or "", "label": label}}
+
+
+def _shape_night_terminal(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    d = scene.get("data") or {}
+    steps = d.get("steps") or []
+    lines = []
+    for s in steps[:4]:
+        text = (s.get("label") or s.get("title") or s.get("text") or "").strip() if isinstance(s, dict) else str(s).strip()
+        if text:
+            lines.append(text)
+    raw = str(d.get("_text") or scene.get("brief") or "")
+    title = _grounded_headline(raw, brand) or "How it works"
+    # Stash the motif so the close can bookend with the SAME terminal (reference
+    # grammar). brand is the per-run mutable dict build_props threads through.
+    brand["_night_terminal_lines"] = lines[:2]
+    return {"title": title, "lines": lines, "status": None}
+
+
+def _shape_night_ecosystem(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    d = scene.get("data") or {}
+    raw = str(d.get("_text") or scene.get("brief") or "")
+    return {
+        "headline": _grounded_headline(raw, brand) or None,
+        "entities": d.get("featureEntities") or [],
+        "logos": d.get("entityLogos") or [],
+    }
+
+
+def _shape_night_ladder(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    d = scene.get("data") or {}
+    chips = d.get("featureEntities") or []
+    raw = str(d.get("_text") or scene.get("brief") or "")
+    return {
+        "headline": _grounded_headline(raw, brand) or _title_from_text(raw) or "",
+        "chips": chips[:6],
+        "activeIndex": 0,
+    }
+
+
+def _shape_night_close(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[str, Any]:
+    base = _shape_hero(scene, brand)
+    tagline = base.get("title") or base.get("headline") or ""
+    words = tagline.split()
+    accent_word = words[-1] if words else ""
+    return {
+        "tagline": tagline,
+        "accentWord": accent_word,
+        "chip": None,
+        "terminalLines": brand.get("_night_terminal_lines") or None,
+    }
+
+
+_NIGHT_TREATMENT_ARCH = {
+    "pull-quote": "night-quote",
+    "split-stat": "night-credibility",
+    "split-mosaic": "night-ecosystem",
+    "process-pipeline": "night-terminal",
+}
+
+
+class NightStyle(Style):
+    """Role routing + TREATMENT refinement: feature beats pick their night
+    archetype from the card treatment the classic router already assigned."""
+
+    def archetype_for(self, scene: Dict[str, Any]) -> str:
+        role = _scene_role(scene)
+        if role in ("open", "hero", "title", "intro"):
+            # A title scene that closes the film routes via id in role_map users;
+            # plan ids mark closes — check the id the planner uses.
+            sid = str(scene.get("id") or "").lower()
+            if "clos" in sid or "cta" in sid or "outro" in sid:
+                return "night-close"
+            return "night-hero"
+        if role in ("close", "cta", "outro"):
+            return "night-close"
+        if role in ("screenshot", "site"):
+            return "night-panel"
+        treatment = str(((scene.get("data") or {}).get("treatment")) or "").strip().lower()
+        return _NIGHT_TREATMENT_ARCH.get(treatment, "night-ladder")
+
+
+STYLES["engineered-night"] = NightStyle(
+    name="engineered-night",
+    role_map={},  # routing is fully computed in archetype_for
+    default_archetype="night-ladder",
+    shapers={
+        "night-hero": _shape_night_hero,
+        "night-panel": _shape_night_panel,
+        "night-quote": _shape_night_quote,
+        "night-credibility": _shape_night_credibility,
+        "night-terminal": _shape_night_terminal,
+        "night-ecosystem": _shape_night_ecosystem,
+        "night-ladder": _shape_night_ladder,
+        "night-close": _shape_night_close,
+    },
+    # The Night composition derives its dark tokens itself; the theme just needs
+    # the brand slots (accent, wordmark, logoSrc, music) the light builder fills.
+    theme_fn=_theme_kinetic_light,
+)

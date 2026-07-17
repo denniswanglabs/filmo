@@ -100,6 +100,9 @@ export async function createBuild(input: {
   emphasis?: string
   brain?: string
   mode?: 'mock' | 'real'
+  /** Visual style family. 'engineered-night' renders the dark one-world style;
+      anything else (or absent) is the classic light look. */
+  look?: 'classic' | 'engineered-night'
   // Opt-in HUMAN payment: 'auto' (default) lets the worker auto-resolve payment
   // (PRODUCER_SIMULATE_PAID); 'human' creates a REAL Stripe TEST checkout the user
   // must pay (test card 4242) before the build proceeds. Only the payment becomes
@@ -176,6 +179,8 @@ export async function createBuild(input: {
   // 'standard' (kept only to satisfy the existing runs/jobs schema + worker param contract).
   const quality = 'standard' as const
   const brain = input.brain && ALLOWED_BRAINS.has(input.brain) ? input.brain : 'super-free'
+  const look: 'classic' | 'engineered-night' =
+    input.look === 'engineered-night' ? 'engineered-night' : 'classic'
   const mode: 'mock' | 'real' = input.mode === 'real' ? 'real' : 'mock'
   let payMode: 'auto' | 'human' = input.payMode === 'human' ? 'human' : 'auto'
 
@@ -205,7 +210,7 @@ export async function createBuild(input: {
   if (runErr) throw new Error('runs.insert: ' + JSON.stringify(runErr))
   const runId = runs![0].id
 
-  const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, pay_mode: payMode, run_key: runKey, duration: 30 }
+  const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, look, pay_mode: payMode, run_key: runKey, duration: 30 }
   const { error: jobErr } = await withRetry(() =>
     db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }]),
   )

@@ -11,6 +11,9 @@ interface Card {
   brand: string
   sourceUrl: string
   descriptor: string
+  /** Optional style-family badge ("Engineered Night") — the same-brand,
+      second-style showcase card wears it. */
+  styleLabel?: string
 }
 
 const BRAND: Record<string, { logo: string; tint: string }> = {
@@ -52,6 +55,15 @@ const CARDS: readonly Card[] = [
     brand: 'InsForge',
     sourceUrl: 'https://insforge.dev',
     descriptor: 'An agent-native backend story, read from the live site.',
+  },
+  {
+    slug: 'insforge-night-wide',
+    src: '/examples/insforge-night.mp4',
+    poster: '/examples/insforge-night.jpg',
+    brand: 'InsForge',
+    sourceUrl: 'https://insforge.dev',
+    descriptor: 'The same brand, produced in a second style — one click apart.',
+    styleLabel: 'Engineered Night',
   },
 ]
 
@@ -139,6 +151,11 @@ function GalleryCard({ card }: { card: Card }) {
             {card.brand}
           </p>
           <p className="mt-0.5 truncate text-xs text-[#5A6472] transition-colors duration-500 group-hover:text-white/80 sm:text-sm">
+            {card.styleLabel ? (
+              <span className="mr-2 inline-flex items-center rounded-full border border-[#0E1320]/15 bg-[#0E1320] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                {card.styleLabel}
+              </span>
+            ) : null}
             {card.descriptor}
           </p>
         </div>
@@ -184,7 +201,11 @@ export default function Examples() {
 
         <RevealGroup className="mt-8 grid grid-cols-1 gap-0 overflow-hidden rounded-2xl border border-[#D4E2FB] shadow-[0_30px_80px_-40px_rgba(30,58,120,0.32)] sm:rounded-3xl md:grid-cols-2">
           {CARDS.map((card, i) => (
-            <RevealItem key={card.slug} index={i} className="block">
+            <RevealItem
+              key={card.slug}
+              index={i}
+              className={card.styleLabel ? 'block md:col-span-2' : 'block'}
+            >
               <GalleryCard card={card} />
             </RevealItem>
           ))}

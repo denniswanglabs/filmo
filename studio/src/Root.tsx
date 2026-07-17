@@ -9,6 +9,11 @@ import { Active, activeMeta } from "./generated/active";
 // existing single-Scene path + its tests stay green.
 import { Timeline } from "./timeline/Timeline";
 import { fixtureTimeline, timelineMetadata } from "./timeline/data";
+// Engineered Night (dark one-world style) — dev/stills composition for the
+// Stage-2 aesthetic checkpoint; the full NightTimeline registers once assembled.
+import { NightHeroDemo } from "./night/NightHeroDemo";
+import { NightTimeline } from "./night/NightTimeline";
+import { nightFixture, nightMetadata } from "./night/fixture";
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -26,6 +31,23 @@ export const RemotionRoot: React.FC = () => {
         component={Timeline}
         defaultProps={fixtureTimeline}
         calculateMetadata={timelineMetadata}
+      />
+      <Composition
+        id="NightTimeline"
+        component={NightTimeline}
+        defaultProps={nightFixture}
+        calculateMetadata={nightMetadata}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="NightHeroDemo"
+        component={NightHeroDemo}
+        defaultProps={{ brand: "insforge" }}
+        durationInFrames={150}
+        fps={30}
+        width={1920}
+        height={1080}
       />
     </>
   );
