@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation'
 import { useAuth } from '../../../lib/auth'
 import { getRunForViewer } from '../../actions'
 import { TopBar, StatusChip } from '../../components/Brand'
-import BuildProgress from '../../components/BuildProgress'
+import BuildProgress, { feedVisible } from '../../components/BuildProgress'
 import SceneFilmstrip from '../../components/SceneFilmstrip'
 import {
   formatCents,
@@ -361,10 +361,8 @@ export default function RunPage() {
                   <p className="text-sm text-slate-400">No events yet.</p>
                 ) : (
                   <ul className="space-y-1.5">
-                    {/* Hide internal infrastructure diagnostics (actor 'system', e.g. the
-                        asset verify-and-heal probe) — they're for ops/logs, not the user-facing
-                        production story, and shouldn't surface as red errors in the feed. */}
-                    {events.filter((e) => e.actor !== 'system').map((e) => (
+                    {/* Hide ops noise (actor 'system') and retired payment theater. */}
+                    {events.filter(feedVisible).map((e) => (
                       <li
                         key={e.id}
                         className="flex items-start gap-3 rounded-lg border border-black/5 bg-white px-3.5 py-2.5"
@@ -467,19 +465,21 @@ function Stat({
   )
 }
 
-const ACTOR_STYLES: Record<string, string> = {
-  hermes: 'bg-amber/10 text-amber',
-  nemotron: 'bg-nemo/10 text-nemo',
-  stripe: 'bg-indigo-50 text-indigo-600',
+// Mirrors BuildProgress: legacy hermes/nemotron/stripe actors render as FILMO.
+const LEGACY_ACTOR_DISPLAY: Record<string, string> = {
+  hermes: 'filmo',
+  nemotron: 'filmo',
+  stripe: 'filmo',
 }
 
 function ActorBadge({ actor }: { actor: string }) {
-  const style = ACTOR_STYLES[actor] || 'bg-slate-100 text-slate-500'
+  const display = LEGACY_ACTOR_DISPLAY[actor] ?? actor
+  const style = display === 'filmo' ? 'bg-amber/10 text-amber' : 'bg-slate-100 text-slate-500'
   return (
     <span
       className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${style}`}
     >
-      {actor}
+      {display}
     </span>
   )
 }

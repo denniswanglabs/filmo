@@ -406,6 +406,52 @@ async function uploadRunAssets(runKey) {
   return ok
 }
 
+// ── per-scene thumbnails for the run page filmstrip ──
+// The curated path historically produced "cards only" (no thumbs — the web's
+// SceneFilmstrip reads a durable props.scene_thumbs {index: url} map that only the
+// retired Hermes conduct used to fill). Extract one frame per scene from the
+// rendered final.mp4 at each scene's midpoint, upload to <runKey>/thumb-<i>.jpg,
+// and return the scene_thumbs map. Best-effort: any failure returns what we have.
+async function stageSceneThumbs(runKey, props) {
+  try {
+    const scenes = props && Array.isArray(props.scenes) ? props.scenes : []
+    const finalPath = join(PIPELINE_DIR, 'runs', runKey, 'final.mp4')
+    if (!scenes.length || !existsSync(finalPath)) return null
+    const fps = Number(props.fps) || 30
+    const durs = scenes.map((s) => {
+      const f = Number(s && s.durationInFrames)
+      if (Number.isFinite(f) && f > 0) return f / fps
+      const d = Number((s && s.duration_s) ?? (s && s.data && s.data.duration_s))
+      return Number.isFinite(d) && d > 0 ? d : 6
+    })
+    const thumbs = {}
+    let t = 0
+    for (let i = 0; i < scenes.length; i++) {
+      const mid = t + durs[i] / 2
+      t += durs[i]
+      const out = join(PIPELINE_DIR, 'runs', runKey, `thumb-${i}.jpg`)
+      const ok = await new Promise((res) => {
+        const c = spawn('ffmpeg', ['-y', '-ss', mid.toFixed(2), '-i', finalPath,
+          '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', out], { stdio: 'ignore' })
+        c.on('error', () => res(false))
+        c.on('close', (code) => res(code === 0 && existsSync(out)))
+      })
+      if (!ok) continue
+      try {
+        const url = await putObject(`${runKey}/thumb-${i}.jpg`,
+          new Blob([readFileSync(out)], { type: 'image/jpeg' }))
+        if (url) thumbs[String(i)] = url
+      } catch (e) { log(`  ! thumb upload ${i}`, String(e)) }
+    }
+    const n = Object.keys(thumbs).length
+    log(`  scene thumbs: ${n}/${scenes.length} staged`)
+    return n ? thumbs : null
+  } catch (e) {
+    log('  ! stageSceneThumbs', String(e))
+    return null
+  }
+}
+
 // runs.update — THE call that wedged the worker (a 30s InsForge timeout right after
 // "PAID … proceeding to conduct"). Now bounded+retried so it can never block >~40s.
 async function setRun(runId, patch) {
@@ -879,7 +925,7 @@ async function deliverHermesRun(job, runId, runKey, finalUrl, sceneCount, t0, pl
   const notifyEmail = curUserId ? await lookupUserEmail(curUserId) : null
   await notifyVideoReady(runId, finalUrl, notifyEmail)
   const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
-  await emit(runId, `Conducted by Hermes on Hetzner VM (producer=${HERMES_PRODUCER})${sceneCount ? `, ${sceneCount} scenes` : ''}. ${totalSec}s total.`, 'hermes')
+  await emit(runId, `Conducted by Hermes on Hetzner VM (producer=${HERMES_PRODUCER})${sceneCount ? `, ${sceneCount} scenes` : ''}. ${totalSec}s total.`)
   log(`  DELIVERED run ${runKey} -> ${finalUrl}  [${totalSec}s, producer=${HERMES_PRODUCER}, conducted_by=hermes]`)
   return true
 }
@@ -1033,14 +1079,14 @@ async function processReRender(job) {
   const runKey = p.run_key || p.runKey
   log(`claimed RERENDER job ${job.id} -> run ${runKey}`)
   await setRun(runId, { phase: 'rerendering' })
-  await emit(runId, 'Edit export: re-rendering your edited video…', 'hermes')
+  await emit(runId, 'Edit export: re-rendering your edited video…')
 
   // Pull the edited props (durable). Fall back to clean props if no edit was saved.
   const { data: run, error } = await ifCall('runs.select(rerender)',
     () => db.database.from('runs').select('props, props_edited').eq('id', runId).maybeSingle())
-  if (error || !run) { log('  ! rerender: run not found', JSON.stringify(error)); await failRerenderJob(job, 'run not found'); await emit(runId, 'Re-render failed: run not found.', 'hermes', 'error'); return }
+  if (error || !run) { log('  ! rerender: run not found', JSON.stringify(error)); await failRerenderJob(job, 'run not found'); await emit(runId, 'Re-render failed: run not found.', 'filmo', 'error'); return }
   const edited = run.props_edited && Array.isArray(run.props_edited.scenes) ? run.props_edited : run.props
-  if (!edited || !Array.isArray(edited.scenes)) { await failRerenderJob(job, 'no edited props'); await emit(runId, 'Re-render failed: nothing to render.', 'hermes', 'error'); return }
+  if (!edited || !Array.isArray(edited.scenes)) { await failRerenderJob(job, 'no edited props'); await emit(runId, 'Re-render failed: nothing to render.', 'filmo', 'error'); return }
 
   // Make a working copy; strip the hosted asset base so the render reads local
   // studio/public files via staticFile (we download the run's assets below).
@@ -1054,17 +1100,17 @@ async function processReRender(job) {
   try {
     mkdirSync(join(PIPELINE_DIR, 'runs', runKey), { recursive: true })
     writeFileSync(propsPath, JSON.stringify(props, null, 2))
-  } catch (e) { await failRerenderJob(job, 'write props: ' + e); await emit(runId, 'Re-render failed: could not stage props.', 'hermes', 'error'); return }
+  } catch (e) { await failRerenderJob(job, 'write props: ' + e); await emit(runId, 'Re-render failed: could not stage props.', 'filmo', 'error'); return }
 
   const outPath = join(PIPELINE_DIR, 'runs', runKey, 'edited.mp4')
-  await emit(runId, 'Rendering edited cut…', 'hermes')
+  await emit(runId, 'Rendering edited cut…')
   const code = await runRender(propsPath, outPath)
-  if (code !== 0 || !existsSync(outPath)) { await failRerenderJob(job, `remotion exit ${code}`); await emit(runId, 'Re-render failed during rendering.', 'hermes', 'error'); return }
+  if (code !== 0 || !existsSync(outPath)) { await failRerenderJob(job, `remotion exit ${code}`); await emit(runId, 'Re-render failed during rendering.', 'filmo', 'error'); return }
 
   const url = await uploadVideo(runKey, 'edited.mp4')
   await setRun(runId, { edited_url: url, phase: 'delivered', status: 'delivered' })
   await setJob(job.id, { status: 'done' })
-  await emit(runId, 'Edited video ready.', 'hermes')
+  await emit(runId, 'Edited video ready.')
   log(`  RERENDER delivered run ${runKey} (${url ? 'uploaded' : 'NO video'})`)
 }
 
@@ -1096,7 +1142,7 @@ async function processJob(job) {
     const reason = 'unsafe url: ' + String(e && e.message || e)
     await setRun(runId, { status: 'failed', phase: 'blocked_url' })
     await setJob(job.id, { status: 'failed', error: reason })
-    await emit(runId, reason, 'hermes', 'error')
+    await emit(runId, reason, 'filmo', 'error')
     log(`  BLOCKED run ${runKey}: ${reason}`)
     return
   }
@@ -1130,7 +1176,7 @@ async function processJob(job) {
       //     'planning' and the price tool 'pricing', so the stepper advances HONESTLY
       //     (Reading/Planning/Pricing genuinely complete here, BEFORE any pay prompt).
       //     Yields a real price_cents + plan_id.
-      await emit(runId, 'Conducting read -> plan -> price via Hermes agent (NemoClaw sandbox).', 'hermes')
+      await emit(runId, 'Conducting read -> plan -> price via Hermes agent (NemoClaw sandbox).')
       await setRun(runId, { phase: 'analyzing' })
       // A healthy 550B can still drop a plan pass via a transient stream truncation
       // ("Response payload is not completed"); the in-skill API retries share one
@@ -1143,13 +1189,13 @@ async function processJob(job) {
       let planRes = await runHermesPlan(safeUrl, goal, runId)
       for (let attempt = 2; (!planRes.ok || !planRes.planId || !(planRes.priceCents > 0)) && attempt <= PLAN_ATTEMPTS; attempt++) {
         log(`  ~ hermes PLAN pass attempt ${attempt - 1}/${PLAN_ATTEMPTS} failed (${planRes.error}); retrying in a fresh exec`)
-        await emit(runId, `Plan hit a transient model error - retrying (attempt ${attempt}/${PLAN_ATTEMPTS})...`, 'hermes', 'warn')
+        await emit(runId, `Plan hit a transient model error - retrying (attempt ${attempt}/${PLAN_ATTEMPTS})...`, 'filmo', 'warn')
         await sleep(PLAN_RETRY_DELAY_MS)
         planRes = await runHermesPlan(safeUrl, goal, runId)
       }
       if (!planRes.ok || !planRes.planId || !(planRes.priceCents > 0)) {
         log(`  ! hermes PLAN pass failed after ${PLAN_ATTEMPTS} attempts (${planRes.error}); falling back to deterministic build_runner`)
-        await emit(runId, `Plan pass failed (${planRes.error || 'no plan'}); falling back to deterministic render.`, 'hermes', 'warn')
+        await emit(runId, `Plan pass failed (${planRes.error || 'no plan'}); falling back to deterministic render.`, 'filmo', 'warn')
         throw new Error('plan pass failed: ' + (planRes.error || 'no plan'))
       }
       const planId = planRes.planId
@@ -1171,7 +1217,7 @@ async function processJob(job) {
       // (c) PRODUCE pass — produce_and_ship ONLY, REUSING the cached plan_id (no
       //     re-read/re-plan/re-price, so no double charge and the customer gets the
       //     exact plan they paid for).
-      await emit(runId, 'Payment cleared - producing the planned video via Hermes agent.', 'hermes')
+      await emit(runId, 'Payment cleared - producing the planned video via Hermes agent.')
       await setRun(runId, { phase: 'producing' })
       const prodRes = await runHermesProduce(safeUrl, planId, runId)
       if (prodRes.ok && prodRes.finalUrl) {
@@ -1194,16 +1240,16 @@ async function processJob(job) {
         // scenes/theme/total_frames onto runs.props.
         const heal = await healRecoveredRun(runId, planId)
         log(`  heal-recovered ${heal && heal.ok ? 'ok' : 'FAILED'}: ${JSON.stringify((heal && (heal.asset_check || heal.error)) ?? heal)}`)
-        await emit(runId, `Produce pass finished but did not echo the link; recovered the shipped video from storage.`, 'hermes', 'warn')
+        await emit(runId, `Produce pass finished but did not echo the link; recovered the shipped video from storage.`, 'filmo', 'warn')
         await deliverHermesRun(job, runId, runKey, recovered.finalUrl, recovered.sceneCount ?? planRes.sceneCount, t0, planId)
         return
       }
       log(`  ! no shipped video found for plan_id=${planId}; falling back to deterministic build_runner`)
-      await emit(runId, `Produce pass failed (${prodRes.error}); falling back to deterministic render.`, 'hermes', 'warn')
+      await emit(runId, `Produce pass failed (${prodRes.error}); falling back to deterministic render.`, 'filmo', 'warn')
       // fall through to deterministic; paidViaGate (if set) prevents a 2nd charge.
     } catch (e) {
       log(`  ! hermes split mode threw (${String(e)}); falling back to deterministic build_runner`)
-      await emit(runId, `Hermes conduct error; falling back to deterministic render.`, 'hermes', 'warn')
+      await emit(runId, `Hermes conduct error; falling back to deterministic render.`, 'filmo', 'warn')
     }
     // fall through to the deterministic path (render NEVER fails)
   } else if (CLAIMER_MODE === 'hermes') {
@@ -1215,7 +1261,7 @@ async function processJob(job) {
       paidViaGate = true
     }
     try {
-      await emit(runId, 'Conducting produce step via Hermes agent (NemoClaw sandbox)…', 'hermes')
+      await emit(runId, 'Conducting produce step via Hermes agent (NemoClaw sandbox)…')
       await setRun(runId, { phase: 'hermes_conducting' })
       const goal = p.goal || 'A 30-second brand explainer'
       const res = await runHermesConduct(safeUrl, goal, HERMES_BUDGET_CENTS, runId)
@@ -1228,15 +1274,15 @@ async function processJob(job) {
         // failure. Mark the job failed with the decline reason; do NOT fall back.
         await setRun(runId, { status: 'failed', phase: 'gate_declined' })
         await setJob(job.id, { status: 'failed', error: 'hermes gate declined (over budget)' })
-        await emit(runId, 'Hermes gate declined: price exceeds budget. No video produced.', 'hermes', 'warn')
+        await emit(runId, 'Hermes gate declined: price exceeds budget. No video produced.', 'filmo', 'warn')
         log(`  DECLINED run ${runKey} (hermes gate declined)`)
         return
       }
       log(`  ! hermes mode failed (${res.error}); falling back to deterministic build_runner`)
-      await emit(runId, `Hermes conduct failed (${res.error}); falling back to deterministic render.`, 'hermes', 'warn')
+      await emit(runId, `Hermes conduct failed (${res.error}); falling back to deterministic render.`, 'filmo', 'warn')
     } catch (e) {
       log(`  ! hermes mode threw (${String(e)}); falling back to deterministic build_runner`)
-      await emit(runId, `Hermes conduct error; falling back to deterministic render.`, 'hermes', 'warn')
+      await emit(runId, `Hermes conduct error; falling back to deterministic render.`, 'filmo', 'warn')
     }
     // fall through to the deterministic path (render NEVER fails)
   }
@@ -1335,13 +1381,15 @@ async function processJob(job) {
       const retryProps = { ...props, ship_retryable: haveVideo, local_video_path: haveVideo ? localPath : null }
       await setRun(runId, { ...mapped, status: 'failed', phase: 'upload_failed', final_url: null, props: retryProps })
       await setJob(job.id, { status: 'failed', error: `video upload failed (render OK; mp4 preserved at ${localPath} for re-ship)` })
-      await emit(runId, `Render finished but the upload to storage failed after retries. Your video is safe on the worker and can be re-shipped (no re-render needed).`, 'hermes', 'warn')
+      await emit(runId, `Render finished but the upload to storage failed after retries. Your video is safe on the worker and can be re-shipped (no re-render needed).`, 'filmo', 'warn')
       log(`  UPLOAD FAILED run ${runKey} (render ok, mp4 preserved at ${localPath}, ship_retryable=${haveVideo})`)
     } else {
+      const sceneThumbs = await stageSceneThumbs(runKey, props)
+      if (sceneThumbs) props.scene_thumbs = sceneThumbs
       await setRun(runId, { ...mapped, final_url: finalUrl, props })
       await setJob(job.id, { status: 'done' })
       const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
-      await emit(runId, `Produced on Hetzner VM (producer=${PRODUCER}). ${totalSec}s total.`, 'hermes')
+      await emit(runId, `Produced by Filmo (${PRODUCER}). ${totalSec}s total.`)
       log(`  DELIVERED run ${runKey} -> ${finalUrl}  [${totalSec}s, producer=${PRODUCER}, claimed_by=${WORKER_ID}]`)
     }
   } else {

@@ -133,11 +133,22 @@ const ACTOR_STYLES: Record<string, string> = {
   stripe: 'bg-indigo-50 text-indigo-600',
 }
 
-// Legacy runs carry hermes/nemotron actors from the retired conduct era — they
-// render as FILMO so old run pages match the current brand voice.
+// Legacy runs carry hermes/nemotron/stripe actors from the retired conduct and
+// payment eras — they render as FILMO so old run pages match the current voice.
 const LEGACY_ACTOR_DISPLAY: Record<string, string> = {
   hermes: 'filmo',
   nemotron: 'filmo',
+  stripe: 'filmo',
+}
+
+// Payment-theater lines from the retired auto-pay simulation and hermes-era
+// checkout narration. Hidden from the feed everywhere: with payments off no user
+// ever sees a checkout, so narrating one is pure confusion. The dormant human-pay
+// path surfaces its checkout via the payment CARD, not feed lines.
+const PAYMENT_THEATER_RE =
+  /payment gate|awaiting payment|customer paid|payment received|payment cleared|stripe test checkout|paymentintent|checkout\.stripe\.com|test card 4242|payment_timeout/i
+export function feedVisible(e: { actor: string; msg: string }): boolean {
+  return e.actor !== 'system' && !PAYMENT_THEATER_RE.test(e.msg || '')
 }
 
 function ActorBadge({ actor }: { actor: string }) {
@@ -180,9 +191,8 @@ function ChatAvatar({ who }: { who: 'user' | 'agent' }) {
 // the edit loop feel like one continuous conversation.
 function BuildChat({ run, events }: { run: Run; events: RunEvent[] }) {
   // Chronological (oldest first) so the thread reads top-to-bottom like a chat.
-  // Hide internal infrastructure diagnostics (actor 'system', e.g. the asset verify-and-heal
-  // probe) from the live feed — they're ops/log noise, not the user-facing production story.
-  const ordered = [...events].filter((e) => e.actor !== 'system').sort((a, b) => a.seq - b.seq)
+  // Hide ops noise (actor 'system') and retired payment theater from the live feed.
+  const ordered = [...events].filter(feedVisible).sort((a, b) => a.seq - b.seq)
   const newestSeq = ordered.length ? ordered[ordered.length - 1].seq : -1
 
   // The user's opening request, assembled from the run's own fields.
@@ -341,7 +351,7 @@ export default function BuildProgress({ run, events }: { run: Run; events: RunEv
 
   // Most-recent activity first; the newest line gets a highlight so motion reads.
   // Show the FULL history (scrollable) so nothing scrolls out of reach on a long run.
-  const recent = [...events].filter((e) => e.actor !== 'system').sort((a, b) => b.seq - a.seq)
+  const recent = [...events].filter(feedVisible).sort((a, b) => b.seq - a.seq)
 
   // Human-pays flow: the build is parked awaiting a real Stripe TEST payment.
   const awaitingPayment = run.phase === 'awaiting_payment' && !!run.checkout_url
