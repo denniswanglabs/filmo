@@ -545,6 +545,26 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                     continue
                 stops.append({"title": title, "page": page_urls[slug],
                               "target": target})
+            if len(stops) < max_stops:
+                # Top-up pass: relax only the hero-region diversity rule (the
+                # strictest filter) — on dense one-pagers it can kill every
+                # candidate and leave a one-stop film.
+                for c in cand[:max_stops * 2]:
+                    if len(stops) >= max_stops:
+                        break
+                    title = str(c.get("title") or "").strip()
+                    slug = str(c.get("page") or "home").strip()
+                    target = str(c.get("target") or title).strip()
+                    if not title or title.lower() not in corpus_lc:
+                        continue
+                    if len(title) > 60 or len(title.split()) > 8:
+                        continue
+                    if slug not in page_urls:
+                        slug = "home"
+                    if any(s["title"].lower() == title.lower() for s in stops):
+                        continue
+                    stops.append({"title": title, "page": page_urls[slug],
+                                  "target": target})
             stops = stops or None
     except (Exception, SystemExit) as e:
         print(f"[tour] brain plan failed ({e}); deterministic fallback",
@@ -614,13 +634,23 @@ def _clips_similar(fa, fb, thresh: float = 10.0) -> bool:
     return False
 
 
+# Concept vignettes first (they ENACT the title — Dennis 2026-07-18: "there
+# should be infographics or animations of [the title], maybe like a table");
+# plain line-art motifs remain the fallback tier for unmatched titles.
 _MOTIF_KEYWORDS = [
-    ("house", ("home", "house", "estate", "propert", "listing", "real ", "apartment", "rent")),
-    ("chat", ("chat", "message", "inquir", "whatsapp", "tell ", "ask ", "contact", "talk", "conversation")),
+    ("request-table", ("request", "inquir", "booking", "viewing", "schedul",
+                       "appointment", "preferred time")),
+    ("chat-exchange", ("chat", "message", "whatsapp", "tell ", "ask ",
+                       "contact", "talk", "conversation")),
+    ("context-cards", ("present", "context", "home", "house", "propert",
+                       "listing", "estate", "apartment", "showcase")),
     ("tag", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ")),
     ("globe", ("language", "languages", "global", "world", "international", "translat")),
     ("card", ("link", "profile", "page", "website", "site", "portfolio")),
+    ("house", ("real ", "rent")),
 ]
+
+_VIGNETTES = {"request-table", "context-cards", "chat-exchange"}
 
 
 def _pick_motif(text: str, used) -> str:
@@ -742,13 +772,15 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             moments.append({"at": t_f, "x": cx, "y": cy + 340, "scale": 1.0})
             t_f += int(min(seg_dur, 9.5) * FPS)
         else:
-            # Motion-graphic beat — a domain-themed line-art motif carries the
-            # stop instead of a redundant recording.
+            # Motion-graphic beat — a concept vignette that ENACTS the title
+            # (or a line-art motif fallback) instead of a redundant recording.
+            motif = s.get("motif", "card")
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
                              "y": cy + 300, "w": 760, "at": t_f + 12,
-                             "motif": s.get("motif", "card")})
-            moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.0})
-            t_f += int(5.5 * FPS)
+                             "motif": motif, "text": s["title"]})
+            # Push in on graphic beats — vignettes must fill the frame.
+            moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.15})
+            t_f += int((6.5 if motif in _VIGNETTES else 5.5) * FPS)
 
     elements.append({"id": "cta", "kind": "cta", "x": 6200, "y": 1800,
                      "at": t_f + 16, "text": f"See it live at {host}",

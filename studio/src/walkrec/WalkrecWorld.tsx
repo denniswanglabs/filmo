@@ -42,7 +42,7 @@ export interface WalkrecElement {
   label?: string;
   videoSrc?: string;
   logoSrc?: string;
-  motif?: "house" | "chat" | "tag" | "globe" | "card";
+  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange";
 }
 
 export interface WalkrecMoment {
@@ -213,6 +213,166 @@ const MotionGraphic: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; fr
   );
 };
 
+/** Concept vignettes (Dennis 2026-07-18: "there should be infographics or
+ *  animations of clients requiring a property and a preferred time, maybe like
+ *  a table" — enact the title, don't just iconify it). Honest by construction:
+ *  only the stop's own words and abstract bars — no invented names, prices,
+ *  or dates. Motion: entrances on the fitted curve, sibling stagger 8f,
+ *  detail pops confirmation-tier with overshoot, ambient float after. */
+const vinP = (local: number, at: number, dur = 14) =>
+  interpolate(local, [at, at + dur], [0, 1], {
+    extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: VEVARA_STEP,
+  });
+const vinPop = (local: number, at: number, dur = 10) =>
+  interpolate(local, [at, at + dur], [0, 1], {
+    extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.back(2)),
+  });
+const vinFloat = (local: number, after: number) =>
+  local > after ? 5 * Math.sin((2 * Math.PI * (local - after)) / 160) : 0;
+
+const Bar: React.FC<{ w: number; h?: number; o?: number; color: string }> = ({ w, h = 12, o = 0.16, color }) => (
+  <div style={{ width: w, height: h, borderRadius: h / 2, background: color, opacity: o }} />
+);
+
+const ClockGlyph: React.FC<{ color: string }> = ({ color }) => (
+  <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, display: "block" }}>
+    <circle cx="12" cy="12" r="9" fill="none" stroke={color} strokeWidth="2.4" />
+    <path d="M 12 7 v 5 l 3.4 2" fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" />
+  </svg>
+);
+
+const HouseGlyph: React.FC<{ color: string; size?: number }> = ({ color, size = 40 }) => (
+  <svg viewBox="0 0 64 52" style={{ width: size, height: (size * 52) / 64, display: "block" }}>
+    <path d="M 6 26 L 32 6 L 58 26 M 14 24 v 22 h 36 v -22" fill="none" stroke={color} strokeWidth="4.4" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M 27 46 v -12 h 10 v 12" fill="none" stroke={color} strokeWidth="4.4" strokeLinejoin="round" />
+  </svg>
+);
+
+/** Rows of incoming requests: initial badge + property bars + a time chip. */
+const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const initials = (el.text || "Client Request Time").split(/\s+/).filter((w) => /^[a-zA-Z]/.test(w));
+  const rows = [0, 1, 2];
+  return (
+    <div style={{ background: "#FFFFFF", borderRadius: 36, padding: "34px 38px", boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, opacity: vinP(local, 0) }}>
+        <HouseGlyph color={t.accent} size={34} />
+        <Bar w={190} h={14} o={0.32} color={t.ink} />
+      </div>
+      {rows.map((r) => {
+        const p = vinP(local, 10 + r * 8, 16);
+        const chip = vinPop(local, 34 + r * 8);
+        const initial = (initials[r] || "AMJ"[r] || "A")[0].toUpperCase();
+        return (
+          <div key={r} style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 18px", borderRadius: 20, background: "rgba(15,23,56,0.035)", marginBottom: 14, opacity: p, transform: `translateY(${24 * (1 - p)}px)` }}>
+            <div style={{ width: 52, height: 52, borderRadius: 26, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {initial}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1 }}>
+              <Bar w={200 - r * 26} h={13} o={0.3} color={t.ink} />
+              <Bar w={132} h={11} color={t.ink} />
+            </div>
+            {chip > 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 16px", borderRadius: 999, background: `${t.accent}16`, border: `2px solid ${t.accent}55`, transform: `scale(${chip})` }}>
+                <ClockGlyph color={t.accent} />
+                <Bar w={44} h={11} o={0.85} color={t.accent} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/** Property cards gaining context chips; the middle one gets the accent ring. */
+const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const ring = vinPop(local, 62, 12);
+  return (
+    <div style={{ display: "flex", gap: 22, transform: `translateY(${vinFloat(local, 84)}px)` }}>
+      {[0, 1, 2].map((c) => {
+        const p = vinP(local, c * 9, 16);
+        const highlighted = c === 1;
+        return (
+          <div key={c} style={{ width: 224, borderRadius: 28, background: "#FFFFFF", boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${t.accent}` : "none", outlineOffset: -2 }}>
+            <div style={{ height: 118, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <HouseGlyph color={t.accent} size={46} />
+            </div>
+            <div style={{ padding: "18px 18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+              <Bar w={150 - c * 14} h={13} o={0.32} color={t.ink} />
+              <Bar w={104} h={11} color={t.ink} />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                {[0, 1].map((k) => {
+                  const chip = vinPop(local, 30 + c * 9 + k * 5);
+                  return chip > 0 ? (
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 999, background: "rgba(15,23,56,0.05)", transform: `scale(${chip})` }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 5, background: t.accent, opacity: 0.75 }} />
+                      <Bar w={34} h={9} o={0.34} color={t.ink} />
+                    </div>
+                  ) : null;
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/** A chat exchange: typing dots resolve to bars; a home card lands in-thread. */
+const VignetteChat: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const pL = vinP(local, 0, 16);
+  const pR = vinP(local, 26, 16);
+  const dotsDone = local > 52;
+  const pCard = vinPop(local, 60, 14);
+  const dot = (i: number) => 0.35 + 0.65 * Math.abs(Math.sin((Math.PI * (local - i * 4)) / 24));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18, width: 620, transform: `translateY(${vinFloat(local, 86)}px)` }}>
+      <div style={{ alignSelf: "flex-start", maxWidth: 420, padding: "20px 24px", borderRadius: "26px 26px 26px 8px", background: "#FFFFFF", boxShadow: "0 26px 60px -28px rgba(15,20,40,0.24)", opacity: pL, transform: `translateY(${20 * (1 - pL)}px)`, display: "flex", flexDirection: "column", gap: 9 }}>
+        <Bar w={290} h={12} o={0.3} color={t.ink} />
+        <Bar w={198} h={12} o={0.18} color={t.ink} />
+      </div>
+      <div style={{ alignSelf: "flex-end", padding: "18px 24px", borderRadius: "26px 26px 8px 26px", background: t.accent, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.3)", opacity: pR, transform: `translateY(${20 * (1 - pR)}px)` }}>
+        {!dotsDone ? (
+          <div style={{ display: "flex", gap: 8, padding: "4px 2px" }}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} style={{ width: 11, height: 11, borderRadius: 6, background: "#FFFFFF", opacity: dot(i) }} />
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+            <Bar w={236} h={12} o={0.92} color="#FFFFFF" />
+            <Bar w={150} h={12} o={0.6} color="#FFFFFF" />
+          </div>
+        )}
+      </div>
+      {pCard > 0 ? (
+        <div style={{ alignSelf: "flex-end", display: "flex", alignItems: "center", gap: 16, padding: "16px 22px", borderRadius: 22, background: "#FFFFFF", boxShadow: "0 30px 64px -28px rgba(15,20,40,0.26)", transform: `scale(${pCard})`, transformOrigin: "bottom right" }}>
+          <div style={{ width: 84, height: 62, borderRadius: 14, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <HouseGlyph color={t.accent} size={34} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <Bar w={130} h={12} o={0.32} color={t.ink} />
+            <Bar w={88} h={10} color={t.ink} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }>> = {
+  "request-table": VignetteRequestTable,
+  "context-cards": VignetteContextCards,
+  "chat-exchange": VignetteChat,
+};
+
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({
   el, t, frame, fps,
 }) => {
@@ -277,12 +437,18 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
           ) : null}
         </div>
       );
-    case "graphic":
+    case "graphic": {
+      const Vignette = el.motif ? VIGNETTES[el.motif] : undefined;
       return (
         <div style={{ ...base, width: el.w ?? 760 }}>
-          <MotionGraphic el={el} t={t} frame={frame} />
+          {/* Inner scale keeps vignette layouts authored at comfortable px
+              while filling the frame (Dennis: content must come BIG). */}
+          <div style={{ transform: "scale(1.3)", transformOrigin: "center" }}>
+            {Vignette ? <Vignette el={el} t={t} /> : <MotionGraphic el={el} t={t} frame={frame} />}
+          </div>
         </div>
       );
+    }
     case "cta":
       return (
         <div style={{ ...base }}>
