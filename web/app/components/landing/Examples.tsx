@@ -56,15 +56,10 @@ const CARDS: readonly Card[] = [
     sourceUrl: 'https://insforge.dev',
     descriptor: 'An agent-native backend story, read from the live site.',
   },
-  {
-    slug: 'insforge-night-wide',
-    src: '/examples/insforge-night.mp4',
-    poster: '/examples/insforge-night.jpg',
-    brand: 'InsForge',
-    sourceUrl: 'https://insforge.dev',
-    descriptor: 'The same brand, produced in a second style — one click apart.',
-    styleLabel: 'Engineered Night',
-  },
+  // The Engineered Night showcase card is PARKED (Dennis 2026-07-17 evening):
+  // the dark one-world style stays in the pipeline behind the API `look` knob
+  // for local prototyping, but the hosted product presents the classic style
+  // only until the walkthrough-recording direction is proven.
 ]
 
 function GalleryCard({ card }: { card: Card }) {
