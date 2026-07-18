@@ -52,6 +52,17 @@ from url_guard import assert_public_url, is_public_http_url
 HERE = os.path.dirname(os.path.abspath(__file__))
 # The dedicated venv that carries Playwright + chromium (see module docstring).
 CAPTURE_PY = os.path.join(HERE, ".venv-capture", "bin", "python")
+# Machines without the dedicated capture venv (e.g. the dev Mac) run Playwright
+# in the MAIN interpreter — capture_url already handles that in-process, but
+# SUBPROCESS consumers of CAPTURE_PY (walk_native via adapters) hard-failed on
+# the missing path and silently degraded every walkthrough to a placeholder.
+# Fall back to the current interpreter when it can import Playwright.
+if not os.path.exists(CAPTURE_PY):
+    try:
+        import playwright  # noqa: F401
+        CAPTURE_PY = sys.executable
+    except Exception:
+        pass  # keep the venv path; callers surface the actionable error
 
 # A desktop-ish viewport. 1600px wide matches the brief ("1600px-ish wide") and
 # crops cleanly inside the 16:9 studio card. We capture ABOVE-THE-FOLD by default
