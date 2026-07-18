@@ -280,8 +280,27 @@ def _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN,
         print("[build_runner] read_pass crashed: %s" % e, file=sys.stderr)
         rp = {"url": url, "body_text": "", "hero_screenshot_path": None,
               "headline": "", "degraded": True}
+    # AGENTIC SITE READ (Dennis 2026-07-17): browse beyond the homepage — the
+    # brain picks up to 4 subpages (pricing/features/customers/steps...), each
+    # is captured (rendered text + screenshot), and the combined provenance
+    # corpus feeds BOTH the analyze/plan stages and the VO-grounding guard.
+    # SITE_BROWSE=0 disables; any failure degrades to the single-page read.
+    corpus = rp.get("body_text", "")
+    site_ledger = {"ok": False, "pages": []}
+    if os.environ.get("SITE_BROWSE", "1") != "0":
+        try:
+            import site_read
+            site_ledger = site_read.browse_site(
+                url, run_dir, brain=brain,
+                homepage_text=rp.get("body_text", ""))
+            corpus = site_read.combined_corpus(rp.get("body_text", ""), site_ledger)
+            if site_ledger.get("pages"):
+                print("[build_runner] site read: +%d pages, corpus %d chars"
+                      % (len(site_ledger["pages"]), len(corpus)), file=sys.stderr)
+        except Exception as e:
+            print("[build_runner] site read skipped (%s)" % e, file=sys.stderr)
     try:
-        read = analyze_fn(url, rp.get("body_text", ""),
+        read = analyze_fn(url, corpus,
                           hero_path=rp.get("hero_screenshot_path"),
                           headline=rp.get("headline"), brain=brain)
     except Exception as e:
@@ -290,6 +309,16 @@ def _maybe_conversion_read(url, run_dir, brain=ANALYZE_BRAIN,
     if rp.get("degraded"):
         read["degraded"] = True
     read["hero_screenshot_path"] = rp.get("hero_screenshot_path")
+    # Provenance for downstream stages: the grounding guard reads _ground_corpus;
+    # the Night shapers match beats to per-page screenshots via design_brief.
+    if isinstance(read, dict):
+        read["_ground_corpus"] = corpus
+        if site_ledger.get("pages"):
+            read.setdefault("design_brief", {"story_shape": {}, "brand_vibe": {}})
+            read["design_brief"]["site_pages"] = [
+                {"slug": p.get("slug"), "title": p.get("title"), "shot": p.get("shot")}
+                for p in site_ledger["pages"] if p.get("shot")
+            ]
     # Guarantee the design brief key is present so downstream (plan_job / style_fill)
     # can always read conversion_read["design_brief"] without a guard. analyze_read /
     # minimal_read already set it; this defends against an injected analyze_fn (tests)

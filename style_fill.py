@@ -3991,6 +3991,8 @@ def build_props(timeline: Dict[str, Any], plan: Dict[str, Any],
     # brand dict they already receive (same channel as _night_terminal_lines).
     # Real, honesty-guarded material only — story_shape is guarded upstream.
     brand["_plan_design_brief"] = plan.get("design_brief") or {}
+    # Agentic site read: per-page screenshots for beat-relevant fragments.
+    brand["_night_site_pages"] = (plan.get("design_brief") or {}).get("site_pages") or []
 
     # The run's emphasis (user-supplied feature/area). The walkthrough shaper uses
     # this for the overlay title so the title bar stays on the emphasized feature,
@@ -4595,6 +4597,46 @@ def _shape_night_ecosystem(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict
     }
 
 
+_NIGHT_PAGE_HINTS = {
+    "pricing": ("pricing", "price", "cost", "plan", "€", "$", "£", "per year",
+                "per month", "subscription", "founding"),
+    "features": ("feature", "capability", "tool", "everything you"),
+    "how-it-works": ("how it works", "step", "start", "create your", "set up",
+                     "minutes", "launch"),
+    "customers": ("customer", "trusted", "agents use", "teams", "companies"),
+    "testimonials": ("testimonial", "review", "love", "said"),
+    "about": ("about", "mission", "team", "story"),
+    "docs": ("docs", "documentation", "api", "developer"),
+    "demo": ("demo", "see it", "watch"),
+}
+
+
+def _night_page_shot_for(beat_text: str, brand: Dict[str, Any]) -> str:
+    """The captured page screenshot most relevant to this beat's text (agentic
+    site read): slug/title word overlap first, then the hint keywords above.
+    '' when nothing matches — the caller falls back to the homepage capture."""
+    pages = brand.get("_night_site_pages") or []
+    text = (beat_text or "").lower()
+    if not pages or not text.strip():
+        return ""
+    best, best_score = "", 0
+    for p in pages:
+        shot = p.get("shot") or ""
+        if not shot:
+            continue
+        slug = str(p.get("slug") or "").lower()
+        score = 0
+        for word in re.split(r"[-_/]+", slug):
+            if len(word) >= 4 and word in text:
+                score += 2
+        for hint in _NIGHT_PAGE_HINTS.get(slug, ()):
+            if hint in text:
+                score += 1
+        if score > best_score:
+            best, best_score = shot, score
+    return best
+
+
 def _night_harvest_chips(d: Dict[str, Any], brand: Dict[str, Any]) -> List[str]:
     """Chips for the ladder from ALREADY-GUARDED real material only (development
     pass §D): scene entities -> brand page-harvested features -> the design
@@ -4647,10 +4689,14 @@ def _shape_night_ladder(scene: Dict[str, Any], brand: Dict[str, Any]) -> Dict[st
     if chips:
         # v4: remember the film's chip family so the close can recap it.
         brand.setdefault("_night_chips", chips)
-    elif brand.get("_night_shot_raw"):
-        # v4 content: statement beats carry a cropped fragment of the real
-        # captured homepage (the public stager stages any data.imageSrc).
-        out["imageSrc"] = brand["_night_shot_raw"]
+    else:
+        # v4 content + agentic site read: statement beats carry a fragment of
+        # the most RELEVANT captured page — a beat that talks pricing shows the
+        # real /pricing page — falling back to the homepage capture. The public
+        # stager stages any data.imageSrc.
+        shot = _night_page_shot_for(raw + " " + headline, brand) or brand.get("_night_shot_raw")
+        if shot:
+            out["imageSrc"] = shot
     return out
 
 

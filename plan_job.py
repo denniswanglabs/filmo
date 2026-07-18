@@ -237,6 +237,108 @@ def _normalize_quality(quality):
     return q if q in VALID_QUALITIES else "standard"
 
 
+# --- VO GROUNDING GUARD (agentic site read, 2026-07-17) -----------------------
+# Every model in the 8-brain bake-off fabricated exactly one claim per video
+# (nemotron "7 minutes", sonnet "free"/"3,000 agents", kimi "MLS", deepseek
+# "five new clients", gpt-5.2 a wrong price label). Honesty therefore lives in
+# CODE: a voiceover beat may only state numbers / "free" / magnitude claims that
+# appear in the site's own text (the site-read corpus + guarded real material).
+
+_GROUND_NUM_RE = re.compile(r"[$€£]?\d[\d,.]*\+?%?")
+_GROUND_SPELLED_RE = re.compile(
+    r"\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozens?|"
+    r"hundreds?|thousands?|millions?|billions?)\b", re.I)
+_GROUND_FREE_RE = re.compile(r"\bfree\b", re.I)
+
+
+def _grounding_corpus(conversion_read, company_facts, enrichment, story_shape):
+    """Lower-cased, comma-stripped text the video is allowed to claim from:
+    the site-read corpus (+ homepage) plus the already-honesty-guarded material
+    (story_shape, enrichment, company facts). '' disables the guard."""
+    parts = [str((conversion_read or {}).get("_ground_corpus") or "")]
+    for blob in (company_facts, enrichment, story_shape):
+        if blob:
+            try:
+                parts.append(json.dumps(blob))
+            except Exception:
+                pass
+    corpus = " ".join(parts).lower().replace(",", "")
+    return corpus if corpus.strip() else ""
+
+
+def _ungrounded_tokens(text, corpus):
+    """Claim tokens in `text` that the corpus does not contain."""
+    bad = []
+    for m in _GROUND_NUM_RE.finditer(text or ""):
+        tok = m.group(0)
+        norm = tok.strip("$€£").rstrip("+%").replace(",", "")
+        if not norm or not re.search(r"\d", norm):
+            continue
+        if not re.search(r"(?<![\d.])" + re.escape(norm) + r"(?![\d])", corpus):
+            bad.append(tok)
+    for m in _GROUND_SPELLED_RE.finditer(text or ""):
+        if not re.search(r"\b" + re.escape(m.group(0).lower()) + r"\b", corpus):
+            bad.append(m.group(0))
+    for m in _GROUND_FREE_RE.finditer(text or ""):
+        if not re.search(r"\bfree\b", corpus):
+            bad.append(m.group(0))
+    return bad
+
+
+def _vo_beats(plan):
+    """The voiceover beat list for BOTH plan shapes: the production shape is a
+    dict {"voice", "beats": [{scene_id, text}...], "script"}; older/test plans
+    carry a bare list. (The live agentic run exposed this: iterating the dict
+    yielded its KEYS and the guard silently saw no beats at all.)"""
+    vo = (plan or {}).get("voiceover")
+    if isinstance(vo, dict):
+        beats = vo.get("beats")
+        return beats if isinstance(beats, list) else []
+    return vo if isinstance(vo, list) else []
+
+
+def _grounding_violations(plan, corpus):
+    """Human-readable violation list for the content-quality gate."""
+    out = []
+    for i, beat in enumerate(_vo_beats(plan)):
+        text = beat.get("text") if isinstance(beat, dict) else str(beat or "")
+        for tok in _ungrounded_tokens(text or "", corpus):
+            out.append("beat[%d] claims %r which appears nowhere on the site" % (i, tok))
+    return out
+
+
+def _strip_ungrounded(plan, corpus):
+    """Deterministic last line of defense: remove claim tokens the corpus can't
+    back from every VO beat (qualifiers like 'under'/'up to' go with them).
+    Runs AFTER the corrective re-plan so even an ignoring model can't ship an
+    ungrounded number. Logs every strip; leaves a beat untouched if stripping
+    would gut it (<10 chars)."""
+    for beat in _vo_beats(plan):
+        if not isinstance(beat, dict):
+            continue
+        text = beat.get("text") or ""
+        bad = _ungrounded_tokens(text, corpus)
+        if not bad:
+            continue
+        new = text
+        for tok in bad:
+            if tok.lower() == "free":
+                new = re.sub(r"\s*(?:for\s+)?free\b", "", new, flags=re.I)
+            else:
+                new = re.sub(
+                    r"\b(?:under|over|about|around|up\s+to|just)\s+" + re.escape(tok) + r"\s*",
+                    "", new)
+                new = re.sub(re.escape(tok) + r"\s*", "", new)
+        new = re.sub(r"\s{2,}", " ", new).strip(" ,;:-")
+        if len(new) >= 10 and new != text:
+            print("[planner][ground] stripped %s -> %r" % (bad, new), file=sys.stderr)
+            beat["text"] = new
+        elif new != text:
+            print("[planner][ground] strip would gut beat; kept original (%s)" % bad,
+                  file=sys.stderr)
+    return plan
+
+
 def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
              currency="usd", style="standard", quality="standard",
              brain="super-free", company_facts=None, emphasis=None,
@@ -426,6 +528,15 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     # cross-scene dedup backstop still guarantees no cross-scene repeats; the other
     # content checks (nav-labels, thin beats, proof) remain advisory).
     content_problems = validate_plan_content_quality(plan, company_facts or {})
+    # VO GROUNDING (agentic site read): ungrounded claims join the same
+    # corrective re-plan; a deterministic strip after the gate guarantees none
+    # survive regardless of what the model does with the instruction.
+    _ground_corpus = _grounding_corpus(conversion_read, company_facts, enrich, _story_shape)
+    _ground_problems = _grounding_violations(plan, _ground_corpus) if _ground_corpus else []
+    if _ground_problems:
+        print("[planner][ground] ungrounded claims: %s" % "; ".join(_ground_problems),
+              file=sys.stderr)
+        content_problems = list(content_problems) + _ground_problems
     if content_problems and plan_source == "llm":
         print("[planner] content-quality issues -> one corrective re-plan: %s"
               % "; ".join(content_problems), file=sys.stderr)
@@ -433,7 +544,11 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
                + "; ".join(content_problems)
                + ". Rewrite the voiceover beats so each is distinct, names a concrete "
                  "proof point (a real number or named feature), and contains no nav/section "
-                 "labels. Keep the same scene ids, types, and durations.")
+                 "labels. Keep the same scene ids, types, and durations."
+               + (" Every number, price, count, and availability claim (like 'free') "
+                  "MUST appear verbatim in the provided site text — replace any "
+                  "invented figure with the site's real one, or drop the claim."
+                  if _ground_problems else ""))
         retry = _plan_with_nemotron(company_url, goal, target_duration_s, style, quality,
                                     brain, company_facts, meta=planner_meta,
                                     conversion_read=conversion_read, extra_user=fix)
@@ -465,6 +580,10 @@ def plan_job(company_url, goal, target_duration_s=30, target_margin=0.6,
     elif content_problems:
         print("[planner] content-quality issues (advisory, not retried): %s"
               % "; ".join(content_problems), file=sys.stderr)
+    # Grounding backstop on the FINAL plan (whichever path produced it): no
+    # ungrounded number / "free" / magnitude claim ships, period.
+    if _ground_corpus:
+        plan = _strip_ungrounded(plan, _ground_corpus)
     # Stamp planner provenance on the plan so the ledger/console can show EVERY build
     # plainly as LLM-planned or template-fallback (with finish_reason + token usage).
     # build_runner reads plan["_planner"] into ledger selection. Not a frozen-schema
