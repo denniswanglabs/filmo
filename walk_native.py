@@ -987,6 +987,72 @@ def _propose_next_action(brain_key_name, goal, emphasis, url, title, page_text,
 # ffmpeg stitch — matches the repo's libx264/yuv420p/+faststart style.
 # ---------------------------------------------------------------------------
 
+def _webm_to_mp4(webm_path: str, out_path: str) -> bool:
+    """Playwright's continuous webm -> the pipeline's h264 mp4 contract (even
+    dims, yuv420p, SILENT stereo track so Remotion's a:0 probe succeeds on
+    linux-x64). True on a valid mp4."""
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y", "-nostdin", "-loglevel", "error",
+        "-i", webm_path,
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,setsar=1",
+        "-r", "30",
+        "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+        "-c:a", "aac", "-shortest",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=120, check=False)
+    except Exception:
+        return False
+    return (proc.returncode == 0 and os.path.exists(out_path)
+            and os.path.getsize(out_path) > 1000)
+
+
+# SMOOTH-CAPTURE v2: an eased requestAnimationFrame scroll tween. The old
+# window.scrollTo({behavior:'smooth'}) is browser-paced (~0.3-0.5s) and reads as
+# a jump on film; this pans like a camera move (default ~1.6s, cubic in-out).
+_SMOOTH_SCROLL_JS = """
+async ([targetY, ms]) => {
+  const startY = window.scrollY;
+  const dist = targetY - startY;
+  if (Math.abs(dist) < 2) return;
+  const t0 = performance.now();
+  await new Promise((resolve) => {
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / ms);
+      const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+      window.scrollTo(0, startY + dist * e);
+      if (p < 1) requestAnimationFrame(step); else resolve();
+    };
+    requestAnimationFrame(step);
+  });
+}
+"""
+
+
+def _smooth_scroll_to(page, target_y, ms: int = 1600) -> None:
+    """Cinematic pan to an absolute Y (never raises)."""
+    try:
+        page.evaluate(_SMOOTH_SCROLL_JS, [target_y, ms])
+    except Exception:
+        try:
+            page.evaluate("y => window.scrollTo(0, y)", target_y)
+        except Exception:
+            pass
+
+
+def _smooth_scroll_to_delta(page, delta, ms: int = 1400) -> None:
+    """Cinematic pan by a RELATIVE amount (never raises)."""
+    try:
+        target = page.evaluate("d => window.scrollY + d", delta)
+        _smooth_scroll_to(page, target, ms=ms)
+    except Exception:
+        pass
+
+
 def _stitch(frames_dir: str, out_path: str, duration: float) -> bool:
     """Stitch frames_dir/f*.jpg -> out_path so the clip ≈ `duration` seconds.
 
@@ -1052,9 +1118,9 @@ def _phase1_scrollthrough(page, state_path: str, emphasis: str,
 
     def _scroll_to(frac: float) -> None:
         try:
-            page.evaluate(
-                "f => window.scrollTo({top: document.body.scrollHeight * f, "
-                "behavior: 'smooth'})", frac)
+            target = page.evaluate(
+                "f => Math.round((document.body.scrollHeight - innerHeight) * f)", frac)
+            _smooth_scroll_to(page, target, ms=1800)
         except Exception:
             pass
 
@@ -1185,7 +1251,7 @@ def _smart_nav(page, state_path: str, goal: str, emphasis: str,
             n_sub = max(1, px // 300)
             for _ in range(n_sub):
                 try:
-                    page.evaluate("d => window.scrollBy({top: d, behavior: 'smooth'})",
+                    _smooth_scroll_to_delta(page,
                                   dy / n_sub)
                     page.wait_for_timeout(int(per_step_ms / max(1, n_sub)))
                 except Exception:
@@ -1198,7 +1264,7 @@ def _smart_nav(page, state_path: str, goal: str, emphasis: str,
         if not isinstance(cid, int) or cid < 0 or cid >= len(clickables):
             print("WALK_NATIVE: step %d invalid id %r -> scroll" % (step, cid))
             try:
-                page.evaluate("() => window.scrollBy({top: 600, behavior: 'smooth'})")
+                _smooth_scroll_to_delta(page, 600)
                 _dwell()
             except Exception:
                 pass
@@ -1299,6 +1365,14 @@ def run(url: str, goal: str, emphasis: str, out_path: str,
         # + stealth) so bot-detection serves the real page; keeps the promo-agent
         # NetworkServiceInProcess + ignore-cert flags + optional WALK_PROXY.
         browser = _launch_browser(p)
+        # SMOOTH-CAPTURE v2 (Dennis 2026-07-18: "the scrolling was shuddery —
+        # frames per second were very low"): record the session with Playwright's
+        # continuous video recorder (steady ~25fps webm) instead of relying on the
+        # event-driven CDP screencast, whose variable-timed frames flattened to a
+        # constant framerate produced the shudder. The screencast still runs for
+        # the live dashboard preview + as the stitch fallback.
+        video_dir = os.path.join(walk_dir, "video")
+        os.makedirs(video_dir, exist_ok=True)
         ctx = browser.new_context(
             viewport=VIEWPORT,
             device_scale_factor=1,  # screencast is already capped at 1280x800
@@ -1309,6 +1383,8 @@ def run(url: str, goal: str, emphasis: str, out_path: str,
             permissions=["geolocation"],
             user_agent=_DESKTOP_UA,
             extra_http_headers=_EXTRA_HEADERS,
+            record_video_dir=video_dir,
+            record_video_size=VIEWPORT,
         )
         # Stealth init runs BEFORE every navigation in this context.
         ctx.add_init_script(_STEALTH_INIT_JS)
@@ -1429,18 +1505,33 @@ def run(url: str, goal: str, emphasis: str, out_path: str,
         except Exception:
             pass
 
-        # --- stitch ----------------------------------------------------------
+        # --- finalize the recording ------------------------------------------
         _write_state(state_path, page.url, "Stitching the walkthrough", "navigating")
+        # SMOOTH-CAPTURE v2: prefer the continuous Playwright recording (closing
+        # the context finalizes the webm). The screencast stitch is the fallback.
+        final_url = page.url
+        video_path = ""
+        try:
+            vid = page.video
+            ctx.close()          # flushes the webm to disk
+            ctx = None           # teardown in `finally` skips the closed context
+            video_path = vid.path() if vid else ""
+        except Exception:
+            video_path = ""
+        if video_path and os.path.exists(video_path) and _webm_to_mp4(video_path, out_path):
+            _write_state(state_path, final_url, "Walkthrough ready", "done")
+            print("WALK_NATIVE: ok %s (smooth video)" % out_path)
+            return True
         if frame_count[0] < 2:
-            _write_state(state_path, page.url, "No frames captured", "failed")
+            _write_state(state_path, final_url, "No frames captured", "failed")
             print("WALK_NATIVE: failed no-frames (%d)" % frame_count[0])
             return False
         if not _stitch(frames_dir, out_path, duration):
-            _write_state(state_path, page.url, "Stitch failed", "failed")
+            _write_state(state_path, final_url, "Stitch failed", "failed")
             print("WALK_NATIVE: failed stitch (%d frames)" % frame_count[0])
             return False
 
-        _write_state(state_path, page.url, "Walkthrough ready", "done")
+        _write_state(state_path, final_url, "Walkthrough ready", "done")
         print("WALK_NATIVE: ok %s" % out_path)
         return True
 

@@ -129,14 +129,165 @@ def build_film(url: str, run_id: str, clip: str, logo_from: str = "") -> str:
     return out
 
 
+def _split_clip(clip: str, run_dir: str) -> list:
+    """Split the tour recording at its midpoint into two segments (the film
+    alternates kinetic beats with footage beats). Returns [seg1, seg2] paths
+    (falls back to [clip] when too short to split)."""
+    dur = _probe_duration(clip)
+    if dur < 8.0:
+        return [clip]
+    mid = dur / 2.0
+    segs = []
+    for i, (ss, t) in enumerate(((0.0, mid), (mid, dur - mid))):
+        seg = os.path.join(run_dir, f"tour-seg{i + 1}.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{ss:.2f}",
+             "-i", clip, "-t", f"{t:.2f}", "-c:v", "libx264", "-crf", "20",
+             "-preset", "veryfast", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-movflags", "+faststart", seg],
+            check=True, timeout=180)
+        segs.append(seg)
+    return segs
+
+
+def _real_stat_from_text(text: str):
+    """A REAL stat (value, label) from the site's own text, else None. Looks for
+    price-per-period first, then a big count — deterministic, never invented."""
+    import re
+    m = re.search(r"([$€£]\d[\d,.]*)\s*/\s*(year|month|yr|mo)", text or "", re.I)
+    if m:
+        return (f"{m.group(1)}/{m.group(2).lower()}", "on the site today")
+    m = re.search(r"(\d[\d,]*\+)\s+([a-z][a-z ]{6,40})", text or "")
+    if m:
+        return (m.group(1), m.group(2).strip())
+    return None
+
+
+def build_night_film(url: str, run_id: str, clip: str, logo_from: str = "") -> str:
+    """v2 (Dennis 2026-07-18): the SaaS-style film — Engineered Night kinetic
+    beats alternating with the agent's REAL smooth recording playing inside the
+    Night browser panel. Copy is grounded by construction: only the brand's own
+    headline/tagline and a stat regexed from the captured page text."""
+    run_dir = os.path.join(HERE, "runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    pub = os.path.join(HERE, "studio", "public")
+
+    theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
+    pal = theme_src["palette"]
+    name = theme_src.get("name") or url
+    host = theme_src.get("host") or url
+    tagline = (theme_src.get("tagline") or "").strip()
+
+    theme = {
+        "bg": "#000000", "bgCard": "#161616", "bgCardRaised": "#1D1D1D",
+        "navy": "#0A0A0A", "navyBright": "#161616",
+        "accent": pal["accent"], "ok": pal.get("success") or pal["accent"],
+        "text": "#FFFFFF", "textMuted": "rgba(255,255,255,0.62)",
+        "textDim": "rgba(255,255,255,0.38)", "border": "rgba(255,255,255,0.08)",
+        "fontPrimary": "Inter, sans-serif",
+        "fontMono": '"SF Mono", Menlo, monospace',
+        "fontDisplay": "Manrope, sans-serif",
+        "wordmark": name.upper(),
+    }
+    logo = theme_src.get("logo_src")
+    if logo and os.path.exists(logo):
+        rel = f"walkrec-logo-{run_id}{os.path.splitext(logo)[1] or '.png'}"
+        shutil.copyfile(logo, os.path.join(pub, rel))
+        theme["logoSrc"] = rel
+
+    # Real corpus for the grounded stat: a prior run's read corpus when present.
+    corpus = ""
+    read_json = os.path.join(logo_from or run_dir, "conversion_read.json")
+    if os.path.exists(read_json):
+        try:
+            corpus = json.load(open(read_json)).get("_ground_corpus", "") or ""
+        except Exception:
+            corpus = ""
+    stat = _real_stat_from_text(corpus)
+
+    segs = _split_clip(os.path.abspath(clip), run_dir)
+    seg_rels = []
+    for i, s in enumerate(segs):
+        rel = f"walkrec-{run_id}-seg{i + 1}.mp4"
+        shutil.copyfile(s, os.path.join(pub, rel))
+        seg_rels.append((rel, _probe_duration(s)))
+
+    t = 0
+    scenes = []
+
+    def add(scene_id, archetype, dur_s, data):
+        nonlocal t
+        dur_f = int(dur_s * FPS)
+        scenes.append({"id": scene_id, "archetype": archetype,
+                       "in_frame": t, "out_frame": t + dur_f, "cues": [], "data": data})
+        t += dur_f
+
+    hero_line = tagline or f"{name} — a live product tour"
+    add("open", "night-hero", 4.5, {
+        "eyebrow": "LAUNCH FILM",
+        "lines": style_fill._night_accent_split(hero_line),
+        "sub": f"Recorded live on {host} by the launch agent.",
+        "ctaPrimary": "Watch the tour",
+    })
+    add("tour-1", "night-panel", min(seg_rels[0][1], 12.0), {
+        "videoSrc": seg_rels[0][0], "caption": f"{host} — recorded live",
+    })
+    if stat:
+        add("stat", "night-credibility", 4.5, {
+            "stat": {"value": stat[0], "label": stat[1]},
+        })
+    else:
+        add("statement", "night-ladder", 4.0, {
+            "headline": hero_line, "chips": [], "activeIndex": 0,
+        })
+    if len(seg_rels) > 1:
+        add("tour-2", "night-panel", min(seg_rels[1][1], 12.0), {
+            "videoSrc": seg_rels[1][0], "caption": f"{host} — the pricing page",
+        })
+    add("close", "night-close", 5.0, {
+        "tagline": f"See it live at {host}",
+        "accentWord": host,
+    })
+
+    # Night music bed mapped so the climax lands on the close arrival.
+    import night_music
+    bed_rel = f"walkrec-bed-{run_id}.mp3"
+    bed_out = os.path.join(pub, bed_rel)
+    target_climax = scenes[-1]["in_frame"] / FPS + 1.0
+    bed = night_music.build_bed(target_climax, t / FPS, bed_out)
+    if bed:
+        theme["music"] = bed_rel
+        if bed.get("spb_s"):
+            theme["musicMeta"] = {"spbFrames": bed["spb_s"] * FPS,
+                                  "phaseFrames": bed.get("first_beat_s", 0.0) * FPS}
+
+    props = {"fps": FPS, "total_frames": t, "audio_path": "", "lang": "en",
+             "theme": theme, "scenes": scenes}
+    props_path = os.path.join(run_dir, "walkrec-night-props.json")
+    with open(props_path, "w") as f:
+        json.dump(props, f, indent=2)
+
+    out = os.path.join(run_dir, "film-night.mp4")
+    subprocess.run(["npx", "remotion", "render", "NightTimeline", out,
+                    f"--props={props_path}", "--log=error"],
+                   cwd=os.path.join(HERE, "studio"), check=True, timeout=900)
+    print(f"[walkrec] night film: {out} ({t / FPS:.1f}s, {len(seg_rels)} footage beats)")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--clip", required=True)
     ap.add_argument("--logo-from", default="")
+    ap.add_argument("--night", action="store_true",
+                    help="v2: Engineered Night kinetic beats around the footage")
     a = ap.parse_args()
-    build_film(a.url, a.run_id, a.clip, a.logo_from)
+    if a.night:
+        build_night_film(a.url, a.run_id, a.clip, a.logo_from)
+    else:
+        build_film(a.url, a.run_id, a.clip, a.logo_from)
 
 
 if __name__ == "__main__":

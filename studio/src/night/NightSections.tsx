@@ -3,7 +3,7 @@
 // ONLY real data stamped by the pipeline: captured screenshots, page quotes,
 // real stats, real feature copy. No invented content lives here.
 import React from "react";
-import { Img, staticFile } from "remotion";
+import { Img, OffthreadVideo, staticFile } from "remotion";
 import { NIGHT_TYPE, type NightTokens } from "./theme";
 import { countUp, ladderStart, microDrift, pop, rise, riseStyle, typedChars } from "./motion";
 import { Chip, Eyebrow, popStyle } from "./ui";
@@ -130,12 +130,14 @@ const Section: React.FC<{
   </div>
 );
 
-/** The grounding beat: the captured homepage framed as a surface in the world. */
+/** The grounding beat: the captured homepage framed as a surface in the world.
+ *  walkrec v2: `videoSrc` plays the agent's REAL recorded tour inside the same
+ *  browser card — clean footage, no overlay chrome (Dennis 2026-07-18). */
 export const NightPanel: React.FC<{
   t: NightTokens;
   frame: number;
   fps: number;
-  data: { imageSrc?: string; caption?: string };
+  data: { imageSrc?: string; videoSrc?: string; caption?: string };
   wordmark?: string;
   index?: number;
 }> = ({ t, frame, fps, data, wordmark, index }) => {
@@ -170,7 +172,17 @@ export const NightPanel: React.FC<{
           ))}
         </div>
         <div style={{ borderRadius: 10, overflow: "hidden" }}>
-          {data.imageSrc ? (
+          {data.videoSrc ? (
+            <OffthreadVideo
+              src={resolveAsset(data.videoSrc)}
+              muted
+              style={{
+                width: "100%",
+                display: "block",
+                opacity: shotIn.opacity,
+              }}
+            />
+          ) : data.imageSrc ? (
             <Img
               src={resolveAsset(data.imageSrc)}
               style={{
