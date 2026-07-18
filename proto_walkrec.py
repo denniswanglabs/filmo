@@ -494,6 +494,14 @@ def _harvest_details(corpus: str, target: str, title: str, want: int = 4):
     return out
 
 
+def _norm_ws(s: str) -> str:
+    """Whitespace-collapsed lowercase — a heading that wraps across two lines
+    on the page is still VERBATIM (both Nemotron and Sonnet lost a real title
+    to a line break under exact matching, 2026-07-18)."""
+    import re as _re
+    return _re.sub(r"\s+", " ", s or "").strip().lower()
+
+
 def _verbatim_details(cand: dict, corpus_lc: str):
     """Keep only supporting details that exist VERBATIM on the site — the
     vignettes render real information, never model-written text (Dennis
@@ -501,7 +509,7 @@ def _verbatim_details(cand: dict, corpus_lc: str):
     out = []
     for d in (cand.get("details") or []):
         d = str(d).strip().strip('"')
-        if d and len(d) <= 48 and d.lower() in corpus_lc and d not in out:
+        if d and len(d) <= 48 and _norm_ws(d) in corpus_lc and d not in out:
             out.append(d)
     return out[:4]
 
@@ -525,7 +533,7 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     for p in (ledger.get("pages") or []):
         pages[p["slug"]] = p.get("body_text", "") or ""
         page_urls[p["slug"]] = p.get("url") or url
-    corpus_lc = " ".join(pages.values()).lower()
+    corpus_lc = _norm_ws(" ".join(pages.values()))
 
     stops = None
     try:
@@ -574,7 +582,7 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                 target = str(c.get("target") or title).strip()
                 # HARD grounding: verbatim on the site, AND heading-shaped —
                 # short. A 150-char paragraph is not a section title.
-                if not title or title.lower() not in corpus_lc:
+                if not title or _norm_ws(title) not in corpus_lc:
                     continue
                 if len(title) > 60 or len(title.split()) > 8:
                     continue
@@ -605,7 +613,7 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                     title = str(c.get("title") or "").strip()
                     slug = str(c.get("page") or "home").strip()
                     target = str(c.get("target") or title).strip()
-                    if not title or title.lower() not in corpus_lc:
+                    if not title or _norm_ws(title) not in corpus_lc:
                         continue
                     if len(title) > 60 or len(title.split()) > 8:
                         continue
