@@ -511,6 +511,11 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
             raw = vp.call_model(msgs, brain=brain) or ""
             cand = _extract_json_list(raw)
         if cand:
+            # Prefer sentence-case value lines over ALL-CAPS UI labels
+            # ("Your real estate website, ready in minutes." beats "FEATURED
+            # PROPERTY") — stable sort keeps the brain's importance order
+            # within each class.
+            cand = sorted(cand, key=lambda c: str(c.get("title") or "").isupper())
             stops = []
             for c in cand[:max_stops * 2]:
                 if len(stops) >= max_stops:
@@ -574,6 +579,63 @@ def _smooth60(seg_in: str, seg_out: str) -> str:
         return seg_in
 
 
+def _clip_fp(mp4: str, n: int = 3):
+    """n tiny grayscale frames spread across the clip (16x16 rawvideo)."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", mp4], capture_output=True, text=True, timeout=30)
+        dur = float(out.stdout.strip() or 9)
+    except Exception:
+        dur = 9.0
+    frames = []
+    for i in range(n):
+        t = dur * (i + 1) / (n + 1)
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", mp4,
+                 "-frames:v", "1", "-vf", "scale=16:16,format=gray",
+                 "-f", "rawvideo", "-"], capture_output=True, timeout=60)
+            if len(r.stdout) == 256:
+                frames.append(r.stdout)
+        except Exception:
+            pass
+    return frames
+
+
+def _clips_similar(fa, fb, thresh: float = 10.0) -> bool:
+    """True when two clips share a near-identical frame (SPA-mirror guard).
+    Calibrated 2026-07-18 on homefeed: genuinely different folds of the SAME
+    page measure 13.9+; only true visual mirrors fall under 10."""
+    for a in fa:
+        for b in fb:
+            if sum(abs(x - y) for x, y in zip(a, b)) / 256.0 < thresh:
+                return True
+    return False
+
+
+_MOTIF_KEYWORDS = [
+    ("house", ("home", "house", "estate", "propert", "listing", "real ", "apartment", "rent")),
+    ("chat", ("chat", "message", "inquir", "whatsapp", "tell ", "ask ", "contact", "talk", "conversation")),
+    ("tag", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ")),
+    ("globe", ("language", "languages", "global", "world", "international", "translat")),
+    ("card", ("link", "profile", "page", "website", "site", "portfolio")),
+]
+
+
+def _pick_motif(text: str, used) -> str:
+    """Domain-themed motif for a motion-graphic beat, keyword-scored from the
+    stop's own words; never repeats within a film."""
+    lc = (text or "").lower()
+    for motif, kws in _MOTIF_KEYWORDS:
+        if motif not in used and any(k in lc for k in kws):
+            return motif
+    for motif, _ in _MOTIF_KEYWORDS:
+        if motif not in used:
+            return motif
+    return "card"
+
+
 def build_tour_film(url: str, run_id: str, logo_from: str = "",
                     brain: str = "sonnet5") -> str:
     """v4: planned shots -> titled Vevara film on the site's own palette.
@@ -585,17 +647,39 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
 
     stops = plan_tour(url, run_dir, brain=brain)
 
-    # Execute each planned shot (scripted — no LLM at capture time).
+    # Execute planned shots. Each additional screen recording must EARN its
+    # place (Dennis 2026-07-18: "each screen recording should be different") —
+    # one recording per distinct PAGE; a stop on an already-filmed page (or
+    # whose footage mirrors a kept clip) becomes a motion-graphic beat instead.
     import walk_shot
+    filmed_pages, kept_fps, used_motifs = [], [], set()
     for i, s in enumerate(stops):
+        s["seg"] = ""
+        if s["page"] in filmed_pages:
+            s["motif"] = _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs)
+            used_motifs.add(s["motif"])
+            print(f"[tour] stop {i + 1}: page already filmed -> motion graphic "
+                  f"({s['motif']})", file=sys.stderr)
+            continue
         seg = os.path.join(run_dir, f"shot-{i + 1}.mp4")
         ok = walk_shot.shot(s["page"], "" if i == 0 else s["target"], seg,
                             run_dir, duration=9.0)
-        s["seg"] = seg if ok and os.path.exists(seg) else ""
-        if s["seg"]:
+        if ok and os.path.exists(seg):
             smooth = _smooth60(seg, os.path.join(run_dir, f"shot-{i + 1}-60.mp4"))
-            s["seg"] = smooth
-    stops = [s for s in stops if s.get("seg")]
+            fp = _clip_fp(smooth)
+            if any(_clips_similar(fp, kf) for kf in kept_fps):
+                s["motif"] = _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs)
+                used_motifs.add(s["motif"])
+                print(f"[tour] stop {i + 1}: footage mirrors a kept clip -> "
+                      f"motion graphic ({s['motif']})", file=sys.stderr)
+            else:
+                s["seg"] = smooth
+                kept_fps.append(fp)
+                filmed_pages.append(s["page"])
+        else:
+            s["motif"] = _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs)
+            used_motifs.add(s["motif"])
+    stops = [s for s in stops if s.get("seg") or s.get("motif")]
     if not stops:
         raise RuntimeError("no shots captured")
 
@@ -648,14 +732,23 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                          "dir": "bottom"})
         moments.append({"at": t_f, "x": cx, "y": cy - 320, "scale": 1.12})
         t_f += int(2.4 * FPS)
-        # Footage beat — the planned shot below its title.
-        seg_dur = _probe_duration(s["seg"])
-        rel = f"walkrec-{run_id}-shot{i + 1}.mp4"
-        shutil.copyfile(s["seg"], os.path.join(pub, rel))
-        elements.append({"id": f"v{i}", "kind": "video", "x": cx, "y": cy + 330,
-                         "w": 1300, "at": t_f + 12, "videoSrc": rel})
-        moments.append({"at": t_f, "x": cx, "y": cy + 340, "scale": 1.0})
-        t_f += int(min(seg_dur, 9.5) * FPS)
+        if s.get("seg"):
+            # Footage beat — the planned shot below its title.
+            seg_dur = _probe_duration(s["seg"])
+            rel = f"walkrec-{run_id}-shot{i + 1}.mp4"
+            shutil.copyfile(s["seg"], os.path.join(pub, rel))
+            elements.append({"id": f"v{i}", "kind": "video", "x": cx, "y": cy + 330,
+                             "w": 1300, "at": t_f + 12, "videoSrc": rel})
+            moments.append({"at": t_f, "x": cx, "y": cy + 340, "scale": 1.0})
+            t_f += int(min(seg_dur, 9.5) * FPS)
+        else:
+            # Motion-graphic beat — a domain-themed line-art motif carries the
+            # stop instead of a redundant recording.
+            elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
+                             "y": cy + 300, "w": 760, "at": t_f + 12,
+                             "motif": s.get("motif", "card")})
+            moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.0})
+            t_f += int(5.5 * FPS)
 
     elements.append({"id": "cta", "kind": "cta", "x": 6200, "y": 1800,
                      "at": t_f + 16, "text": f"See it live at {host}",

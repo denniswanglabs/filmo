@@ -29,7 +29,7 @@ const CHORD_F = 45; // element entrance chord
 
 export interface WalkrecElement {
   id: string;
-  kind: "headline" | "sub" | "stat" | "video" | "cta" | "wordmark";
+  kind: "headline" | "sub" | "stat" | "video" | "cta" | "wordmark" | "graphic";
   x: number; // world coords (element center X)
   y: number;
   w?: number;
@@ -42,6 +42,7 @@ export interface WalkrecElement {
   label?: string;
   videoSrc?: string;
   logoSrc?: string;
+  motif?: "house" | "chat" | "tag" | "globe" | "card";
 }
 
 export interface WalkrecMoment {
@@ -116,6 +117,102 @@ const slideOffset = (dir: WalkrecElement["dir"], p: number) => {
   }
 };
 
+/** Domain-themed line-art beat for stops that don't earn a second screen
+ *  recording (Dennis 2026-07-18: "if there is no need to be another screen
+ *  recording, use more motion graphics"). Strokes draw on over ~55f in
+ *  staggered groups (deliberate tier), accent details pop with a small
+ *  overshoot (confirmation tier), then the whole motif floats gently. */
+const MOTIF_PATHS: Record<string, { groups: string[][]; pops: { d?: string; cx?: number; cy?: number; r?: number; rect?: [number, number, number, number, number] }[] }> = {
+  house: {
+    groups: [
+      ["M 90 262 L 320 92 L 550 262"], // roof
+      ["M 140 262 L 140 452 L 500 452 L 500 262", "M 60 452 L 580 452"], // body + ground
+      ["M 180 306 h 84 v 70 h -84 Z"], // window
+    ],
+    pops: [{ rect: [292, 340, 80, 112, 10] }], // door, accent
+  },
+  chat: {
+    groups: [
+      ["M 128 128 h 224 a 28 28 0 0 1 28 28 v 84 a 28 28 0 0 1 -28 28 h -152 l -44 40 v -40 h -28 a 28 28 0 0 1 -28 -28 v -84 a 28 28 0 0 1 28 -28 Z"],
+      ["M 288 288 h 224 a 28 28 0 0 1 28 28 v 84 a 28 28 0 0 1 -28 28 h -28 v 40 l -44 -40 h -152 a 28 28 0 0 1 -28 -28 v -84 a 28 28 0 0 1 28 -28 Z"],
+    ],
+    pops: [
+      { cx: 356, cy: 358, r: 12 }, { cx: 400, cy: 358, r: 12 }, { cx: 444, cy: 358, r: 12 },
+    ],
+  },
+  tag: {
+    groups: [
+      ["M 190 120 L 350 120 L 480 250 a 24 24 0 0 1 0 34 L 344 420 a 24 24 0 0 1 -34 0 L 180 290 L 180 130 a 10 10 0 0 1 10 -10 Z"],
+      ["M 250 60 C 250 100 236 110 232 140"], // string
+    ],
+    pops: [{ cx: 246, cy: 186, r: 22 }],
+  },
+  globe: {
+    groups: [
+      ["M 320 96 a 176 176 0 1 0 0.01 0 Z"],
+      ["M 320 96 a 88 176 0 1 0 0.01 0 Z", "M 152 214 h 336", "M 152 330 h 336"],
+    ],
+    pops: [{ cx: 396, cy: 190, r: 18 }],
+  },
+  card: {
+    groups: [
+      ["M 120 130 h 400 a 24 24 0 0 1 24 24 v 240 a 24 24 0 0 1 -24 24 h -400 a 24 24 0 0 1 -24 -24 v -240 a 24 24 0 0 1 24 -24 Z", "M 96 196 h 448"],
+      ["M 150 244 h 220", "M 150 292 h 300"],
+    ],
+    pops: [{ rect: [150, 336, 132, 44, 22] }],
+  },
+};
+
+const MotionGraphic: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number }> = ({ el, t, frame }) => {
+  const local = frame - el.at;
+  const motif = MOTIF_PATHS[el.motif || "card"] || MOTIF_PATHS.card;
+  const drawP = (gi: number) =>
+    interpolate(local, [gi * 10, gi * 10 + 55], [1, 0], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: VEVARA_STEP,
+    });
+  const popStart = motif.groups.length * 10 + 40;
+  const popP = (pi: number) =>
+    interpolate(local, [popStart + pi * 5, popStart + pi * 5 + 10], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: Easing.out(Easing.back(2)),
+    });
+  const float = local > popStart + 20 ? 6 * Math.sin((2 * Math.PI * (local - popStart - 20)) / 150) : 0;
+  return (
+    <svg viewBox="0 0 640 520" style={{ width: "100%", display: "block", transform: `translateY(${float}px)` }}>
+      {motif.groups.map((paths, gi) =>
+        paths.map((d, pi) => (
+          <path
+            key={`${gi}-${pi}`}
+            d={d}
+            pathLength={1}
+            fill="none"
+            stroke={t.ink}
+            strokeWidth={9}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray={1}
+            strokeDashoffset={drawP(gi)}
+          />
+        )),
+      )}
+      {motif.pops.map((p, pi) => {
+        const s = popP(pi);
+        if (s <= 0) return null;
+        const common = { fill: t.accent, opacity: Math.min(1, s) };
+        if (p.rect) {
+          const [x, y, w, h, r] = p.rect;
+          return <rect key={pi} x={x} y={y} width={w} height={h} rx={r} {...common}
+            transform={`translate(${x + w / 2} ${y + h / 2}) scale(${s}) translate(${-(x + w / 2)} ${-(y + h / 2)})`} />;
+        }
+        return <circle key={pi} cx={p.cx} cy={p.cy} r={(p.r || 12) * s} {...common} />;
+      })}
+    </svg>
+  );
+};
+
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({
   el, t, frame, fps,
 }) => {
@@ -178,6 +275,12 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
               <OffthreadVideo src={resolveAsset(el.videoSrc)} muted style={{ width: "100%", display: "block" }} />
             </Sequence>
           ) : null}
+        </div>
+      );
+    case "graphic":
+      return (
+        <div style={{ ...base, width: el.w ?? 760 }}>
+          <MotionGraphic el={el} t={t} frame={frame} />
         </div>
       );
     case "cta":
