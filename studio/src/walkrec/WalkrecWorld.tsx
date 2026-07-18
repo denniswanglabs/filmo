@@ -42,7 +42,8 @@ export interface WalkrecElement {
   label?: string;
   videoSrc?: string;
   logoSrc?: string;
-  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange";
+  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card";
+  lines?: string[]; // verbatim site strings the vignette renders as content
 }
 
 export interface WalkrecMoment {
@@ -248,35 +249,47 @@ const HouseGlyph: React.FC<{ color: string; size?: number }> = ({ color, size = 
   </svg>
 );
 
-/** Rows of incoming requests: initial badge + property bars + a time chip. */
+/** Rows of incoming requests: real site strings as the request lines, with a
+ *  time-flavored site label in the chip when the site offers one. */
 const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
   const frame = useCurrentFrame();
   const local = frame - el.at;
-  const initials = (el.text || "Client Request Time").split(/\s+/).filter((w) => /^[a-zA-Z]/.test(w));
+  const lines = el.lines || [];
+  const chipLine = lines.find((l) => /time|date|viewing|visit|when|schedule/i.test(l));
+  const rowLines = lines.filter((l) => l !== chipLine);
   const rows = [0, 1, 2];
   return (
-    <div style={{ background: "#FFFFFF", borderRadius: 36, padding: "34px 38px", boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
+    <div style={{ background: "#FFFFFF", borderRadius: 36, padding: "34px 38px", minWidth: 640, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, opacity: vinP(local, 0) }}>
         <HouseGlyph color={t.accent} size={34} />
-        <Bar w={190} h={14} o={0.32} color={t.ink} />
+        <div style={{ fontFamily: t.fontBody, fontSize: 19, fontWeight: 700, color: t.ink, opacity: 0.8, textAlign: "left" }}>{el.text}</div>
       </div>
       {rows.map((r) => {
         const p = vinP(local, 10 + r * 8, 16);
         const chip = vinPop(local, 34 + r * 8);
-        const initial = (initials[r] || "AMJ"[r] || "A")[0].toUpperCase();
+        const line = rowLines[r];
+        const initial = (line || el.text || "A")[0].toUpperCase();
         return (
           <div key={r} style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 18px", borderRadius: 20, background: "rgba(15,23,56,0.035)", marginBottom: 14, opacity: p, transform: `translateY(${24 * (1 - p)}px)` }}>
-            <div style={{ width: 52, height: 52, borderRadius: 26, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 52, height: 52, borderRadius: 26, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               {initial}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1 }}>
-              <Bar w={200 - r * 26} h={13} o={0.3} color={t.ink} />
-              <Bar w={132} h={11} color={t.ink} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minWidth: 0 }}>
+              {line ? (
+                <div style={{ fontFamily: t.fontBody, fontSize: 21, fontWeight: 600, color: t.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{line}</div>
+              ) : (
+                <Bar w={200 - r * 26} h={13} o={0.3} color={t.ink} />
+              )}
+              <Bar w={132} h={10} color={t.ink} />
             </div>
             {chip > 0 ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 16px", borderRadius: 999, background: `${t.accent}16`, border: `2px solid ${t.accent}55`, transform: `scale(${chip})` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 16px", borderRadius: 999, background: `${t.accent}16`, border: `2px solid ${t.accent}55`, transform: `scale(${chip})`, flexShrink: 0 }}>
                 <ClockGlyph color={t.accent} />
-                <Bar w={44} h={11} o={0.85} color={t.accent} />
+                {chipLine ? (
+                  <span style={{ fontFamily: t.fontBody, fontSize: 16, fontWeight: 700, color: t.accent, whiteSpace: "nowrap" }}>{chipLine}</span>
+                ) : (
+                  <Bar w={44} h={11} o={0.85} color={t.accent} />
+                )}
               </div>
             ) : null}
           </div>
@@ -302,8 +315,14 @@ const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
               <HouseGlyph color={t.accent} size={46} />
             </div>
             <div style={{ padding: "18px 18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
-              <Bar w={150 - c * 14} h={13} o={0.32} color={t.ink} />
-              <Bar w={104} h={11} color={t.ink} />
+              {(el.lines || [])[c] ? (
+                <div style={{ fontFamily: t.fontBody, fontSize: 17, fontWeight: 600, color: t.ink, textAlign: "left", lineHeight: 1.3, minHeight: 44 }}>{(el.lines || [])[c]}</div>
+              ) : (
+                <>
+                  <Bar w={150 - c * 14} h={13} o={0.32} color={t.ink} />
+                  <Bar w={104} h={11} color={t.ink} />
+                </>
+              )}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 {[0, 1].map((k) => {
                   const chip = vinPop(local, 30 + c * 9 + k * 5);
@@ -334,17 +353,18 @@ const VignetteChat: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> =
   const dot = (i: number) => 0.35 + 0.65 * Math.abs(Math.sin((Math.PI * (local - i * 4)) / 24));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18, width: 620, transform: `translateY(${vinFloat(local, 86)}px)` }}>
-      <div style={{ alignSelf: "flex-start", maxWidth: 420, padding: "20px 24px", borderRadius: "26px 26px 26px 8px", background: "#FFFFFF", boxShadow: "0 26px 60px -28px rgba(15,20,40,0.24)", opacity: pL, transform: `translateY(${20 * (1 - pL)}px)`, display: "flex", flexDirection: "column", gap: 9 }}>
-        <Bar w={290} h={12} o={0.3} color={t.ink} />
-        <Bar w={198} h={12} o={0.18} color={t.ink} />
+      <div style={{ alignSelf: "flex-start", maxWidth: 440, padding: "20px 24px", borderRadius: "26px 26px 26px 8px", background: "#FFFFFF", boxShadow: "0 26px 60px -28px rgba(15,20,40,0.24)", opacity: pL, transform: `translateY(${20 * (1 - pL)}px)` }}>
+        <div style={{ fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: t.ink, textAlign: "left", lineHeight: 1.4 }}>{el.text}</div>
       </div>
-      <div style={{ alignSelf: "flex-end", padding: "18px 24px", borderRadius: "26px 26px 8px 26px", background: t.accent, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.3)", opacity: pR, transform: `translateY(${20 * (1 - pR)}px)` }}>
+      <div style={{ alignSelf: "flex-end", maxWidth: 440, padding: "18px 24px", borderRadius: "26px 26px 8px 26px", background: t.accent, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.3)", opacity: pR, transform: `translateY(${20 * (1 - pR)}px)` }}>
         {!dotsDone ? (
           <div style={{ display: "flex", gap: 8, padding: "4px 2px" }}>
             {[0, 1, 2].map((i) => (
               <div key={i} style={{ width: 11, height: 11, borderRadius: 6, background: "#FFFFFF", opacity: dot(i) }} />
             ))}
           </div>
+        ) : (el.lines || [])[0] ? (
+          <div style={{ fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: "#FFFFFF", textAlign: "left", lineHeight: 1.4 }}>{(el.lines || [])[0]}</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
             <Bar w={236} h={12} o={0.92} color="#FFFFFF" />
@@ -354,15 +374,62 @@ const VignetteChat: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> =
       </div>
       {pCard > 0 ? (
         <div style={{ alignSelf: "flex-end", display: "flex", alignItems: "center", gap: 16, padding: "16px 22px", borderRadius: 22, background: "#FFFFFF", boxShadow: "0 30px 64px -28px rgba(15,20,40,0.26)", transform: `scale(${pCard})`, transformOrigin: "bottom right" }}>
-          <div style={{ width: 84, height: 62, borderRadius: 14, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ width: 84, height: 62, borderRadius: 14, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <HouseGlyph color={t.accent} size={34} />
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Bar w={130} h={12} o={0.32} color={t.ink} />
-            <Bar w={88} h={10} color={t.ink} />
-          </div>
+          {(el.lines || [])[1] ? (
+            <div style={{ fontFamily: t.fontBody, fontSize: 17, fontWeight: 600, color: t.ink, textAlign: "left", maxWidth: 240 }}>{(el.lines || [])[1]}</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <Bar w={130} h={12} o={0.32} color={t.ink} />
+              <Bar w={88} h={10} color={t.ink} />
+            </div>
+          )}
         </div>
       ) : null}
+    </div>
+  );
+};
+
+/** Real pricing, big: the currency line as the hero figure, remaining site
+ *  lines as checked rows. Everything shown is verbatim from the site. */
+const VignettePriceCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const lines = el.lines || [];
+  // The RECURRING price is the real offer; a bare figure may be the
+  // crossed-out original — emphasizing it would misrepresent the price.
+  const price =
+    lines.find((l) => /[€$£¥]\s?\d[\d.,]*\s*\/\s*(year|month|mo|yr|wk|week)/i.test(l)) ||
+    lines.find((l) => /[€$£¥]\s?\d|\d+[.,]\d{2}/.test(l));
+  // Rows carry benefits/labels — a bare leftover price (the crossed-out
+  // original) must not render as a checked benefit.
+  const rest = lines.filter((l) => l !== price && !/^[€$£¥]\s?\d[\d.,]*$/.test(l.trim()));
+  const pPrice = vinPop(local, 24, 14);
+  return (
+    <div style={{ background: "#FFFFFF", borderRadius: 36, padding: "40px 48px", minWidth: 560, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
+      <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", color: t.ink, opacity: 0.55 * vinP(local, 0), textAlign: "left" }}>
+        {(el.text || "").toUpperCase()}
+      </div>
+      {price ? (
+        <div style={{ fontFamily: t.fontDisplay, fontSize: 84, fontWeight: 700, letterSpacing: "-0.02em", color: t.accent, textAlign: "left", margin: "14px 0 6px", opacity: Math.min(1, pPrice), transform: `scale(${0.8 + 0.2 * pPrice})`, transformOrigin: "left center" }}>
+          {price}
+        </div>
+      ) : null}
+      <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+        {rest.slice(0, 3).map((l, i) => {
+          const p = vinP(local, 44 + i * 8, 14);
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, opacity: p, transform: `translateY(${16 * (1 - p)}px)` }}>
+              <svg viewBox="0 0 24 24" style={{ width: 24, height: 24, flexShrink: 0 }}>
+                <circle cx="12" cy="12" r="11" fill={`${t.accent}26`} />
+                <path d="M 7 12.5 l 3.2 3.2 L 17 9" fill="none" stroke={t.accent} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <div style={{ fontFamily: t.fontBody, fontSize: 21, fontWeight: 600, color: t.ink, textAlign: "left" }}>{l}</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -371,6 +438,7 @@ const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["
   "request-table": VignetteRequestTable,
   "context-cards": VignetteContextCards,
   "chat-exchange": VignetteChat,
+  "price-card": VignettePriceCard,
 };
 
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({

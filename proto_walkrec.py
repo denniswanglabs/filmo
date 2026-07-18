@@ -460,6 +460,41 @@ def _extract_json_list(raw: str):
     return None
 
 
+def _harvest_details(corpus: str, target: str, title: str, want: int = 4):
+    """Short REAL fragments from around the target section — verbatim by
+    construction (substrings of the corpus), used when the brain's details
+    fail the verbatim gate. No model in the loop."""
+    pos = corpus.lower().find((target or title or "").lower())
+    window = corpus[max(0, pos - 300):pos + 1200] if pos >= 0 else corpus[:1500]
+    out = []
+    for line in window.split("\n"):
+        frag = line.strip()
+        if not (8 <= len(frag) <= 45) or not (2 <= len(frag.split()) <= 6):
+            continue
+        if not frag[0].isalnum():
+            continue
+        if title and frag.lower() in title.lower():
+            continue
+        if any(frag.lower() == o.lower() or frag.lower() in o.lower() for o in out):
+            continue
+        out.append(frag)
+        if len(out) >= want:
+            break
+    return out
+
+
+def _verbatim_details(cand: dict, corpus_lc: str):
+    """Keep only supporting details that exist VERBATIM on the site — the
+    vignettes render real information, never model-written text (Dennis
+    2026-07-18: "provide actual information... find it in the website")."""
+    out = []
+    for d in (cand.get("details") or []):
+        d = str(d).strip().strip('"')
+        if d and len(d) <= 48 and d.lower() in corpus_lc and d not in out:
+            out.append(d)
+    return out[:4]
+
+
 def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3):
     """v4 'check the website first': read the site, then have the brain pick the
     3 things a visitor actually cares about. Every stop is {title, page, target}
@@ -484,7 +519,7 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     stops = None
     try:
         import validate_planner as vp
-        menu = "\n\n".join(f"[PAGE {slug}]\n{text[:1600]}" for slug, text in pages.items())
+        menu = "\n\n".join(f"[PAGE {slug}]\n{text[:4000]}" for slug, text in pages.items())
         msgs = [
             {"role": "system", "content": (
                 "You are planning the SHOT LIST for a product launch video. From "
@@ -496,8 +531,11 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                 "text — a real heading, UNDER 60 characters and at most 8 words, "
                 'NEVER a full sentence or paragraph, "page": the [PAGE ...] slug '
                 'it appears on, "target": the exact on-page heading text to '
-                'scroll to (usually the same as title)}. Copy text EXACTLY — do '
-                "not write your own words. No prose outside the JSON."
+                'scroll to (usually the same as title), "details": up to 4 SHORT '
+                "verbatim strings copied exactly from the site text that support "
+                "this moment (property names, feature labels, form fields, plan "
+                "names — each 2-6 words, under 45 chars)}. Copy text EXACTLY — "
+                "do not write your own words. No prose outside the JSON."
                 % (max_stops + 2))},
             {"role": "user", "content": menu},
         ]
@@ -544,7 +582,8 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                 if any(s["title"].lower() == title.lower() for s in stops):
                     continue
                 stops.append({"title": title, "page": page_urls[slug],
-                              "target": target})
+                              "target": target,
+                              "details": _verbatim_details(c, corpus_lc)})
             if len(stops) < max_stops:
                 # Top-up pass: relax only the hero-region diversity rule (the
                 # strictest filter) — on dense one-pagers it can kill every
@@ -564,7 +603,17 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                     if any(s["title"].lower() == title.lower() for s in stops):
                         continue
                     stops.append({"title": title, "page": page_urls[slug],
-                                  "target": target})
+                                  "target": target,
+                                  "details": _verbatim_details(c, corpus_lc)})
+            if stops:
+                corpus_raw = " ".join(pages.values())
+                for s in stops:
+                    if len(s.get("details") or []) < 2:
+                        have = s.get("details") or []
+                        mined = _harvest_details(corpus_raw, s.get("target", ""),
+                                                 s["title"])
+                        s["details"] = (have + [m for m in mined
+                                                if m not in have])[:4]
             stops = stops or None
     except (Exception, SystemExit) as e:
         print(f"[tour] brain plan failed ({e}); deterministic fallback",
@@ -644,13 +693,13 @@ _MOTIF_KEYWORDS = [
                        "contact", "talk", "conversation")),
     ("context-cards", ("present", "context", "home", "house", "propert",
                        "listing", "estate", "apartment", "showcase")),
-    ("tag", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ")),
+    ("price-card", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ", "offer")),
     ("globe", ("language", "languages", "global", "world", "international", "translat")),
     ("card", ("link", "profile", "page", "website", "site", "portfolio")),
     ("house", ("real ", "rent")),
 ]
 
-_VIGNETTES = {"request-table", "context-cards", "chat-exchange"}
+_VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card"}
 
 
 def _pick_motif(text: str, used) -> str:
@@ -777,7 +826,8 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             motif = s.get("motif", "card")
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
                              "y": cy + 300, "w": 760, "at": t_f + 12,
-                             "motif": motif, "text": s["title"]})
+                             "motif": motif, "text": s["title"],
+                             "lines": s.get("details") or []})
             # Push in on graphic beats — vignettes must fill the frame.
             moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.15})
             t_f += int((6.5 if motif in _VIGNETTES else 5.5) * FPS)
