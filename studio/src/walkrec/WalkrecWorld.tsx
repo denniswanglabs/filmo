@@ -37,6 +37,7 @@ export interface WalkrecElement {
   dir?: "left" | "right" | "top" | "bottom";
   text?: string;
   accentWord?: string;
+  size?: number;
   value?: string;
   label?: string;
   videoSrc?: string;
@@ -135,7 +136,7 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
     case "headline": {
       const words = (el.text || "").split(/\s+/);
       return (
-        <div style={{ ...base, fontFamily: t.fontDisplay, fontSize: 92, fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.12, color: t.ink }}>
+        <div style={{ ...base, fontFamily: t.fontDisplay, fontSize: el.size ?? 92, fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.12, color: t.ink }}>
           {words.map((w, i) => (
             <span key={i} style={{ color: el.accentWord && w.toLowerCase().startsWith(el.accentWord.toLowerCase()) ? t.accent : t.ink }}>
               {w}{" "}

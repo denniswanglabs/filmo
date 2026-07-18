@@ -438,18 +438,260 @@ def build_vevara_film(url: str, run_id: str, clip: str, logo_from: str = "") -> 
     return out
 
 
+def _extract_json_list(raw: str):
+    r"""First decodable JSON list-of-dicts anywhere in `raw`. Survives markdown
+    fences, prose around the array, and bracketed text BEFORE it — the greedy
+    `\[.*\]` regex this replaces grabbed first-[ to last-] and died on
+    'Extra data' whenever the reply contained any other bracket."""
+    import re as _re
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = _re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", raw, flags=_re.S)
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(raw):
+        if ch != "[":
+            continue
+        try:
+            val, _end = dec.raw_decode(raw[i:])
+        except Exception:
+            continue
+        if isinstance(val, list) and val and all(isinstance(x, dict) for x in val):
+            return val
+    return None
+
+
+def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3):
+    """v4 'check the website first': read the site, then have the brain pick the
+    3 things a visitor actually cares about. Every stop is {title, page, target}
+    where BOTH title and target must be VERBATIM text from the site (enforced in
+    code) — the brain chooses, it never writes. Deterministic fallback: hero +
+    pricing + first feature page."""
+    import re as _re
+    import read_pass
+    import site_read
+
+    rp = read_pass.read_pass(url, run_dir)
+    home_text = rp.get("body_text", "") or ""
+    ledger = site_read.browse_site(url, run_dir, brain=None,
+                                   homepage_text=home_text)
+    pages = {"home": home_text}
+    page_urls = {"home": url}
+    for p in (ledger.get("pages") or []):
+        pages[p["slug"]] = p.get("body_text", "") or ""
+        page_urls[p["slug"]] = p.get("url") or url
+    corpus_lc = " ".join(pages.values()).lower()
+
+    stops = None
+    try:
+        import validate_planner as vp
+        menu = "\n\n".join(f"[PAGE {slug}]\n{text[:1600]}" for slug, text in pages.items())
+        msgs = [
+            {"role": "system", "content": (
+                "You are planning the SHOT LIST for a product launch video. From "
+                "the site text below, pick up to %d moments a potential customer "
+                "most cares about (the core promise, the standout capability, "
+                "pricing/social proof), ordered most important first. Return "
+                "STRICT JSON: an array of objects "
+                '{"title": a short VERBATIM HEADING copied exactly from the '
+                "text — a real heading, UNDER 60 characters and at most 8 words, "
+                'NEVER a full sentence or paragraph, "page": the [PAGE ...] slug '
+                'it appears on, "target": the exact on-page heading text to '
+                'scroll to (usually the same as title)}. Copy text EXACTLY — do '
+                "not write your own words. No prose outside the JSON."
+                % (max_stops + 2))},
+            {"role": "user", "content": menu},
+        ]
+        raw = vp.call_model(msgs, brain=brain) or ""
+        cand = _extract_json_list(raw)
+        if cand is None:
+            with open(os.path.join(run_dir, "tour-plan-raw.txt"), "w") as f:
+                f.write(raw)
+            print("[tour] unparseable plan reply (saved raw); retrying once",
+                  file=sys.stderr)
+            raw = vp.call_model(msgs, brain=brain) or ""
+            cand = _extract_json_list(raw)
+        if cand:
+            stops = []
+            for c in cand[:max_stops * 2]:
+                if len(stops) >= max_stops:
+                    break
+                title = str(c.get("title") or "").strip()
+                slug = str(c.get("page") or "home").strip()
+                target = str(c.get("target") or title).strip()
+                # HARD grounding: verbatim on the site, AND heading-shaped —
+                # short. A 150-char paragraph is not a section title.
+                if not title or title.lower() not in corpus_lc:
+                    continue
+                if len(title) > 60 or len(title.split()) > 8:
+                    continue
+                if slug not in page_urls:
+                    slug = "home"
+                # DIVERSITY: after the first stop, skip targets living in the
+                # hero region of a page another stop already films (two shots
+                # of the same fold made v4's footage repeat).
+                page_text_lc = pages.get(
+                    next((k for k, u in page_urls.items() if u == page_urls[slug]), "home"),
+                    "").lower()
+                hero_lc = page_text_lc[:500]
+                same_page_used = any(s["page"] == page_urls[slug] for s in stops)
+                if stops and same_page_used and target.lower() in hero_lc:
+                    continue
+                if any(s["title"].lower() == title.lower() for s in stops):
+                    continue
+                stops.append({"title": title, "page": page_urls[slug],
+                              "target": target})
+            stops = stops or None
+    except (Exception, SystemExit) as e:
+        print(f"[tour] brain plan failed ({e}); deterministic fallback",
+              file=sys.stderr)
+        stops = None
+
+    if not stops:
+        stops = [{"title": (rp.get("headline") or "The product").split("—")[0].strip()[:60],
+                  "page": url, "target": ""}]
+        for slug in ("pricing", "how-it-works", "features", "customers"):
+            if slug in page_urls and len(stops) < max_stops:
+                stops.append({"title": slug.replace("-", " ").title(),
+                              "page": page_urls[slug],
+                              "target": slug.split("-")[0].title()})
+    print("[tour] plan: " + " | ".join(s["title"] for s in stops), file=sys.stderr)
+    return stops
+
+
+def _smooth60(seg_in: str, seg_out: str) -> str:
+    """Motion-interpolate a shot to 60fps (kills residual capture stutter).
+    Falls back to the original on any failure."""
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", seg_in,
+             "-vf", "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
+             "-c:v", "libx264", "-crf", "19", "-preset", "fast",
+             "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart",
+             seg_out],
+            check=True, timeout=600)
+        return seg_out if os.path.exists(seg_out) else seg_in
+    except Exception:
+        return seg_in
+
+
+def build_tour_film(url: str, run_id: str, logo_from: str = "",
+                    brain: str = "sonnet5") -> str:
+    """v4: planned shots -> titled Vevara film on the site's own palette.
+    Film = brand open -> per stop [verbatim TITLE beat -> that stop's planned
+    footage] -> CTA settle."""
+    run_dir = os.path.join(HERE, "runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    pub = os.path.join(HERE, "studio", "public")
+
+    stops = plan_tour(url, run_dir, brain=brain)
+
+    # Execute each planned shot (scripted — no LLM at capture time).
+    import walk_shot
+    for i, s in enumerate(stops):
+        seg = os.path.join(run_dir, f"shot-{i + 1}.mp4")
+        ok = walk_shot.shot(s["page"], "" if i == 0 else s["target"], seg,
+                            run_dir, duration=9.0)
+        s["seg"] = seg if ok and os.path.exists(seg) else ""
+        if s["seg"]:
+            smooth = _smooth60(seg, os.path.join(run_dir, f"shot-{i + 1}-60.mp4"))
+            s["seg"] = smooth
+    stops = [s for s in stops if s.get("seg")]
+    if not stops:
+        raise RuntimeError("no shots captured")
+
+    theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
+    pal = theme_src["palette"]
+    name = theme_src.get("name") or url
+    host = theme_src.get("host") or url
+    tagline = (theme_src.get("tagline") or "").strip()
+    manifest = brand_extract._find_capture_manifest(logo_from or run_dir)
+    shot_png = brand_extract._shot_path_from_manifest(manifest) if manifest else ""
+    site_bg = _site_bg_from_shot(shot_png) or pal.get("bg") or "#FFFFFF"
+
+    theme = {"bg": site_bg, "ink": pal.get("ink") or "#0F2338",
+             "inkMuted": "#6B6257", "accent": pal["accent"], "card": "#FFFFFF",
+             "fontDisplay": "Manrope, sans-serif", "fontBody": "Inter, sans-serif",
+             "wordmark": name}
+    logo = theme_src.get("logo_src")
+    logo_rel = ""
+    if logo and os.path.exists(logo):
+        logo_rel = f"walkrec-logo-{run_id}{os.path.splitext(logo)[1] or '.png'}"
+        shutil.copyfile(logo, os.path.join(pub, logo_rel))
+        theme["logoSrc"] = logo_rel
+    music_src = os.path.join(HERE, "assets", "music", "calm.mp3")
+    if os.path.exists(music_src):
+        rel = f"walkrec-music-{run_id}.mp3"
+        shutil.copyfile(music_src, os.path.join(pub, rel))
+        theme["music"] = rel
+
+    elements, moments = [], [{"at": 0, "x": 960, "y": 540, "scale": 1.0}]
+    hero_line = tagline or f"{name} — see it live"
+    accent_word = max(hero_line.split(), key=len).strip(".,")
+    elements += [
+        {"id": "wm", "kind": "wordmark", "x": 960, "y": 330, "at": 4, "text": name, "dir": "top"},
+        {"id": "h1", "kind": "headline", "x": 960, "y": 520, "w": 1300, "at": 8,
+         "text": hero_line, "accentWord": accent_word, "dir": "bottom"},
+        {"id": "sub", "kind": "sub", "x": 960, "y": 724, "w": 980, "at": 20,
+         "text": f"A planned tour of {host}, filmed by the launch agent.", "dir": "bottom"},
+    ]
+    t_f = int(4.4 * FPS)
+
+    # Spatial clusters spread FAR apart (>=2400px) so no neighbor bleeds into
+    # another beat's framing; camera zooms slightly on titles.
+    cluster_pos = [(3600, 700), (700, 2800), (4200, 3400), (1800, 5000)]
+    for i, s in enumerate(stops):
+        cx, cy = cluster_pos[i % len(cluster_pos)]
+        # Title beat — the site's own words, section-title sized.
+        elements.append({"id": f"t{i}", "kind": "headline", "x": cx, "y": cy - 340,
+                         "w": 1180, "at": t_f + 14, "text": s["title"], "size": 72,
+                         "accentWord": max(s["title"].split(), key=len).strip(".,"),
+                         "dir": "bottom"})
+        moments.append({"at": t_f, "x": cx, "y": cy - 320, "scale": 1.12})
+        t_f += int(2.4 * FPS)
+        # Footage beat — the planned shot below its title.
+        seg_dur = _probe_duration(s["seg"])
+        rel = f"walkrec-{run_id}-shot{i + 1}.mp4"
+        shutil.copyfile(s["seg"], os.path.join(pub, rel))
+        elements.append({"id": f"v{i}", "kind": "video", "x": cx, "y": cy + 330,
+                         "w": 1300, "at": t_f + 12, "videoSrc": rel})
+        moments.append({"at": t_f, "x": cx, "y": cy + 340, "scale": 1.0})
+        t_f += int(min(seg_dur, 9.5) * FPS)
+
+    elements.append({"id": "cta", "kind": "cta", "x": 6200, "y": 1800,
+                     "at": t_f + 16, "text": f"See it live at {host}",
+                     "value": "Get started", "logoSrc": logo_rel or None, "dir": "bottom"})
+    moments.append({"at": t_f, "x": 6200, "y": 1810, "scale": 0.98})
+    t_f += int(4.6 * FPS)
+
+    props = {"fps": FPS, "total_frames": t_f, "theme": theme,
+             "elements": elements, "moments": moments}
+    props_path = os.path.join(run_dir, "walkrec-tour-props.json")
+    with open(props_path, "w") as f:
+        json.dump(props, f, indent=2)
+    out = os.path.join(run_dir, "film-tour.mp4")
+    subprocess.run(["npx", "remotion", "render", "WalkrecWorld", out,
+                    f"--props={props_path}", "--log=error"],
+                   cwd=os.path.join(HERE, "studio"), check=True, timeout=900)
+    print(f"[walkrec] tour film: {out} ({t_f / FPS:.1f}s, {len(stops)} planned shots, bg {site_bg})")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
     ap.add_argument("--run-id", required=True)
-    ap.add_argument("--clip", required=True)
+    ap.add_argument("--clip", default="")
     ap.add_argument("--logo-from", default="")
     ap.add_argument("--night", action="store_true",
                     help="v2: Engineered Night kinetic beats around the footage")
     ap.add_argument("--vevara", action="store_true",
                     help="v3: Vevara world-moments grammar on the site's own palette")
+    ap.add_argument("--tour", action="store_true",
+                    help="v4: planned shot-list tour (analyze -> decide -> film)")
     a = ap.parse_args()
-    if a.vevara:
+    if a.tour:
+        build_tour_film(a.url, a.run_id, a.logo_from)
+    elif a.vevara:
         build_vevara_film(a.url, a.run_id, a.clip, a.logo_from)
     elif a.night:
         build_night_film(a.url, a.run_id, a.clip, a.logo_from)

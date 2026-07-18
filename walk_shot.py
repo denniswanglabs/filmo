@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""PLANNED SHOT executor (walkrec v4 — Dennis 2026-07-18: "check the website
+first, figure out what a user might like, and show THAT — not random scrolls").
+
+One deliberate, cinematic recording per PLANNED stop: open the page, settle,
+locate the target section by its own heading text, slow-pan it to center, hold,
+drift gently, hold. No LLM in the loop at capture time — the thinking happened
+in the tour PLAN; execution is scripted, so the footage has zero mid-recording
+pauses and every second shows something chosen on purpose.
+
+Reuses walk_native's hardened machinery (launch args, stealth, hydration gate,
+interstitial dismissal, smooth-scroll tween, webm->mp4 contract) and records
+with Playwright's continuous 30fps recorder.
+
+CLI:
+    python3 walk_shot.py <url> <target_text> <out_path> <run_dir> [duration]
+
+`target_text` — a heading/phrase FROM THE PAGE marking the section to feature
+("Pricing", "How it works", ""=hero top). Exit 0 on a valid mp4.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import walk_native as wn  # noqa: E402
+
+_FIND_TARGET_JS = """
+(needle) => {
+  if (!needle) return null;
+  const n = needle.toLowerCase();
+  const els = Array.from(document.querySelectorAll('h1,h2,h3,h4,[class*="head"],[class*="title"],section,p,span,div'));
+  let best = null, bestLen = 1e9;
+  for (const el of els) {
+    const t = (el.textContent || '').trim();
+    if (!t || t.length > 400) continue;
+    if (t.toLowerCase().includes(n)) {
+      // Prefer the TIGHTEST match (the heading itself, not a giant container).
+      if (t.length < bestLen) { best = el; bestLen = t.length; }
+    }
+  }
+  if (!best) return null;
+  const r = best.getBoundingClientRect();
+  return { y: r.top + window.scrollY, h: r.height };
+}
+"""
+
+
+def _trim_head(mp4_path: str, off_s: float) -> None:
+    """Cut the pre-shot head (page load, and for targeted shots the instant
+    pre-position jump) so the clip opens ON the composed frame. Best-effort."""
+    if off_s < 0.3:
+        return
+    import subprocess
+    tmp = mp4_path + ".trim.mp4"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{off_s:.2f}",
+             "-i", mp4_path, "-c:v", "libx264", "-crf", "19", "-preset", "fast",
+             "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", tmp],
+            check=True, timeout=180)
+        if os.path.exists(tmp) and os.path.getsize(tmp) > 50000:
+            os.replace(tmp, mp4_path)
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+
+
+def shot(url: str, target: str, out_path: str, run_dir: str,
+         duration: float = 9.0) -> bool:
+    url = wn._norm_url(url)
+    walk_dir = os.path.join(run_dir, "walk-shot")
+    video_dir = os.path.join(walk_dir, "video")
+    os.makedirs(video_dir, exist_ok=True)
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:
+        print("WALK_SHOT: failed playwright-import: %s" % e)
+        return False
+
+    p = browser = ctx = None
+    try:
+        p = sync_playwright().start()
+        browser = wn._launch_browser(p)
+        ctx = browser.new_context(
+            viewport=wn.VIEWPORT,
+            device_scale_factor=1,
+            locale="en-US",
+            timezone_id="America/New_York",
+            user_agent=wn._DESKTOP_UA,
+            extra_http_headers=wn._EXTRA_HEADERS,
+            record_video_dir=video_dir,
+            record_video_size=wn.VIEWPORT,
+        )
+        ctx.add_init_script(wn._STEALTH_INIT_JS)
+        t_rec0 = time.time()  # video frame 0 ~= page creation
+        page = ctx.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        wn._wait_for_spa_hydration(page)
+        try:
+            wn._dismiss_interstitial(page)
+            wn._handle_content_gate(page)
+        except Exception:
+            pass
+        # Everything above happened BEFORE the pose; give the page a beat to
+        # finish image loads so the recording opens on a fully painted frame.
+        page.wait_for_timeout(1200)
+
+        # THE SHOT: settle on hero -> pan target section to center -> hold ->
+        # gentle drift -> hold. All pacing derived from `duration`.
+        hold_ms = int(max(1.2, duration * 0.22) * 1000)
+        pan_ms = int(max(1.8, duration * 0.28) * 1000)
+
+        target_y = 0
+        if target:
+            try:
+                found = page.evaluate(_FIND_TARGET_JS, target)
+            except Exception:
+                found = None
+            if found:
+                vh = wn.VIEWPORT["height"]
+                target_y = max(0, int(found["y"] - (vh - min(found["h"], vh)) / 2))
+        if target_y > 0:
+            # Pre-position just ABOVE the section before the on-camera motion
+            # starts — otherwise every shot replays the same hero fold and the
+            # film reads "hero, hero, hero" (v4.1 contact-sheet finding). Keep
+            # the run-up SHORT (180px): on short single-page sites a 500px
+            # approach clamps to the very top and reintroduces the hero.
+            approach = max(0, target_y - 180)
+            page.evaluate("(y) => window.scrollTo(0, y)", approach)
+            page.wait_for_timeout(600)
+            shot_begin = time.time()  # head up to here (load + jump) gets trimmed
+            page.wait_for_timeout(hold_ms)  # opening hold (section context)
+            wn._smooth_scroll_to(page, target_y, ms=pan_ms)
+            page.wait_for_timeout(pan_ms + 200)
+        else:
+            shot_begin = time.time()  # trim the load-flicker head
+            page.wait_for_timeout(hold_ms)  # opening hold (hero visible)
+            # No target (hero shot): a slow partial pan gives the frame life.
+            wn._smooth_scroll_to(page, int(wn.VIEWPORT["height"] * 0.55), ms=pan_ms)
+            page.wait_for_timeout(pan_ms + 200)
+
+        page.wait_for_timeout(hold_ms)  # target hold
+        # Gentle drift (±90px) — the "camera breathes" beat.
+        wn._smooth_scroll_to(page, max(0, (target_y or 600) + 90), ms=1400)
+        page.wait_for_timeout(1500)
+        page.wait_for_timeout(hold_ms)  # closing hold
+
+        vid = page.video
+        ctx.close()
+        ctx = None
+        video_path = vid.path() if vid else ""
+        if video_path and os.path.exists(video_path) and wn._webm_to_mp4(video_path, out_path):
+            _trim_head(out_path, max(0.0, shot_begin - t_rec0 - 0.15))
+            print("WALK_SHOT: ok %s (target=%r)" % (out_path, target))
+            return True
+        print("WALK_SHOT: failed no-video")
+        return False
+    except Exception as e:
+        print("WALK_SHOT: failed %s" % e)
+        return False
+    finally:
+        for closer in ((lambda: ctx.close()) if ctx else None,
+                       (lambda: browser.close()) if browser else None,
+                       (lambda: p.stop()) if p else None):
+            if closer is None:
+                continue
+            try:
+                closer()
+            except Exception:
+                pass
+
+
+def main(argv):
+    if len(argv) < 5:
+        print("usage: walk_shot.py <url> <target_text> <out_path> <run_dir> [duration]")
+        return 1
+    url, target, out_path, run_dir = argv[1:5]
+    duration = float(argv[5]) if len(argv) > 5 else 9.0
+    return 0 if shot(url, target, out_path, run_dir, duration) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
