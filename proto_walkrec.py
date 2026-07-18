@@ -275,6 +275,169 @@ def build_night_film(url: str, run_id: str, clip: str, logo_from: str = "") -> s
     return out
 
 
+def _site_bg_from_shot(shot_path: str) -> str:
+    """The page's REAL background color: the most frequent LIGHT quantized pixel
+    in the captured screenshot (ffmpeg rawvideo, stdlib parse — same discipline
+    as brand_extract._accent_from_pixels). '' when unreadable."""
+    if not shot_path or not os.path.exists(shot_path):
+        return ""
+    try:
+        raw = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", shot_path, "-vf", "scale=48:48",
+             "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            capture_output=True, timeout=30).stdout
+    except Exception:
+        return ""
+    from collections import Counter
+    counts = Counter()
+    buckets = {}
+    for i in range(0, len(raw) - 2, 3):
+        r, g, b = raw[i], raw[i + 1], raw[i + 2]
+        lum = (r * 299 + g * 587 + b * 114) // 1000
+        if lum < 150:
+            continue  # background of a SaaS page is light
+        q = (r // 16, g // 16, b // 16)
+        counts[q] += 1
+        buckets.setdefault(q, []).append((r, g, b))
+    if not counts:
+        return ""
+    q, n = counts.most_common(1)[0]
+    px = buckets[q]
+    return "#%02X%02X%02X" % (sum(p[0] for p in px) // n,
+                              sum(p[1] for p in px) // n,
+                              sum(p[2] for p in px) // n)
+
+
+def build_vevara_film(url: str, run_id: str, clip: str, logo_from: str = "") -> str:
+    """v3 (Dennis 2026-07-18): the Vevara-grammar film ON THE BRAND'S OWN
+    PALETTE — world bg sampled from the captured page, camera moments with the
+    fitted swift-S curve, blur+slide+fade chords, footage in rounded cards."""
+    run_dir = os.path.join(HERE, "runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    pub = os.path.join(HERE, "studio", "public")
+
+    theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
+    pal = theme_src["palette"]
+    name = theme_src.get("name") or url
+    host = theme_src.get("host") or url
+    tagline = (theme_src.get("tagline") or "").strip()
+
+    # THE SITE'S OWN BACKGROUND as the world (the v2 complaint): sample the
+    # prior capture's homepage shot; honest white fallback.
+    shot = ""
+    manifest = brand_extract._find_capture_manifest(logo_from or run_dir)
+    if manifest:
+        shot = brand_extract._shot_path_from_manifest(manifest) or ""
+    site_bg = _site_bg_from_shot(shot) or pal.get("bg") or "#FFFFFF"
+
+    theme = {
+        "bg": site_bg,
+        "ink": pal.get("ink") or "#0F2338",
+        "inkMuted": "#6B6257" if site_bg.lower() != "#ffffff" else "#5A6472",
+        "accent": pal["accent"],
+        "card": "#FFFFFF",
+        "fontDisplay": "Manrope, sans-serif",
+        "fontBody": "Inter, sans-serif",
+        "wordmark": name,
+    }
+    logo = theme_src.get("logo_src")
+    logo_rel = ""
+    if logo and os.path.exists(logo):
+        logo_rel = f"walkrec-logo-{run_id}{os.path.splitext(logo)[1] or '.png'}"
+        shutil.copyfile(logo, os.path.join(pub, logo_rel))
+        theme["logoSrc"] = logo_rel
+    music_src = os.path.join(HERE, "assets", "music", "calm.mp3")
+    if os.path.exists(music_src):
+        rel = f"walkrec-music-{run_id}.mp3"
+        shutil.copyfile(music_src, os.path.join(pub, rel))
+        theme["music"] = rel
+
+    # Grounded stat from a prior read corpus when available.
+    corpus = ""
+    read_json = os.path.join(logo_from or run_dir, "conversion_read.json")
+    if os.path.exists(read_json):
+        try:
+            corpus = json.load(open(read_json)).get("_ground_corpus", "") or ""
+        except Exception:
+            corpus = ""
+    if not corpus and shot:
+        # fall back to the read-pass body text next to the shot
+        pass
+    stat = _real_stat_from_text(corpus)
+
+    segs = _split_clip(os.path.abspath(clip), run_dir)
+    seg_rels = []
+    for i, s in enumerate(segs):
+        rel = f"walkrec-{run_id}-vseg{i + 1}.mp4"
+        shutil.copyfile(s, os.path.join(pub, rel))
+        seg_rels.append((rel, _probe_duration(s)))
+
+    FPSL = FPS
+    hero_line = tagline or f"{name} — see it live"
+    accent_word = max(hero_line.split(), key=len)
+
+    # World layout (clusters far apart; text travels short, camera travels far).
+    elements = []
+    moments = [{"at": 0, "x": 960, "y": 540, "scale": 1.0}]
+    t_f = 0
+
+    def el(**kw):
+        elements.append(kw)
+
+    # Moment 0 — hero cluster at the origin.
+    el(id="wm", kind="wordmark", x=960, y=330, at=4, text=name, dir="top")
+    el(id="h1", kind="headline", x=960, y=520, w=1300, at=8, text=hero_line,
+       accentWord=accent_word.strip(".,"), dir="bottom")
+    el(id="sub", kind="sub", x=960, y=724, w=980, at=20,
+       text=f"A live tour of {host}, recorded by the launch agent.", dir="bottom")
+    t_f = int(4.6 * FPSL)
+
+    # Moment 1 — footage card cluster (far right).
+    v1_dur = min(seg_rels[0][1], 11.0)
+    el(id="v1", kind="video", x=3120, y=760, w=1300, at=t_f + 18, videoSrc=seg_rels[0][0])
+    moments.append({"at": t_f, "x": 3120, "y": 780, "scale": 1.0})
+    t_f += int(v1_dur * FPSL)
+
+    # Moment 2 — stat / statement cluster (lower left).
+    if stat:
+        el(id="st", kind="stat", x=1180, y=1900, at=t_f + 16,
+           value=stat[0], label=stat[1], dir="bottom")
+    else:
+        el(id="st", kind="headline", x=1180, y=1900, w=1200, at=t_f + 16,
+           text=hero_line, accentWord=accent_word.strip(".,"), dir="bottom")
+    moments.append({"at": t_f, "x": 1180, "y": 1900, "scale": 1.08})
+    t_f += int(3.2 * FPSL)
+
+    # Moment 3 — footage 2 (far lower right), when a second segment exists.
+    if len(seg_rels) > 1:
+        v2_dur = min(seg_rels[1][1], 11.0)
+        el(id="v2", kind="video", x=3420, y=2160, w=1300, at=t_f + 18,
+           videoSrc=seg_rels[1][0])
+        moments.append({"at": t_f, "x": 3420, "y": 2180, "scale": 1.0})
+        t_f += int(v2_dur * FPSL)
+
+    # Moment 4 — CTA cluster (center of the world's diagonal), long settle.
+    el(id="cta", kind="cta", x=2200, y=1420, at=t_f + 16,
+       text=f"See it live at {host}", value="Get started", logoSrc=logo_rel or None,
+       dir="bottom")
+    moments.append({"at": t_f, "x": 2200, "y": 1430, "scale": 0.96})
+    t_f += int(4.6 * FPSL)
+
+    props = {"fps": FPSL, "total_frames": t_f, "theme": theme,
+             "elements": elements, "moments": moments}
+    props_path = os.path.join(run_dir, "walkrec-vevara-props.json")
+    with open(props_path, "w") as f:
+        json.dump(props, f, indent=2)
+
+    out = os.path.join(run_dir, "film-vevara.mp4")
+    subprocess.run(["npx", "remotion", "render", "WalkrecWorld", out,
+                    f"--props={props_path}", "--log=error"],
+                   cwd=os.path.join(HERE, "studio"), check=True, timeout=900)
+    print(f"[walkrec] vevara film: {out} ({t_f / FPSL:.1f}s, bg {site_bg}, "
+          f"{len(seg_rels)} footage beats)")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
@@ -283,8 +446,12 @@ def main():
     ap.add_argument("--logo-from", default="")
     ap.add_argument("--night", action="store_true",
                     help="v2: Engineered Night kinetic beats around the footage")
+    ap.add_argument("--vevara", action="store_true",
+                    help="v3: Vevara world-moments grammar on the site's own palette")
     a = ap.parse_args()
-    if a.night:
+    if a.vevara:
+        build_vevara_film(a.url, a.run_id, a.clip, a.logo_from)
+    elif a.night:
         build_night_film(a.url, a.run_id, a.clip, a.logo_from)
     else:
         build_film(a.url, a.run_id, a.clip, a.logo_from)

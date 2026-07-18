@@ -12,6 +12,7 @@ import { fixtureTimeline, timelineMetadata } from "./timeline/data";
 // Engineered Night (dark one-world style) — dev/stills composition for the
 // Stage-2 aesthetic checkpoint; the full NightTimeline registers once assembled.
 import { NightHeroDemo } from "./night/NightHeroDemo";
+import { WalkrecWorld, walkrecMetadata } from "./walkrec/WalkrecWorld";
 import { NightTimeline } from "./night/NightTimeline";
 import { nightFixture, nightMetadata } from "./night/fixture";
 
@@ -39,6 +40,27 @@ export const RemotionRoot: React.FC = () => {
         calculateMetadata={nightMetadata}
         width={1920}
         height={1080}
+      />
+      <Composition
+        id="WalkrecWorld"
+        component={WalkrecWorld}
+        calculateMetadata={walkrecMetadata}
+        durationInFrames={900}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{
+          fps: 30,
+          total_frames: 240,
+          theme: {
+            bg: "#F7F1E8", ink: "#221F1A", inkMuted: "#6B6257",
+            accent: "#CB7C5A", card: "#FFFFFF",
+            fontDisplay: "Manrope, sans-serif", fontBody: "Inter, sans-serif",
+            wordmark: "DEMO",
+          },
+          elements: [],
+          moments: [{ at: 0, x: 960, y: 540, scale: 1 }],
+        }}
       />
       <Composition
         id="NightHeroDemo"
