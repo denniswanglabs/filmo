@@ -42,8 +42,9 @@ export interface WalkrecElement {
   label?: string;
   videoSrc?: string;
   logoSrc?: string;
-  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list";
+  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list" | "chip-sweep" | "stat-pop" | "kinetic-line";
   lines?: string[]; // verbatim site strings the vignette renders as content
+  chips?: string[]; // short real labels for the chip sweep
 }
 
 export interface WalkrecMoment {
@@ -434,12 +435,91 @@ const VignettePriceCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   );
 };
 
+/** Night's chip sweep, walkrec-grounded: real short labels cascade in BIG. */
+const VignetteChipSweep: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const chips = (el.chips || []).slice(0, 10);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 18, justifyContent: "center", width: 980, transform: `translateY(${vinFloat(local, chips.length * 6 + 40)}px)` }}>
+      {chips.map((c, i) => {
+        const p = vinP(local, i * 6, 16);
+        const hot = i % 4 === 1; // a few chips carry the accent
+        return (
+          <div key={i} style={{
+            padding: "18px 30px", borderRadius: 999,
+            background: hot ? `${t.accent}1F` : t.card,
+            border: `2.5px solid ${hot ? t.accent : `${t.ink}22`}`,
+            color: hot ? t.accent : t.ink,
+            fontFamily: t.fontBody, fontSize: 27, fontWeight: 700,
+            boxShadow: "0 22px 48px -24px rgba(15,20,40,0.25)",
+            opacity: p, transform: `translateY(${26 * (1 - p)}px)`,
+            filter: p < 0.97 ? `blur(${8 * (1 - p)}px)` : undefined,
+          }}>
+            {c}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/** Credibility number counting up to the REAL figure from the site line. */
+const VignetteStatPop: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const line = (el.lines || []).find((l) => /\d/.test(l)) || el.text || "";
+  const m = line.match(/([$€£]?)(\d+(?:[.,]\d+)?)([kKmM%+]*)/);
+  const target = m ? parseFloat(m[2].replace(",", ".")) : 0;
+  const decimals = m && m[2].includes(".") ? m[2].split(".")[1].length : 0;
+  const p = interpolate(local, [8, 52], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: VEVARA_STEP });
+  const shown = (target * p).toFixed(decimals);
+  const label = m ? (line.slice(0, m.index) + line.slice((m.index || 0) + m[0].length)).trim() : line;
+  return (
+    <div style={{ transform: `translateY(${vinFloat(local, 70)}px)` }}>
+      <div style={{ fontFamily: t.fontDisplay, fontSize: 168, fontWeight: 700, letterSpacing: "-0.03em", color: t.ink, lineHeight: 1 }}>
+        {m ? `${m[1]}${shown}${m[3]}` : ""}
+      </div>
+      <div style={{ width: 150, height: 5, borderRadius: 3, background: t.accent, margin: "24px auto 18px", transform: `scaleX(${vinP(local, 40, 16)})` }} />
+      <div style={{ fontFamily: t.fontBody, fontSize: 27, fontWeight: 600, color: t.inkMuted, opacity: vinP(local, 46, 14) }}>{label}</div>
+    </div>
+  );
+};
+
+/** Kinetic statement: the site's own line, word-by-word rise + deblur. */
+const VignetteKineticLine: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const words = (el.text || "").split(/\s+/);
+  const accentIdx = words.reduce((bi, w, i) => (w.length > words[bi].length ? i : bi), 0);
+  return (
+    <div style={{ width: 1100, fontFamily: t.fontDisplay, fontSize: 84, fontWeight: 700, letterSpacing: "-0.025em", lineHeight: 1.15, transform: `translateY(${vinFloat(local, words.length * 6 + 40)}px)` }}>
+      {words.map((w, i) => {
+        const p = vinP(local, i * 6, 18);
+        return (
+          <span key={i} style={{
+            display: "inline-block", marginRight: "0.28em",
+            color: i === accentIdx ? t.accent : t.ink,
+            opacity: p, transform: `translateY(${34 * (1 - p)}px)`,
+            filter: p < 0.97 ? `blur(${10 * (1 - p)}px)` : undefined,
+          }}>
+            {w}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
 const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }>> = {
   "request-table": VignetteRequestTable,
   "context-cards": VignetteContextCards,
   "chat-exchange": VignetteChat,
   "price-card": VignettePriceCard,
   "check-list": VignettePriceCard,
+  "chip-sweep": VignetteChipSweep,
+  "stat-pop": VignetteStatPop,
+  "kinetic-line": VignetteKineticLine,
 };
 
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({

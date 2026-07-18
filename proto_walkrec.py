@@ -502,6 +502,40 @@ def _norm_ws(s: str) -> str:
     return _re.sub(r"\s+", " ", s or "").strip().lower()
 
 
+def _harvest_chips(corpus: str, target: str, title: str, want: int = 10):
+    """SHORT real labels near the target (service/feature names) — the Night
+    chip-sweep's material, mined verbatim. 1-3 words, tight length caps."""
+    pos = corpus.lower().find((target or title or "").lower())
+    window = corpus[max(0, pos - 200):pos + 2200] if pos >= 0 else corpus[:2400]
+    import re as _re
+    NAV = {"products", "product", "blog", "blogs", "docs", "documentation",
+           "careers", "roadmap", "pricing", "templates", "integrations",
+           "home", "about", "customers", "changelog", "community", "legal",
+           "terms", "privacy", "login", "log in", "sign in", "sign up"}
+    CTA_START = ("start", "read", "learn", "contact", "get ", "view", "try",
+                 "book", "see ", "join", "request", "explore", "works ")
+    out = []
+    for line in window.split("\n"):
+        frag = line.strip().strip("·•|-–")
+        if not (3 <= len(frag) <= 24) or not (1 <= len(frag.split()) <= 3):
+            continue
+        if not frag[0].isalnum():
+            continue
+        lc = frag.lower()
+        if lc in NAV or lc.startswith(CTA_START):
+            continue
+        if _re.fullmatch(r"[\d:.,%$€£+/ ]+", frag):
+            continue  # bare times/numbers are not feature labels
+        if title and lc in title.lower():
+            continue
+        if any(lc == o.lower() for o in out):
+            continue
+        out.append(frag)
+        if len(out) >= want:
+            break
+    return out
+
+
 def _verbatim_details(cand: dict, corpus_lc: str):
     """Keep only supporting details that exist VERBATIM on the site — the
     vignettes render real information, never model-written text (Dennis
@@ -624,15 +658,6 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                     stops.append({"title": title, "page": page_urls[slug],
                                   "target": target,
                                   "details": _verbatim_details(c, corpus_lc)})
-            if stops:
-                corpus_raw = " ".join(pages.values())
-                for s in stops:
-                    if len(s.get("details") or []) < 2:
-                        have = s.get("details") or []
-                        mined = _harvest_details(corpus_raw, s.get("target", ""),
-                                                 s["title"])
-                        s["details"] = (have + [m for m in mined
-                                                if m not in have])[:4]
             stops = stops or None
     except (Exception, SystemExit) as e:
         print(f"[tour] brain plan failed ({e}); deterministic fallback",
@@ -647,6 +672,13 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                 stops.append({"title": slug.replace("-", " ").title(),
                               "page": page_urls[slug],
                               "target": slug.split("-")[0].title()})
+    corpus_nl = "\n".join(pages.values())
+    for s in stops:
+        s["chips"] = _harvest_chips(corpus_nl, s.get("target", ""), s["title"])
+        if len(s.get("details") or []) < 2:
+            have = s.get("details") or []
+            mined = _harvest_details(corpus_nl, s.get("target", ""), s["title"])
+            s["details"] = (have + [m for m in mined if m not in have])[:4]
     print("[tour] plan: " + " | ".join(s["title"] for s in stops), file=sys.stderr)
     return stops
 
@@ -712,6 +744,10 @@ _MOTIF_KEYWORDS = [
                        "contact", "talk", "conversation")),
     ("context-cards", ("present", "context", "home", "house", "propert",
                        "listing", "estate", "apartment", "showcase")),
+    ("chip-sweep", ("everything", "features", "services", "platform",
+                    "need for", "built for", "all-in-one", "toolkit")),
+    ("stat-pop", ("stars", "developers", "teams", "companies", "downloads",
+                  "backed by", "customers", "users")),
     ("price-card", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ", "offer")),
     ("globe", ("language", "languages", "global", "world", "international", "translat")),
     ("card", ("link", "profile", "page", "website", "site", "portfolio")),
@@ -719,7 +755,30 @@ _MOTIF_KEYWORDS = [
 ]
 
 _VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card",
-              "check-list"}
+              "check-list", "chip-sweep", "stat-pop", "kinetic-line"}
+
+
+def _refine_motif(motif: str, s: dict, used) -> str:
+    """Content beats keywords: a chip-sweep needs >=6 real chips; a stat-pop
+    needs a number; anything data-rich beats line art; a punchy title beats a
+    bare drawing (kinetic word-by-word)."""
+    import re as _re
+    details = s.get("details") or []
+    chips = s.get("chips") or []
+    if motif == "chip-sweep" and len(chips) < 6:
+        motif = "check-list" if len(details) >= 2 else "kinetic-line"
+    if motif == "stat-pop" and not any(_re.search(r"\d", d) for d in details):
+        motif = "check-list" if len(details) >= 2 else "kinetic-line"
+    if motif not in _VIGNETTES:  # line-art tier
+        if len(chips) >= 6 and "chip-sweep" not in used:
+            return "chip-sweep"
+        if any(_re.search(r"\d", d) for d in details) and "stat-pop" not in used:
+            return "stat-pop"
+        if len(details) >= 2 and "check-list" not in used:
+            return "check-list"
+        if len((s.get("title") or "").split()) <= 8 and "kinetic-line" not in used:
+            return "kinetic-line"
+    return motif
 
 
 def _pick_motif(text: str, used) -> str:
@@ -729,8 +788,11 @@ def _pick_motif(text: str, used) -> str:
     for motif, kws in _MOTIF_KEYWORDS:
         if motif not in used and any(k in lc for k in kws):
             return motif
+    # No keyword match: rotate LINE-ART only — a domain vignette (request
+    # table, chat) makes no sense for an unmatched title; _refine_motif
+    # upgrades from here based on the stop's actual content.
     for motif, _ in _MOTIF_KEYWORDS:
-        if motif not in used:
+        if motif not in _VIGNETTES and motif not in used:
             return motif
     return "card"
 
@@ -744,7 +806,7 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     os.makedirs(run_dir, exist_ok=True)
     pub = os.path.join(HERE, "studio", "public")
 
-    stops = plan_tour(url, run_dir, brain=brain)
+    stops = plan_tour(url, run_dir, brain=brain, max_stops=5)
 
     # Execute planned shots. Each additional screen recording must EARN its
     # place (Dennis 2026-07-18: "each screen recording should be different") —
@@ -755,10 +817,9 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     for i, s in enumerate(stops):
         s["seg"] = ""
         if s["page"] in filmed_pages:
-            s["motif"] = _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs)
-            if (s["motif"] not in _VIGNETTES and len(s.get("details") or []) >= 2
-                    and "check-list" not in used_motifs):
-                s["motif"] = "check-list"  # real info beats line art
+            s["motif"] = _refine_motif(
+                _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
+                s, used_motifs)
             used_motifs.add(s["motif"])
             print(f"[tour] stop {i + 1}: page already filmed -> motion graphic "
                   f"({s['motif']})", file=sys.stderr)
@@ -770,7 +831,9 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             smooth = _smooth60(seg, os.path.join(run_dir, f"shot-{i + 1}-60.mp4"))
             fp = _clip_fp(smooth)
             if any(_clips_similar(fp, kf) for kf in kept_fps):
-                s["motif"] = _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs)
+                s["motif"] = _refine_motif(
+                    _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
+                    s, used_motifs)
                 used_motifs.add(s["motif"])
                 print(f"[tour] stop {i + 1}: footage mirrors a kept clip -> "
                       f"motion graphic ({s['motif']})", file=sys.stderr)
@@ -779,7 +842,9 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                 kept_fps.append(fp)
                 filmed_pages.append(s["page"])
         else:
-            s["motif"] = _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs)
+            s["motif"] = _refine_motif(
+                _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
+                s, used_motifs)
             used_motifs.add(s["motif"])
     stops = [s for s in stops if s.get("seg") or s.get("motif")]
     if not stops:
@@ -828,9 +893,18 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
 
     # Spatial clusters spread FAR apart (>=2400px) so no neighbor bleeds into
     # another beat's framing; camera zooms slightly on titles.
-    cluster_pos = [(3600, 700), (700, 2800), (4200, 3400), (1800, 5000)]
+    cluster_pos = [(3600, 700), (700, 2800), (4200, 3400), (1800, 5000),
+                   (6400, 4600), (900, 6600)]
     for i, s in enumerate(stops):
         cx, cy = cluster_pos[i % len(cluster_pos)]
+        if s.get("motif") == "kinetic-line" and not s.get("seg"):
+            # The kinetic line IS the title — one beat, no duplicate headline.
+            elements.append({"id": f"g{i}", "kind": "graphic", "x": cx, "y": cy,
+                             "at": t_f + 12, "motif": "kinetic-line",
+                             "text": s["title"]})
+            moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.12})
+            t_f += int(3.5 * FPS)
+            continue
         # Title beat — the site's own words, section-title sized.
         elements.append({"id": f"t{i}", "kind": "headline", "x": cx, "y": cy - 340,
                          "w": 1180, "at": t_f + 14, "text": s["title"], "size": 72,
@@ -846,7 +920,7 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             elements.append({"id": f"v{i}", "kind": "video", "x": cx, "y": cy + 330,
                              "w": 1300, "at": t_f + 12, "videoSrc": rel})
             moments.append({"at": t_f, "x": cx, "y": cy + 340, "scale": 1.0})
-            t_f += int(min(seg_dur, 9.5) * FPS)
+            t_f += int(min(seg_dur, 7.0) * FPS)
         else:
             # Motion-graphic beat — a concept vignette that ENACTS the title
             # (or a line-art motif fallback) instead of a redundant recording.
@@ -854,10 +928,15 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
                              "y": cy + 300, "w": 760, "at": t_f + 12,
                              "motif": motif, "text": s["title"],
-                             "lines": s.get("details") or []})
+                             "lines": s.get("details") or [],
+                             "chips": s.get("chips") or []})
             # Push in on graphic beats — vignettes must fill the frame.
             moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.15})
-            t_f += int((6.5 if motif in _VIGNETTES else 5.5) * FPS)
+            beat_s = {"chip-sweep": 5.5, "stat-pop": 4.0, "kinetic-line": 3.5,
+                      "request-table": 5.5, "context-cards": 5.5,
+                      "chat-exchange": 5.5, "price-card": 5.0,
+                      "check-list": 5.0}.get(motif, 5.5)
+            t_f += int(beat_s * FPS)
 
     elements.append({"id": "cta", "kind": "cta", "x": 6200, "y": 1800,
                      "at": t_f + 16, "text": f"See it live at {host}",
