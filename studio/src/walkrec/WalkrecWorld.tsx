@@ -42,7 +42,7 @@ export interface WalkrecElement {
   label?: string;
   videoSrc?: string;
   logoSrc?: string;
-  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card";
+  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list";
   lines?: string[]; // verbatim site strings the vignette renders as content
 }
 
@@ -259,7 +259,7 @@ const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
   const rowLines = lines.filter((l) => l !== chipLine);
   const rows = [0, 1, 2];
   return (
-    <div style={{ background: "#FFFFFF", borderRadius: 36, padding: "34px 38px", minWidth: 640, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
+    <div style={{ background: t.card, borderRadius: 36, padding: "34px 38px", minWidth: 640, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, opacity: vinP(local, 0) }}>
         <HouseGlyph color={t.accent} size={34} />
         <div style={{ fontFamily: t.fontBody, fontSize: 19, fontWeight: 700, color: t.ink, opacity: 0.8, textAlign: "left" }}>{el.text}</div>
@@ -270,7 +270,7 @@ const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
         const line = rowLines[r];
         const initial = (line || el.text || "A")[0].toUpperCase();
         return (
-          <div key={r} style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 18px", borderRadius: 20, background: "rgba(15,23,56,0.035)", marginBottom: 14, opacity: p, transform: `translateY(${24 * (1 - p)}px)` }}>
+          <div key={r} style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 18px", borderRadius: 20, background: `${t.ink}0D`, marginBottom: 14, opacity: p, transform: `translateY(${24 * (1 - p)}px)` }}>
             <div style={{ width: 52, height: 52, borderRadius: 26, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               {initial}
             </div>
@@ -310,7 +310,7 @@ const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
         const p = vinP(local, c * 9, 16);
         const highlighted = c === 1;
         return (
-          <div key={c} style={{ width: 224, borderRadius: 28, background: "#FFFFFF", boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${t.accent}` : "none", outlineOffset: -2 }}>
+          <div key={c} style={{ width: 224, borderRadius: 28, background: t.card, boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${t.accent}` : "none", outlineOffset: -2 }}>
             <div style={{ height: 118, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <HouseGlyph color={t.accent} size={46} />
             </div>
@@ -327,7 +327,7 @@ const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
                 {[0, 1].map((k) => {
                   const chip = vinPop(local, 30 + c * 9 + k * 5);
                   return chip > 0 ? (
-                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 999, background: "rgba(15,23,56,0.05)", transform: `scale(${chip})` }}>
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 999, background: `${t.ink}12`, transform: `scale(${chip})` }}>
                       <div style={{ width: 10, height: 10, borderRadius: 5, background: t.accent, opacity: 0.75 }} />
                       <Bar w={34} h={9} o={0.34} color={t.ink} />
                     </div>
@@ -353,7 +353,7 @@ const VignetteChat: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> =
   const dot = (i: number) => 0.35 + 0.65 * Math.abs(Math.sin((Math.PI * (local - i * 4)) / 24));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18, width: 620, transform: `translateY(${vinFloat(local, 86)}px)` }}>
-      <div style={{ alignSelf: "flex-start", maxWidth: 440, padding: "20px 24px", borderRadius: "26px 26px 26px 8px", background: "#FFFFFF", boxShadow: "0 26px 60px -28px rgba(15,20,40,0.24)", opacity: pL, transform: `translateY(${20 * (1 - pL)}px)` }}>
+      <div style={{ alignSelf: "flex-start", maxWidth: 440, padding: "20px 24px", borderRadius: "26px 26px 26px 8px", background: t.card, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.24)", opacity: pL, transform: `translateY(${20 * (1 - pL)}px)` }}>
         <div style={{ fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: t.ink, textAlign: "left", lineHeight: 1.4 }}>{el.text}</div>
       </div>
       <div style={{ alignSelf: "flex-end", maxWidth: 440, padding: "18px 24px", borderRadius: "26px 26px 8px 26px", background: t.accent, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.3)", opacity: pR, transform: `translateY(${20 * (1 - pR)}px)` }}>
@@ -373,7 +373,7 @@ const VignetteChat: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> =
         )}
       </div>
       {pCard > 0 ? (
-        <div style={{ alignSelf: "flex-end", display: "flex", alignItems: "center", gap: 16, padding: "16px 22px", borderRadius: 22, background: "#FFFFFF", boxShadow: "0 30px 64px -28px rgba(15,20,40,0.26)", transform: `scale(${pCard})`, transformOrigin: "bottom right" }}>
+        <div style={{ alignSelf: "flex-end", display: "flex", alignItems: "center", gap: 16, padding: "16px 22px", borderRadius: 22, background: t.card, boxShadow: "0 30px 64px -28px rgba(15,20,40,0.26)", transform: `scale(${pCard})`, transformOrigin: "bottom right" }}>
           <div style={{ width: 84, height: 62, borderRadius: 14, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <HouseGlyph color={t.accent} size={34} />
           </div>
@@ -407,7 +407,7 @@ const VignettePriceCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const rest = lines.filter((l) => l !== price && !/^[€$£¥]\s?\d[\d.,]*$/.test(l.trim()));
   const pPrice = vinPop(local, 24, 14);
   return (
-    <div style={{ background: "#FFFFFF", borderRadius: 36, padding: "40px 48px", minWidth: 560, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
+    <div style={{ background: t.card, borderRadius: 36, padding: "40px 48px", minWidth: 560, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
       <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", color: t.ink, opacity: 0.55 * vinP(local, 0), textAlign: "left" }}>
         {(el.text || "").toUpperCase()}
       </div>
@@ -439,6 +439,7 @@ const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["
   "context-cards": VignetteContextCards,
   "chat-exchange": VignetteChat,
   "price-card": VignettePriceCard,
+  "check-list": VignettePriceCard,
 };
 
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({

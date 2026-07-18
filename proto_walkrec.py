@@ -295,10 +295,21 @@ def _site_bg_from_shot(shot_path: str) -> str:
         r, g, b = raw[i], raw[i + 1], raw[i + 2]
         lum = (r * 299 + g * 587 + b * 114) // 1000
         if lum < 150:
-            continue  # background of a SaaS page is light
+            continue  # light pass first — most SaaS pages
         q = (r // 16, g // 16, b // 16)
         counts[q] += 1
         buckets.setdefault(q, []).append((r, g, b))
+    if not counts or counts.most_common(1)[0][1] < 96:
+        # DARK site (InsForge-class): most frequent dark pixel instead.
+        counts.clear(); buckets.clear()
+        for i in range(0, len(raw) - 2, 3):
+            r, g, b = raw[i], raw[i + 1], raw[i + 2]
+            lum = (r * 299 + g * 587 + b * 114) // 1000
+            if lum > 90:
+                continue
+            q = (r // 16, g // 16, b // 16)
+            counts[q] += 1
+            buckets.setdefault(q, []).append((r, g, b))
     if not counts:
         return ""
     q, n = counts.most_common(1)[0]
@@ -699,7 +710,8 @@ _MOTIF_KEYWORDS = [
     ("house", ("real ", "rent")),
 ]
 
-_VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card"}
+_VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card",
+              "check-list"}
 
 
 def _pick_motif(text: str, used) -> str:
@@ -736,6 +748,9 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
         s["seg"] = ""
         if s["page"] in filmed_pages:
             s["motif"] = _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs)
+            if (s["motif"] not in _VIGNETTES and len(s.get("details") or []) >= 2
+                    and "check-list" not in used_motifs):
+                s["motif"] = "check-list"  # real info beats line art
             used_motifs.add(s["motif"])
             print(f"[tour] stop {i + 1}: page already filmed -> motion graphic "
                   f"({s['motif']})", file=sys.stderr)
@@ -770,9 +785,13 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     manifest = brand_extract._find_capture_manifest(logo_from or run_dir)
     shot_png = brand_extract._shot_path_from_manifest(manifest) if manifest else ""
     site_bg = _site_bg_from_shot(shot_png) or pal.get("bg") or "#FFFFFF"
-
-    theme = {"bg": site_bg, "ink": pal.get("ink") or "#0F2338",
-             "inkMuted": "#6B6257", "accent": pal["accent"], "card": "#FFFFFF",
+    _r, _g, _b = (int(site_bg[i:i + 2], 16) for i in (1, 3, 5))
+    dark_world = (_r * 299 + _g * 587 + _b * 114) // 1000 < 120
+    theme = {"bg": site_bg,
+             "ink": "#F2F5F9" if dark_world else (pal.get("ink") or "#0F2338"),
+             "inkMuted": "#9AA3B2" if dark_world else "#6B6257",
+             "accent": pal["accent"],
+             "card": "#191C22" if dark_world else "#FFFFFF",
              "fontDisplay": "Manrope, sans-serif", "fontBody": "Inter, sans-serif",
              "wordmark": name}
     logo = theme_src.get("logo_src")
