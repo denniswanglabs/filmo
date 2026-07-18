@@ -13,6 +13,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# DASHBOARD_BASE is bound at import time; drop any ambient override so the
+# default-URL check below asserts the committed default, not this shell's env.
+os.environ.pop("FILMO_PUBLIC_BASE", None)
+
 import stripe_earn  # noqa: E402
 
 _checks = 0
@@ -40,7 +44,7 @@ def test_dryrun_params_wellformed():
     ok(p["line_items[0][price_data][currency]"] == "usd", "currency in price_data")
     ok(p["line_items[0][quantity]"] == 1, "quantity == 1")
     ok(p["line_items[0][price_data][product_data][name]"] == "Stripe promo", "product name set")
-    ok("test-001" in p["success_url"] and p["success_url"].startswith("http://localhost:3030"),
+    ok("test-001" in p["success_url"] and p["success_url"].startswith("https://filmostudio.vercel.app"),
        "success_url points back at dashboard with job_id")
     ok("test-001" in p["cancel_url"], "cancel_url carries job_id")
     # No API call happened => no network keys leaked, no spend.
