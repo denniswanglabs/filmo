@@ -1396,6 +1396,28 @@ async function processJob(job) {
   await syncEvents(runId, ledger, lastSeq, suppressPay)   // final flush
   const mapped = mapLedgerToRun(ledger)
 
+  // WALKREC VERDICT: the classic ledger doesn't exist for walkrec builds
+  // (the python pipeline narrates via agent_events instead), so the ledger
+  // check above would fail every exit-0 walkrec run. Delivery receipt =
+  // runs.final_url, PATCHed by the pipeline itself (strategy-flow upload,
+  // no gateway body cap).
+  if (p.look === 'walkrec') {
+    const { data: fresh } = await ifCall('runs.select(walkrec-receipt)',
+      () => db.database.from('runs').select('final_url').eq('id', runId).maybeSingle())
+    const shippedUrl = fresh && fresh.final_url
+    if (code === 0 && shippedUrl) {
+      await setRun(runId, { status: 'delivered', phase: 'delivered' })
+      await setJob(job.id, { status: 'done' })
+      const totalSec = ((Date.now() - t0) / 1000).toFixed(1)
+      log(`  DELIVERED walkrec run ${runKey} -> ${shippedUrl}  [${totalSec}s, claimed_by=${WORKER_ID}]`)
+    } else {
+      await setRun(runId, { status: 'failed', phase: 'failed' })
+      await setJob(job.id, { status: 'failed', error: `walkrec exit ${code}, final_url ${shippedUrl ? 'set' : 'missing'}` })
+      log(`  FAILED walkrec run ${runKey} (exit ${code}, final_url ${shippedUrl ? 'set' : 'missing'})`)
+    }
+    return
+  }
+
   if (code === 0 && (mapped.status === 'delivered' || mapped.status === 'completed_with_warnings')) {
     // SHIP. uploadVideo -> putObject -> ifCall is BOUNDED (each attempt timeout-capped,
     // 3 attempts), so the mp4 upload can never hang the worker (this is the call that

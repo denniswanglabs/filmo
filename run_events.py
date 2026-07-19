@@ -124,6 +124,20 @@ def _upload_artifact(run_id: str, seq: int, path: str) -> str:
     return upload_object(f"agent/{run_id}/{seq}{ext}", path)
 
 
+_SINK_THREADS: list = []
+
+
+def flush_sinks(timeout: float = 120.0) -> None:
+    """Join pending sink threads. The bus contract's exit clause: daemon
+    threads die with the process, so a run's TAIL events (terminal events,
+    the film artifact) were lost when the pipeline exited right after its
+    last emit. Callers that end a run MUST flush."""
+    deadline = time.time() + timeout
+    for t in list(_SINK_THREADS):
+        t.join(max(0.0, deadline - time.time()))
+    _SINK_THREADS.clear()
+
+
 def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
     rid = _hosted_run_id(run_dir)
     if not (rid and _IF_BASE and _IF_KEY):
@@ -158,7 +172,9 @@ def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
         except Exception as e:
             print(f"[sink!] artifact {evt['kind']} seq {evt['seq']}: {e}",
                   file=sys.stderr)
-    threading.Thread(target=work, daemon=True).start()
+    t = threading.Thread(target=work, daemon=True)
+    _SINK_THREADS.append(t)
+    t.start()
 
 
 def _events_path(run_dir: str) -> str:
