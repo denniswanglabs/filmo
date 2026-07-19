@@ -101,6 +101,7 @@ export default function Workspace({ runKey, getToken }: {
   const [liveTick, setLiveTick] = useState(0)
   const [queueAhead, setQueueAhead] = useState<number | null>(null)
   const [filmUrl, setFilmUrl] = useState('')
+  const [runStatus, setRunStatus] = useState('')
   const [localMsgs, setLocalMsgs] = useState<LocalMsg[]>([])
   const [input, setInput] = useState('')
   const [pinned, setPinned] = useState<AgentEvent | null>(null)
@@ -159,6 +160,8 @@ export default function Workspace({ runKey, getToken }: {
           if (typeof res.queueAhead === 'number') setQueueAhead(res.queueAhead)
           else if (res.events.length) setQueueAhead(null)
           if (res.filmUrl) setFilmUrl(res.filmUrl)
+          const st = (res.run as { status?: string } | undefined)?.status
+          if (st) setRunStatus(st)
         }
       } catch { /* transient */ }
       setTimeout(tick, 1500)
@@ -257,7 +260,12 @@ export default function Workspace({ runKey, getToken }: {
   }
   items.sort((a, b) => a.ts - b.ts)
 
-  const working = !S.done
+  // MOTION MEANS WORK: the mark moves only while the studio is actually
+  // doing something. A terminal run row ends it even if the terminal EVENT
+  // never arrived (a sink brownout used to leave it spinning forever on a
+  // finished film).
+  const TERMINAL = ['delivered', 'failed', 'completed_with_warnings']
+  const working = !S.done && !TERMINAL.includes(runStatus)
   const host = (S.site || '').replace(/^https?:\/\//, '').split('/')[0]
   const brandTitle = host
     ? host.split('.')[0].charAt(0).toUpperCase()
@@ -471,6 +479,11 @@ export default function Workspace({ runKey, getToken }: {
               <span className="wk-tailblob" />
               {pending ? 'Thinking…' : `${verb}… ${elapsed}s`}
             </div>
+          ) : items.length ? (
+            <div className="t-verb rest">
+              <span className="wk-tailblob still" />
+              {S.status === 'failed' ? 'Stopped' : 'Finished'}
+            </div>
           ) : null}
         </div>
         <div className="wk-inputrow">
@@ -520,15 +533,25 @@ export default function Workspace({ runKey, getToken }: {
         .wk-ic.on, .wk-ic:hover { color:#1B1B1A; }
         .wk-railspace { flex:1; }
         .wk-filmomark svg { width:26px; height:26px; opacity:0.9; }
-        .wk-tailblob { display:inline-block; width:16px; height:16px;
+        .wk-tailblob { display:inline-block; width:26px; height:26px;
+          position:relative; flex-shrink:0; vertical-align:-7px;
           background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
-          animation:wkmorph 2.4s ease-in-out infinite; position:relative; }
+          border-radius:44% 56% 52% 48% / 50% 46% 54% 50%;
+          animation:wkmorph 2.4s ease-in-out infinite; }
+        .wk-tailblob::after { content:""; position:absolute; width:34%;
+          height:34%; right:16%; top:26%; background:#fff; border-radius:50%;
+          animation:wkhole 2.4s ease-in-out infinite; }
+        /* AT REST: perfectly round, hole centred, nothing animating. */
+        .wk-tailblob.still { animation:none; border-radius:50%; }
+        .wk-tailblob.still::after { animation:none;
+          right:auto; top:50%; left:50%; transform:translate(-50%, -50%); }
         .wk-tabs { display:flex; gap:2px; background:#F1F1EF; border-radius:8px;
           padding:2px; }
         .wk-tabs button { border:none; background:none; font:12px Inter,sans-serif;
           padding:4px 12px; border-radius:6px; color:#8A8A86; cursor:pointer; }
         .wk-tabs button.on { background:#fff; color:#1B1B1A;
           box-shadow:0 1px 2px rgba(0,0,0,0.06); }
+        .t-verb.rest { color:#B6B6B2; }
         .t-user.dim { opacity:0.45; }
         .t-chev { border:none; background:none; padding:2px; cursor:pointer;
           color:#B6B6B2; flex-shrink:0; }
