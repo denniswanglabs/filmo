@@ -714,9 +714,17 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
           {el.logoSrc ? (
             <Img src={resolveAsset(el.logoSrc)} style={{ width: 84, height: 84, objectFit: "contain", borderRadius: 20, margin: "0 auto 26px", display: "block" }} />
           ) : null}
-          <div style={{ fontFamily: t.fontDisplay, fontSize: 76, fontWeight: 700, letterSpacing: "-0.02em", color: t.ink }}>
-            {el.text}
+          {/* Pipeline-authored copy declares its lines — meaning-bearing
+              breaks are never left to width-wrapping (Dennis 2026-07-18:
+              the CTA wrapped "See it live / at / palmier.io"). */}
+          <div style={{ fontFamily: t.fontDisplay, fontSize: 66, fontWeight: 700, letterSpacing: "-0.02em", color: t.ink, whiteSpace: "nowrap" }}>
+            {el.label ? el.text : el.text}
           </div>
+          {el.label ? (
+            <div style={{ fontFamily: t.fontDisplay, fontSize: el.label.length > 16 ? 46 : 58, fontWeight: 700, letterSpacing: "-0.01em", color: t.accent, marginTop: 6, whiteSpace: "nowrap" }}>
+              {el.label}
+            </div>
+          ) : null}
           <div
             style={{
               display: "inline-block",

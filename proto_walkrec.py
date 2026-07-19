@@ -1370,7 +1370,7 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             t_f += int(beat_s * FPS)
 
     elements.append({"id": "cta", "kind": "cta", "x": 6200, "y": 1800,
-                     "at": t_f + 16, "text": f"See it live at {host}",
+                     "at": t_f + 16, "text": "See it live", "label": host,
                      "value": "Get started", "logoSrc": logo_rel or None, "dir": "bottom"})
     moments.append({"at": t_f, "x": 6200, "y": 1810, "scale": 0.98})
     t_f += int(4.6 * FPS)
