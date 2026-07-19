@@ -1117,6 +1117,22 @@ async function processReRender(job) {
 async function processDirectorJob(job) {
   const p = job.params || {}
   const runKey = p.run_key || p.runKey
+  // REPLICA AFFINITY: a director edit re-renders from the builder's working
+  // files (stops.json + clips) which live on ONE replica's disk. If this
+  // replica doesn't hold them, bounce the job back to the queue so the
+  // sibling can claim it; after 3 bounces proceed anyway — director_job
+  // answers gracefully when the files are truly gone.
+  const bounces = Number(p._affinity || 0)
+  if (!existsSync(join(PIPELINE_DIR, 'runs', String(runKey), 'stops.json'))
+      && bounces < 3) {
+    log(`director job ${job.id}: run files not on ${WORKER_ID} — bounce ${bounces + 1}/3`)
+    await sleep(1500 + Math.floor(Math.random() * 2500))
+    await setJob(job.id, {
+      status: 'queued', claimed_at: null, claimed_by: null,
+      params: { ...p, _affinity: bounces + 1 },
+    })
+    return
+  }
   log(`director job ${job.id} -> run ${runKey}`)
   const code = await new Promise((resolve) => {
     const child = spawn(PYTHON_BIN,
