@@ -590,6 +590,77 @@ _LOGO_ALT_JS = """
 """
 
 
+_TESTIMONIAL_MARKERS = ("from founders", "testimonial", "what people say",
+                        "loved by", "customers say", "wall of love")
+
+_QUOTES_JS = """
+() => {
+  let host = null;
+  for (const el of document.querySelectorAll("*")) {
+    const t = (el.textContent || "").trim().toLowerCase();
+    if ((t.includes("testimonial") || t.includes("from founders") ||
+         t.includes("wall of love") || t.includes("what people say")) &&
+        (!host || t.length < (host.textContent || "").length))
+      host = el;
+  }
+  if (!host) return [];
+  let sec = host;
+  for (let i = 0; i < 6 && sec.parentElement; i++) {
+    sec = sec.parentElement;
+    if ((sec.innerText || "").length > 300) break;
+  }
+  const lines = (sec.innerText || "").split("\\n").map(s => s.trim()).filter(Boolean);
+  const attrRe = /@|^(founder|co-founder|ceo|cto|head of|director)\\b/i;
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const isQ = /^[\\u201C\\u201D"']/.test(l) || (l.length >= 40 && !attrRe.test(l));
+    if (!isQ || l.length < 25 || l.length > 300) continue;
+    let name = "", attr = "";
+    for (let j = i + 1; j <= i + 2 && j < lines.length; j++) {
+      if (attrRe.test(lines[j])) attr = lines[j];
+      else if (!name && lines[j].length <= 40 && /^[A-Z]/.test(lines[j])) name = lines[j];
+    }
+    if (attr) out.push({ q: l.replace(/^[\\u201C\\u201D"']+|[\\u201C\\u201D"']+$/g, ""), name, a: attr });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+"""
+
+
+def _harvest_quotes(url: str):
+    """REAL testimonial quotes from the marker page's live DOM (the sections
+    are lazy-loaded and quote sentences exceed label-length caps, so neither
+    static corpus nor the detail harvester can see them). Never raises."""
+    try:
+        import walk_native as wn
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = wn._launch_browser(p)
+            ctx = browser.new_context(viewport=wn.VIEWPORT,
+                                      user_agent=wn._DESKTOP_UA,
+                                      extra_http_headers=wn._EXTRA_HEADERS)
+            ctx.add_init_script(wn._STEALTH_INIT_JS)
+            page = ctx.new_page()
+            page.goto(wn._norm_url(url), wait_until="domcontentloaded",
+                      timeout=45000)
+            wn._wait_for_spa_hydration(page)
+            page.evaluate("""async () => {
+              const h = document.body.scrollHeight;
+              for (let y = 0; y <= h; y += 600) {
+                window.scrollTo(0, y);
+                await new Promise(r => setTimeout(r, 120));
+              }
+            }""")
+            page.wait_for_timeout(1000)
+            quotes = page.evaluate(_QUOTES_JS) or []
+            browser.close()
+        return [q for q in quotes if q.get("q") and q.get("a")][:3]
+    except Exception:
+        return []
+
+
 def _harvest_logo_alt_names(url: str):
     """Partner names from the works-with section's OWN logo images (alt text
     or filename) — the tools are usually rendered as images with no text
@@ -869,6 +940,18 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
             have = s.get("details") or []
             mined = _harvest_details(corpus_nl, s.get("target", ""), s["title"])
             s["details"] = (have + [m for m in mined if m not in have])[:4]
+    marker_slug = next((slug for slug, text in pages.items()
+                        if any(m in text.lower() for m in _TESTIMONIAL_MARKERS)),
+                       "")
+    if marker_slug:
+        for s in stops:
+            hay = (s["title"] + " " + " ".join(s.get("details") or [])).lower()
+            if any(m in hay for m in _TESTIMONIAL_MARKERS) or \
+                    any("@" in d for d in (s.get("details") or [])):
+                s["quotes"] = _harvest_quotes(page_urls.get(marker_slug, url))
+                print(f"[tour] quotes harvested: {len(s['quotes'])}",
+                      file=sys.stderr)
+                break
     print("[tour] plan: " + " | ".join(s["title"] for s in stops), file=sys.stderr)
     return stops
 
@@ -950,7 +1033,7 @@ _MOTIF_KEYWORDS = [
 
 _VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card",
               "check-list", "chip-sweep", "stat-pop", "kinetic-line",
-              "logo-wall", "quote-card"}
+              "logo-wall", "quote-card", "people-wall"}
 
 
 _STAT_RE = __import__("re").compile(
@@ -977,18 +1060,20 @@ def _refine_motif(motif: str, s: dict, used) -> str:
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
     if motif == "stat-pop" and not any(_is_stat_line(d) for d in details):
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
-    if (motif == "quote-card" and not any(
-            _re.search(r"@|founder|ceo|cto", d, _re.I) or len(d) >= 20
-            for d in details)):
-        motif = "check-list" if len(details) >= 2 else "kinetic-line"
+    if motif == "quote-card" and not s.get("quotes"):
+        motif = ("people-wall"
+                 if sum(1 for d in details if _re.search(r"@", d)) >= 2
+                 else ("check-list" if len(details) >= 2 else "card"))
     # MINIMUM-MATERIAL contract: a beat must carry real content. kinetic-line
     # needs a >=3-word line AND must never swallow a stop that has details
     # (the 'Testimonials' one-word empty scene, Palmier 2026-07-18).
     if motif == "kinetic-line":
         words = len((s.get("title") or "").split())
-        if details:
-            motif = ("quote-card" if any(
-                _re.search(r"@|founder|ceo|cto", d, _re.I) for d in details)
+        if s.get("quotes"):
+            motif = "quote-card"
+        elif details:
+            motif = ("people-wall" if sum(
+                1 for d in details if _re.search(r"@", d)) >= 2
                 else "check-list")
         elif words < 3:
             motif = "card"  # line-art fallback; better a drawing than a word
@@ -997,9 +1082,11 @@ def _refine_motif(motif: str, s: dict, used) -> str:
             return "logo-wall"
         if any(_is_stat_line(d) for d in details) and "stat-pop" not in used:
             return "stat-pop"
-        if any(_re.search(r"@|founder|ceo|cto", d, _re.I) for d in details) \
-                and "quote-card" not in used:
+        if s.get("quotes") and "quote-card" not in used:
             return "quote-card"
+        if (sum(1 for d in details if _re.search(r"@", d)) >= 2
+                and "people-wall" not in used):
+            return "people-wall"
         if len(details) >= 2:
             return "check-list"  # may repeat: real info beats line art
         if (not details and 3 <= len((s.get("title") or "").split()) <= 8
@@ -1202,7 +1289,7 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                              "chips": s.get("chips") or [], "logos": logos})
             moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.12})
             beat_s = {"chip-sweep": 5.5, "stat-pop": 4.0, "kinetic-line": 3.5,
-                      "logo-wall": 5.0}.get(motif, 5.5)
+                      "logo-wall": 5.0, "people-wall": 5.0}.get(motif, 5.5)
             t_f += int(beat_s * FPS)
             continue
         if s.get("motif") == "kinetic-line" and not s.get("seg"):
@@ -1235,11 +1322,12 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                                  "x": cx + sign * 330, "y": cy, "at": t_f + 20,
                                  "motif": motif, "text": s["title"],
                                  "lines": s.get("details") or [],
-                                 "chips": s.get("chips") or [], "logos": logos,
-                                 "narrow": True})
+                                 "chips": s.get("chips") or [],
+                                 "quotes": s.get("quotes") or [],
+                                 "logos": logos, "narrow": True})
                 moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.05})
                 beat_s = {"chip-sweep": 6.0, "stat-pop": 4.5, "logo-wall": 5.5,
-                          "quote-card": 5.5}.get(motif, 6.0)
+                          "quote-card": 5.5, "people-wall": 5.5}.get(motif, 6.0)
                 t_f += int(beat_s * FPS)
                 continue
         # Title beat — the site's own words, section-title sized (stacked).
@@ -1270,6 +1358,7 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                              "motif": motif, "text": s["title"],
                              "lines": s.get("details") or [],
                              "chips": s.get("chips") or [],
+                             "quotes": s.get("quotes") or [],
                              "logos": logos})
             # Push in on graphic beats — vignettes must fill the frame.
             moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.15})

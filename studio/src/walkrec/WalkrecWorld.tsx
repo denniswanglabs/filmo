@@ -42,12 +42,13 @@ export interface WalkrecElement {
   label?: string;
   videoSrc?: string;
   logoSrc?: string;
-  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list" | "chip-sweep" | "stat-pop" | "kinetic-line" | "logo-wall";
+  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list" | "chip-sweep" | "stat-pop" | "kinetic-line" | "logo-wall" | "people-wall";
   lines?: string[]; // verbatim site strings the vignette renders as content
   chips?: string[]; // short real labels for the chip sweep
   align?: "left" | "center"; // split layouts compose titles left/right
   narrow?: boolean; // split layouts get narrower fluid vignettes
   logos?: { name: string; src: string }[]; // resolved third-party marks
+  quotes?: { q: string; name?: string; a: string }[]; // real testimonial quotes
 }
 
 export interface WalkrecMoment {
@@ -562,12 +563,12 @@ const VignetteQuoteCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const frame = useCurrentFrame();
   const local = frame - el.at;
   const lines = el.lines || [];
-  // "@" (or a role-comma pattern) marks an ATTRIBUTION; the quote is the
-  // first line that is NOT one — roles must never invert (an attribution
-  // rendered as the quote is wrong information).
+  // A REAL harvested quote wins; otherwise "@" marks an attribution and the
+  // quote is the first non-attribution line — roles must never invert.
   const isAttr = (l: string) => /@/.test(l) || /^(founder|co-founder|ceo|cto|head of|director)\b/i.test(l);
-  const attr = lines.find(isAttr);
-  const quote = lines.find((l) => !isAttr(l) && l.length >= 12) || "";
+  const hq = (el.quotes || [])[0];
+  const attr = hq ? [hq.name, hq.a].filter(Boolean).join(" · ") : lines.find(isAttr);
+  const quote = hq ? hq.q : (lines.find((l) => !isAttr(l) && l.length >= 12) || "");
   const pQ = vinP(local, 6, 18);
   const pA = vinP(local, 30, 14);
   return (
@@ -575,7 +576,7 @@ const VignetteQuoteCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
       <svg viewBox="0 0 48 36" style={{ width: 44, height: 33, marginBottom: 18, opacity: vinP(local, 0, 12) }}>
         <path d="M 0 36 V 22 Q 0 0 20 0 v 10 Q 10 10 10 22 h 10 v 14 Z M 28 36 V 22 Q 28 0 48 0 v 10 Q 38 10 38 22 h 10 v 14 Z" fill={t.accent} />
       </svg>
-      <div style={{ fontFamily: t.fontDisplay, fontSize: el.narrow ? 28 : 34, fontWeight: 600, lineHeight: 1.35, color: t.ink, opacity: pQ, transform: `translateY(${18 * (1 - pQ)}px)` }}>
+      <div style={{ fontFamily: t.fontDisplay, fontSize: quote.length > 110 ? (el.narrow ? 23 : 27) : (el.narrow ? 28 : 34), fontWeight: 600, lineHeight: 1.4, color: t.ink, opacity: pQ, transform: `translateY(${18 * (1 - pQ)}px)` }}>
         {quote}
       </div>
       {attr ? (
@@ -583,6 +584,31 @@ const VignetteQuoteCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
           {attr}
         </div>
       ) : null}
+    </div>
+  );
+};
+
+/** Social proof without a verifiable quote: the site's real founder/role
+ *  tags as cards — never a heading dressed as a quote. */
+const VignettePeopleWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const tags = (el.lines || []).filter((l) => /@/.test(l)).slice(0, 4);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 20, justifyContent: "center", width: el.narrow ? 620 : 900, transform: `translateY(${vinFloat(local, tags.length * 6 + 40)}px)` }}>
+      {tags.map((tag, i) => {
+        const p = vinPop(local, i * 6, 12);
+        if (p <= 0) return null;
+        const initial = (tag.split("@")[1] || tag).trim()[0] || "?";
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 24px", borderRadius: 22, background: t.card, boxShadow: "0 24px 52px -26px rgba(15,20,40,0.25)", transform: `scale(${p})` }}>
+            <div style={{ width: 48, height: 48, borderRadius: 24, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 21, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              {initial.toUpperCase()}
+            </div>
+            <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 600, color: t.ink, textAlign: "left", maxWidth: 320 }}>{tag}</div>
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -598,6 +624,7 @@ const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["
   "kinetic-line": VignetteKineticLine,
   "logo-wall": VignetteLogoWall,
   "quote-card": VignetteQuoteCard,
+  "people-wall": VignettePeopleWall,
 };
 
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({
