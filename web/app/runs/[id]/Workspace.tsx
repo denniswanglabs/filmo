@@ -44,7 +44,17 @@ function reduce(evts: AgentEvent[]) {
     if (k === 'brand.logo' && e.artifact_url) S.logo = e.artifact_url
     if (k === 'decide.plan') { S.plan = e.detail.split('\n'); S.phase = 'decide' }
     if (k.startsWith('film.')) S.phase = 'film'
-    if (k === 'design.beat' && e.artifact_url) { S.beats.push(e); S.phase = 'design' }
+    if (k === 'design.beat' && e.artifact_url) {
+      // A review round re-emits its beats — REPLACE by beat index (the
+      // title carries "Beat N:") so the timeline strip never shows a
+      // mixed set of superseded and current beats.
+      const m = e.title.match(/^Beat (\d+):/)
+      const idx = m ? parseInt(m[1], 10) : S.beats.length + 1
+      const at = S.beats.findIndex((b) => (b.title.match(/^Beat (\d+):/) || [])[1] === String(idx))
+      if (at >= 0) S.beats[at] = e
+      else S.beats.push(e)
+      S.phase = 'design'
+    }
     if (k === 'assemble.render') S.phase = 'assemble'
     if (k.startsWith('review.')) S.phase = 'review'
     if (k === 'assemble.film') { S.film = e.artifact_url; S.filmSeq = e.seq }
