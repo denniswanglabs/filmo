@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -1223,20 +1224,34 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             if (os.path.exists(_cs.CAPTURE_PY)
                     and os.path.abspath(_cs.CAPTURE_PY)
                     != os.path.abspath(sys.executable)):
+                # PROCESS-GROUP TIMEOUT: subprocess.run(capture_output=True,
+                # timeout=...) deadlocks on timeout — it kills the child but
+                # then blocks on the pipe, which the orphaned chromium
+                # GRANDCHILD keeps open (observed: one wedged shot pinned a
+                # run for 15 minutes). Kill the whole group instead.
+                proc = subprocess.Popen(
+                    [_cs.CAPTURE_PY, os.path.join(HERE, "walk_shot.py"),
+                     s["page"], "" if i == 0 else s["target"], seg,
+                     run_dir, "9.0"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, start_new_session=True)
                 try:
-                    r = subprocess.run(
-                        [_cs.CAPTURE_PY, os.path.join(HERE, "walk_shot.py"),
-                         s["page"], "" if i == 0 else s["target"], seg,
-                         run_dir, "9.0"],
-                        timeout=240, capture_output=True, text=True)
-                    ok = r.returncode == 0 and os.path.exists(seg)
-                    if not ok:
-                        capture_err = ((r.stderr or "") + "\n"
-                                       + (r.stdout or "")).strip()[-400:]
-                        print(f"[walkrec] shot retry rc={r.returncode}: "
-                              f"{capture_err}", file=sys.stderr)
+                    out_txt, _ = proc.communicate(timeout=240)
                 except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except Exception:
+                        proc.kill()
+                    try:
+                        out_txt, _ = proc.communicate(timeout=15)
+                    except Exception:
+                        out_txt = ""
                     capture_err = "capture timed out after 240s"
+                ok = proc.returncode == 0 and os.path.exists(seg)
+                if not ok and not capture_err:
+                    capture_err = (out_txt or "").strip()[-400:]
+                    print(f"[walkrec] shot retry rc={proc.returncode}: "
+                          f"{capture_err}", file=sys.stderr)
             else:
                 capture_err = "no capture interpreter available"
         if not ok:
