@@ -12,6 +12,12 @@ const VERBS: Record<string, string> = {
   read: 'Scouting', decide: 'Framing', film: 'Rolling',
   design: 'Cutting', assemble: 'Printing', review: 'Grading',
 }
+function md(text: string) {
+  // Ploy-grammar light markdown: **bold leads**, keep everything else plain.
+  const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  return esc.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+}
+
 const THREAD_KINDS = new Set([
   'run.start', 'read.page', 'read.quotes', 'decide.plan', 'decide.guard',
   'film.recording', 'film.shot', 'design.beat', 'review.lint',
@@ -25,7 +31,7 @@ function reduce(evts: AgentEvent[]) {
   const S = {
     pages: [] as AgentEvent[], plan: [] as string[], beats: [] as AgentEvent[],
     review: [] as AgentEvent[], film: '', filmSeq: 0, phase: 'read',
-    status: '', lastTitle: '', site: '', done: false,
+    status: '', lastTitle: '', site: '', done: false, logo: '',
   }
   for (const e of evts) {
     const k = e.kind
@@ -35,6 +41,7 @@ function reduce(evts: AgentEvent[]) {
       S.done = false
     }
     if (k === 'read.page') { S.pages.push(e); S.phase = 'read' }
+    if (k === 'brand.logo' && e.artifact_url) S.logo = e.artifact_url
     if (k === 'decide.plan') { S.plan = e.detail.split('\n'); S.phase = 'decide' }
     if (k.startsWith('film.')) S.phase = 'film'
     if (k === 'design.beat' && e.artifact_url) { S.beats.push(e); S.phase = 'design' }
@@ -59,6 +66,9 @@ export default function Workspace({ runKey, getToken }: {
   const [localMsgs, setLocalMsgs] = useState<LocalMsg[]>([])
   const [input, setInput] = useState('')
   const [pinned, setPinned] = useState<AgentEvent | null>(null)
+  const [tab, setTab] = useState<'film' | 'beats'>('film')
+  const [openWork, setOpenWork] = useState<Record<number, boolean>>({})
+  const [pending, setPending] = useState(false)
   const phaseStart = useRef(Date.now())
   const lastPhase = useRef('')
   const threadRef = useRef<HTMLDivElement>(null)
@@ -123,6 +133,7 @@ export default function Workspace({ runKey, getToken }: {
     if (!text) return
     setInput('')
     setLocalMsgs((m) => [...m, { ts: Date.now() / 1000, kind: 'user', text }])
+    setPending(true)
     const res = await sendDirectorMessage(runKey, text, (await getToken()) || '')
     if ('error' in res) {
       setLocalMsgs((m) => [...m, {
@@ -137,12 +148,19 @@ export default function Workspace({ runKey, getToken }: {
     | { ts: number; type: 'user' | 'dir'; text: string }
     | { ts: number; type: 'work'; e: AgentEvent }
   > = []
+  let sawDirectorReply = false
   for (const e of evts) {
     if (!THREAD_KINDS.has(e.kind)) continue
     if (e.kind === 'chat.user') items.push({ ts: e.ts, type: 'user', text: e.title })
-    else if (e.kind === 'chat.director') items.push({ ts: e.ts, type: 'dir', text: e.title })
-    else items.push({ ts: e.ts, type: 'work', e })
+    else if (e.kind === 'chat.director') {
+      items.push({ ts: e.ts, type: 'dir', text: e.title })
+      sawDirectorReply = true
+    } else items.push({ ts: e.ts, type: 'work', e })
   }
+  useEffect(() => {
+    if (pending && sawDirectorReply) setPending(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evts.length])
   for (const m of localMsgs) {
     const dupe = evts.some((e) =>
       (e.kind === 'chat.user' || e.kind === 'chat.director')
@@ -159,7 +177,16 @@ export default function Workspace({ runKey, getToken }: {
   let screen: React.ReactNode = null
   let pill = ''
   const lastPage = S.pages[S.pages.length - 1]
-  if (pinned) {
+  if (tab === 'beats' && S.beats.length) {
+    screen = (
+      <div className="wk-grid">
+        {S.beats.map((b) => (
+          <div key={b.seq} className="beat"><img src={b.artifact_url} alt="" /></div>
+        ))}
+      </div>
+    )
+    pill = 'Beats — every scene of the film'
+  } else if (pinned) {
     screen = <img src={pinned.artifact_url} alt="" />
     pill = pinned.title
   } else if (liveFresh && working) {
@@ -206,6 +233,29 @@ export default function Workspace({ runKey, getToken }: {
   if (!mounted) return null
   return createPortal(
     <div className="wk-root">
+      <div className="wk-iconrail">
+        <div className="wk-brand" title={S.site || 'brand'}>
+          {S.logo
+            ? <img src={S.logo} alt="" />
+            : <span>{(S.site || 'F')[0].toUpperCase()}</span>}
+        </div>
+        <a className="wk-ic" href="/" title="All builds">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+          <i>Builds</i>
+        </a>
+        <button className={'wk-ic' + (tab === 'film' ? ' on' : '')} onClick={() => setTab('film')} title="The film">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>
+          <i>Film</i>
+        </button>
+        <button className={'wk-ic' + (tab === 'beats' ? ' on' : '')} onClick={() => setTab('beats')} title="Beats">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="3" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
+          <i>Beats</i>
+        </button>
+        <div className="wk-railspace" />
+        <div className="wk-filmomark" title="Filmo">
+          <svg viewBox="14 13 56 56"><path fillRule="evenodd" fill="#3B82F6" d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"/></svg>
+        </div>
+      </div>
       <div className="wk-rail">
         <div className="wk-railhead">
           <div className="wk-blob" />
@@ -218,26 +268,44 @@ export default function Workspace({ runKey, getToken }: {
           {items.map((it, i) => {
             if (it.type !== 'work') {
               return it.type === 'user'
-                ? <div key={i} className="t-user">{it.text}</div>
-                : <div key={i} className="t-dir">{it.text}</div>
+                ? <div key={i} className={'t-user' + (pending && i === items.length - 1 ? ' dim' : '')}>{it.text}</div>
+                : <div key={i} className="t-dir"
+                    dangerouslySetInnerHTML={{ __html: md(it.text) }} />
             }
             const e = it.e
             const thumb = e.artifact_url && !e.artifact_url.includes('.mp4')
+            const open = !!openWork[e.seq]
             return (
               <div key={i} className="t-work">
-                {thumb ? (
-                  <img src={e.artifact_url} alt=""
-                    onClick={() => { setPinned(e); setTimeout(() => setPinned(null), 8000) }} />
-                ) : null}
-                <div>
-                  <b>{e.title}</b>
-                  {e.detail ? <><br />{e.detail.split('\n')[0].slice(0, 90)}</> : null}
+                <button className="t-chev" onClick={() =>
+                  setOpenWork((o) => ({ ...o, [e.seq]: !o[e.seq] }))}>
+                  <svg viewBox="0 0 16 16" style={{ transform: open ? 'rotate(90deg)' : 'none' }}>
+                    <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+                  </svg>
+                </button>
+                <div className="t-workbody">
+                  <div className="t-workline" onClick={() =>
+                    setOpenWork((o) => ({ ...o, [e.seq]: !o[e.seq] }))}>
+                    <b>{e.title}</b>
+                  </div>
+                  {open ? (
+                    <div className="t-workdetail">
+                      {e.detail ? <div>{e.detail}</div> : null}
+                      {thumb ? (
+                        <img src={e.artifact_url} alt=""
+                          onClick={() => { setPinned(e); setTimeout(() => setPinned(null), 8000) }} />
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )
           })}
-          {working ? (
-            <div className="t-verb"><span className="dotp" />{verb}… {elapsed}s</div>
+          {working || pending ? (
+            <div className="t-verb">
+              <span className="wk-tailblob" />
+              {pending ? 'Thinking…' : `${verb}… ${elapsed}s`}
+            </div>
           ) : null}
         </div>
         <div className="wk-inputrow">
@@ -253,6 +321,10 @@ export default function Workspace({ runKey, getToken }: {
         <div className="wk-canvas">
           <div className="wk-chrome">
             <div className="dots"><i /><i /><i /></div>
+            <div className="wk-tabs">
+              <button className={tab === 'film' ? 'on' : ''} onClick={() => setTab('film')}>Film</button>
+              <button className={tab === 'beats' ? 'on' : ''} onClick={() => setTab('beats')}>Beats</button>
+            </div>
             <div className="pill">{pill}</div>
             {liveFresh && working ? <div className="rec" /> : null}
           </div>
@@ -262,6 +334,39 @@ export default function Workspace({ runKey, getToken }: {
       <style>{`
         .wk-root { position:fixed; inset:0; display:flex; background:#F1F1EF;
           color:#1B1B1A; font:14px/1.5 Inter,-apple-system,sans-serif; z-index:50; }
+        .wk-iconrail { flex:0 0 72px; display:flex; flex-direction:column;
+          align-items:center; gap:18px; padding:16px 0; border-right:1px solid #E6E6E3; }
+        .wk-brand { width:40px; height:40px; border-radius:12px; overflow:hidden;
+          background:#1B1B1A; color:#fff; display:flex; align-items:center;
+          justify-content:center; font-weight:700; font-size:17px;
+          box-shadow:0 2px 8px rgba(0,0,0,0.12); }
+        .wk-brand img { width:100%; height:100%; object-fit:cover; }
+        .wk-ic { display:flex; flex-direction:column; align-items:center; gap:4px;
+          color:#8A8A86; background:none; border:none; cursor:pointer;
+          text-decoration:none; font:inherit; }
+        .wk-ic svg { width:22px; height:22px; }
+        .wk-ic i { font-style:normal; font-size:10px; }
+        .wk-ic.on, .wk-ic:hover { color:#1B1B1A; }
+        .wk-railspace { flex:1; }
+        .wk-filmomark svg { width:26px; height:26px; opacity:0.9; }
+        .wk-tailblob { display:inline-block; width:16px; height:16px;
+          background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
+          animation:wkmorph 2.4s ease-in-out infinite; position:relative; }
+        .wk-tabs { display:flex; gap:2px; background:#F1F1EF; border-radius:8px;
+          padding:2px; }
+        .wk-tabs button { border:none; background:none; font:12px Inter,sans-serif;
+          padding:4px 12px; border-radius:6px; color:#8A8A86; cursor:pointer; }
+        .wk-tabs button.on { background:#fff; color:#1B1B1A;
+          box-shadow:0 1px 2px rgba(0,0,0,0.06); }
+        .t-user.dim { opacity:0.45; }
+        .t-chev { border:none; background:none; padding:2px; cursor:pointer;
+          color:#B6B6B2; flex-shrink:0; }
+        .t-chev svg { width:14px; height:14px; transition:transform 0.15s; }
+        .t-workbody { min-width:0; }
+        .t-workline { cursor:pointer; }
+        .t-workdetail { margin-top:6px; color:#8A8A86; }
+        .t-workdetail img { width:150px; border-radius:8px; margin-top:6px;
+          border:1px solid #E6E6E3; cursor:pointer; display:block; }
         .wk-rail { flex:0 0 380px; display:flex; flex-direction:column;
           border-right:1px solid #E6E6E3; }
         .wk-railhead { flex:0 0 62px; display:flex; align-items:center; gap:12px;

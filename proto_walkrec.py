@@ -754,6 +754,10 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     emit(run_dir, "read.page", f"Read {url}",
          f"{len(home_text)} chars of copy",
          artifact=rp.get("hero_screenshot_path") or "")
+    _logo_png = os.path.join(run_dir, "screenshots-read", "brand", "logo.png")
+    if os.path.exists(_logo_png):
+        emit(run_dir, "brand.logo", "Brand mark captured", "",
+             artifact=_logo_png)
     ledger = site_read.browse_site(url, run_dir, brain=None,
                                    homepage_text=home_text)
     for p in (ledger.get("pages") or []):
