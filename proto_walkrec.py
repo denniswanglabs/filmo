@@ -1476,7 +1476,8 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
             b["still"] = still
             emit(run_dir, "design.beat",
                  f"Beat {b['i'] + 1}: {b['treatment']} ({b['layout']})",
-                 f"\u201c{b['title'][:60]}\u201d", artifact=still)
+                 f"\u201c{b['title'][:60]}\u201d \u00b7 {b['at'] / FPS:.1f}s",
+                 artifact=still)
     print(f"[walkrec] tour film: {out} ({t_f / FPS:.1f}s, {len(stops)} planned shots, bg {site_bg})")
     return out, beats
 
