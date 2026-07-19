@@ -1503,9 +1503,19 @@ let CURRENT_CLAIMED_JOB_ID = null
 process.on('SIGTERM', async () => {
   try {
     if (CURRENT_CLAIMED_JOB_ID) {
-      await setJob(CURRENT_CLAIMED_JOB_ID,
-        { status: 'queued', claimed_at: null, claimed_by: null })
-      log(`SIGTERM: released claim on job ${CURRENT_CLAIMED_JOB_ID}`)
+      // Release ONLY a job that is still genuinely in flight — releasing a
+      // finished job resurrects it on the next container (observed: a failed
+      // walkrec job re-ran after a deploy because the claim var outlived
+      // its job).
+      const { data: j } = await ifCall('jobs.select(sigterm)',
+        () => db.database.from('jobs').select('status').eq('id', CURRENT_CLAIMED_JOB_ID).maybeSingle())
+      if (j && j.status === 'claimed') {
+        await setJob(CURRENT_CLAIMED_JOB_ID,
+          { status: 'queued', claimed_at: null, claimed_by: null })
+        log(`SIGTERM: released claim on job ${CURRENT_CLAIMED_JOB_ID}`)
+      } else {
+        log(`SIGTERM: claim var held ${CURRENT_CLAIMED_JOB_ID} but status=${j && j.status} — not releasing`)
+      }
     }
   } catch {}
   process.exit(0)
@@ -1534,7 +1544,9 @@ async function runJobBounded(job) {
   })
   try {
     await Promise.race([
-      processJob(job).catch((e) => log('processJob threw', String(e && e.stack || e))),
+      processJob(job)
+        .catch((e) => log('processJob threw', String(e && e.stack || e)))
+        .finally(() => { CURRENT_CLAIMED_JOB_ID = null }),
       guard,
     ])
   } finally { clearTimeout(timer) }

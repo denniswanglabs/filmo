@@ -47,10 +47,12 @@ def _hosted_run_id(run_dir: str) -> str:
         return ""
 
 
-def _if_req(method: str, path: str, body: bytes, ctype: str):
+def _if_req(method: str, path: str, body, ctype: str):
+    headers = {"Authorization": f"Bearer {_IF_KEY}"}
+    if body is not None:
+        headers["Content-Type"] = ctype
     req = urllib.request.Request(
-        _IF_BASE + path, data=body, method=method,
-        headers={"Authorization": f"Bearer {_IF_KEY}", "Content-Type": ctype})
+        _IF_BASE + path, data=body, method=method, headers=headers)
     return urllib.request.urlopen(req, timeout=15)
 
 
@@ -125,6 +127,31 @@ def _upload_artifact(run_id: str, seq: int, path: str) -> str:
 
 
 _SINK_THREADS: list = []
+_SEQ_OFFSET: dict = {}
+_SEQ_LOCK = threading.Lock()
+
+
+def _seq_offset(rid: str, first_local_seq: int) -> int:
+    """RETRY CONTRACT: a re-run of the same hosted run starts its local seq
+    at 0 on a fresh disk, colliding with rows the previous attempt already
+    inserted (UNIQUE(run_id, seq) -> every event 409s). On the first sink
+    call of this process, read the DB's max seq and offset all rows past it."""
+    with _SEQ_LOCK:
+        if rid in _SEQ_OFFSET:
+            return _SEQ_OFFSET[rid]
+        off = 0
+        try:
+            resp = _if_req(
+                "GET",
+                f"/api/database/records/agent_events?run_id=eq.{rid}"
+                "&select=seq&order=seq.desc&limit=1", None, "application/json")
+            rows = json.loads(resp.read())
+            if rows:
+                off = max(0, int(rows[0]["seq"]) + 1 - first_local_seq)
+        except Exception:
+            off = 0
+        _SEQ_OFFSET[rid] = off
+        return off
 
 
 def flush_sinks(timeout: float = 120.0) -> None:
@@ -150,27 +177,28 @@ def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
         # upload made the whole thread lag minutes behind the live canvas.
         # The artifact attaches to the already-visible row via PATCH.
         try:
-            row = {"run_id": rid, "seq": evt["seq"], "ts": evt["ts"],
+            seq = evt["seq"] + _seq_offset(rid, evt["seq"])
+            row = {"run_id": rid, "seq": seq, "ts": evt["ts"],
                    "kind": evt["kind"], "title": evt["title"],
                    "detail": evt["detail"], "artifact_url": ""}
             _if_req("POST", "/api/database/records/agent_events",
                     json.dumps([row]).encode(), "application/json")
         except Exception as e:
-            print(f"[sink!] insert {evt['kind']} seq {evt['seq']}: {e}",
+            print(f"[sink!] insert {evt['kind']} seq {row['seq']}: {e}",
                   file=sys.stderr)
             return
         if not (artifact_path and os.path.exists(artifact_path)):
             return
         try:
-            url = _upload_artifact(rid, evt["seq"], artifact_path)
+            url = _upload_artifact(rid, seq, artifact_path)
             if url:
                 _if_req("PATCH",
                         "/api/database/records/agent_events"
-                        f"?run_id=eq.{rid}&seq=eq.{evt['seq']}",
+                        f"?run_id=eq.{rid}&seq=eq.{seq}",
                         json.dumps({"artifact_url": url}).encode(),
                         "application/json")
         except Exception as e:
-            print(f"[sink!] artifact {evt['kind']} seq {evt['seq']}: {e}",
+            print(f"[sink!] artifact {evt['kind']} seq {seq}: {e}",
                   file=sys.stderr)
     t = threading.Thread(target=work, daemon=True)
     _SINK_THREADS.append(t)
