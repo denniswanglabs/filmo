@@ -520,14 +520,14 @@ def _harvest_chips(corpus: str, target: str, title: str, want: int = 10):
            "demo", "features", "download", "how it works", "faq", "support"}
     CTA_START = ("start", "read", "learn", "contact", "get ", "view", "try",
                  "book", "see ", "join", "request", "explore", "works ",
-                 "create ", "how ", "tell ")
+                 "create ", "how ", "tell ", "download", "install", "replay")
     out = []
     for line in window.split("\n"):
         frag = line.strip().strip("·•|-–")
         if not (5 <= len(frag) <= 24) or not (1 <= len(frag.split()) <= 3):
             continue
-        if not frag[0].isalnum():
-            continue
+        if not frag[0].isalnum() or not all(ord(ch) < 128 for ch in frag):
+            continue  # symbol-bearing fragments are UI controls, not labels
         lc = frag.lower()
         if lc in NAV or lc.startswith(CTA_START):
             continue
@@ -557,7 +557,8 @@ def _verbatim_entities(cand: dict, corpus_lc: str):
 
 # Tight markers only: nav words like "Integrations" window the site's OWN
 # services grid and produce first-party names as "partners" (v13 finding).
-_ENTITY_MARKERS = ("works perfectly with", "works with", "compatible with")
+_ENTITY_MARKERS = ("works perfectly with", "works with", "compatible with",
+                   "integrated with")
 
 _LOGO_ALT_JS = """
 () => {
@@ -567,7 +568,8 @@ _LOGO_ALT_JS = """
   let host = null;
   for (const el of all) {
     const t = (el.textContent || "").trim().toLowerCase();
-    if ((t.startsWith("works perfectly with") || t.startsWith("works with")) &&
+    if ((t.startsWith("works perfectly with") || t.startsWith("works with") ||
+         t.startsWith("integrated with")) &&
         el.querySelectorAll("img,svg").length >= 3 &&
         (el.textContent || "").length < 400) { host = el; }
   }
@@ -631,12 +633,16 @@ def _harvest_entities(corpus: str, want: int = 8):
             continue
         window = corpus[pos + len(marker):pos + 700]
         window = window[window.find("\n") + 1:max(0, window.rfind("\n"))]
+        _CTA = ("learn", "see ", "read", "and more", "view", "get ", "try",
+                "start", "download", "contact", "more")
         out = []
         for line in window.split("\n"):
             frag = line.strip().strip("·•|,")
             if not (2 <= len(frag) <= 24) or not (1 <= len(frag.split()) <= 3):
                 continue
-            if not frag[0].isalnum() or not frag[0].isupper():
+            if not frag[0].isalnum() or not any(c.isupper() for c in frag):
+                continue
+            if frag.lower().startswith(_CTA):
                 continue
             if any(frag.lower() == o.lower() for o in out):
                 continue
@@ -823,10 +829,9 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                 break
     for s in stops:
         s["chips"] = _harvest_chips(corpus_nl, s.get("target", ""), s["title"])
-        if len(s.get("entities") or []) < 3:
-            mined = _harvest_entities(corpus_nl)
-            have = s.get("entities") or []
-            s["entities"] = (have + [m for m in mined if m not in have])[:8]
+        # Entities are STOP-LOCAL (model-provided, verbatim-gated); the
+        # marker harvest belongs exclusively to the ecosystem auto-stop —
+        # smearing it across stops made arbitrary beats wall-eligible.
         s["entities"] = [e for e in (s.get("entities") or [])
                          if e.lower() not in {c.lower() for c in (s.get("chips") or [])}]
     # Ecosystem beat assembles ITSELF: when the site names >=4 partner tools
@@ -839,8 +844,8 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     if len(ents) < 4:
         ents = _harvest_entities(corpus_nl)
     covered = any(any(k in s["title"].lower() for k in
-                      ("works with", "works perfectly", "integration"))
-                  for s in stops)
+                      ("works with", "works perfectly", "integrat"))
+                  for s in stops[1:])
     if len(ents) >= 4 and not covered:
         marker_line = next(
             (ln.strip() for ln in corpus_nl.split("\n")
@@ -921,8 +926,7 @@ _MOTIF_KEYWORDS = [
                        "contact", "talk", "conversation")),
     ("context-cards", ("present", "context", "home", "house", "propert",
                        "listing", "estate", "apartment", "showcase")),
-    ("logo-wall", ("works with", "works perfectly", "integrations",
-                   "compatible with", "supported tools")),
+    ("logo-wall", _ENTITY_MARKERS + ("integrations", "supported tools")),
     ("price-card", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ", "offer")),
     ("chip-sweep", ("everything", "features", "services", "platform",
                     "need for", "built for", "all-in-one", "toolkit")),
@@ -938,6 +942,17 @@ _VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card",
               "logo-wall"}
 
 
+_STAT_RE = __import__("re").compile(
+    r"(?<![\w-])(?:[$€£]\d[\d,.]*|\d[\d,.]*\s*(?:k|K|M|%|\+)|\d{2,}(?:[,.]\d+)?)(?![\w-])")
+
+
+def _is_stat_line(line: str) -> bool:
+    """A REAL statistic: currency, magnitude suffix, or a standalone number.
+    Digits glued to letters (YC W26, Kling V3) are codes, not stats — a
+    testimonial cohort tag must never become a count-up (Palmier finding)."""
+    return bool(_STAT_RE.search(line or ""))
+
+
 def _refine_motif(motif: str, s: dict, used) -> str:
     """Content beats keywords: a chip-sweep needs >=6 real chips; a stat-pop
     needs a number; anything data-rich beats line art; a punchy title beats a
@@ -949,17 +964,21 @@ def _refine_motif(motif: str, s: dict, used) -> str:
         motif = "chip-sweep" if len(chips) >= 6 else "check-list"
     if motif == "chip-sweep" and len(chips) < 6:
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
-    if motif == "stat-pop" and not any(_re.search(r"\d", d) for d in details):
+    if motif == "stat-pop" and not any(_is_stat_line(d) for d in details):
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
     if motif not in _VIGNETTES:  # line-art tier
+        if len(s.get("entities") or []) >= 4 and "logo-wall" not in used:
+            return "logo-wall"
         if len(chips) >= 6 and "chip-sweep" not in used:
             return "chip-sweep"
-        if any(_re.search(r"\d", d) for d in details) and "stat-pop" not in used:
+        if any(_is_stat_line(d) for d in details) and "stat-pop" not in used:
             return "stat-pop"
         if len(details) >= 2 and "check-list" not in used:
             return "check-list"
         if len((s.get("title") or "").split()) <= 8 and "kinetic-line" not in used:
             return "kinetic-line"
+        if len(details) >= 2:
+            return "check-list"  # may repeat: real info beats line art
     return motif
 
 
@@ -989,16 +1008,28 @@ _AGENT_TOOL_DOMAINS = {
     "copilot": "github.com", "devin": "devin.ai", "cline": "cline.bot",
     "aider": "aider.chat", "v0": "v0.dev", "bolt": "bolt.new",
     "lovable": "lovable.dev", "replit": "replit.com", "whatsapp": "whatsapp.com",
+    "xai": "x.ai", "kling ai": "klingai.com", "kling": "klingai.com",
+    "bytedance": "bytedance.com", "google": "google.com", "veo": "google.com",
+    "grok": "x.ai", "grok imagine": "x.ai", "premiere": "adobe.com",
+    "adobe premiere": "adobe.com", "davinci": "blackmagicdesign.com",
+    "davinci resolve": "blackmagicdesign.com",
 }
 
 
 def _logo_uri(name: str) -> str:
-    """Real favicon as a data URI via the production resolver; '' = fallback
-    initial badge in the composition. Never raises."""
+    """Real favicon as a data URI — resolved ONLY via explicit maps (a
+    guessed domain can fetch a WRONG mark, which is fabrication; unmapped
+    names render an honest initial badge). Version suffixes strip before
+    lookup ('Kling V3' -> 'kling'). Never raises."""
     try:
+        import re as _re
         import entity_logos as _el
-        domain = (_AGENT_TOOL_DOMAINS.get(name.strip().lower())
-                  or _el._resolve_domain(name))
+        key = name.strip().lower()
+        base = _re.sub(r"\s+v?\d[\d.]*$", "", key).strip()
+        domain = (_AGENT_TOOL_DOMAINS.get(key)
+                  or _AGENT_TOOL_DOMAINS.get(base)
+                  or _el.KNOWN_OVERRIDES.get(key)
+                  or _el.KNOWN_OVERRIDES.get(base))
         got = _el._fetch_logo(domain) if domain else None
         return _el._data_uri(*got) if got else ""
     except Exception:
@@ -1103,8 +1134,28 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     # another beat's framing; camera zooms slightly on titles.
     cluster_pos = [(3600, 700), (700, 2800), (4200, 3400), (1800, 5000),
                    (6400, 4600), (900, 6600)]
+    seen_titles = set()
     for i, s in enumerate(stops):
         cx, cy = cluster_pos[i % len(cluster_pos)]
+        # CONTRACT: a title text renders as a beat at most once per film —
+        # a graphic stop whose title an earlier beat already carries plays
+        # title-less at its cluster center (the vignette IS the content).
+        dup_title = s["title"].lower() in seen_titles
+        seen_titles.add(s["title"].lower())
+        if dup_title and not s.get("seg"):
+            motif = s.get("motif", "card")
+            logos = ([{"name": n, "src": _logo_uri(n)}
+                      for n in (s.get("entities") or [])[:8]]
+                     if motif == "logo-wall" else [])
+            elements.append({"id": f"g{i}", "kind": "graphic", "x": cx, "y": cy,
+                             "at": t_f + 12, "motif": motif, "text": s["title"],
+                             "lines": s.get("details") or [],
+                             "chips": s.get("chips") or [], "logos": logos})
+            moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.12})
+            beat_s = {"chip-sweep": 5.5, "stat-pop": 4.0, "kinetic-line": 3.5,
+                      "logo-wall": 5.0}.get(motif, 5.5)
+            t_f += int(beat_s * FPS)
+            continue
         if s.get("motif") == "kinetic-line" and not s.get("seg"):
             # The kinetic line IS the title — one beat, no duplicate headline.
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx, "y": cy,

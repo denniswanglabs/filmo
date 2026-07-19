@@ -478,8 +478,12 @@ const VignetteChipSweep: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
 const VignetteStatPop: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
   const frame = useCurrentFrame();
   const local = frame - el.at;
-  const line = (el.lines || []).find((l) => /\d/.test(l)) || el.text || "";
+  // Same strict predicate as the python gate: currency, magnitude suffix, or
+  // a standalone number — never digits glued to letters (YC W26, Kling V3).
+  const STAT_RE = /(?<![\w-])(?:[$€£]\d[\d,.]*|\d[\d,.]*\s*(?:k|K|M|%|\+)|\d{2,}(?:[,.]\d+)?)(?![\w-])/;
+  const line = (el.lines || []).find((l) => STAT_RE.test(l)) || "";
   const m = line.match(/([$€£]?)(\d+(?:[.,]\d+)?)([kKmM%+]*)/);
+  if (!m) return null;
   const target = m ? parseFloat(m[2].replace(",", ".")) : 0;
   const decimals = m && m[2].includes(".") ? m[2].split(".")[1].length : 0;
   const p = interpolate(local, [8, 52], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: VEVARA_STEP });
