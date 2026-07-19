@@ -655,7 +655,30 @@ export async function getAgentRun(
     `${(process.env.INSFORGE_URL || process.env.NEXT_PUBLIC_INSFORGE_URL || '').replace(/\/$/, '')}`
     + `/api/storage/buckets/${process.env.INSFORGE_BUCKET || 'walk-videos'}`
     + `/objects/agent/${run.id}/live.jpg`)}`
-  return { run, events, runId: run.id, liveUrl }
+  // Queue truth (F8): before any event arrives, the only honest thing the
+  // workspace can say is where this build sits in line. One studio worker
+  // builds one film at a time, so ahead = queued build jobs older than ours
+  // + any currently-claimed build.
+  let queueAhead: number | null = null
+  if (after < 0 && events.length === 0) {
+    const { data: ourJob } = await db.database
+      .from('jobs').select('id, created_at, status')
+      .eq('run_id', run.id).eq('type', 'build')
+      .order('created_at', { ascending: true }).limit(1)
+    const mine = ourJob && (ourJob[0] as
+      { created_at: string; status: string } | undefined)
+    if (mine && (mine.status === 'queued' || mine.status === 'claimed')) {
+      const { data: others } = await db.database
+        .from('jobs').select('id, status, created_at')
+        .eq('type', 'build').in('status', ['queued', 'claimed'])
+      const rows = (others as
+        { id: string; status: string; created_at: string }[]) || []
+      queueAhead = mine.status === 'claimed' ? 0 : rows.filter((j) =>
+        j.status === 'claimed'
+        || (j.status === 'queued' && j.created_at < mine.created_at)).length
+    }
+  }
+  return { run, events, runId: run.id, liveUrl, queueAhead }
 }
 
 /** One director chat turn: log the user message as an agent event and enqueue

@@ -754,10 +754,15 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     emit(run_dir, "read.page", f"Read {url}",
          f"{len(home_text)} chars of copy",
          artifact=rp.get("hero_screenshot_path") or "")
-    _logo_png = os.path.join(run_dir, "screenshots-read", "brand", "logo.png")
-    if os.path.exists(_logo_png):
+    # The capture saves brand/logo.<ext> (inline <svg> -> .svg,
+    # apple-touch-icon/icon -> .png/.ico) — checking only .png silently
+    # skipped every SVG-logo brand (insforge.dev among them).
+    import glob as _glob
+    _logos = sorted(_glob.glob(os.path.join(
+        run_dir, "screenshots-read", "brand", "logo.*")))
+    if _logos:
         emit(run_dir, "brand.logo", "Brand mark captured", "",
-             artifact=_logo_png)
+             artifact=_logos[0])
     ledger = site_read.browse_site(url, run_dir, brain=None,
                                    homepage_text=home_text)
     for p in (ledger.get("pages") or []):
@@ -1323,6 +1328,13 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
             weakest = min(data, key=lambda s: len(s.get("details") or [])
                           + len((s.get("chips") or [])[:10]))
             weakest["motif"] = _pick_motif(weakest["title"], set(_VIGNETTES))
+    # STABILITY INVARIANT: treatments are decided ONCE, at first assembly.
+    # Re-renders (reviewer swaps, director edits) must never re-roll the
+    # other beats — unlocked motifs re-rolled every round, so the film the
+    # user saw, stops.json, and the director's summary could all disagree
+    # about which beat carried which treatment (the F7 wrong-beat drop).
+    for s in gstops:
+        s["motif_locked"] = True
     emit(run_dir, "decide.treatments", "Treatments assigned",
          "\n".join(f"\u201c{s['title'][:44]}\u201d \u2192 "
                     f"{'recording' if s.get('seg') else s['motif']}"
@@ -1582,7 +1594,9 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
         if act != "none":
             actions.append({"beat": bi, "action": act,
                             "to": str(c.get("to") or ""),
-                            "issue": str(c.get("issue") or "")[:120]})
+                            "issue": (lambda t: t[:117] + "…"
+                                      if len(t) > 120 else t)(
+                                          str(c.get("issue") or ""))})
     return actions
 
 

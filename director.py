@@ -54,7 +54,8 @@ menu below. Taste is owned by the system: every color, font, and visual \
 style comes from the customer's own website, and every word shown comes \
 verbatim from that site. You never invent copy, colors, or styles.
 
-THE FILM'S CURRENT BEATS (index: title -> treatment):
+THE FILM'S CURRENT BEATS (the ONLY editable beats; recordings of the site
+itself are not editable and are not listed):
 {beats}
 
 TREATMENTS AVAILABLE FOR SWAPS: check-list, chip-sweep, kinetic-line, \
@@ -68,7 +69,13 @@ RUN PROVENANCE (recent events you may cite when answering questions):
 Respond with STRICT JSON only:
 {{"reply": "<your short, warm, concrete reply to the user>",
   "actions": [{{"action": "drop"|"swap_treatment"|"rerun"|"none",
-               "beat": <index or -1>, "to": "<treatment or empty>"}}]}}
+               "beat_title": "<the beat's title EXACTLY as listed above>",
+               "to": "<treatment or empty>"}}]}}
+
+TARGETING RULE: beat_title must be copied VERBATIM from the beat list above.
+If the user references a beat by treatment ("the globe beat"), map it to the
+title carrying that treatment in the list; if no listed beat carries it, or
+two could match, ask instead (actions=[]).
 
 Rules:
 - Aesthetic requests outside the brand's own palette/style (e.g. 'make it \
@@ -86,12 +93,84 @@ def _load_state(run_dir: str):
         return json.load(f)
 
 
+def _vignettes(stops):
+    return [s for s in stops if not s.get("seg")]
+
+
 def _beats_summary(stops):
     lines = []
-    for i, s in enumerate(stops):
-        tr = "recording" if s.get("seg") else s.get("motif", "?")
-        lines.append(f"{i}: “{s['title'][:60]}” -> {tr}")
+    for n, s in enumerate(_vignettes(stops), start=1):
+        lines.append(f"Beat {n}: “{s['title']}” -> "
+                     f"{s.get('motif', '?')}")
     return "\n".join(lines)
+
+
+def _norm_title(t: str) -> str:
+    return " ".join(str(t or "").split()).lower()
+
+
+def _resolve_actions(stops, actions):
+    """Resolve model actions to CURRENT stops by verbatim title — one source
+    of truth for targeting (F7: index-based targeting dropped the wrong beat
+    after treatments shifted between rounds). Mutates stops for applied
+    drops/swaps; returns (applied, rejected, rerun) where applied/rejected
+    are outcome facts for the reply."""
+    import proto_walkrec as pw
+    vign = _vignettes(stops)
+    by_title = {_norm_title(s["title"]): s for s in vign}
+    applied, rejected = [], []
+    rerun = False
+    for a in actions:
+        if a.get("action") == "rerun":
+            rerun = True
+            continue
+        title = a.get("beat_title") or ""
+        s = by_title.get(_norm_title(title))
+        if s is None and isinstance(a.get("beat"), int):
+            bi = a["beat"]
+            if 0 <= bi < len(vign):
+                s = vign[bi]
+        if s is None:
+            rejected.append((title or "(unnamed beat)",
+                             "no beat with that title in the current cut"))
+            continue
+        if a.get("action") == "drop":
+            s["_drop"] = True
+            applied.append(("drop", s["title"]))
+        elif a.get("action") == "swap_treatment":
+            to = a.get("to", "")
+            if pw._refine_motif(to, s, set()) != to:
+                rejected.append(
+                    (s["title"],
+                     f"“{to}” fails its material floor on this beat"))
+                continue
+            s["motif"] = to
+            s["motif_locked"] = True
+            applied.append(("swap", s["title"], to))
+    stops[:] = [s for s in stops if not s.get("_drop")]
+    return applied, rejected, rerun
+
+
+def _outcome_reply(stops, applied, rejected) -> str:
+    """The chat.director text for an action turn, authored FROM the resolved
+    outcome — never from intent (F7: the pre-gate reply narrated a swap the
+    gates then rejected, and a drop the film never made)."""
+    parts = []
+    for a in applied:
+        if a[0] == "drop":
+            parts.append(f"Dropped “{a[1]}”.")
+        else:
+            parts.append(f"Swapped “{a[1]}” to {a[2]}.")
+    for title, why in rejected:
+        parts.append(f"I couldn't touch “{title}” — {why}.")
+    if applied:
+        vign = _vignettes(stops)
+        if vign:
+            parts.append(f"The film now ends on “{vign[-1]['title']}”.")
+        parts.append("Re-rendering now — watch the film panel.")
+    elif not rejected:
+        parts.append("Nothing to change.")
+    return " ".join(parts)
 
 
 def _events_tail(run_dir: str, n: int = 18):
@@ -114,51 +193,22 @@ def _log_chat(run_dir: str, role: str, text: str):
         pass
 
 
-def _apply_async(run_id: str, run_dir: str, state: dict, actions):
-    """Apply gated actions and re-render on a background thread; the stage
-    narrates via the normal event stream."""
+def _render_async(run_id: str, run_dir: str, state: dict, applied):
+    """Render an already-resolved change set on a background thread (local
+    path). Resolution/gating happened synchronously in handle() so the reply
+    the user already saw is outcome-truth; this thread only prints."""
     def work():
         try:
             import proto_walkrec as pw
-            stops, ctx = state["stops"], state["ctx"]
-            applied = []
-            for a in actions:
-                if a["action"] == "rerun":
-                    emit(run_dir, "run.start",
-                         "Director: full re-run requested",
-                         "Re-reading the site and re-filming from scratch.")
-                    url = ctx.get("host", "")
-                    subprocess.Popen(
-                        [sys.executable, os.path.join(HERE, "proto_walkrec.py"),
-                         "--url", url, "--run-id", run_id, "--tour"],
-                        cwd=HERE)
-                    return
-                bi = a.get("beat", -1)
-                if not (0 <= bi < len(stops)) or stops[bi].get("seg"):
-                    continue
-                if a["action"] == "drop":
-                    applied.append(f"dropped “{stops[bi]['title'][:40]}”")
-                    stops[bi]["_drop"] = True
-                elif a["action"] == "swap_treatment":
-                    to = a.get("to", "")
-                    if pw._refine_motif(to, stops[bi], set()) != to:
-                        emit(run_dir, "review.finding",
-                             f"Swap rejected for beat {bi + 1}",
-                             f"“{to}” fails its material floor on this beat.")
-                        continue
-                    stops[bi]["motif"] = to
-                    stops[bi]["motif_locked"] = True
-                    applied.append(f"beat {bi + 1} → {to}")
-            stops[:] = [s for s in stops if not s.get("_drop")]
-            if not applied:
-                emit(run_dir, "review.pass", "No changes applied",
-                     "The requested edits did not survive the gates.")
-                return
+            stops = state["stops"]
             emit(run_dir, "review.apply",
-                 "Director: " + "; ".join(applied),
+                 "Director: " + "; ".join(
+                     (f"dropped “{a[1][:40]}”" if a[0] == "drop"
+                      else f"“{a[1][:40]}” → {a[2]}") for a in applied),
                  "Re-assembling and re-rendering.")
             pub = os.path.join(HERE, "studio", "public")
-            out, _ = pw._assemble_and_render(run_id, run_dir, pub, stops, ctx)
+            out, _ = pw._assemble_and_render(run_id, run_dir, pub, stops,
+                                             state["ctx"])
             emit(run_dir, "review.done", "Change applied — film updated",
                  artifact=out)
             emit(run_dir, "run.done", "Run finished",
@@ -199,39 +249,32 @@ def _parse(run_dir: str, state: dict, message: str):
 
 
 def _apply_work(run_id: str, run_dir: str, state: dict, actions) -> None:
-    """Apply gated actions + re-render, synchronously. Emits the outcome."""
+    """Resolve + gate + apply + re-render, synchronously. The chat reply is
+    authored from the OUTCOME (never from intent) and emitted before the
+    slow render so the user sees truth immediately."""
     import proto_walkrec as pw
     stops, ctx = state["stops"], state["ctx"]
-    applied = []
-    for a in actions:
-        if a["action"] == "rerun":
-            emit(run_dir, "run.start",
-                 "Director: full re-run requested",
-                 "Re-reading the site and re-filming from scratch.")
-            pw.build_tour_film(ctx.get("host", ""), run_id)
-            return
-        bi = a.get("beat", -1)
-        if not (0 <= bi < len(stops)) or stops[bi].get("seg"):
-            continue
-        if a["action"] == "drop":
-            applied.append(f"dropped \u201c{stops[bi]['title'][:40]}\u201d")
-            stops[bi]["_drop"] = True
-        elif a["action"] == "swap_treatment":
-            to = a.get("to", "")
-            if pw._refine_motif(to, stops[bi], set()) != to:
-                emit(run_dir, "review.finding",
-                     f"Swap rejected for beat {bi + 1}",
-                     f"\u201c{to}\u201d fails its material floor on this beat.")
-                continue
-            stops[bi]["motif"] = to
-            stops[bi]["motif_locked"] = True
-            applied.append(f"beat {bi + 1} \u2192 {to}")
-    stops[:] = [s for s in stops if not s.get("_drop")]
+    applied, rejected, rerun = _resolve_actions(stops, actions)
+    if rerun:
+        emit(run_dir, "chat.director",
+             "Redoing the whole film — re-reading the site and re-filming "
+             "from scratch.", "")
+        emit(run_dir, "run.start", "Director: full re-run requested",
+             "Re-reading the site and re-filming from scratch.")
+        pw.build_tour_film(ctx.get("host", ""), run_id)
+        return
+    emit(run_dir, "chat.director", _outcome_reply(stops, applied, rejected),
+         "")
+    for title, why in rejected:
+        emit(run_dir, "review.finding", f"Rejected: “{title[:60]}”", why + ".")
     if not applied:
         emit(run_dir, "review.pass", "No changes applied",
              "The requested edits did not survive the gates.")
         return
-    emit(run_dir, "review.apply", "Director: " + "; ".join(applied),
+    emit(run_dir, "review.apply",
+         "Director: " + "; ".join(
+             (f"dropped “{a[1][:40]}”" if a[0] == "drop"
+              else f"“{a[1][:40]}” → {a[2]}") for a in applied),
          "Re-assembling and re-rendering.")
     pub = os.path.join(HERE, "studio", "public")
     out, _beats = pw._assemble_and_render(run_id, run_dir, pub,
@@ -268,14 +311,16 @@ def handle_job(run_key: str, insforge_run_id: str, message: str) -> int:
         emit(run_dir, "chat.director",
              f"I hit a snag reading that ({type(e).__name__}) — try again?", "")
         return 0
-    emit(run_dir, "chat.director", reply, "")
-    if actions:
-        try:
-            _apply_work(run_key, run_dir, state, actions)
-        except BaseException as e:
-            emit(run_dir, "run.error", "Director change failed",
-                 f"{type(e).__name__}: {e}")
-            return 1
+    if not actions:
+        # Answers and declines: the model's own voice IS the outcome.
+        emit(run_dir, "chat.director", reply, "")
+        return 0
+    try:
+        _apply_work(run_key, run_dir, state, actions)
+    except BaseException as e:
+        emit(run_dir, "run.error", "Director change failed",
+             f"{type(e).__name__}: {e}")
+        return 1
     return 0
 
 
@@ -297,9 +342,29 @@ def handle(run_id: str, message: str) -> dict:
         return {"reply": reply, "working": False}
     try:
         reply, actions = _parse(run_dir, state, message)
-        working = bool(actions)
         if actions:
-            _apply_async(run_id, run_dir, state, actions)
+            applied, rejected, rerun = _resolve_actions(state["stops"],
+                                                        actions)
+            if rerun:
+                emit(run_dir, "run.start", "Director: full re-run requested",
+                     "Re-reading the site and re-filming from scratch.")
+                subprocess.Popen(
+                    [sys.executable, os.path.join(HERE, "proto_walkrec.py"),
+                     "--url", state["ctx"].get("host", ""),
+                     "--run-id", run_id, "--tour"], cwd=HERE)
+                reply = "Redoing the whole film from scratch — watch the stage."
+                _log_chat(run_dir, "director", reply)
+                return {"reply": reply, "working": True}
+            reply = _outcome_reply(state["stops"], applied, rejected)
+            for title, why in rejected:
+                emit(run_dir, "review.finding",
+                     f"Rejected: “{title[:60]}”", why + ".")
+            if applied:
+                _render_async(run_id, run_dir, state, applied)
+            else:
+                emit(run_dir, "review.pass", "No changes applied",
+                     "The requested edits did not survive the gates.")
+        working = bool(actions)
         _log_chat(run_dir, "director", reply)
         return {"reply": reply, "working": working}
     except (Exception, SystemExit) as e:

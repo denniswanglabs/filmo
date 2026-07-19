@@ -73,6 +73,7 @@ export default function Workspace({ runKey, getToken }: {
   const [liveUrl, setLiveUrl] = useState('')
   const [liveFresh, setLiveFresh] = useState(false)
   const [liveTick, setLiveTick] = useState(0)
+  const [queueAhead, setQueueAhead] = useState<number | null>(null)
   const [localMsgs, setLocalMsgs] = useState<LocalMsg[]>([])
   const [input, setInput] = useState('')
   const [pinned, setPinned] = useState<AgentEvent | null>(null)
@@ -103,9 +104,13 @@ export default function Workspace({ runKey, getToken }: {
         const after = evtsRef.current.length
           ? evtsRef.current[evtsRef.current.length - 1].seq : -1
         const res = await getAgentRun(runKey, after, (await getToken()) || '')
-        if (!('error' in res) && res.events.length) {
-          evtsRef.current = [...evtsRef.current, ...res.events]
-          setEvts(evtsRef.current)
+        if (!('error' in res)) {
+          if (res.events.length) {
+            evtsRef.current = [...evtsRef.current, ...res.events]
+            setEvts(evtsRef.current)
+          }
+          if (typeof res.queueAhead === 'number') setQueueAhead(res.queueAhead)
+          else if (res.events.length) setQueueAhead(null)
         }
       } catch { /* transient */ }
       setTimeout(tick, 1500)
@@ -202,11 +207,27 @@ export default function Workspace({ runKey, getToken }: {
     screen = <img src={pinned.artifact_url} alt="" />
     pill = pinned.title
   } else if (liveFresh && working) {
-    screen = (
-      <img src={`${liveUrl}&t=${liveTick}`} alt=""
-        onError={() => setLiveFresh(false)} />
-    )
+    screen = <img src={`${liveUrl}&t=${liveTick}`} alt="" />
     pill = `Recording ${S.site || ''}`
+  } else if (evts.length === 0 && working) {
+    // Queue truth (F8): nothing has happened yet — say where the build is.
+    screen = (
+      <div className="wk-text">
+        <div className="big">
+          {queueAhead === null ? 'Warming up…'
+            : queueAhead === 0 ? 'Up next'
+              : `In line at the studio`}
+        </div>
+        <div className="small">
+          {queueAhead === null
+            ? 'Connecting to the studio.'
+            : queueAhead === 0
+              ? 'The studio is opening your site now.'
+              : `${queueAhead} build${queueAhead === 1 ? '' : 's'} ahead of you — the studio films one at a time.`}
+        </div>
+      </div>
+    )
+    pill = queueAhead && queueAhead > 0 ? `queued · ${queueAhead} ahead` : 'starting'
   } else if (S.phase === 'read') {
     screen = lastPage?.artifact_url ? <img src={lastPage.artifact_url} alt="" /> : null
     pill = lastPage ? lastPage.title.replace('Read ', '') : (S.site || 'opening…')
@@ -222,11 +243,16 @@ export default function Workspace({ runKey, getToken }: {
     screen = <div className="wk-text"><div className="big">{S.lastTitle}</div></div>
     pill = S.site
   } else if (['design', 'assemble', 'review'].includes(S.phase)) {
-    screen = (
+    screen = S.beats.length ? (
       <div className="wk-grid">
         {S.beats.map((b) => (
           <div key={b.seq} className="beat"><img src={b.artifact_url} alt="" /></div>
         ))}
+      </div>
+    ) : (
+      <div className="wk-text">
+        <div className="big">Printing the film</div>
+        <div className="small">The beat board fills in as scenes land.</div>
       </div>
     )
     pill = S.phase === 'review' ? 'Grading — story and coherence' : 'Cutting — beat by beat'
@@ -273,7 +299,7 @@ export default function Workspace({ runKey, getToken }: {
 
   // Live-frame freshness: try turning it on whenever working (img onError flips off).
   useEffect(() => {
-    if (working && liveUrl) setLiveFresh(true)
+    // The probe below owns liveFresh; the tick only advances the counter.
   }, [liveTick, working, liveUrl])
 
   if (!mounted) return null
@@ -306,7 +332,7 @@ export default function Workspace({ runKey, getToken }: {
         <div className="wk-railhead">
           <div className="wk-blob" />
           <div>
-            <h1>Filmo Director</h1>
+            <h1>Filmo Director <span className="wk-betachip">beta</span></h1>
             <div className="sub">{S.done ? (S.status || 'finished') : 'live'}</div>
           </div>
         </div>
@@ -373,6 +399,11 @@ export default function Workspace({ runKey, getToken }: {
             </div>
             <div className="pill">{pill}</div>
             {liveFresh && working ? <div className="rec" /> : null}
+            {working ? (
+              <img className="wk-liveprobe" src={`${liveUrl}&t=${liveTick}`}
+                onLoad={() => setLiveFresh(true)}
+                onError={() => setLiveFresh(false)} alt="" />
+            ) : null}
           </div>
           <div className="wk-screen">{screen}</div>
         </div>
@@ -487,8 +518,15 @@ export default function Workspace({ runKey, getToken }: {
         .wk-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px;
           width:100%; height:100%; padding:18px; grid-auto-rows:1fr; }
         .wk-grid .beat { border-radius:10px; overflow:hidden; min-height:0;
+          background:#0B0B09;
           border:1px solid #E6E6E3; background:#fff; }
-        .wk-grid .beat img { width:100%; height:100%; object-fit:cover; }
+        .wk-grid .beat img { width:100%; height:100%; object-fit:contain; }
+        .wk-liveprobe { position:absolute; width:1px; height:1px;
+          opacity:0; pointer-events:none; }
+        .wk-betachip { display:inline-block; vertical-align:3px;
+          margin-left:8px; padding:1px 8px; border-radius:99px;
+          font-size:10px; font-weight:700; letter-spacing:.08em;
+          text-transform:uppercase; color:#3B82F6; background:#EAF1FF; }
         .wk-playerwrap { width:100%; height:100%; display:flex;
           flex-direction:column; gap:10px; padding:14px; min-height:0; }
         .wk-playerwrap video { flex:1; min-height:0; width:100%;
