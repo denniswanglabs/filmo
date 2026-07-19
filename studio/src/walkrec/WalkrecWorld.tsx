@@ -535,21 +535,29 @@ const VignetteLogoWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] 
   const frame = useCurrentFrame();
   const local = frame - el.at;
   const logos = (el.logos || []).slice(0, 8);
+  // GRID SHAPE FOLLOWS COUNT: wrapping a fixed tile width made 8 partners a
+  // 2-wide, 4-tall column — a portrait block in a landscape frame, clipped
+  // at the bottom edge. Wide counts get wide grids, and the tile shrinks so
+  // the wall always fits its half of the stage.
+  const cols = logos.length >= 7 ? 4 : logos.length >= 5 ? 3 : logos.length >= 3 ? 3 : 2;
+  const wide = !el.narrow;
+  const tile = wide ? (cols >= 4 ? 190 : 210) : (cols >= 4 ? 140 : 160);
+  const mark = cols >= 4 ? 44 : 56;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 22, justifyContent: "center", width: el.narrow ? 640 : 940, transform: `translateY(${vinFloat(local, logos.length * 5 + 40)}px)` }}>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${tile}px)`, gap: wide ? 20 : 14, justifyContent: "center", transform: `translateY(${vinFloat(local, logos.length * 5 + 40)}px)` }}>
       {logos.map((l, i) => {
         const p = vinPop(local, i * 5, 12);
         if (p <= 0) return null;
         return (
-          <div key={i} style={{ width: 200, padding: "24px 12px 18px", borderRadius: 24, background: t.card, boxShadow: "0 24px 52px -26px rgba(15,20,40,0.25)", textAlign: "center", transform: `scale(${p})` }}>
+          <div key={i} style={{ width: tile, padding: cols >= 4 ? "18px 10px 14px" : "24px 12px 18px", borderRadius: 24, background: t.card, boxShadow: "0 24px 52px -26px rgba(15,20,40,0.25)", textAlign: "center", transform: `scale(${p})` }}>
             {l.src ? (
-              <Img src={l.src} style={{ width: 56, height: 56, objectFit: "contain", borderRadius: 12, margin: "0 auto 12px", display: "block" }} />
+              <Img src={l.src} style={{ width: mark, height: mark, objectFit: "contain", margin: "0 auto 12px", display: "block" }} />
             ) : (
-              <div style={{ width: 56, height: 56, borderRadius: 28, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+              <div style={{ width: mark, height: mark, borderRadius: mark / 2, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: mark * 0.42, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
                 {(l.name || "?")[0].toUpperCase()}
               </div>
             )}
-            <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 600, color: t.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+            <div style={{ fontFamily: t.fontBody, fontSize: cols >= 4 ? 15 : 18, fontWeight: 600, color: t.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
           </div>
         );
       })}

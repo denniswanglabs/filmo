@@ -633,101 +633,18 @@ _QUOTES_JS = """
 """
 
 
-def _harvest_quotes(url: str):
-    """REAL testimonial quotes from the marker page's live DOM (the sections
-    are lazy-loaded and quote sentences exceed label-length caps, so neither
-    static corpus nor the detail harvester can see them). Never raises."""
-    try:
-        import walk_native as wn
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = wn._launch_browser(p)
-            ctx = browser.new_context(viewport=wn.VIEWPORT,
-                                      user_agent=wn._DESKTOP_UA,
-                                      extra_http_headers=wn._EXTRA_HEADERS)
-            ctx.add_init_script(wn._STEALTH_INIT_JS)
-            page = ctx.new_page()
-            page.goto(wn._norm_url(url), wait_until="domcontentloaded",
-                      timeout=45000)
-            wn._wait_for_spa_hydration(page)
-            page.evaluate("""async () => {
-              const h = document.body.scrollHeight;
-              for (let y = 0; y <= h; y += 600) {
-                window.scrollTo(0, y);
-                await new Promise(r => setTimeout(r, 120));
-              }
-            }""")
-            page.wait_for_timeout(1000)
-            quotes = page.evaluate(_QUOTES_JS) or []
-            browser.close()
-        return [q for q in quotes if q.get("q") and q.get("a")][:3]
-    except Exception:
-        return []
+def _harvest_quotes(url: str, run_dir: str = ""):
+    """REAL testimonial quotes from the marker page's live DOM (lazy-loaded
+    sections the static corpus can't see). Capture-interpreter aware."""
+    import page_harvest
+    return page_harvest.run(url, "quotes", run_dir) or []
 
-
-def _harvest_logo_alt_names(url: str):
-    """Partner names from the works-with section's OWN logo images (alt text
-    or filename) — the tools are usually rendered as images with no text
-    nodes, so the text harvest can't see them. Dedupes hover variants
-    ('cursor color' -> covered by 'Cursor'). Best-effort, never raises."""
-    try:
-        import walk_native as wn
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = wn._launch_browser(p)
-            ctx = browser.new_context(viewport=wn.VIEWPORT,
-                                      user_agent=wn._DESKTOP_UA,
-                                      extra_http_headers=wn._EXTRA_HEADERS)
-            ctx.add_init_script(wn._STEALTH_INIT_JS)
-            page = ctx.new_page()
-            page.goto(wn._norm_url(url), wait_until="domcontentloaded",
-                      timeout=45000)
-            wn._wait_for_spa_hydration(page)
-            page.wait_for_timeout(1200)
-            raw = page.evaluate(_LOGO_ALT_JS) or []
-            browser.close()
-        out = []
-        for n in raw:
-            nl = n.lower()
-            if nl.endswith((" color", " dark", " light", " white", " black")):
-                continue  # hover/theme image variants of another mark
-            if any(nl.startswith(o.lower() + " ") or nl == o.lower()
-                   or o.lower().endswith(" " + nl) for o in out):
-                continue
-            out.append(n)
-        return out[:8]
-    except Exception:
-        return []
-
-
-def _harvest_entities(corpus: str, want: int = 8):
-    """Fallback: short capitalized labels right after a works-with marker."""
-    lc = corpus.lower()
-    for marker in _ENTITY_MARKERS:
-        pos = lc.find(marker)
-        if pos < 0:
-            continue
-        window = corpus[pos + len(marker):pos + 700]
-        window = window[window.find("\n") + 1:max(0, window.rfind("\n"))]
-        _CTA = ("learn", "see ", "read", "and more", "view", "get ", "try",
-                "start", "download", "contact", "more")
-        out = []
-        for line in window.split("\n"):
-            frag = line.strip().strip("·•|,")
-            if not (2 <= len(frag) <= 24) or not (1 <= len(frag.split()) <= 3):
-                continue
-            if not frag[0].isalnum() or not any(c.isupper() for c in frag):
-                continue
-            if frag.lower().startswith(_CTA):
-                continue
-            if any(frag.lower() == o.lower() for o in out):
-                continue
-            out.append(frag)
-            if len(out) >= want:
-                break
-        if len(out) >= 3:
-            return out
-    return []
+def _harvest_partner_marks(url: str, run_dir: str = ""):
+    """Partner marks — name AND the site's own logo image — from the
+    works-with block itself. Runs under the capture interpreter when the
+    main one has no Playwright (see page_harvest)."""
+    import page_harvest
+    return page_harvest.marks(url, run_dir)
 
 
 def _verbatim_details(cand: dict, corpus_lc: str):
@@ -931,11 +848,15 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     # and no planned stop covers them, add the works-with section as a stop
     # (title = the site's own marker line) so the logo wall always appears
     # when the site earns it.
-    ents = []
+    # PROVENANCE: a partner wall may ONLY name what the works-with block
+    # itself contains. The old corpus-window fallback took the 700 chars
+    # after the marker — for an image-only strip that's the NEXT section,
+    # which is how a features grid shipped as an integration wall. No
+    # marks in the block = no wall.
+    marks = []
     if any(m in corpus_nl.lower() for m in _ENTITY_MARKERS):
-        ents = _harvest_logo_alt_names(url)
-    if len(ents) < 4:
-        ents = _harvest_entities(corpus_nl)
+        marks = _harvest_partner_marks(url, run_dir)
+    ents = [m["name"] for m in marks]
     covered = any(any(k in s["title"].lower() for k in
                       ("works with", "works perfectly", "integrat"))
                   for s in stops[1:])
@@ -948,7 +869,9 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
         if marker_line:
             stops.append({"title": marker_line, "page": url,
                           "target": marker_line, "details": [],
-                          "entities": ents, "chips": []})
+                          "entities": ents, "chips": [],
+                          "marks": {m["name"]: m.get("src", "")
+                                    for m in marks}})
             # CONTENT-ONCE: the wall owns these names — no other beat may
             # present them (the chip sweep was duplicating the model list).
             reserved = {e.lower() for e in ents}
@@ -1078,8 +1001,16 @@ def _refine_motif(motif: str, s: dict, used) -> str:
     import re as _re
     details = s.get("details") or []
     chips = s.get("chips") or []
-    if motif == "logo-wall" and len(s.get("entities") or []) < 4:
-        motif = "chip-sweep" if len(chips) >= 6 else "check-list"
+    # A WALL NEEDS MARKS: a logo wall whose tiles are mostly initial badges
+    # is the system announcing it has no logos (eight lettered circles under
+    # "Works perfectly with", insforge.dev 2026-07-19). Fewer than half the
+    # partners carrying a real mark = not a wall.
+    if motif == "logo-wall":
+        ents = s.get("entities") or []
+        marks = s.get("marks") or {}
+        real = sum(1 for n in ents if marks.get(n))
+        if len(ents) < 4 or real * 2 < len(ents):
+            motif = "chip-sweep" if len(chips) >= 6 else "check-list"
     if motif == "chip-sweep" and len(chips) < 6:
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
     if motif == "stat-pop" and not any(_is_stat_line(d) for d in details):
@@ -1155,6 +1086,29 @@ _AGENT_TOOL_DOMAINS = {
     "adobe premiere": "adobe.com", "davinci": "blackmagicdesign.com",
     "davinci resolve": "blackmagicdesign.com",
 }
+
+
+def _stop_logos(s: dict, want: int = 8):
+    """The wall's marks for one stop, in provenance order: the image the
+    site itself renders for that partner, then a mapped favicon, then ''
+    (an honest initial badge). Fetched marks are memoised per build."""
+    out = []
+    marks = s.get("marks") or {}
+    for n in (s.get("entities") or [])[:want]:
+        src_url = marks.get(n) or ""
+        uri = ""
+        if src_url:
+            if src_url in _MARK_CACHE:
+                uri = _MARK_CACHE[src_url]
+            else:
+                import page_harvest
+                uri = page_harvest.mark_data_uri(src_url)
+                _MARK_CACHE[src_url] = uri
+        out.append({"name": n, "src": uri or _logo_uri(n)})
+    return out
+
+
+_MARK_CACHE: dict = {}
 
 
 def _logo_uri(name: str) -> str:
@@ -1396,9 +1350,7 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
         seen_titles.add(s["title"].lower())
         if dup_title and not s.get("seg"):
             motif = s.get("motif", "card")
-            logos = ([{"name": n, "src": _logo_uri(n)}
-                      for n in (s.get("entities") or [])[:8]]
-                     if motif == "logo-wall" else [])
+            logos = _stop_logos(s) if motif == "logo-wall" else []
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx, "y": cy,
                              "at": t_f + 12, "motif": motif, "text": s["title"],
                              "lines": s.get("details") or [],
@@ -1430,9 +1382,7 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
                 # (variability contract + Dennis's split-layout preference).
                 sign = -1 if layout == "split-left" else 1
                 motif = s.get("motif", "card")
-                logos = ([{"name": n, "src": _logo_uri(n)}
-                          for n in (s.get("entities") or [])[:8]]
-                         if motif == "logo-wall" else [])
+                logos = _stop_logos(s) if motif == "logo-wall" else []
                 elements.append({"id": f"t{i}", "kind": "headline",
                                  "x": cx + sign * -390, "y": cy, "w": 560,
                                  "at": t_f + 12, "text": s["title"], "size": 60,
@@ -1475,9 +1425,7 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
             # Motion-graphic beat — a concept vignette that ENACTS the title
             # (or a line-art motif fallback) instead of a redundant recording.
             motif = s.get("motif", "card")
-            logos = ([{"name": n, "src": _logo_uri(n)}
-                      for n in (s.get("entities") or [])[:8]]
-                     if motif == "logo-wall" else [])
+            logos = _stop_logos(s) if motif == "logo-wall" else []
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
                              "y": cy + 300, "at": t_f + 12,
                              "motif": motif, "text": s["title"],
