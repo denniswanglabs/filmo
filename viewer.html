@@ -54,7 +54,9 @@
   #blob { position:absolute; inset:0;
           background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
           animation:blobmorph 3.2s ease-in-out infinite, blobspin 8s linear infinite; }
-  /* The mark's lens hole survives the melt — the white circle rides the blob. */
+  /* The mark's lens hole survives the melt — and WANDERS: the white circle
+     drifts slowly around the body on the SAME 3.2s clock as the deformation,
+     so hole and blob read as one organism. */
   #blob::after { content:""; position:absolute; width:34%; height:34%;
                  right:16%; top:26%; background:#fff; border-radius:50%;
                  animation:holemorph 3.2s ease-in-out infinite; }
@@ -64,8 +66,14 @@
     66% { border-radius:52% 48% 62% 38% / 40% 55% 45% 60%; transform:scale(1.05); } }
   @keyframes blobspin { to { transform:rotate(360deg); } }
   @keyframes holemorph {
-    0%,100% { border-radius:52% 48% 50% 50% / 48% 52% 48% 52%; }
-    50% { border-radius:46% 54% 58% 42% / 54% 46% 52% 48%; } }
+    0%   { border-radius:52% 48% 50% 50% / 48% 52% 48% 52%;
+           transform:translate(0, 0) scale(1); }
+    33%  { border-radius:46% 54% 58% 42% / 54% 46% 52% 48%;
+           transform:translate(-34%, 30%) scale(0.9); }
+    66%  { border-radius:55% 45% 47% 53% / 45% 55% 50% 50%;
+           transform:translate(-58%, -8%) scale(1.08); }
+    100% { border-radius:52% 48% 50% 50% / 48% 52% 48% 52%;
+           transform:translate(0, 0) scale(1); } }
   #railhead h1 { font-size:14.5px; font-weight:700; }
   #railhead .sub { color:var(--muted); font-size:12px; }
   #thread { flex:1; min-height:0; overflow-y:auto; padding:6px 20px 12px;
