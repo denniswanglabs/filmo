@@ -51,12 +51,19 @@ export default function Home() {
   const [brain, setBrain] = useState<string>('ultra-paid')
   // Visual style family — 'classic' light or the Engineered Night dark one-world look.
   const [look, setLook] = useState<string>('classic')
-  // Walkrec beta entry: /?look=walkrec preselects the agent-toured film mode
-  // (hidden flag while in beta — free, narrated live in the workspace).
+  // Walkrec beta entry: /?look=walkrec selects the agent-toured film mode and
+  // the choice STICKS (localStorage) so every later plain visit keeps the new
+  // pipeline; /?look=classic explicitly switches back and sticks the same way.
   useEffect(() => {
     try {
       const q = new URLSearchParams(window.location.search).get('look')
-      if (q === 'walkrec') setLook('walkrec')
+      if (q === 'walkrec' || q === 'classic' || q === 'engineered-night') {
+        setLook(q)
+        localStorage.setItem('filmo-look', q)
+      } else {
+        const saved = localStorage.getItem('filmo-look')
+        if (saved === 'walkrec' || saved === 'engineered-night') setLook(saved)
+      }
     } catch { /* ssr */ }
   }, [])
   // Payments are OFF for the open beta (no Stripe roadblock for new users) — every

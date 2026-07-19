@@ -112,6 +112,15 @@ export async function createBuild(input: {
   // Identity comes from the verified token, NEVER from the client. The owner of the
   // build is whoever the token belongs to.
   const me = await verifyUser(input.accessToken)
+  // The operator defaults to the walkrec pipeline (Dennis 2026-07-19: "I want
+  // to use the new one"): a plain submit with no explicit mode upgrades to
+  // walkrec for the owner account only — public beta users keep classic
+  // unless they carry the ?look=walkrec flag. /?look=classic stays an
+  // explicit escape (the client sends it through as-is).
+  let look = input.look
+  if (me && (me.email || '').toLowerCase() === OWNER_EMAIL && !look) {
+    look = 'walkrec'
+  }
   if (!me) throw new Error('Please sign in to start a build.')
 
   // Validate the URL is a real http(s) address (defense-in-depth; the worker also
@@ -179,9 +188,9 @@ export async function createBuild(input: {
   // 'standard' (kept only to satisfy the existing runs/jobs schema + worker param contract).
   const quality = 'standard' as const
   const brain = input.brain && ALLOWED_BRAINS.has(input.brain) ? input.brain : 'super-free'
-  const look: 'classic' | 'engineered-night' | 'walkrec' =
-    input.look === 'walkrec' ? 'walkrec'
-    : input.look === 'engineered-night' ? 'engineered-night' : 'classic'
+  const lookFinal: 'classic' | 'engineered-night' | 'walkrec' =
+    look === 'walkrec' ? 'walkrec'
+    : look === 'engineered-night' ? 'engineered-night' : 'classic'
   const mode: 'mock' | 'real' = input.mode === 'real' ? 'real' : 'mock'
   let payMode: 'auto' | 'human' = input.payMode === 'human' ? 'human' : 'auto'
 
@@ -206,15 +215,15 @@ export async function createBuild(input: {
         user_id: me.id, run_key: runKey, brand, company_url: rawUrl,
         goal, emphasis: input.emphasis || null, quality, brain, mode, status: 'queued',
         // Walkrec beta: free (price 0), narrated via agent_events, Sonnet-planned.
-        film_mode: look === 'walkrec' ? 'walkrec' : 'classic',
-        ...(look === 'walkrec' ? { price_cents: 0 } : {}),
+        film_mode: lookFinal === 'walkrec' ? 'walkrec' : 'classic',
+        ...(lookFinal === 'walkrec' ? { price_cents: 0 } : {}),
       }])
       .select(),
   )
   if (runErr) throw new Error('runs.insert: ' + JSON.stringify(runErr))
   const runId = runs![0].id
 
-  const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, look, pay_mode: payMode, run_key: runKey, duration: 30 }
+  const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, look: lookFinal, pay_mode: payMode, run_key: runKey, duration: 30 }
   const { error: jobErr } = await withRetry(() =>
     db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }]),
   )
