@@ -1611,6 +1611,13 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats):
         emit(run_dir, "review.lint", f"Beat {i + 1}: {issue}",
              f"Fix: swap to {fix}." if fix else "Flagged for the critic.")
     actions = _critic_review(run_dir, stops, beats)
+    # NO-OP GUARD: a swap to the treatment the beat already carries changes
+    # nothing but still triggers a full ~4-minute re-render (observed: the
+    # critic asked stat-pop -> stat-pop). Filter before deciding to apply.
+    actions = [a for a in actions
+               if not (a["action"] == "swap_treatment"
+                       and a["beat"] < len(stops)
+                       and stops[a["beat"]].get("motif") == a["to"])]
     for a in actions:
         emit(run_dir, "review.finding",
              f"Beat {a['beat'] + 1}: {a['issue'] or a['action']}",
