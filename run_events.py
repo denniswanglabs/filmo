@@ -130,20 +130,34 @@ def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
         return
 
     def work():
+        # ROW FIRST, PIXELS AFTER: the text event must reach the UI in
+        # seconds; artifact uploads (cross-region, uplink shared with the
+        # live-frame stream) can take a minute — serializing insert behind
+        # upload made the whole thread lag minutes behind the live canvas.
+        # The artifact attaches to the already-visible row via PATCH.
         try:
-            url = ""
-            if artifact_path and os.path.exists(artifact_path):
-                try:
-                    url = _upload_artifact(rid, evt["seq"], artifact_path)
-                except Exception:
-                    url = ""
             row = {"run_id": rid, "seq": evt["seq"], "ts": evt["ts"],
                    "kind": evt["kind"], "title": evt["title"],
-                   "detail": evt["detail"], "artifact_url": url}
+                   "detail": evt["detail"], "artifact_url": ""}
             _if_req("POST", "/api/database/records/agent_events",
                     json.dumps([row]).encode(), "application/json")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[sink!] insert {evt['kind']} seq {evt['seq']}: {e}",
+                  file=sys.stderr)
+            return
+        if not (artifact_path and os.path.exists(artifact_path)):
+            return
+        try:
+            url = _upload_artifact(rid, evt["seq"], artifact_path)
+            if url:
+                _if_req("PATCH",
+                        "/api/database/records/agent_events"
+                        f"?run_id=eq.{rid}&seq=eq.{evt['seq']}",
+                        json.dumps({"artifact_url": url}).encode(),
+                        "application/json")
+        except Exception as e:
+            print(f"[sink!] artifact {evt['kind']} seq {evt['seq']}: {e}",
+                  file=sys.stderr)
     threading.Thread(target=work, daemon=True).start()
 
 

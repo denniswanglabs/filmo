@@ -1125,10 +1125,26 @@ def main():
         # narrated through run_events -> agent_events.
         import shutil as _sh
         import proto_walkrec
-        out = proto_walkrec.build_tour_film(a.url, a.run_id)
-        final = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "runs", a.run_id, "final.mp4")
+        from run_events import emit
+        run_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "runs", a.run_id)
+        # TERMINAL EVENTS ARE PART OF THE BUS CONTRACT (no silent endings):
+        # hosted runs used to skip the run.start/run.done wrapper (it lived
+        # only in the proto CLI), so the workspace never saw a terminal
+        # state. The wrapper lives HERE now — the one entry point the
+        # claimer actually runs.
+        emit(run_dir, "run.start", f"Opening {a.url}",
+             "Walkrec build claimed by the studio worker.")
+        try:
+            out = proto_walkrec.build_tour_film(a.url, a.run_id)
+        except BaseException as e:
+            emit(run_dir, "run.error", "The run hit a wall",
+                 f"{type(e).__name__}: {e}")
+            raise
+        final = os.path.join(run_dir, "final.mp4")
         _sh.copyfile(out, final)
+        emit(run_dir, "run.done", "Film delivered",
+             "The tour film is rendered and shipped.")
         print(f"[walkrec] final: {final}")
         return
     goal = a.goal or ("%d-second promo plus a short product walkthrough" % a.duration)
