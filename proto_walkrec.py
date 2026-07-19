@@ -1241,6 +1241,21 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
         shutil.copyfile(music_src, os.path.join(pub, rel))
         theme["music"] = rel
 
+    ctx = {"theme": theme, "name": name, "host": host, "tagline": tagline,
+           "logo_rel": logo_rel, "site_bg": site_bg, "accent": pal["accent"]}
+    out, beats = _assemble_and_render(run_id, run_dir, pub, stops, ctx)
+    fixed = _review_and_fix(run_id, run_dir, pub, stops, ctx, beats)
+    return fixed or out
+
+
+def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
+    """Assembly tail: motif assignment -> world layout -> props -> render ->
+    per-beat design stills. Split from build_tour_film so the REVIEWER can
+    re-run it with adjusted stops (auto-apply). Returns (film, beats_meta)."""
+    theme = ctx["theme"]; name = ctx["name"]; host = ctx["host"]
+    tagline = ctx["tagline"]; logo_rel = ctx["logo_rel"]
+    site_bg = ctx["site_bg"]
+    beats = []
     elements, moments = [], [{"at": 0, "x": 960, "y": 540, "scale": 1.0}]
     hero_line = tagline or f"{name} — see it live"
     accent_word = max(hero_line.split(), key=len).strip(".,")
@@ -1269,16 +1284,20 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                       if c.lower() not in presented]
         s["details"] = [d for d in (s.get("details") or [])
                         if d.lower() not in presented]
-        s["motif"] = _refine_motif(
-            _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
-            s, used_motifs)
-        used_motifs.add(s["motif"])
+        if s.get("motif_locked"):
+            used_motifs.add(s["motif"])  # reviewer's decision stands
+        else:
+            s["motif"] = _refine_motif(
+                _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
+                s, used_motifs)
+            used_motifs.add(s["motif"])
         presented.update(x.lower() for x in (s.get("chips") or [])[:10])
         presented.update(x.lower() for x in (s.get("details") or []))
         presented.update(e.lower() for e in (s.get("entities") or []))
     if len(gstops) >= 4 and not any(s["motif"] in _LINE_ART for s in gstops):
         data = [s for s in gstops if s["motif"] in
-                ("check-list", "chip-sweep", "request-table", "context-cards")]
+                ("check-list", "chip-sweep", "request-table", "context-cards")
+                and not s.get("motif_locked")]
         if data:
             weakest = min(data, key=lambda s: len(s.get("details") or [])
                           + len((s.get("chips") or [])[:10]))
@@ -1308,6 +1327,8 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                              "lines": s.get("details") or [],
                              "chips": s.get("chips") or [], "logos": logos})
             moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.12})
+            beats.append({"i": i, "title": s["title"], "treatment": motif,
+                          "layout": "center", "at": t_f})
             beat_s = {"chip-sweep": 5.5, "stat-pop": 4.0, "kinetic-line": 3.5,
                       "logo-wall": 5.0, "people-wall": 5.0}.get(motif, 5.5)
             t_f += int(beat_s * FPS)
@@ -1318,6 +1339,9 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                              "at": t_f + 12, "motif": "kinetic-line",
                              "text": s["title"]})
             moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.12})
+            beats.append({"i": i, "title": s["title"],
+                          "treatment": "kinetic-line", "layout": "center",
+                          "at": t_f})
             t_f += int(3.5 * FPS)
             continue
         if not s.get("seg"):
@@ -1346,6 +1370,8 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                                  "quotes": s.get("quotes") or [],
                                  "logos": logos, "narrow": True})
                 moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.05})
+                beats.append({"i": i, "title": s["title"], "treatment": motif,
+                              "layout": layout, "at": t_f})
                 beat_s = {"chip-sweep": 6.0, "stat-pop": 4.5, "logo-wall": 5.5,
                           "quote-card": 5.5, "people-wall": 5.5}.get(motif, 6.0)
                 t_f += int(beat_s * FPS)
@@ -1365,6 +1391,8 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             elements.append({"id": f"v{i}", "kind": "video", "x": cx, "y": cy + 330,
                              "w": 1300, "at": t_f + 12, "videoSrc": rel})
             moments.append({"at": t_f, "x": cx, "y": cy + 340, "scale": 1.0})
+            beats.append({"i": i, "title": s["title"], "treatment": "recording",
+                          "layout": "stacked", "at": t_f})
             t_f += int(min(seg_dur, 7.0) * FPS)
         else:
             # Motion-graphic beat — a concept vignette that ENACTS the title
@@ -1403,13 +1431,171 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     out = os.path.join(run_dir, "film-tour.mp4")
     emit(run_dir, "assemble.render",
          f"Rendering the film — {t_f / FPS:.1f}s, {len(stops)} beats",
-         f"World palette {site_bg}, accent {pal['accent']}.")
+         f"World palette {site_bg}, accent {ctx['accent']}.")
     subprocess.run(["npx", "remotion", "render", "WalkrecWorld", out,
                     f"--props={props_path}", "--log=error"],
                    cwd=os.path.join(HERE, "studio"), check=True, timeout=900)
     emit(run_dir, "assemble.film", "Film rendered", f"{t_f / FPS:.1f}s",
          artifact=out)
+    for b in beats:
+        fsec = min((b["at"] + 84) / FPS, t_f / FPS - 0.3)
+        still = os.path.join(run_dir, f"beat-{b['i']}.jpg")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss",
+                        f"{fsec:.2f}", "-i", out, "-frames:v", "1",
+                        "-vf", "scale=960:-1", still], check=False, timeout=60)
+        if os.path.exists(still):
+            b["still"] = still
+            emit(run_dir, "design.beat",
+                 f"Beat {b['i'] + 1}: {b['treatment']} ({b['layout']})",
+                 f"\u201c{b['title'][:60]}\u201d", artifact=still)
     print(f"[walkrec] tour film: {out} ({t_f / FPS:.1f}s, {len(stops)} planned shots, bg {site_bg})")
+    return out, beats
+
+
+def _lint_stops(stops):
+    """Deterministic post-conditions: re-check tonight's contracts on the
+    final beat plan. Returns [(stop_index, issue, fix_motif_or_None)]."""
+    findings = []
+    prev = None
+    for i, s in enumerate(stops):
+        motif = "recording" if s.get("seg") else s.get("motif", "")
+        details = s.get("details") or []
+        if motif == prev and motif not in ("recording",):
+            findings.append((i, f"adjacent repeated treatment ({motif})", None))
+        if motif == "chip-sweep" and len((s.get("chips") or [])) < 6:
+            findings.append((i, "chip-sweep below material floor", "check-list"
+                             if len(details) >= 2 else "card"))
+        if motif == "quote-card" and not s.get("quotes"):
+            findings.append((i, "quote-card without a harvested quote",
+                             "people-wall" if sum(1 for d in details
+                                                  if "@" in d) >= 2 else "card"))
+        if motif == "logo-wall" and sum(
+                1 for e in (s.get("entities") or []) if e) < 4:
+            findings.append((i, "logo wall below 4 partners", "check-list"
+                             if len(details) >= 2 else "card"))
+        prev = motif
+    return findings
+
+
+_CRITIC_MENU = ("none", "drop", "swap_treatment")
+_SWAP_TARGETS = ("check-list", "chip-sweep", "kinetic-line", "quote-card",
+                 "people-wall", "stat-pop", "house", "chat", "globe", "card",
+                 "tag")
+
+
+def _critic_review(run_dir, stops, beats, brain="sonnet5"):
+    """LLM critic with a CLOSED action menu. Sees the beat stills + the plan;
+    may only drop a beat or swap its treatment — it can never write content,
+    so every honesty gate survives review. Returns gated actions."""
+    import base64
+    try:
+        import validate_planner as vp
+    except Exception:
+        return []
+    plan_lines = []
+    content = []
+    for b in beats:
+        s = stops[b["i"]] if b["i"] < len(stops) else {}
+        plan_lines.append(
+            f"beat {b['i']}: title=\u201c{b['title']}\u201d "
+            f"treatment={b['treatment']} layout={b['layout']} "
+            f"material={ (s.get('details') or [])[:3] }")
+        still = b.get("still")
+        if still and os.path.exists(still):
+            with open(still, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            content.append({"type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+    sys_prompt = (
+        "You review a product launch film. Judge STORY and COHERENCE: does "
+        "each beat's title match what the beat shows, is any beat empty or "
+        "redundant, does the sequence flow? You may ONLY act via this menu "
+        "per beat: none | drop | swap_treatment (to one of: "
+        + ", ".join(_SWAP_TARGETS) + "). You cannot write copy. Return STRICT "
+        'JSON: [{"beat": <index>, "verdict": "ok"|"issue", "issue": "<short '
+        'reason>", "action": "none"|"drop"|"swap_treatment", "to": "<target '
+        'or empty>"}] — one object per beat, no prose.')
+    user_content = ([{"type": "text", "text": "\n".join(plan_lines)}] + content
+                    if content else "\n".join(plan_lines))
+    try:
+        raw = vp.call_model([{"role": "system", "content": sys_prompt},
+                             {"role": "user", "content": user_content}],
+                            brain=brain) or ""
+    except (Exception, SystemExit):
+        try:
+            raw = vp.call_model([{"role": "system", "content": sys_prompt},
+                                 {"role": "user",
+                                  "content": "\n".join(plan_lines)}],
+                                brain=brain) or ""
+        except (Exception, SystemExit):
+            return []
+    cand = _extract_json_list(raw) or []
+    actions, drops = [], 0
+    for c in cand:
+        try:
+            bi = int(c.get("beat", -1))
+        except Exception:
+            continue
+        act = str(c.get("action") or "none")
+        if bi < 0 or bi >= len(stops) or act not in _CRITIC_MENU:
+            continue
+        if act == "drop":
+            if drops >= 2 or stops[bi].get("seg"):
+                continue  # never drop recordings; max 2 drops
+            drops += 1
+        if act == "swap_treatment":
+            to = str(c.get("to") or "")
+            if to not in _SWAP_TARGETS or stops[bi].get("seg"):
+                continue
+            if _refine_motif(to, stops[bi], set()) != to:
+                continue  # target's material floor must hold
+        if act != "none":
+            actions.append({"beat": bi, "action": act,
+                            "to": str(c.get("to") or ""),
+                            "issue": str(c.get("issue") or "")[:120]})
+    return actions
+
+
+def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats):
+    """One review cycle (auto-apply, per Dennis): deterministic linter +
+    stills-seeing critic -> gated actions -> re-assemble once. Everything
+    visible in the feed as review.* events. Returns the fixed film or None."""
+    emit(run_dir, "review.start", "Reviewing story and architecture",
+         f"{len(beats)} beats: linter + critic pass.")
+    findings = _lint_stops(stops)
+    for i, issue, fix in findings:
+        emit(run_dir, "review.lint", f"Beat {i + 1}: {issue}",
+             f"Fix: swap to {fix}." if fix else "Flagged for the critic.")
+    actions = _critic_review(run_dir, stops, beats)
+    for a in actions:
+        emit(run_dir, "review.finding",
+             f"Beat {a['beat'] + 1}: {a['issue'] or a['action']}",
+             f"Action: {a['action']}"
+             + (f" \u2192 {a['to']}" if a['to'] else ""))
+    lint_fixes = [(i, fix) for i, _, fix in findings if fix]
+    if not lint_fixes and not actions:
+        emit(run_dir, "review.pass", "Review passed",
+             "Story and treatments hold; shipping the first cut.")
+        return None
+    drop_idx = sorted({a["beat"] for a in actions if a["action"] == "drop"},
+                      reverse=True)
+    for i, fix in lint_fixes:
+        stops[i]["motif"] = fix
+        stops[i]["motif_locked"] = True
+    for a in actions:
+        if a["action"] == "swap_treatment":
+            stops[a["beat"]]["motif"] = a["to"]
+            stops[a["beat"]]["motif_locked"] = True
+    for i in drop_idx:
+        stops.pop(i)
+    shutil.copyfile(os.path.join(run_dir, "film-tour.mp4"),
+                    os.path.join(run_dir, "film-tour-prereview.mp4"))
+    emit(run_dir, "review.apply",
+         f"Applying {len(lint_fixes) + len(actions)} adjustments",
+         "Re-assembling and re-rendering the film.")
+    out, _beats2 = _assemble_and_render(run_id, run_dir, pub, stops, ctx)
+    emit(run_dir, "review.done", "Review complete — film updated",
+         artifact=out)
     return out
 
 
