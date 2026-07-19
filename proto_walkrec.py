@@ -443,8 +443,10 @@ def build_vevara_film(url: str, run_id: str, clip: str, logo_from: str = "") -> 
 
     out = os.path.join(run_dir, "film-vevara.mp4")
     subprocess.run(["npx", "remotion", "render", "WalkrecWorld", out,
-                    f"--props={props_path}", "--log=error"],
-                   cwd=os.path.join(HERE, "studio"), check=True, timeout=900)
+                    f"--props={props_path}", "--log=error",
+                    "--concurrency=1",
+                    "--offthreadvideo-cache-size-in-bytes=314572800"],
+                   cwd=os.path.join(HERE, "studio"), check=True, timeout=1800)
     print(f"[walkrec] vevara film: {out} ({t_f / FPSL:.1f}s, bg {site_bg}, "
           f"{len(seg_rels)} footage beats)")
     return out
@@ -1501,8 +1503,15 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
          f"Rendering the film — {t_f / FPS:.1f}s, {len(stops)} beats",
          f"World palette {site_bg}, accent {ctx['accent']}.")
     subprocess.run(["npx", "remotion", "render", "WalkrecWorld", out,
-                    f"--props={props_path}", "--log=error"],
-                   cwd=os.path.join(HERE, "studio"), check=True, timeout=900)
+                    f"--props={props_path}", "--log=error",
+                    # FIT THE BOX: default concurrency decodes several
+                    # 1080p60 clips at once and the compositor gets
+                    # OOM-SIGKILLed on the worker (observed the first run
+                    # that carried real footage). One frame lane + a
+                    # 300MB video cache keeps peak memory inside the box.
+                    "--concurrency=1",
+                    "--offthreadvideo-cache-size-in-bytes=314572800"],
+                   cwd=os.path.join(HERE, "studio"), check=True, timeout=1800)
     emit(run_dir, "assemble.film", "Film rendered", f"{t_f / FPS:.1f}s",
          artifact=out)
     for b in beats:
