@@ -102,7 +102,7 @@ export async function createBuild(input: {
   mode?: 'mock' | 'real'
   /** Visual style family. 'engineered-night' renders the dark one-world style;
       anything else (or absent) is the classic light look. */
-  look?: 'classic' | 'engineered-night'
+  look?: 'classic' | 'engineered-night' | 'walkrec'
   // Opt-in HUMAN payment: 'auto' (default) lets the worker auto-resolve payment
   // (PRODUCER_SIMULATE_PAID); 'human' creates a REAL Stripe TEST checkout the user
   // must pay (test card 4242) before the build proceeds. Only the payment becomes
@@ -179,8 +179,9 @@ export async function createBuild(input: {
   // 'standard' (kept only to satisfy the existing runs/jobs schema + worker param contract).
   const quality = 'standard' as const
   const brain = input.brain && ALLOWED_BRAINS.has(input.brain) ? input.brain : 'super-free'
-  const look: 'classic' | 'engineered-night' =
-    input.look === 'engineered-night' ? 'engineered-night' : 'classic'
+  const look: 'classic' | 'engineered-night' | 'walkrec' =
+    input.look === 'walkrec' ? 'walkrec'
+    : input.look === 'engineered-night' ? 'engineered-night' : 'classic'
   const mode: 'mock' | 'real' = input.mode === 'real' ? 'real' : 'mock'
   let payMode: 'auto' | 'human' = input.payMode === 'human' ? 'human' : 'auto'
 
@@ -204,6 +205,9 @@ export async function createBuild(input: {
       .insert([{
         user_id: me.id, run_key: runKey, brand, company_url: rawUrl,
         goal, emphasis: input.emphasis || null, quality, brain, mode, status: 'queued',
+        // Walkrec beta: free (price 0), narrated via agent_events, Sonnet-planned.
+        film_mode: look === 'walkrec' ? 'walkrec' : 'classic',
+        ...(look === 'walkrec' ? { price_cents: 0 } : {}),
       }])
       .select(),
   )
@@ -581,4 +585,80 @@ export async function readAnalytics(
     }
   })
   return { authorized: true, rows }
+}
+
+
+// ---- Walkrec beta: the agent activity stream + director chat ----------------
+
+export type AgentEvent = {
+  seq: number; ts: number; kind: string; title: string; detail: string;
+  artifact_url: string
+}
+
+async function ownedRun(runKey: string, accessToken: string) {
+  const me = await verifyUser(accessToken)
+  if (!me) return null
+  const db = adminClient()
+  const { data } = await db.database
+    .from('runs').select('*').eq('run_key', runKey).limit(1)
+  const run = (data && data[0]) as Run | undefined
+  if (!run || (run as { user_id?: string }).user_id !== me.id) return null
+  return { me, db, run: run as Run & { id: string; film_mode?: string } }
+}
+
+/** The walkrec workspace poll: run row + agent events after `after`.
+ *  artifact_url is rewritten to the same-origin proxy so private storage
+ *  objects render in the browser. */
+export async function getAgentRun(
+  runKey: string, after: number, accessToken: string,
+) {
+  const ctx = await ownedRun(runKey, accessToken)
+  if (!ctx) return { error: 'not-found' as const }
+  const { db, run } = ctx
+  const { data: evts } = await db.database
+    .from('agent_events')
+    .select('seq,ts,kind,title,detail,artifact_url')
+    .eq('run_id', run.id)
+    .gt('seq', after)
+    .order('seq', { ascending: true })
+    .limit(400)
+  const events = ((evts as AgentEvent[]) || []).map((e) => ({
+    ...e,
+    artifact_url: e.artifact_url
+      ? `/api/agent-artifact?u=${encodeURIComponent(e.artifact_url)}`
+      : '',
+  }))
+  const liveUrl = `/api/agent-artifact?u=${encodeURIComponent(
+    `${(process.env.INSFORGE_URL || process.env.NEXT_PUBLIC_INSFORGE_URL || '').replace(/\/$/, '')}`
+    + `/api/storage/buckets/${process.env.INSFORGE_BUCKET || 'walk-videos'}`
+    + `/objects/agent/${run.id}/live.jpg`)}`
+  return { run, events, runId: run.id, liveUrl }
+}
+
+/** One director chat turn: log the user message as an agent event and enqueue
+ *  a director job — the worker's python director replies via chat.director
+ *  events (ONE director implementation, no TS drift). */
+export async function sendDirectorMessage(
+  runKey: string, message: string, accessToken: string,
+) {
+  const ctx = await ownedRun(runKey, accessToken)
+  if (!ctx) return { error: 'not-found' as const }
+  const { db, run } = ctx
+  const text = String(message || '').slice(0, 2000)
+  if (!text.trim()) return { error: 'empty' as const }
+  const { data: maxRow } = await db.database
+    .from('agent_events').select('seq').eq('run_id', run.id)
+    .order('seq', { ascending: false }).limit(1)
+  const seq = ((maxRow && maxRow[0] && (maxRow[0] as { seq: number }).seq) || 0) + 1
+  await withRetry(() => db.database.from('agent_events').insert([{
+    run_id: run.id, seq, ts: Date.now() / 1000, kind: 'chat.user',
+    title: text, detail: '', artifact_url: '',
+  }]))
+  const { error: jobErr } = await withRetry(() =>
+    db.database.from('jobs').insert([{
+      run_id: run.id, status: 'queued', type: 'director',
+      params: { run_key: runKey, message: text, look: 'walkrec' },
+    }]))
+  if (jobErr) return { error: 'enqueue-failed' as const }
+  return { ok: true as const, seq }
 }

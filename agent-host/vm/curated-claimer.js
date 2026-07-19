@@ -1114,6 +1114,26 @@ async function processReRender(job) {
   log(`  RERENDER delivered run ${runKey} (${url ? 'uploaded' : 'NO video'})`)
 }
 
+async function processDirectorJob(job) {
+  const p = job.params || {}
+  const runKey = p.run_key || p.runKey
+  log(`director job ${job.id} -> run ${runKey}`)
+  const code = await new Promise((resolve) => {
+    const child = spawn(PYTHON_BIN,
+      [join(PIPELINE_DIR, 'director_job.py'),
+       '--run-key', String(runKey),
+       '--run-id', String(job.run_id || ''),
+       '--message', String(p.message || '')],
+      { cwd: PIPELINE_DIR, env: process.env })
+    child.stdout.on('data', (d) => { try { process.stdout.write(`  [dir] ${d}`) } catch {} })
+    child.stderr.on('data', (d) => { try { process.stderr.write(`  [dir!] ${d}`) } catch {} })
+    child.on('error', () => resolve(1))
+    child.on('close', (c) => resolve(c ?? 1))
+  })
+  await setJob(job.id, code === 0 ? { status: 'done' }
+    : { status: 'failed', error: `director exit ${code}` })
+}
+
 // ───────────────────────────── processJob ─────────────────────────────
 async function processJob(job) {
   const p = job.params || {}
@@ -1124,6 +1144,11 @@ async function processJob(job) {
   // original build). Must branch BEFORE the url read below.
   if (job.type === 'rerender' || p.from === 'props_edited') {
     return processReRender(job)
+  }
+  // Walkrec beta: director chat turns are jobs too — ONE python director
+  // implementation; the reply + any re-render narrate via agent_events.
+  if (job.type === 'director') {
+    return processDirectorJob(job)
   }
   const url = p.company_url || p.url
   const t0 = Date.now()

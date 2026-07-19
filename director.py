@@ -171,6 +171,111 @@ def _apply_async(run_id: str, run_dir: str, state: dict, actions):
     t.start()
 
 
+def _parse(run_dir: str, state: dict, message: str):
+    """One director parse: (reply, gated_actions). Raises on brain failure."""
+    import validate_planner as vp
+    sys_prompt = _SYSTEM.format(
+        beats=_beats_summary(state["stops"]),
+        events=_events_tail(run_dir))
+    raw = vp.call_model([{"role": "system", "content": sys_prompt},
+                         {"role": "user", "content": message}],
+                        brain="sonnet5") or ""
+    obj = None
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(raw):
+        if ch == "{":
+            try:
+                obj, _ = dec.raw_decode(raw[i:])
+                break
+            except Exception:
+                continue
+    if not isinstance(obj, dict):
+        raise ValueError("unparseable director reply")
+    reply = str(obj.get("reply") or "")[:600]
+    actions = [a for a in (obj.get("actions") or [])
+               if isinstance(a, dict)
+               and a.get("action") in ("drop", "swap_treatment", "rerun")]
+    return reply, actions
+
+
+def _apply_work(run_id: str, run_dir: str, state: dict, actions) -> None:
+    """Apply gated actions + re-render, synchronously. Emits the outcome."""
+    import proto_walkrec as pw
+    stops, ctx = state["stops"], state["ctx"]
+    applied = []
+    for a in actions:
+        if a["action"] == "rerun":
+            emit(run_dir, "run.start",
+                 "Director: full re-run requested",
+                 "Re-reading the site and re-filming from scratch.")
+            pw.build_tour_film(ctx.get("host", ""), run_id)
+            return
+        bi = a.get("beat", -1)
+        if not (0 <= bi < len(stops)) or stops[bi].get("seg"):
+            continue
+        if a["action"] == "drop":
+            applied.append(f"dropped \u201c{stops[bi]['title'][:40]}\u201d")
+            stops[bi]["_drop"] = True
+        elif a["action"] == "swap_treatment":
+            to = a.get("to", "")
+            if pw._refine_motif(to, stops[bi], set()) != to:
+                emit(run_dir, "review.finding",
+                     f"Swap rejected for beat {bi + 1}",
+                     f"\u201c{to}\u201d fails its material floor on this beat.")
+                continue
+            stops[bi]["motif"] = to
+            stops[bi]["motif_locked"] = True
+            applied.append(f"beat {bi + 1} \u2192 {to}")
+    stops[:] = [s for s in stops if not s.get("_drop")]
+    if not applied:
+        emit(run_dir, "review.pass", "No changes applied",
+             "The requested edits did not survive the gates.")
+        return
+    emit(run_dir, "review.apply", "Director: " + "; ".join(applied),
+         "Re-assembling and re-rendering.")
+    pub = os.path.join(HERE, "studio", "public")
+    out, _beats = pw._assemble_and_render(run_id, run_dir, pub,
+                                          stops, state["ctx"])
+    emit(run_dir, "review.done", "Change applied — film updated",
+         artifact=out)
+    emit(run_dir, "run.done", "Run finished", "The updated film is ready.")
+
+
+def handle_job(run_key: str, insforge_run_id: str, message: str) -> int:
+    """Hosted director turn (claimer job): reply + apply, all through the
+    event bus so the workspace narrates it. Returns a process exit code."""
+    run_dir = os.path.join(HERE, "runs", run_key)
+    os.makedirs(run_dir, exist_ok=True)
+    if insforge_run_id:
+        try:
+            with open(os.path.join(run_dir, "insforge-run-id"), "w") as f:
+                f.write(insforge_run_id)
+        except Exception:
+            pass
+    try:
+        state = _load_state(run_dir)
+    except Exception:
+        emit(run_dir, "chat.director",
+             "This run's working files were recycled by a redeploy — say "
+             "\u201credo the film\u201d and I'll make a fresh cut.", "")
+        return 0
+    try:
+        reply, actions = _parse(run_dir, state, message)
+    except (Exception, SystemExit) as e:
+        emit(run_dir, "chat.director",
+             f"I hit a snag reading that ({type(e).__name__}) — try again?", "")
+        return 0
+    emit(run_dir, "chat.director", reply, "")
+    if actions:
+        try:
+            _apply_work(run_key, run_dir, state, actions)
+        except BaseException as e:
+            emit(run_dir, "run.error", "Director change failed",
+                 f"{type(e).__name__}: {e}")
+            return 1
+    return 0
+
+
 def handle(run_id: str, message: str) -> dict:
     """One chat turn. Returns {reply, working}. Never raises."""
     run_dir = os.path.join(HERE, "runs", run_id)
@@ -188,29 +293,7 @@ def handle(run_id: str, message: str) -> dict:
         _log_chat(run_dir, "director", reply)
         return {"reply": reply, "working": False}
     try:
-        import validate_planner as vp
-        import proto_walkrec as pw
-        sys_prompt = _SYSTEM.format(
-            beats=_beats_summary(state["stops"]),
-            events=_events_tail(run_dir))
-        raw = vp.call_model([{"role": "system", "content": sys_prompt},
-                             {"role": "user", "content": message}],
-                            brain="sonnet5") or ""
-        obj = None
-        dec = json.JSONDecoder()
-        for i, ch in enumerate(raw):
-            if ch == "{":
-                try:
-                    obj, _ = dec.raw_decode(raw[i:])
-                    break
-                except Exception:
-                    continue
-        if not isinstance(obj, dict):
-            raise ValueError("unparseable director reply")
-        reply = str(obj.get("reply") or "")[:600]
-        actions = [a for a in (obj.get("actions") or [])
-                   if isinstance(a, dict)
-                   and a.get("action") in ("drop", "swap_treatment", "rerun")]
+        reply, actions = _parse(run_dir, state, message)
         working = bool(actions)
         if actions:
             _apply_async(run_id, run_dir, state, actions)

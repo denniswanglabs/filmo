@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useAuth } from '../../../lib/auth'
 import { getRunForViewer } from '../../actions'
+import Workspace from './Workspace'
 import { TopBar, StatusChip } from '../../components/Brand'
 import BuildProgress, { feedVisible } from '../../components/BuildProgress'
 import SceneFilmstrip from '../../components/SceneFilmstrip'
@@ -166,6 +167,12 @@ export default function RunPage() {
         </main>
       </>
     )
+  }
+
+  // Walkrec beta: those runs get the director workspace, not the classic page.
+  const wk = run as unknown as { film_mode?: string; run_key?: string } | null
+  if (wk?.film_mode === 'walkrec' && wk.run_key) {
+    return <Workspace runKey={wk.run_key} getToken={getToken} />
   }
 
   return (

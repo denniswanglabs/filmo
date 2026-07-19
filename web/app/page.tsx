@@ -51,6 +51,14 @@ export default function Home() {
   const [brain, setBrain] = useState<string>('ultra-paid')
   // Visual style family — 'classic' light or the Engineered Night dark one-world look.
   const [look, setLook] = useState<string>('classic')
+  // Walkrec beta entry: /?look=walkrec preselects the agent-toured film mode
+  // (hidden flag while in beta — free, narrated live in the workspace).
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get('look')
+      if (q === 'walkrec') setLook('walkrec')
+    } catch { /* ssr */ }
+  }, [])
   // Payments are OFF for the open beta (no Stripe roadblock for new users) — every
   // build goes pay_mode 'auto'. The checkout UI + claimer gate remain in the codebase.
   const [requirePay] = useState(false)
@@ -99,7 +107,8 @@ export default function Home() {
           accessToken,
           url: p.url.trim(),
           brain: p.brain,
-          look: p.look === 'engineered-night' ? 'engineered-night' : 'classic',
+          look: p.look === 'walkrec' ? 'walkrec'
+            : p.look === 'engineered-night' ? 'engineered-night' : 'classic',
           mode: 'mock',
           payMode: p.requirePay ? 'human' : 'auto',
         })
@@ -167,7 +176,8 @@ export default function Home() {
     // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
     setUrl(p.url ?? '')
     setBrain(p.brain ?? 'ultra-paid')
-    setLook(p.look === 'engineered-night' ? 'engineered-night' : 'classic')
+    setLook(p.look === 'walkrec' ? 'walkrec'
+      : p.look === 'engineered-night' ? 'engineered-night' : 'classic')
     // NOTE: deliberately NOT restoring p.requirePay — stashes from before payments
     // were turned off carry requirePay:true and would resurrect the checkout gate.
     // Auto-resume the build only when we returned signed-in AND the stashed URL is real.
