@@ -22,8 +22,13 @@ const THREAD_KINDS = new Set([
   'run.start', 'read.page', 'read.quotes', 'decide.plan', 'decide.guard',
   'film.recording', 'film.shot', 'film.failed', 'design.beat', 'review.lint',
   'review.finding', 'review.pass', 'review.apply', 'review.done',
-  'assemble.film', 'run.error', 'chat.user', 'chat.director',
+  'assemble.film', 'run.error', 'chat.user', 'chat.director', 'say.step',
 ])
+
+// VOICE: the agent SPEAKS in prose (always visible, full sentences) and
+// leaves work RECEIPTS (collapsed, verb + result). A thread of nothing but
+// receipts reads as a log; a thread of nothing but prose hides the work.
+const PROSE_KINDS = new Set(['chat.director', 'say.step'])
 
 type LocalMsg = { ts: number; kind: 'user' | 'dir'; text: string }
 
@@ -201,9 +206,9 @@ export default function Workspace({ runKey, getToken }: {
   for (const e of evts) {
     if (!THREAD_KINDS.has(e.kind)) continue
     if (e.kind === 'chat.user') items.push({ ts: e.ts, type: 'user', text: e.title })
-    else if (e.kind === 'chat.director') {
+    else if (PROSE_KINDS.has(e.kind)) {
       items.push({ ts: e.ts, type: 'dir', text: e.title })
-      sawDirectorReply = true
+      if (e.kind === 'chat.director') sawDirectorReply = true
     } else items.push({ ts: e.ts, type: 'work', e })
   }
   useEffect(() => {

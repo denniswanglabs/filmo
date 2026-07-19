@@ -47,6 +47,12 @@ def build_film(url: str, run_id: str, clip: str, logo_from: str = "") -> str:
     pub = os.path.join(HERE, "studio", "public")
 
     # Brand theme with the REAL pixel accent (logo_from threads a prior capture).
+    _kept = sum(1 for s in stops if s.get("seg"))
+    _say(run_dir,
+         f"Footage is in — {_kept} recording{'s' if _kept != 1 else ''} kept. "
+         "Now let me cut it into a film on your own palette: the graphic "
+         "beats between the recordings only say what I could quote from "
+         "your pages, so nothing in the cut is invented.")
     theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
     pal = theme_src["palette"]
     name = theme_src.get("name") or url
@@ -174,6 +180,12 @@ def build_night_film(url: str, run_id: str, clip: str, logo_from: str = "") -> s
     os.makedirs(run_dir, exist_ok=True)
     pub = os.path.join(HERE, "studio", "public")
 
+    _kept = sum(1 for s in stops if s.get("seg"))
+    _say(run_dir,
+         f"Footage is in — {_kept} recording{'s' if _kept != 1 else ''} kept. "
+         "Now let me cut it into a film on your own palette: the graphic "
+         "beats between the recordings only say what I could quote from "
+         "your pages, so nothing in the cut is invented.")
     theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
     pal = theme_src["palette"]
     name = theme_src.get("name") or url
@@ -329,6 +341,12 @@ def build_vevara_film(url: str, run_id: str, clip: str, logo_from: str = "") -> 
     os.makedirs(run_dir, exist_ok=True)
     pub = os.path.join(HERE, "studio", "public")
 
+    _kept = sum(1 for s in stops if s.get("seg"))
+    _say(run_dir,
+         f"Footage is in — {_kept} recording{'s' if _kept != 1 else ''} kept. "
+         "Now let me cut it into a film on your own palette: the graphic "
+         "beats between the recordings only say what I could quote from "
+         "your pages, so nothing in the cut is invented.")
     theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
     pal = theme_src["palette"]
     name = theme_src.get("name") or url
@@ -633,6 +651,13 @@ _QUOTES_JS = """
 """
 
 
+def _say(run_dir: str, text: str) -> None:
+    """The agent SPEAKING — one prose line at a phase turn, rendered as
+    speech in the thread (work receipts stay collapsed beneath it). Say what
+    is happening and why it matters to the film; never restate the receipts."""
+    emit(run_dir, "say.step", text, "")
+
+
 def _harvest_quotes(url: str, run_dir: str = ""):
     """REAL testimonial quotes from the marker page's live DOM (lazy-loaded
     sections the static corpus can't see). Capture-interpreter aware."""
@@ -669,6 +694,12 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     import read_pass
     import site_read
 
+    host = url.replace("https://", "").replace("http://", "").split("/")[0]
+    _say(run_dir,
+         f"Opening {host} now: reading your site the way a first-time "
+         "visitor would, so every line in the film comes from your own "
+         "words. Taking the homepage first to get your brand — palette, "
+         "type, and mark — before anything else.")
     rp = read_pass.read_pass(url, run_dir)
     home_text = rp.get("body_text", "") or ""
     emit(run_dir, "read.page", f"Read {url}",
@@ -683,6 +714,10 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     if _logos:
         emit(run_dir, "brand.logo", "Brand mark captured", "",
              artifact=_logos[0])
+    _say(run_dir,
+         "Homepage read. Now let me follow the pages a buyer would actually "
+         "open — pricing, customers, the product pages — so the film can "
+         "argue with real detail instead of adjectives.")
     ledger = site_read.browse_site(url, run_dir, brain=None,
                                    homepage_text=home_text)
     for p in (ledger.get("pages") or []):
@@ -900,6 +935,12 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     emit(run_dir, "decide.plan",
          f"Planned {len(stops)} moments a customer cares about",
          "\n".join(f"{i + 1}. {s['title']}" for i, s in enumerate(stops)))
+    _say(run_dir,
+         f"Here's the tour I'd film — {len(stops)} moments, opening on "
+         f"\u201c{stops[0]['title']}\u201d and closing on "
+         f"\u201c{stops[-1]['title']}\u201d. Rolling now: I glide through "
+         "each page rather than cutting between screenshots, so it reads "
+         "like someone showing you around.")
     return stops
 
 
@@ -1236,6 +1277,12 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             "no recordings captured — refusing to ship a walkrec film with "
             "no screen footage (see the Recording failed events for causes)")
 
+    _kept = sum(1 for s in stops if s.get("seg"))
+    _say(run_dir,
+         f"Footage is in — {_kept} recording{'s' if _kept != 1 else ''} kept. "
+         "Now let me cut it into a film on your own palette: the graphic "
+         "beats between the recordings only say what I could quote from "
+         "your pages, so nothing in the cut is invented.")
     theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
     pal = theme_src["palette"]
     name = theme_src.get("name") or url
@@ -1269,6 +1316,20 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
            "logo_rel": logo_rel, "site_bg": site_bg, "accent": pal["accent"]}
     out, beats = _assemble_and_render(run_id, run_dir, pub, stops, ctx)
     fixed = _review_and_fix(run_id, run_dir, pub, stops, ctx, beats)
+    # The one long message the thread earns: what it is, what's in it, and
+    # the invitation to change it. Composed from the film's OWN final state
+    # so it can never describe a cut that wasn't made.
+    live = [s for s in stops if not s.get("_drop")]
+    shots = sum(1 for s in live if s.get("seg"))
+    secs = (beats[-1]["at"] / FPS + 5) if beats else 0
+    _say(run_dir,
+         f"Done \u2014 your {ctx['host']} film runs about {secs:.0f} seconds "
+         f"across {len(live)} beats, with {shots} real recording"
+         f"{'s' if shots != 1 else ''} gliding through the site and the rest "
+         f"built from your own copy. It closes on "
+         f"\u201c{live[-1]['title']}\u201d. Tell me what to change \u2014 "
+         "drop a beat, swap how one is treated, or ask why I made a call "
+         "\u2014 and I'll recut it.")
     return fixed or out
 
 
@@ -1477,6 +1538,11 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
                    cwd=os.path.join(HERE, "studio"), check=True, timeout=1800)
     emit(run_dir, "assemble.film", "Film rendered", f"{t_f / FPS:.1f}s",
          artifact=out)
+    _say(run_dir,
+         f"The film is printed \u2014 {t_f / FPS:.0f} seconds across "
+         f"{len(beats)} beats. Before I hand it over, let me watch it back "
+         "the way a viewer would: does every title match what's under it, "
+         "does anything repeat, does it end well?")
     for b in beats:
         fsec = min((b["at"] + 84) / FPS, t_f / FPS - 0.3)
         still = os.path.join(run_dir, f"beat-{b['i']}.jpg")
@@ -1626,7 +1692,15 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats):
     if not lint_fixes and not actions:
         emit(run_dir, "review.pass", "Review passed",
              "Story and treatments hold; shipping the first cut.")
+        _say(run_dir,
+             "Watched it back and it holds — every title matches what's "
+             "under it and nothing repeats. Shipping this cut.")
         return None
+    _n = len(lint_fixes) + len(actions)
+    _say(run_dir,
+         f"{_n} thing{'s' if _n != 1 else ''} bothered me on the way "
+         f"through, so I'm fixing {'them' if _n != 1 else 'it'} before you "
+         "see it — then re-cutting.")
     drop_idx = sorted({a["beat"] for a in actions if a["action"] == "drop"},
                       reverse=True)
     for i, fix in lint_fixes:

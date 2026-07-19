@@ -77,6 +77,12 @@ If the user references a beat by treatment ("the globe beat"), map it to the
 title carrying that treatment in the list; if no listed beat carries it, or
 two could match, ask instead (actions=[]).
 
+VOICE (match this exactly):
+- Open a reply with a 1-3 word acknowledgment token, an em-dash, then the move: "Perfect — …", "No problem — …", "Good catch — …". Never spend a sentence acknowledging, and never apologise.
+- First person, present tense, saying what you are doing and WHY: "I'm swapping that beat so the title and what's under it agree."
+- One to three sentences. No bullet lists, no headers, no emoji, no jargon, no internal names (treatments are "how a beat is treated", not "motifs").
+- When you decline, frame it as care for the film, not a limitation, and offer the nearest move that IS in contract.
+
 Rules:
 - Aesthetic requests outside the brand's own palette/style (e.g. 'make it \
 neon cyberpunk', 'use red', 'add emojis'): actions=[], and the reply \
@@ -156,20 +162,23 @@ def _outcome_reply(stops, applied, rejected) -> str:
     outcome — never from intent (F7: the pre-gate reply narrated a swap the
     gates then rejected, and a drop the film never made)."""
     parts = []
-    for a in applied:
-        if a[0] == "drop":
-            parts.append(f"Dropped “{a[1]}”.")
-        else:
-            parts.append(f"Swapped “{a[1]}” to {a[2]}.")
+    # Lead with a short acknowledgment token, then the move — never spend a
+    # whole sentence acknowledging, and never apologise.
+    if applied:
+        head = [(f"dropped “{a[1]}”" if a[0] == "drop"
+                 else f"swapped “{a[1]}” to {a[2]}") for a in applied]
+        parts.append("Done — " + ", ".join(head) + ".")
     for title, why in rejected:
-        parts.append(f"I couldn't touch “{title}” — {why}.")
+        parts.append(f"I left “{title}” alone — {why}.")
     if applied:
         vign = _vignettes(stops)
         if vign:
-            parts.append(f"The film now ends on “{vign[-1]['title']}”.")
-        parts.append("Re-rendering now — watch the film panel.")
+            parts.append(f"The film closes on “{vign[-1]['title']}” now. "
+                         "Re-cutting it — watch the film panel.")
+        else:
+            parts.append("Re-cutting it — watch the film panel.")
     elif not rejected:
-        parts.append("Nothing to change.")
+        parts.append("Nothing to change there.")
     return " ".join(parts)
 
 
