@@ -72,6 +72,8 @@ export default function Workspace({ runKey, getToken }: {
   const phaseStart = useRef(Date.now())
   const lastPhase = useRef('')
   const threadRef = useRef<HTMLDivElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [playT, setPlayT] = useState(0)
   const evtsRef = useRef<AgentEvent[]>([])
   // FULL-SCREEN SURFACE CONTRACT: the page template wraps content in a
   // framer-motion fade with a transform — a transformed ancestor hijacks
@@ -219,9 +221,43 @@ export default function Workspace({ runKey, getToken }: {
     )
     pill = S.phase === 'review' ? 'Grading — story and coherence' : 'Cutting — beat by beat'
   } else {
-    screen = S.film
-      ? <video src={S.film} controls muted />
-      : <div className="wk-text"><div className="big">{S.status === 'failed' ? 'The run failed.' : 'Finished.'}</div></div>
+    if (S.film) {
+      const starts = S.beats.map((b) => {
+        const m = b.detail.match(/· ([\d.]+)s/)
+        return m ? parseFloat(m[1]) : NaN
+      })
+      const seekable = starts.some((s) => !isNaN(s))
+      let active = -1
+      if (seekable) {
+        for (let i = 0; i < starts.length; i++) {
+          if (!isNaN(starts[i]) && playT >= starts[i]) active = i
+        }
+      }
+      screen = (
+        <div className="wk-playerwrap">
+          <video ref={videoRef} src={S.film} controls muted
+            onTimeUpdate={(ev) => setPlayT((ev.target as HTMLVideoElement).currentTime)} />
+          {S.beats.length ? (
+            <div className="wk-timeline">
+              {S.beats.map((b, i) => (
+                <div key={b.seq}
+                  className={'seg' + (i === active ? ' on' : '')}
+                  title={b.detail}
+                  onClick={() => {
+                    const v = videoRef.current
+                    if (v && !isNaN(starts[i])) { v.currentTime = starts[i]; v.play() }
+                  }}>
+                  <img src={b.artifact_url} alt="" />
+                  <span>{b.title.replace(/^Beat \d+:\s*/, '').split(' (')[0]}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )
+    } else {
+      screen = <div className="wk-text"><div className="big">{S.status === 'failed' ? 'The run failed.' : 'Finished.'}</div></div>
+    }
     pill = S.film ? `film · ${S.review.length ? 'review passed' : 'final'}` : ''
   }
 
@@ -443,6 +479,20 @@ export default function Workspace({ runKey, getToken }: {
         .wk-grid .beat { border-radius:10px; overflow:hidden; min-height:0;
           border:1px solid #E6E6E3; background:#fff; }
         .wk-grid .beat img { width:100%; height:100%; object-fit:cover; }
+        .wk-playerwrap { width:100%; height:100%; display:flex;
+          flex-direction:column; gap:10px; padding:14px; min-height:0; }
+        .wk-playerwrap video { flex:1; min-height:0; width:100%;
+          background:#000; border-radius:10px; object-fit:contain; }
+        .wk-timeline { flex:0 0 84px; display:flex; gap:6px; }
+        .wk-timeline .seg { flex:1; min-width:0; border-radius:8px;
+          overflow:hidden; border:2px solid #E6E6E3; cursor:pointer;
+          position:relative; background:#fff; }
+        .wk-timeline .seg.on { border-color:#3B82F6; }
+        .wk-timeline .seg img { width:100%; height:100%; object-fit:cover; }
+        .wk-timeline .seg span { position:absolute; left:0; right:0; bottom:0;
+          font-size:9.5px; padding:2px 6px; color:#fff;
+          background:linear-gradient(transparent, rgba(0,0,0,0.65));
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .wk-text { max-width:640px; text-align:center; padding:30px; }
         .wk-text .big { font-size:22px; font-weight:650; line-height:1.4; }
         .wk-text .small { color:#8A8A86; margin-top:10px; font-size:13.5px; }
