@@ -376,6 +376,23 @@ export type RunForViewerResult =
   | { notFound: true }
   | { run: Run; events: RunEvent[]; rerenderInFlight: boolean }
 
+
+// Media playback boundary: storage objects serve `binary/octet-stream` (the
+// platform drops upload MIMEs), which Chrome's <video> refuses to sniff — so
+// any URL the app will PLAY is rewritten through /api/media, which stamps the
+// real MIME from the extension and forwards Range. Same-origin relative URL,
+// safe for <video src>.
+function proxyPlayableUrl(u: string | null | undefined): string | null {
+  if (!u || typeof u !== 'string') return u ?? null
+  try {
+    const parsed = new URL(u)
+    if (!parsed.pathname.includes('/api/storage/buckets/')) return u
+  } catch {
+    return u
+  }
+  return `/api/media?u=${encodeURIComponent(u)}`
+}
+
 export async function getRunForViewer(input: {
   runId: string
   accessToken: string | null | undefined
@@ -426,7 +443,13 @@ export async function getRunForViewer(input: {
   //    the SAME way the page did client-side.
   const rerenderInFlight = await isRerenderInFlight(db, input.runId)
 
-  return { run, events, rerenderInFlight }
+  const playableRun = {
+    ...run,
+    final_url: proxyPlayableUrl(run.final_url),
+    edited_url: proxyPlayableUrl(run.edited_url),
+  } as Run
+
+  return { run: playableRun, events, rerenderInFlight }
 }
 
 // Shared: is a rerender job for this run queued or claimed? (Matches the run page's old

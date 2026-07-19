@@ -7,6 +7,7 @@
 // is OUR storage host AND inside an agent/<uuid>/ namespace, then streams
 // with the service key. No other storage path can be reached through it.
 import { NextRequest } from 'next/server'
+import { streamStorageObject } from '../_lib/storageStream'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,14 +36,8 @@ export async function GET(req: NextRequest) {
       || !ALLOWED.test(decodedPath)) {
     return new Response('forbidden', { status: 403 })
   }
-  const upstream = await fetch(target.toString(), {
-    headers: { Authorization: `Bearer ${IF_KEY}` },
-    cache: 'no-store',
-  })
-  if (!upstream.ok) return new Response('not found', { status: 404 })
-  const ctype = upstream.headers.get('content-type') || 'application/octet-stream'
-  return new Response(upstream.body, {
-    status: 200,
-    headers: { 'Content-Type': ctype, 'Cache-Control': 'no-store' },
-  })
+  // Storage serves binary/octet-stream (platform drops upload MIMEs), which
+  // stalls <video> — the shared streamer stamps the MIME from the key's
+  // extension and forwards Range. Live frames overwrite in place → no-store.
+  return streamStorageObject(req, target, IF_KEY, 'no-store')
 }
