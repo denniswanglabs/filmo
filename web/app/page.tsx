@@ -50,7 +50,7 @@ export default function Home() {
   // Default to the flagship paid Ultra; Super (free) stays selectable in the dropdown.
   const [brain, setBrain] = useState<string>('ultra-paid')
   // Visual style family — 'classic' light or the Engineered Night dark one-world look.
-  const [look, setLook] = useState<string>('classic')
+  const [look, setLook] = useState<string>('')
   // Walkrec beta entry: /?look=walkrec selects the agent-toured film mode and
   // the choice STICKS (localStorage) so every later plain visit keeps the new
   // pipeline; /?look=classic explicitly switches back and sticks the same way.
@@ -115,7 +115,8 @@ export default function Home() {
           url: p.url.trim(),
           brain: p.brain,
           look: p.look === 'walkrec' ? 'walkrec'
-            : p.look === 'engineered-night' ? 'engineered-night' : 'classic',
+            : p.look === 'engineered-night' ? 'engineered-night'
+              : p.look === 'classic' ? 'classic' : undefined,
           mode: 'mock',
           payMode: p.requirePay ? 'human' : 'auto',
         })
@@ -184,7 +185,8 @@ export default function Home() {
     setUrl(p.url ?? '')
     setBrain(p.brain ?? 'ultra-paid')
     setLook(p.look === 'walkrec' ? 'walkrec'
-      : p.look === 'engineered-night' ? 'engineered-night' : 'classic')
+      : p.look === 'engineered-night' ? 'engineered-night'
+        : p.look === 'classic' ? 'classic' : '')
     // NOTE: deliberately NOT restoring p.requirePay — stashes from before payments
     // were turned off carry requirePay:true and would resurrect the checkout gate.
     // Auto-resume the build only when we returned signed-in AND the stashed URL is real.
