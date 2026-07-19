@@ -255,6 +255,25 @@ def shot(url: str, target: str, out_path: str, run_dir: str,
         vid = page.video
         ctx.close()
         ctx = None
+        # LIVE STALENESS contract (hosted): the storage frame must vanish when
+        # the session ends — otherwise the workspace shows "Recording" forever.
+        try:
+            import urllib.request as _ur
+            import run_events as _re
+            rid = _re._hosted_run_id(run_dir)
+            if rid and _re._IF_BASE and _re._IF_KEY:
+                req = _ur.Request(
+                    f"{_re._IF_BASE}/api/storage/buckets/{_re._IF_BUCKET}"
+                    f"/objects/agent%2F{rid}%2Flive.jpg",
+                    method="DELETE",
+                    headers={"Authorization": f"Bearer {_re._IF_KEY}"})
+                _ur.urlopen(req, timeout=10)
+        except Exception:
+            pass
+        try:
+            os.remove(os.path.join(run_dir, "live", "current.jpg"))
+        except Exception:
+            pass
         video_path = vid.path() if vid else ""
         if video_path and os.path.exists(video_path) and wn._webm_to_mp4(video_path, out_path):
             _trim_head(out_path, max(0.0, shot_begin - t_rec0 - 0.15))
