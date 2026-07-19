@@ -31,6 +31,7 @@ function reduce(evts: AgentEvent[]) {
   const S = {
     pages: [] as AgentEvent[], plan: [] as string[], beats: [] as AgentEvent[],
     review: [] as AgentEvent[], film: '', filmSeq: 0, phase: 'read',
+    roundResetAt: 0,
     status: '', lastTitle: '', site: '', done: false, logo: '',
   }
   for (const e of evts) {
@@ -44,7 +45,14 @@ function reduce(evts: AgentEvent[]) {
     if (k === 'brand.logo' && e.artifact_url) S.logo = e.artifact_url
     if (k === 'decide.plan') { S.plan = e.detail.split('\n'); S.phase = 'decide' }
     if (k.startsWith('film.')) S.phase = 'film'
+    if (k === 'assemble.render') { S.roundResetAt = e.seq }
     if (k === 'design.beat' && e.artifact_url) {
+      // A new render round replaces the WHOLE beat set — without this, a
+      // dropped beat's stale segment survives at the strip's tail.
+      if (S.roundResetAt && e.seq > S.roundResetAt
+          && S.beats.some((b) => b.seq <= S.roundResetAt)) {
+        S.beats = S.beats.filter((b) => b.seq > S.roundResetAt)
+      }
       // A review round re-emits its beats — REPLACE by beat index (the
       // title carries "Beat N:") so the timeline strip never shows a
       // mixed set of superseded and current beats.
