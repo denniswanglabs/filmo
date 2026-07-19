@@ -144,6 +144,34 @@ def upload_object(key: str, path: str, overwrite: bool = False) -> str:
         return ""
 
 
+def charge_credits(run_dir: str, amount: int, reason: str) -> bool:
+    """Charge the RUN'S OWNER for work the pipeline actually performed.
+    The worker owns this because only it knows whether the taste gates
+    accepted an edit — a declined edit must never cost anything. The
+    ledger's (run_id, reason) unique index makes a retry idempotent, so
+    `reason` must identify the unit of work (e.g. the director job id).
+    Returns True when a charge row landed. Never raises."""
+    rid = _hosted_run_id(run_dir)
+    if not (rid and _IF_BASE and _IF_KEY and amount > 0):
+        return False
+    try:
+        resp = _if_req("GET",
+                       f"/api/database/records/runs?id=eq.{rid}&select=user_id",
+                       None, "application/json")
+        rows = json.loads(resp.read())
+        uid = rows[0]["user_id"] if rows else ""
+        if not uid:
+            return False
+        _if_req_retry("POST", "/api/database/records/credit_ledger",
+                      json.dumps([{"user_id": uid, "delta": -abs(amount),
+                                   "reason": reason, "run_id": rid}]).encode(),
+                      "application/json")
+        return True
+    except Exception as e:
+        print(f"[credits!] charge {reason}: {e}", file=sys.stderr)
+        return False
+
+
 def ship_final(run_dir: str, run_key: str, film_path: str) -> str:
     """Deliver a walkrec film: copy to runs/<key>/final.mp4, upload via the
     strategy flow (no gateway cap), PATCH runs.final_url with a fresh ?v=

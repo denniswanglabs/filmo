@@ -24,9 +24,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-key", required=True)
     ap.add_argument("--run-id", default="")
+    ap.add_argument("--job-id", default="",
+                    help="the claimer's job id — the idempotency key for the "
+                         "edit's credit charge")
     ap.add_argument("--message", required=True)
     a = ap.parse_args()
-    return director.handle_job(a.run_key, a.run_id, a.message)
+    return director.handle_job(a.run_key, a.run_id, a.message, a.job_id)
 
 
 if __name__ == "__main__":

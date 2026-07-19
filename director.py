@@ -248,7 +248,14 @@ def _parse(run_dir: str, state: dict, message: str):
     return reply, actions
 
 
-def _apply_work(run_id: str, run_dir: str, state: dict, actions) -> None:
+# An applied edit re-renders the film — real compute, so it costs credits.
+# Conversation (answers, and anything the taste gates decline) is free: the
+# user must never pay for the system saying no.
+EDIT_CREDIT_COST = 20
+
+
+def _apply_work(run_id: str, run_dir: str, state: dict, actions,
+                job_id: str = "") -> None:
     """Resolve + gate + apply + re-render, synchronously. The chat reply is
     authored from the OUTCOME (never from intent) and emitted before the
     slow render so the user sees truth immediately."""
@@ -276,6 +283,9 @@ def _apply_work(run_id: str, run_dir: str, state: dict, actions) -> None:
              (f"dropped “{a[1][:40]}”" if a[0] == "drop"
               else f"“{a[1][:40]}” → {a[2]}") for a in applied),
          "Re-assembling and re-rendering.")
+    import run_events as _rev
+    _rev.charge_credits(run_dir, EDIT_CREDIT_COST,
+                        f"edit:{job_id or int(time.time())}")
     pub = os.path.join(HERE, "studio", "public")
     out, _beats = pw._assemble_and_render(run_id, run_dir, pub,
                                           stops, state["ctx"])
@@ -287,7 +297,8 @@ def _apply_work(run_id: str, run_dir: str, state: dict, actions) -> None:
     _re.flush_sinks()
 
 
-def handle_job(run_key: str, insforge_run_id: str, message: str) -> int:
+def handle_job(run_key: str, insforge_run_id: str, message: str,
+               job_id: str = "") -> int:
     """Hosted director turn (claimer job): reply + apply, all through the
     event bus so the workspace narrates it. Returns a process exit code."""
     run_dir = os.path.join(HERE, "runs", run_key)
@@ -316,7 +327,7 @@ def handle_job(run_key: str, insforge_run_id: str, message: str) -> int:
         emit(run_dir, "chat.director", reply, "")
         return 0
     try:
-        _apply_work(run_key, run_dir, state, actions)
+        _apply_work(run_key, run_dir, state, actions, job_id)
     except BaseException as e:
         emit(run_dir, "run.error", "Director change failed",
              f"{type(e).__name__}: {e}")

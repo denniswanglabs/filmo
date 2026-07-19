@@ -96,6 +96,10 @@ export async function saveEditedProps(input: {
 // in beta. The ledger is append-only (spends negative, refunds positive, run_id
 // links a spend to its build); balances are DERIVED, never stored.
 const VIDEO_CREDIT_COST = 100
+// An applied director edit re-renders the film — real compute, ~1/5 of a
+// build. Conversation is free: questions, and anything the taste gates
+// decline, never cost credits (the worker charges only on applied work).
+const EDIT_CREDIT_COST = 20
 const DAILY_CREDIT_CAP = 300
 const LIFETIME_CREDIT_CAP = 1500
 
@@ -118,7 +122,7 @@ async function creditBalances(db: ReturnType<typeof adminClient>, userId: string
 export async function getCredits(accessToken: string): Promise<{
   dailyUsed: number; dailyCap: number
   lifetimeUsed: number; lifetimeCap: number
-  videoCost: number; unlimited: boolean
+  videoCost: number; editCost: number; unlimited: boolean
 } | { error: 'not-signed-in' }> {
   const me = await verifyUser(accessToken)
   if (!me) return { error: 'not-signed-in' as const }
@@ -129,7 +133,7 @@ export async function getCredits(accessToken: string): Promise<{
   return {
     dailyUsed: bal.dailyUsed, dailyCap: DAILY_CREDIT_CAP,
     lifetimeUsed: bal.lifetimeUsed, lifetimeCap: LIFETIME_CREDIT_CAP,
-    videoCost: VIDEO_CREDIT_COST, unlimited,
+    videoCost: VIDEO_CREDIT_COST, editCost: EDIT_CREDIT_COST, unlimited,
   }
 }
 
@@ -770,6 +774,19 @@ export async function sendDirectorMessage(
   const { db, run } = ctx
   const text = String(message || '').slice(0, 2000)
   if (!text.trim()) return { error: 'empty' as const }
+  // An edit that lands re-renders the film, so it must fit inside the
+  // allowance. Checked before enqueueing; the worker charges only if the
+  // gates actually apply the change.
+  if ((ctx.me.email || '').toLowerCase() !== OWNER_EMAIL) {
+    const bal = await creditBalances(db, ctx.me.id)
+    if (bal.dailyUsed + EDIT_CREDIT_COST > DAILY_CREDIT_CAP
+        || bal.lifetimeUsed + EDIT_CREDIT_COST > LIFETIME_CREDIT_CAP) {
+      return {
+        error: 'no-credits' as const,
+        message: `An edit costs ${EDIT_CREDIT_COST} credits and you're out for now — credits refresh through the day.`,
+      }
+    }
+  }
   const { data: maxRow } = await db.database
     .from('agent_events').select('seq').eq('run_id', run.id)
     .order('seq', { ascending: false }).limit(1)

@@ -1157,6 +1157,9 @@ async function processDirectorJob(job) {
       [join(PIPELINE_DIR, 'director_job.py'),
        '--run-key', String(runKey),
        '--run-id', String(job.run_id || ''),
+       // The job id is the idempotency key for the edit's credit charge —
+       // a retried job charges once.
+       '--job-id', String(job.id || ''),
        '--message', String(p.message || '')],
       { cwd: PIPELINE_DIR, env: process.env })
     child.stdout.on('data', (d) => { try { process.stdout.write(`  [dir] ${d}`) } catch {} })

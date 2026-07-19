@@ -183,10 +183,12 @@ export default function Workspace({ runKey, getToken }: {
     setPending(true)
     const res = await sendDirectorMessage(runKey, text, (await getToken()) || '')
     if ('error' in res) {
-      setLocalMsgs((m) => [...m, {
-        ts: Date.now() / 1000, kind: 'dir',
-        text: 'That did not go through — try again.',
-      }])
+      // An out-of-credits refusal explains itself; anything else is a blip.
+      const msg = ('message' in res && res.message)
+        ? res.message
+        : 'That did not go through — try again.'
+      setPending(false)
+      setLocalMsgs((m) => [...m, { ts: Date.now() / 1000, kind: 'dir', text: msg }])
     }
   }, [input, runKey, getToken])
 
