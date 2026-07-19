@@ -517,7 +517,8 @@ def _harvest_chips(corpus: str, target: str, title: str, want: int = 10):
            "careers", "roadmap", "pricing", "templates", "integrations",
            "home", "about", "customers", "changelog", "community", "legal",
            "terms", "privacy", "login", "log in", "sign in", "sign up",
-           "demo", "features", "download", "how it works", "faq", "support"}
+           "demo", "features", "download", "how it works", "faq", "support",
+           "and more", "common questions"}
     CTA_START = ("start", "read", "learn", "contact", "get ", "view", "try",
                  "book", "see ", "join", "request", "explore", "works ",
                  "create ", "how ", "tell ", "download", "install", "replay")
@@ -927,6 +928,8 @@ _MOTIF_KEYWORDS = [
     ("context-cards", ("present", "context", "home", "house", "propert",
                        "listing", "estate", "apartment", "showcase")),
     ("logo-wall", _ENTITY_MARKERS + ("integrations", "supported tools")),
+    ("quote-card", ("testimonial", "loved by", "what people say", "founders say",
+                    "customers say", "from founders")),
     ("price-card", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ", "offer")),
     ("chip-sweep", ("everything", "features", "services", "platform",
                     "need for", "built for", "all-in-one", "toolkit")),
@@ -939,7 +942,7 @@ _MOTIF_KEYWORDS = [
 
 _VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card",
               "check-list", "chip-sweep", "stat-pop", "kinetic-line",
-              "logo-wall"}
+              "logo-wall", "quote-card"}
 
 
 _STAT_RE = __import__("re").compile(
@@ -966,6 +969,21 @@ def _refine_motif(motif: str, s: dict, used) -> str:
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
     if motif == "stat-pop" and not any(_is_stat_line(d) for d in details):
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
+    if (motif == "quote-card" and not any(
+            _re.search(r"@|founder|ceo|cto", d, _re.I) or len(d) >= 20
+            for d in details)):
+        motif = "check-list" if len(details) >= 2 else "kinetic-line"
+    # MINIMUM-MATERIAL contract: a beat must carry real content. kinetic-line
+    # needs a >=3-word line AND must never swallow a stop that has details
+    # (the 'Testimonials' one-word empty scene, Palmier 2026-07-18).
+    if motif == "kinetic-line":
+        words = len((s.get("title") or "").split())
+        if details:
+            motif = ("quote-card" if any(
+                _re.search(r"@|founder|ceo|cto", d, _re.I) for d in details)
+                else "check-list")
+        elif words < 3:
+            motif = "card"  # line-art fallback; better a drawing than a word
     if motif not in _VIGNETTES:  # line-art tier
         if len(s.get("entities") or []) >= 4 and "logo-wall" not in used:
             return "logo-wall"
@@ -973,9 +991,13 @@ def _refine_motif(motif: str, s: dict, used) -> str:
             return "chip-sweep"
         if any(_is_stat_line(d) for d in details) and "stat-pop" not in used:
             return "stat-pop"
+        if any(_re.search(r"@|founder|ceo|cto", d, _re.I) for d in details) \
+                and "quote-card" not in used:
+            return "quote-card"
         if len(details) >= 2 and "check-list" not in used:
             return "check-list"
-        if len((s.get("title") or "").split()) <= 8 and "kinetic-line" not in used:
+        if (3 <= len((s.get("title") or "").split()) <= 8
+                and "kinetic-line" not in used):
             return "kinetic-line"
         if len(details) >= 2:
             return "check-list"  # may repeat: real info beats line art
@@ -1135,6 +1157,8 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     cluster_pos = [(3600, 700), (700, 2800), (4200, 3400), (1800, 5000),
                    (6400, 4600), (900, 6600)]
     seen_titles = set()
+    glayout_cycle = ["stacked", "split-left", "split-right"]
+    glayout_i = 0
     for i, s in enumerate(stops):
         cx, cy = cluster_pos[i % len(cluster_pos)]
         # CONTRACT: a title text renders as a beat at most once per film —
@@ -1164,7 +1188,36 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.12})
             t_f += int(3.5 * FPS)
             continue
-        # Title beat — the site's own words, section-title sized.
+        if not s.get("seg"):
+            layout = glayout_cycle[glayout_i % len(glayout_cycle)]
+            glayout_i += 1
+            if layout != "stacked":
+                # SPLIT beat: title and vignette side by side, ONE framing —
+                # a different rhythm and geometry from stacked beats
+                # (variability contract + Dennis's split-layout preference).
+                sign = -1 if layout == "split-left" else 1
+                motif = s.get("motif", "card")
+                logos = ([{"name": n, "src": _logo_uri(n)}
+                          for n in (s.get("entities") or [])[:8]]
+                         if motif == "logo-wall" else [])
+                elements.append({"id": f"t{i}", "kind": "headline",
+                                 "x": cx + sign * -390, "y": cy, "w": 560,
+                                 "at": t_f + 12, "text": s["title"], "size": 60,
+                                 "align": "left",
+                                 "accentWord": max(s["title"].split(), key=len).strip(".,"),
+                                 "dir": "left" if sign < 0 else "right"})
+                elements.append({"id": f"g{i}", "kind": "graphic",
+                                 "x": cx + sign * 330, "y": cy, "at": t_f + 20,
+                                 "motif": motif, "text": s["title"],
+                                 "lines": s.get("details") or [],
+                                 "chips": s.get("chips") or [], "logos": logos,
+                                 "narrow": True})
+                moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.05})
+                beat_s = {"chip-sweep": 6.0, "stat-pop": 4.5, "logo-wall": 5.5,
+                          "quote-card": 5.5}.get(motif, 6.0)
+                t_f += int(beat_s * FPS)
+                continue
+        # Title beat — the site's own words, section-title sized (stacked).
         elements.append({"id": f"t{i}", "kind": "headline", "x": cx, "y": cy - 340,
                          "w": 1180, "at": t_f + 14, "text": s["title"], "size": 72,
                          "accentWord": max(s["title"].split(), key=len).strip(".,"),

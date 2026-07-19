@@ -45,6 +45,8 @@ export interface WalkrecElement {
   motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list" | "chip-sweep" | "stat-pop" | "kinetic-line" | "logo-wall";
   lines?: string[]; // verbatim site strings the vignette renders as content
   chips?: string[]; // short real labels for the chip sweep
+  align?: "left" | "center"; // split layouts compose titles left/right
+  narrow?: boolean; // split layouts get narrower fluid vignettes
   logos?: { name: string; src: string }[]; // resolved third-party marks
 }
 
@@ -184,7 +186,7 @@ const MotionGraphic: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; fr
     });
   const float = local > popStart + 20 ? 6 * Math.sin((2 * Math.PI * (local - popStart - 20)) / 150) : 0;
   return (
-    <svg viewBox="0 0 640 520" style={{ width: 640, display: "block", transform: `translateY(${float}px)` }}>
+    <svg viewBox="0 0 640 520" style={{ width: el.narrow ? 560 : 640, display: "block", transform: `translateY(${float}px)` }}>
       {motif.groups.map((paths, gi) =>
         paths.map((d, pi) => (
           <path
@@ -261,7 +263,7 @@ const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
   const rowLines = lines.filter((l) => l !== chipLine);
   const rows = [0, 1, 2];
   return (
-    <div style={{ background: t.card, borderRadius: 36, padding: "34px 38px", width: 720, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
+    <div style={{ background: t.card, borderRadius: 36, padding: "34px 38px", width: el.narrow ? 620 : 720, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, opacity: vinP(local, 0) }}>
         <HouseGlyph color={t.accent} size={34} />
         <div style={{ fontFamily: t.fontBody, fontSize: 19, fontWeight: 700, color: t.ink, opacity: 0.8, textAlign: "left" }}>{el.text}</div>
@@ -315,8 +317,8 @@ const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
         const p = vinP(local, c * 9, 16);
         const highlighted = c === 1;
         return (
-          <div key={c} style={{ width: 224, borderRadius: 28, background: t.card, boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${t.accent}` : "none", outlineOffset: -2 }}>
-            <div style={{ height: 118, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div key={c} style={{ width: el.narrow ? 190 : 224, borderRadius: 28, background: t.card, boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${t.accent}` : "none", outlineOffset: -2 }}>
+            <div style={{ height: el.narrow ? 96 : 118, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {isPersonName((el.lines || [])[c] || "") ? (
                 <div style={{ width: 72, height: 72, borderRadius: 36, background: `${t.accent}30`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {((el.lines || [])[c] || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("")}
@@ -418,7 +420,7 @@ const VignettePriceCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const rest = lines.filter((l) => l !== price && !/^[€$£¥]\s?\d[\d.,]*$/.test(l.trim()));
   const pPrice = vinPop(local, 24, 14);
   return (
-    <div style={{ background: t.card, borderRadius: 36, padding: "40px 48px", width: 680, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
+    <div style={{ background: t.card, borderRadius: 36, padding: "40px 48px", width: el.narrow ? 600 : 680, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
       <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", color: t.ink, opacity: 0.55 * vinP(local, 0), textAlign: "left" }}>
         {(el.text || "").toUpperCase()}
       </div>
@@ -451,7 +453,7 @@ const VignetteChipSweep: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const local = frame - el.at;
   const chips = (el.chips || []).slice(0, 10);
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 18, justifyContent: "center", width: 980, transform: `translateY(${vinFloat(local, chips.length * 6 + 40)}px)` }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 18, justifyContent: "center", width: el.narrow ? 620 : 980, transform: `translateY(${vinFloat(local, chips.length * 6 + 40)}px)` }}>
       {chips.map((c, i) => {
         const p = vinP(local, i * 6, 16);
         const hot = i % 4 === 1; // a few chips carry the accent
@@ -533,7 +535,7 @@ const VignetteLogoWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] 
   const local = frame - el.at;
   const logos = (el.logos || []).slice(0, 8);
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 22, justifyContent: "center", width: 940, transform: `translateY(${vinFloat(local, logos.length * 5 + 40)}px)` }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 22, justifyContent: "center", width: el.narrow ? 640 : 940, transform: `translateY(${vinFloat(local, logos.length * 5 + 40)}px)` }}>
       {logos.map((l, i) => {
         const p = vinPop(local, i * 5, 12);
         if (p <= 0) return null;
@@ -554,6 +556,33 @@ const VignetteLogoWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] 
   );
 };
 
+/** Testimonial treatment: the site's own words as a large quote with its
+ *  attribution — a testimonials stop must never degrade to a lone word. */
+const VignetteQuoteCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const lines = el.lines || [];
+  const attr = lines.find((l) => /@|founder|ceo|cto|head of|director/i.test(l));
+  const quote = lines.find((l) => l !== attr && l.length >= 12) || lines[0] || "";
+  const pQ = vinP(local, 6, 18);
+  const pA = vinP(local, 30, 14);
+  return (
+    <div style={{ width: el.narrow ? 620 : 780, background: t.card, borderRadius: 36, padding: "44px 52px", boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", textAlign: "left", transform: `translateY(${vinFloat(local, 70)}px)` }}>
+      <svg viewBox="0 0 48 36" style={{ width: 44, height: 33, marginBottom: 18, opacity: vinP(local, 0, 12) }}>
+        <path d="M 0 36 V 22 Q 0 0 20 0 v 10 Q 10 10 10 22 h 10 v 14 Z M 28 36 V 22 Q 28 0 48 0 v 10 Q 38 10 38 22 h 10 v 14 Z" fill={t.accent} />
+      </svg>
+      <div style={{ fontFamily: t.fontDisplay, fontSize: el.narrow ? 28 : 34, fontWeight: 600, lineHeight: 1.35, color: t.ink, opacity: pQ, transform: `translateY(${18 * (1 - pQ)}px)` }}>
+        {quote}
+      </div>
+      {attr ? (
+        <div style={{ marginTop: 22, fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: t.inkMuted, opacity: pA, transform: `translateY(${12 * (1 - pA)}px)` }}>
+          {attr}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }>> = {
   "request-table": VignetteRequestTable,
   "context-cards": VignetteContextCards,
@@ -564,6 +593,7 @@ const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["
   "stat-pop": VignetteStatPop,
   "kinetic-line": VignetteKineticLine,
   "logo-wall": VignetteLogoWall,
+  "quote-card": VignetteQuoteCard,
 };
 
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({
@@ -580,7 +610,7 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
     opacity: c.opacity,
     filter: c.blur > 0.4 ? `blur(${c.blur.toFixed(1)}px)` : undefined,
     width: el.w,
-    textAlign: "center",
+    textAlign: el.align === "left" ? "left" : "center",
   };
   switch (el.kind) {
     case "headline": {
