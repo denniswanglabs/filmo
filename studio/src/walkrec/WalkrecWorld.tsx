@@ -184,7 +184,7 @@ const MotionGraphic: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; fr
     });
   const float = local > popStart + 20 ? 6 * Math.sin((2 * Math.PI * (local - popStart - 20)) / 150) : 0;
   return (
-    <svg viewBox="0 0 640 520" style={{ width: "100%", display: "block", transform: `translateY(${float}px)` }}>
+    <svg viewBox="0 0 640 520" style={{ width: 640, display: "block", transform: `translateY(${float}px)` }}>
       {motif.groups.map((paths, gi) =>
         paths.map((d, pi) => (
           <path
@@ -261,7 +261,7 @@ const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
   const rowLines = lines.filter((l) => l !== chipLine);
   const rows = [0, 1, 2];
   return (
-    <div style={{ background: t.card, borderRadius: 36, padding: "34px 38px", minWidth: 640, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
+    <div style={{ background: t.card, borderRadius: 36, padding: "34px 38px", width: 720, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, opacity: vinP(local, 0) }}>
         <HouseGlyph color={t.accent} size={34} />
         <div style={{ fontFamily: t.fontBody, fontSize: 19, fontWeight: 700, color: t.ink, opacity: 0.8, textAlign: "left" }}>{el.text}</div>
@@ -418,7 +418,7 @@ const VignettePriceCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const rest = lines.filter((l) => l !== price && !/^[€$£¥]\s?\d[\d.,]*$/.test(l.trim()));
   const pPrice = vinPop(local, 24, 14);
   return (
-    <div style={{ background: t.card, borderRadius: 36, padding: "40px 48px", minWidth: 560, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
+    <div style={{ background: t.card, borderRadius: 36, padding: "40px 48px", width: 680, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
       <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", color: t.ink, opacity: 0.55 * vinP(local, 0), textAlign: "left" }}>
         {(el.text || "").toUpperCase()}
       </div>
@@ -628,16 +628,13 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
       );
     case "graphic": {
       const Vignette = el.motif ? VIGNETTES[el.motif] : undefined;
-      // The wrapper must be exactly as wide as the vignette's natural layout —
-      // a wider child overflows a centered parent to the right and the whole
-      // beat reads off-center (Dennis 2026-07-18).
-      const VIGNETTE_W: Record<string, number> = {
-        "chip-sweep": 980, "logo-wall": 940, "kinetic-line": 1100,
-        "chat-exchange": 620,
-      };
-      const gw = (el.motif && VIGNETTE_W[el.motif]) || el.w || 760;
+      // ARCHITECTURAL centering invariant (Dennis 2026-07-18): the wrapper
+      // knows NO widths. It shrink-wraps whatever the vignette renders and
+      // base's translate(-50%,-50%) centers that box — so every vignette,
+      // present or future, is centered by construction as long as it owns
+      // its own bounded width.
       return (
-        <div style={{ ...base, width: gw }}>
+        <div style={{ ...base, width: "max-content" }}>
           {/* Inner scale keeps vignette layouts authored at comfortable px
               while filling the frame (Dennis: content must come BIG). */}
           <div style={{ transform: "scale(1.3)", transformOrigin: "center" }}>
