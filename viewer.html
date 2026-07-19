@@ -45,20 +45,19 @@
   #screentext .small { color:var(--muted); margin-top:10px; font-size:13.5px; }
   /* ---- the timeline rail ---- */
   #rail { flex:0 0 380px; display:flex; flex-direction:column; padding:0;
-          border-left:1px solid var(--line); background:var(--ground); }
+          border-right:1px solid var(--line); background:var(--ground);
+          order:0; }
+  #canvaswrap { order:1; }
   #railhead { flex:0 0 62px; display:flex; align-items:center; gap:12px;
               padding:0 20px; }
   #blobwrap { width:36px; height:36px; position:relative; flex-shrink:0; }
-  #mark, #blob { position:absolute; inset:0; transition:opacity 0.6s; }
-  #blob { opacity:0;
+  #blob { position:absolute; inset:0;
           background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
           animation:blobmorph 3.2s ease-in-out infinite, blobspin 8s linear infinite; }
   /* The mark's lens hole survives the melt — the white circle rides the blob. */
   #blob::after { content:""; position:absolute; width:34%; height:34%;
                  right:16%; top:26%; background:#fff; border-radius:50%;
                  animation:holemorph 3.2s ease-in-out infinite; }
-  .working #blob { opacity:1; }
-  .working #mark { opacity:0; }
   @keyframes blobmorph {
     0%,100% { border-radius:58% 42% 55% 45% / 48% 60% 40% 52%; transform:scale(1); }
     33% { border-radius:42% 58% 38% 62% / 60% 42% 58% 40%; transform:scale(0.92); }
@@ -108,9 +107,6 @@
 <div id="rail">
   <div id="railhead">
     <div id="blobwrap">
-      <svg id="mark" viewBox="14 13 56 56" xmlns="http://www.w3.org/2000/svg">
-        <path fill-rule="evenodd" fill="#3B82F6" d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"/>
-      </svg>
       <div id="blob"></div>
     </div>
     <div>
