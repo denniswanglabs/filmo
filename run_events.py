@@ -22,6 +22,7 @@ import os
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -54,6 +55,28 @@ def _if_req(method: str, path: str, body, ctype: str):
     req = urllib.request.Request(
         _IF_BASE + path, data=body, method=method, headers=headers)
     return urllib.request.urlopen(req, timeout=15)
+
+
+def _if_req_retry(method: str, path: str, body, ctype: str, attempts: int = 3):
+    """BROWNOUT CONTRACT: InsForge intermittently stalls for tens of seconds
+    (observed 2026-07-19: timeout, then ~1s responses). A single-shot call
+    turns a brownout into LOST events; bounded retries turn it into LATE
+    events. 4xx (real rejections, e.g. seq 409) never retry."""
+    delay = 4.0
+    for i in range(attempts):
+        try:
+            return _if_req(method, path, body, ctype)
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500:
+                raise
+            if i == attempts - 1:
+                raise
+        except Exception:
+            if i == attempts - 1:
+                raise
+        time.sleep(delay)
+        delay *= 2
+    raise RuntimeError("unreachable")
 
 
 def _multipart(fields: dict, file_field: str, filename: str,
@@ -181,8 +204,8 @@ def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
             row = {"run_id": rid, "seq": seq, "ts": evt["ts"],
                    "kind": evt["kind"], "title": evt["title"],
                    "detail": evt["detail"], "artifact_url": ""}
-            _if_req("POST", "/api/database/records/agent_events",
-                    json.dumps([row]).encode(), "application/json")
+            _if_req_retry("POST", "/api/database/records/agent_events",
+                          json.dumps([row]).encode(), "application/json")
         except Exception as e:
             print(f"[sink!] insert {evt['kind']} seq {row['seq']}: {e}",
                   file=sys.stderr)
@@ -192,11 +215,11 @@ def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
         try:
             url = _upload_artifact(rid, seq, artifact_path)
             if url:
-                _if_req("PATCH",
-                        "/api/database/records/agent_events"
-                        f"?run_id=eq.{rid}&seq=eq.{seq}",
-                        json.dumps({"artifact_url": url}).encode(),
-                        "application/json")
+                _if_req_retry("PATCH",
+                              "/api/database/records/agent_events"
+                              f"?run_id=eq.{rid}&seq=eq.{seq}",
+                              json.dumps({"artifact_url": url}).encode(),
+                              "application/json")
         except Exception as e:
             print(f"[sink!] artifact {evt['kind']} seq {seq}: {e}",
                   file=sys.stderr)
