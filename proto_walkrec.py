@@ -477,12 +477,16 @@ def _harvest_details(corpus: str, target: str, title: str, want: int = 4):
     fail the verbatim gate. No model in the loop."""
     pos = corpus.lower().find((target or title or "").lower())
     window = corpus[max(0, pos - 300):pos + 1200] if pos >= 0 else corpus[:1500]
+    window = window[window.find("\n") + 1:max(0, window.rfind("\n"))]
+    _CTA = ("start", "read", "learn", "contact", "get ", "view", "try",
+            "book", "see ", "join", "explore", "create your", "log in",
+            "sign ")
     out = []
     for line in window.split("\n"):
         frag = line.strip()
         if not (8 <= len(frag) <= 45) or not (2 <= len(frag.split()) <= 6):
             continue
-        if not frag[0].isalnum():
+        if not frag[0].isalnum() or frag.lower().startswith(_CTA):
             continue
         if title and frag.lower() in title.lower():
             continue
@@ -507,17 +511,20 @@ def _harvest_chips(corpus: str, target: str, title: str, want: int = 10):
     chip-sweep's material, mined verbatim. 1-3 words, tight length caps."""
     pos = corpus.lower().find((target or title or "").lower())
     window = corpus[max(0, pos - 200):pos + 2200] if pos >= 0 else corpus[:2400]
+    window = window[window.find("\n") + 1:max(0, window.rfind("\n"))]
     import re as _re
     NAV = {"products", "product", "blog", "blogs", "docs", "documentation",
            "careers", "roadmap", "pricing", "templates", "integrations",
            "home", "about", "customers", "changelog", "community", "legal",
-           "terms", "privacy", "login", "log in", "sign in", "sign up"}
+           "terms", "privacy", "login", "log in", "sign in", "sign up",
+           "demo", "features", "download", "how it works", "faq", "support"}
     CTA_START = ("start", "read", "learn", "contact", "get ", "view", "try",
-                 "book", "see ", "join", "request", "explore", "works ")
+                 "book", "see ", "join", "request", "explore", "works ",
+                 "create ", "how ", "tell ")
     out = []
     for line in window.split("\n"):
         frag = line.strip().strip("·•|-–")
-        if not (3 <= len(frag) <= 24) or not (1 <= len(frag.split()) <= 3):
+        if not (5 <= len(frag) <= 24) or not (1 <= len(frag.split()) <= 3):
             continue
         if not frag[0].isalnum():
             continue
@@ -534,6 +541,111 @@ def _harvest_chips(corpus: str, target: str, title: str, want: int = 10):
         if len(out) >= want:
             break
     return out
+
+
+def _verbatim_entities(cand: dict, corpus_lc: str):
+    """Third-party names the site itself mentions — verbatim-gated; logos are
+    then resolved by name via entity_logos (the agent chooses, code fetches)."""
+    out = []
+    for e in (cand.get("entities") or []):
+        e = str(e).strip().strip('"')
+        if (e and 2 <= len(e) <= 24 and len(e.split()) <= 3
+                and _norm_ws(e) in corpus_lc and e not in out):
+            out.append(e)
+    return out[:8]
+
+
+# Tight markers only: nav words like "Integrations" window the site's OWN
+# services grid and produce first-party names as "partners" (v13 finding).
+_ENTITY_MARKERS = ("works perfectly with", "works with", "compatible with")
+
+_LOGO_ALT_JS = """
+() => {
+  const clean = (s) => (s || "").trim().replace(/[-_]/g, " ")
+    .replace(/\\.(svg|png|webp|jpg|jpeg)$/i, "").replace(/\\s+logo$/i, "").trim();
+  const all = Array.from(document.querySelectorAll("section,div"));
+  let host = null;
+  for (const el of all) {
+    const t = (el.textContent || "").trim().toLowerCase();
+    if ((t.startsWith("works perfectly with") || t.startsWith("works with")) &&
+        el.querySelectorAll("img,svg").length >= 3 &&
+        (el.textContent || "").length < 400) { host = el; }
+  }
+  if (!host) return [];
+  const out = [];
+  for (const img of host.querySelectorAll("img")) {
+    let n = clean(img.alt || img.getAttribute("aria-label") || img.title);
+    if (!n) {
+      const src = img.getAttribute("src") || "";
+      n = clean(src.split("/").pop().split("?")[0]);
+    }
+    if (n && n.length <= 24 && !out.some((o) => o.toLowerCase() === n.toLowerCase()))
+      out.push(n);
+  }
+  return out.slice(0, 14);
+}
+"""
+
+
+def _harvest_logo_alt_names(url: str):
+    """Partner names from the works-with section's OWN logo images (alt text
+    or filename) — the tools are usually rendered as images with no text
+    nodes, so the text harvest can't see them. Dedupes hover variants
+    ('cursor color' -> covered by 'Cursor'). Best-effort, never raises."""
+    try:
+        import walk_native as wn
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = wn._launch_browser(p)
+            ctx = browser.new_context(viewport=wn.VIEWPORT,
+                                      user_agent=wn._DESKTOP_UA,
+                                      extra_http_headers=wn._EXTRA_HEADERS)
+            ctx.add_init_script(wn._STEALTH_INIT_JS)
+            page = ctx.new_page()
+            page.goto(wn._norm_url(url), wait_until="domcontentloaded",
+                      timeout=45000)
+            wn._wait_for_spa_hydration(page)
+            page.wait_for_timeout(1200)
+            raw = page.evaluate(_LOGO_ALT_JS) or []
+            browser.close()
+        out = []
+        for n in raw:
+            nl = n.lower()
+            if nl.endswith((" color", " dark", " light", " white", " black")):
+                continue  # hover/theme image variants of another mark
+            if any(nl.startswith(o.lower() + " ") or nl == o.lower()
+                   or o.lower().endswith(" " + nl) for o in out):
+                continue
+            out.append(n)
+        return out[:8]
+    except Exception:
+        return []
+
+
+def _harvest_entities(corpus: str, want: int = 8):
+    """Fallback: short capitalized labels right after a works-with marker."""
+    lc = corpus.lower()
+    for marker in _ENTITY_MARKERS:
+        pos = lc.find(marker)
+        if pos < 0:
+            continue
+        window = corpus[pos + len(marker):pos + 700]
+        window = window[window.find("\n") + 1:max(0, window.rfind("\n"))]
+        out = []
+        for line in window.split("\n"):
+            frag = line.strip().strip("·•|,")
+            if not (2 <= len(frag) <= 24) or not (1 <= len(frag.split()) <= 3):
+                continue
+            if not frag[0].isalnum() or not frag[0].isupper():
+                continue
+            if any(frag.lower() == o.lower() for o in out):
+                continue
+            out.append(frag)
+            if len(out) >= want:
+                break
+        if len(out) >= 3:
+            return out
+    return []
 
 
 def _verbatim_details(cand: dict, corpus_lc: str):
@@ -587,8 +699,12 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                 'scroll to (usually the same as title), "details": up to 4 SHORT '
                 "verbatim strings copied exactly from the site text that support "
                 "this moment (property names, feature labels, form fields, plan "
-                "names — each 2-6 words, under 45 chars)}. Copy text EXACTLY — "
-                "do not write your own words. No prose outside the JSON."
+                "names — each 2-6 words, under 45 chars), "
+                '"entities": names of '
+                "third-party tools, products, or companies the page says it "
+                "works with or integrates (copied exactly, 1-3 words each, up "
+                "to 8; [] if none)}. Copy text EXACTLY — do not write your own "
+                "words. No prose outside the JSON."
                 % (max_stops + 2))},
             {"role": "user", "content": menu},
         ]
@@ -636,7 +752,8 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                     continue
                 stops.append({"title": title, "page": page_urls[slug],
                               "target": target,
-                              "details": _verbatim_details(c, corpus_lc)})
+                              "details": _verbatim_details(c, corpus_lc),
+                              "entities": _verbatim_entities(c, corpus_lc)})
             if len(stops) < max_stops:
                 # Top-up pass: relax only the hero-region diversity rule (the
                 # strictest filter) — on dense one-pagers it can kill every
@@ -657,7 +774,8 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                         continue
                     stops.append({"title": title, "page": page_urls[slug],
                                   "target": target,
-                                  "details": _verbatim_details(c, corpus_lc)})
+                                  "details": _verbatim_details(c, corpus_lc),
+                                  "entities": _verbatim_entities(c, corpus_lc)})
             stops = stops or None
     except (Exception, SystemExit) as e:
         print(f"[tour] brain plan failed ({e}); deterministic fallback",
@@ -673,8 +791,66 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                               "page": page_urls[slug],
                               "target": slug.split("-")[0].title()})
     corpus_nl = "\n".join(pages.values())
+    # The hero recording deserves the hero's own words: promote the stop whose
+    # title lives in the top of the homepage (a pricing title over hero footage
+    # reads as WRONG information).
+    hero_head = _norm_ws(home_text)[:700]
+
+    def _heroish(t):
+        return len(t.split()) >= 3 and _norm_ws(t) in hero_head
+
+    promoted = _heroish(stops[0]["title"])
+    for idx, s in enumerate(stops):
+        if idx and _heroish(s["title"]):
+            stops.insert(0, stops.pop(idx))
+            promoted = True
+            break
+    if not promoted:
+        # No planned stop carries the hero's words — the hero RECORDING must
+        # not wear an unrelated title (a "Pricing" headline over hero footage
+        # is wrong information). Front a synthetic stop with the page's own
+        # headline, verbatim.
+        _CTAISH = ("start", "read", "learn", "contact", "get ", "view", "try",
+                   "log in", "sign ", "create ")
+        for line in home_text.split("\n"):
+            frag = line.strip()
+            if (12 <= len(frag) <= 60 and 3 <= len(frag.split()) <= 9
+                    and frag[0].isalnum()
+                    and not frag.lower().startswith(_CTAISH)):
+                stops.insert(0, {"title": frag, "page": url, "target": "",
+                                 "details": [], "entities": []})
+                stops[:] = stops[:max_stops + 1]
+                break
     for s in stops:
         s["chips"] = _harvest_chips(corpus_nl, s.get("target", ""), s["title"])
+        if len(s.get("entities") or []) < 3:
+            mined = _harvest_entities(corpus_nl)
+            have = s.get("entities") or []
+            s["entities"] = (have + [m for m in mined if m not in have])[:8]
+        s["entities"] = [e for e in (s.get("entities") or [])
+                         if e.lower() not in {c.lower() for c in (s.get("chips") or [])}]
+    # Ecosystem beat assembles ITSELF: when the site names >=4 partner tools
+    # and no planned stop covers them, add the works-with section as a stop
+    # (title = the site's own marker line) so the logo wall always appears
+    # when the site earns it.
+    ents = []
+    if any(m in corpus_nl.lower() for m in _ENTITY_MARKERS):
+        ents = _harvest_logo_alt_names(url)
+    if len(ents) < 4:
+        ents = _harvest_entities(corpus_nl)
+    covered = any(any(k in s["title"].lower() for k in
+                      ("works with", "works perfectly", "integration"))
+                  for s in stops)
+    if len(ents) >= 4 and not covered:
+        marker_line = next(
+            (ln.strip() for ln in corpus_nl.split("\n")
+             if 8 <= len(ln.strip()) <= 60
+             and any(m in ln.lower() for m in _ENTITY_MARKERS)),
+            "")
+        if marker_line:
+            stops.append({"title": marker_line, "page": url,
+                          "target": marker_line, "details": [],
+                          "entities": ents, "chips": []})
         if len(s.get("details") or []) < 2:
             have = s.get("details") or []
             mined = _harvest_details(corpus_nl, s.get("target", ""), s["title"])
@@ -723,10 +899,11 @@ def _clip_fp(mp4: str, n: int = 3):
     return frames
 
 
-def _clips_similar(fa, fb, thresh: float = 10.0) -> bool:
+def _clips_similar(fa, fb, thresh: float = 5.0) -> bool:
     """True when two clips share a near-identical frame (SPA-mirror guard).
-    Calibrated 2026-07-18 on homefeed: genuinely different folds of the SAME
-    page measure 13.9+; only true visual mirrors fall under 10."""
+    Calibrated 2026-07-18 on BOTH worlds: homefeed (light) distinct folds
+    13.9+, mirrors ~0; insforge (dark) distinct sections 7.0+, lookalikes
+    0-2.8. Threshold 5 separates cleanly on both."""
     for a in fa:
         for b in fb:
             if sum(abs(x - y) for x, y in zip(a, b)) / 256.0 < thresh:
@@ -744,18 +921,21 @@ _MOTIF_KEYWORDS = [
                        "contact", "talk", "conversation")),
     ("context-cards", ("present", "context", "home", "house", "propert",
                        "listing", "estate", "apartment", "showcase")),
+    ("logo-wall", ("works with", "works perfectly", "integrations",
+                   "compatible with", "supported tools")),
+    ("price-card", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ", "offer")),
     ("chip-sweep", ("everything", "features", "services", "platform",
                     "need for", "built for", "all-in-one", "toolkit")),
     ("stat-pop", ("stars", "developers", "teams", "companies", "downloads",
                   "backed by", "customers", "users")),
-    ("price-card", ("price", "pricing", "plan", "pay", "subscription", "cost", "free ", "offer")),
     ("globe", ("language", "languages", "global", "world", "international", "translat")),
     ("card", ("link", "profile", "page", "website", "site", "portfolio")),
     ("house", ("real ", "rent")),
 ]
 
 _VIGNETTES = {"request-table", "context-cards", "chat-exchange", "price-card",
-              "check-list", "chip-sweep", "stat-pop", "kinetic-line"}
+              "check-list", "chip-sweep", "stat-pop", "kinetic-line",
+              "logo-wall"}
 
 
 def _refine_motif(motif: str, s: dict, used) -> str:
@@ -765,6 +945,8 @@ def _refine_motif(motif: str, s: dict, used) -> str:
     import re as _re
     details = s.get("details") or []
     chips = s.get("chips") or []
+    if motif == "logo-wall" and len(s.get("entities") or []) < 4:
+        motif = "chip-sweep" if len(chips) >= 6 else "check-list"
     if motif == "chip-sweep" and len(chips) < 6:
         motif = "check-list" if len(details) >= 2 else "kinetic-line"
     if motif == "stat-pop" and not any(_re.search(r"\d", d) for d in details):
@@ -795,6 +977,32 @@ def _pick_motif(text: str, used) -> str:
         if motif not in _VIGNETTES and motif not in used:
             return motif
     return "card"
+
+
+# AI coding-agent tools live under domains the generic heuristic can't guess.
+_AGENT_TOOL_DOMAINS = {
+    "claude code": "claude.com", "claude": "claude.com",
+    "codex": "openai.com", "openai codex": "openai.com",
+    "cursor": "cursor.com", "windsurf": "windsurf.com",
+    "google antigravity": "google.com", "antigravity": "google.com",
+    "gemini cli": "google.com", "github copilot": "github.com",
+    "copilot": "github.com", "devin": "devin.ai", "cline": "cline.bot",
+    "aider": "aider.chat", "v0": "v0.dev", "bolt": "bolt.new",
+    "lovable": "lovable.dev", "replit": "replit.com", "whatsapp": "whatsapp.com",
+}
+
+
+def _logo_uri(name: str) -> str:
+    """Real favicon as a data URI via the production resolver; '' = fallback
+    initial badge in the composition. Never raises."""
+    try:
+        import entity_logos as _el
+        domain = (_AGENT_TOOL_DOMAINS.get(name.strip().lower())
+                  or _el._resolve_domain(name))
+        got = _el._fetch_logo(domain) if domain else None
+        return _el._data_uri(*got) if got else ""
+    except Exception:
+        return ""
 
 
 def build_tour_film(url: str, run_id: str, logo_from: str = "",
@@ -925,14 +1133,19 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             # Motion-graphic beat — a concept vignette that ENACTS the title
             # (or a line-art motif fallback) instead of a redundant recording.
             motif = s.get("motif", "card")
+            logos = ([{"name": n, "src": _logo_uri(n)}
+                      for n in (s.get("entities") or [])[:8]]
+                     if motif == "logo-wall" else [])
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
                              "y": cy + 300, "w": 760, "at": t_f + 12,
                              "motif": motif, "text": s["title"],
                              "lines": s.get("details") or [],
-                             "chips": s.get("chips") or []})
+                             "chips": s.get("chips") or [],
+                             "logos": logos})
             # Push in on graphic beats — vignettes must fill the frame.
             moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.15})
             beat_s = {"chip-sweep": 5.5, "stat-pop": 4.0, "kinetic-line": 3.5,
+                      "logo-wall": 5.0,
                       "request-table": 5.5, "context-cards": 5.5,
                       "chat-exchange": 5.5, "price-card": 5.0,
                       "check-list": 5.0}.get(motif, 5.5)

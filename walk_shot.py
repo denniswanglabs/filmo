@@ -29,6 +29,39 @@ sys.path.insert(0, HERE)
 
 import walk_native as wn  # noqa: E402
 
+# Trapezoid-velocity glide: short ease caps, CONSTANT speed in the middle.
+# The cubic in-out tween reads as "inconsistent scrolling speed" on long pans
+# (Dennis 2026-07-18); a constant-velocity glide with 15% ease caps doesn't.
+_GLIDE_JS = """
+(args) => {
+  const [targetY, ms] = args;
+  return new Promise((resolve) => {
+    const startY = window.scrollY;
+    const dist = targetY - startY;
+    const t0 = performance.now();
+    const CAP = 0.15;
+    const ease = (p) => {
+      if (p < CAP) { const u = p / CAP; return CAP * u * u / 2 * 2 / (2 - CAP); }
+      if (p > 1 - CAP) { const u = (1 - p) / CAP; return 1 - (CAP * u * u / 2 * 2 / (2 - CAP)); }
+      return (CAP / (2 - CAP)) + (p - CAP) * (2 / (2 - CAP));
+    };
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / ms);
+      window.scrollTo(0, Math.round(startY + dist * ease(p)));
+      if (p < 1) requestAnimationFrame(step); else resolve(true);
+    };
+    requestAnimationFrame(step);
+  });
+}
+"""
+
+
+def _glide(page, target_y: int, ms: int) -> None:
+    try:
+        page.evaluate(_GLIDE_JS, [int(target_y), int(ms)])
+    except Exception:
+        wn._smooth_scroll_to(page, target_y, ms=ms)
+
 _FIND_TARGET_JS = """
 (needle) => {
   if (!needle) return null;
@@ -131,30 +164,31 @@ def shot(url: str, target: str, out_path: str, run_dir: str,
                 vh = wn.VIEWPORT["height"]
                 target_y = max(0, int(found["y"] - (vh - min(found["h"], vh)) / 2))
         if target_y > 0:
-            # Pre-position just ABOVE the section before the on-camera motion
-            # starts — otherwise every shot replays the same hero fold and the
-            # film reads "hero, hero, hero" (v4.1 contact-sheet finding). Keep
-            # the run-up SHORT (180px): on short single-page sites a 500px
-            # approach clamps to the very top and reintroduces the hero.
-            approach = max(0, target_y - 180)
+            # Pre-position just ABOVE the section off-camera, then ONE glide
+            # into center — no mid-shot stop-starts (they read as chop).
+            approach = max(0, target_y - 220)
             page.evaluate("(y) => window.scrollTo(0, y)", approach)
             page.wait_for_timeout(600)
             shot_begin = time.time()  # head up to here (load + jump) gets trimmed
-            page.wait_for_timeout(hold_ms)  # opening hold (section context)
-            wn._smooth_scroll_to(page, target_y, ms=pan_ms)
-            page.wait_for_timeout(pan_ms + 200)
+            page.wait_for_timeout(int(hold_ms * 0.8))  # opening hold
+            glide_ms = int(duration * 1000 * 0.45)
+            _glide(page, target_y, glide_ms)
+            page.wait_for_timeout(glide_ms + 150)
         else:
             shot_begin = time.time()  # trim the load-flicker head
-            page.wait_for_timeout(hold_ms)  # opening hold (hero visible)
-            # No target (hero shot): a slow partial pan gives the frame life.
-            wn._smooth_scroll_to(page, int(wn.VIEWPORT["height"] * 0.55), ms=pan_ms)
-            page.wait_for_timeout(pan_ms + 200)
+            page.wait_for_timeout(int(hold_ms * 0.8))  # opening hold (hero)
+            # Hero shot: ONE long constant-velocity glide deep into the page.
+            try:
+                deep = page.evaluate(
+                    "() => Math.min(document.body.scrollHeight - innerHeight,"
+                    " Math.round(innerHeight * 1.7))")
+            except Exception:
+                deep = int(wn.VIEWPORT["height"] * 1.2)
+            glide_ms = int(duration * 1000 * 0.62)
+            _glide(page, max(0, int(deep or 0)), glide_ms)
+            page.wait_for_timeout(glide_ms + 150)
 
-        page.wait_for_timeout(hold_ms)  # target hold
-        # Gentle drift (±90px) — the "camera breathes" beat.
-        wn._smooth_scroll_to(page, max(0, (target_y or 600) + 90), ms=1400)
-        page.wait_for_timeout(1500)
-        page.wait_for_timeout(hold_ms)  # closing hold
+        page.wait_for_timeout(hold_ms + int(hold_ms * 0.6))  # settled close hold
 
         vid = page.video
         ctx.close()

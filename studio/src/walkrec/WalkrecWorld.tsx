@@ -42,9 +42,10 @@ export interface WalkrecElement {
   label?: string;
   videoSrc?: string;
   logoSrc?: string;
-  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list" | "chip-sweep" | "stat-pop" | "kinetic-line";
+  motif?: "house" | "chat" | "tag" | "globe" | "card" | "request-table" | "context-cards" | "chat-exchange" | "price-card" | "check-list" | "chip-sweep" | "stat-pop" | "kinetic-line" | "logo-wall";
   lines?: string[]; // verbatim site strings the vignette renders as content
   chips?: string[]; // short real labels for the chip sweep
+  logos?: { name: string; src: string }[]; // resolved third-party marks
 }
 
 export interface WalkrecMoment {
@@ -301,6 +302,9 @@ const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
 };
 
 /** Property cards gaining context chips; the middle one gets the accent ring. */
+const isPersonName = (s: string) =>
+  /^[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){1,2}$/.test((s || "").trim());
+
 const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
   const frame = useCurrentFrame();
   const local = frame - el.at;
@@ -313,7 +317,13 @@ const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
         return (
           <div key={c} style={{ width: 224, borderRadius: 28, background: t.card, boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${t.accent}` : "none", outlineOffset: -2 }}>
             <div style={{ height: 118, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <HouseGlyph color={t.accent} size={46} />
+              {isPersonName((el.lines || [])[c] || "") ? (
+                <div style={{ width: 72, height: 72, borderRadius: 36, background: `${t.accent}30`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {((el.lines || [])[c] || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("")}
+                </div>
+              ) : (
+                <HouseGlyph color={t.accent} size={46} />
+              )}
             </div>
             <div style={{ padding: "18px 18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
               {(el.lines || [])[c] ? (
@@ -511,6 +521,35 @@ const VignetteKineticLine: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme
   );
 };
 
+/** Night's ecosystem wall: marks the AGENT extracted from the site, resolved
+ *  to real favicons by name. Tiles pop staggered; missing marks degrade to
+ *  accent initial badges. */
+const VignetteLogoWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
+  const frame = useCurrentFrame();
+  const local = frame - el.at;
+  const logos = (el.logos || []).slice(0, 8);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 22, justifyContent: "center", width: 940, transform: `translateY(${vinFloat(local, logos.length * 5 + 40)}px)` }}>
+      {logos.map((l, i) => {
+        const p = vinPop(local, i * 5, 12);
+        if (p <= 0) return null;
+        return (
+          <div key={i} style={{ width: 200, padding: "24px 12px 18px", borderRadius: 24, background: t.card, boxShadow: "0 24px 52px -26px rgba(15,20,40,0.25)", textAlign: "center", transform: `scale(${p})` }}>
+            {l.src ? (
+              <Img src={l.src} style={{ width: 56, height: 56, objectFit: "contain", borderRadius: 12, margin: "0 auto 12px", display: "block" }} />
+            ) : (
+              <div style={{ width: 56, height: 56, borderRadius: 28, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+                {(l.name || "?")[0].toUpperCase()}
+              </div>
+            )}
+            <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 600, color: t.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }>> = {
   "request-table": VignetteRequestTable,
   "context-cards": VignetteContextCards,
@@ -520,6 +559,7 @@ const VIGNETTES: Record<string, React.FC<{ el: WalkrecElement; t: WalkrecProps["
   "chip-sweep": VignetteChipSweep,
   "stat-pop": VignetteStatPop,
   "kinetic-line": VignetteKineticLine,
+  "logo-wall": VignetteLogoWall,
 };
 
 const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number; fps: number }> = ({
