@@ -177,9 +177,23 @@ def run(url: str, kind: str, run_dir: str = ""):
         if os.path.exists(cap) and os.path.abspath(cap) != os.path.abspath(sys.executable):
             r = subprocess.run([cap, os.path.abspath(__file__), url, kind],
                                capture_output=True, text=True, timeout=180)
-            if r.returncode == 0 and r.stdout.strip():
-                return json.loads(r.stdout)
-            err = ((r.stderr or "") + " " + (r.stdout or "")).strip()[-300:]
+            # A subprocess's stdout is NEVER assumed pure: the browser stack
+            # (and anything it imports) can print first. Scan back for the
+            # last line that actually parses.
+            payload = None
+            for line in reversed((r.stdout or "").splitlines()):
+                line = line.strip()
+                if not line or line[0] not in "[{":
+                    continue
+                try:
+                    payload = json.loads(line)
+                    break
+                except Exception:
+                    continue
+            if r.returncode == 0 and payload is not None:
+                return payload
+            err = (f"rc={r.returncode} " + (r.stderr or "")
+                   + " " + (r.stdout or "")).strip()[-300:]
         else:
             err = err or "no capture interpreter available"
     except Exception as e:
