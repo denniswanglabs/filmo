@@ -593,7 +593,13 @@ const VignetteQuoteCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
 const VignettePeopleWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> = ({ el, t }) => {
   const frame = useCurrentFrame();
   const local = frame - el.at;
-  const tags = (el.lines || []).filter((l) => /@/.test(l)).slice(0, 4);
+  // Richest source first: harvested quote attributions (name · role) — the
+  // "@" detail lines are the fallback. A people wall with zero people is a
+  // minimum-material violation and must be impossible.
+  const fromQuotes = (el.quotes || [])
+    .map((q) => [q.name, q.a].filter(Boolean).join(" · ")).filter(Boolean);
+  const tags = (fromQuotes.length ? fromQuotes
+    : (el.lines || []).filter((l) => /@/.test(l))).slice(0, 4);
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 20, justifyContent: "center", width: el.narrow ? 620 : 900, transform: `translateY(${vinFloat(local, tags.length * 6 + 40)}px)` }}>
       {tags.map((tag, i) => {

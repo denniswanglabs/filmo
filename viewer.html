@@ -2,123 +2,169 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Filmo — Agent Run</title>
+<title>Filmo — Director</title>
 <style>
-  /* Filmo light language. UNCLUTTERED CONTRACT: one focal STAGE whose content
-     follows the run's phase (hierarchy through time, not space); one caption
-     line; one quiet strip. No scroll, no panel grid. */
+  /* Filmo light language. Ploy-shaped: chat rail LEFT (the director),
+     calm phase-driven STAGE right. Taste is system-owned; the chat steers. */
   :root { --bg:#FFFFFF; --ink:#0A0B0D; --muted:#5A6472; --accent:#3B82F6;
           --soft:#E8F0FF; --line:#D4E2FB; --ok:#10B981; --film:#EF4444;
-          --design:#8B5CF6; --review:#F59E0B; }
+          --design:#8B5CF6; }
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; overflow:hidden; }
   body { background:var(--bg); color:var(--ink);
-         font:14px/1.5 Inter,-apple-system,sans-serif;
-         background-image:radial-gradient(rgba(59,130,246,0.08) 1px, transparent 1px);
-         background-size:22px 22px;
-         display:flex; flex-direction:column; }
-  header { flex:0 0 56px; display:flex; align-items:center; gap:13px;
-           padding:0 26px; }
-  #mark { width:30px; height:30px; }
-  #mark.live { animation:spinbreathe 2.6s ease-in-out infinite; }
-  @keyframes spinbreathe {
-    0% { transform:rotate(0) scale(1); } 50% { transform:rotate(180deg) scale(0.86); }
-    100% { transform:rotate(360deg) scale(1); } }
-  h1 { font-size:14px; font-weight:700; }
-  .sub { color:var(--muted); font-size:12.5px; }
+         font:14px/1.5 Inter,-apple-system,sans-serif; display:flex; }
+  /* ---- chat rail ---- */
+  #rail { flex:0 0 360px; border-right:1px solid var(--line); display:flex;
+          flex-direction:column; background:#FBFCFF; }
+  #railhead { flex:0 0 60px; display:flex; align-items:center; gap:11px;
+              padding:0 18px; border-bottom:1px solid var(--line); }
+  #blobwrap { width:34px; height:34px; position:relative; flex-shrink:0; }
+  #mark, #blob { position:absolute; inset:0; transition:opacity 0.6s; }
+  #blob { opacity:0; background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
+          animation:blobmorph 3.2s ease-in-out infinite,
+                    blobspin 7s linear infinite; }
+  .working #blob { opacity:1; }
+  .working #mark { opacity:0; }
+  @keyframes blobmorph {
+    0%,100% { border-radius:58% 42% 55% 45% / 48% 60% 40% 52%; transform:scale(1); }
+    33% { border-radius:42% 58% 38% 62% / 60% 42% 58% 40%; transform:scale(0.92); }
+    66% { border-radius:52% 48% 62% 38% / 40% 55% 45% 60%; transform:scale(1.05); } }
+  @keyframes blobspin { to { transform:rotate(360deg); } }
+  #railhead h1 { font-size:14px; font-weight:700; }
+  #railhead .sub { color:var(--muted); font-size:12px; }
+  #msgs { flex:1; min-height:0; overflow-y:auto; padding:16px;
+          display:flex; flex-direction:column; gap:10px; }
+  .m { max-width:86%; padding:10px 14px; border-radius:16px; font-size:13.5px;
+       line-height:1.5; }
+  .m.user { align-self:flex-end; background:var(--accent); color:#fff;
+            border-bottom-right-radius:6px; }
+  .m.dir { align-self:flex-start; background:#fff; border:1px solid var(--line);
+           border-bottom-left-radius:6px; }
+  .verb { align-self:flex-start; color:var(--muted); font-size:12.5px;
+          display:flex; align-items:center; gap:8px; padding-left:4px; }
+  .verb .dotp { width:7px; height:7px; border-radius:4px; background:var(--accent);
+                animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
+  #inputrow { flex:0 0 auto; padding:14px; border-top:1px solid var(--line); }
+  #inputbox { display:flex; gap:8px; background:#fff; border:1px solid var(--line);
+              border-radius:14px; padding:10px 12px; }
+  #inp { flex:1; border:none; outline:none; font:13.5px Inter,sans-serif;
+         background:transparent; }
+  #send { border:none; background:var(--accent); color:#fff; width:34px;
+          height:34px; border-radius:10px; cursor:pointer; font-size:15px; }
+  /* ---- stage side ---- */
+  #side { flex:1; min-width:0; display:flex; flex-direction:column;
+          background-image:radial-gradient(rgba(59,130,246,0.08) 1px, transparent 1px);
+          background-size:22px 22px; }
+  header { flex:0 0 52px; display:flex; align-items:center; gap:12px;
+           padding:0 24px; }
+  h2 { font-size:13.5px; font-weight:700; }
+  .sub { color:var(--muted); font-size:12px; }
   #steps { margin-left:auto; display:flex; gap:5px; }
-  .step { padding:3px 11px; border-radius:999px; font-size:10.5px;
-          font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
-          color:#B6BFCE; }
+  .step { padding:3px 11px; border-radius:999px; font-size:10.5px; font-weight:700;
+          letter-spacing:0.06em; text-transform:uppercase; color:#B6BFCE; }
   .step.on { color:#fff; background:var(--accent); }
   .step.done { color:var(--ok); }
   #stagewrap { flex:1; min-height:0; display:flex; flex-direction:column;
-               align-items:center; justify-content:center; padding:6px 26px 0; }
-  #stage { max-width:1060px; width:100%; flex:1; min-height:0;
-           display:flex; align-items:center; justify-content:center; }
+               align-items:center; justify-content:center; padding:4px 24px 0; }
+  #stage { max-width:980px; width:100%; flex:1; min-height:0; display:flex;
+           align-items:center; justify-content:center; }
   #stage img, #stage video { max-width:100%; max-height:100%; border-radius:16px;
            box-shadow:0 40px 90px -45px rgba(10,11,13,0.5); display:block; }
-  #stagegrid { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;
-               width:100%; max-width:1060px; height:100%; grid-auto-rows:1fr; }
-  #stagegrid .beat { border-radius:14px; overflow:hidden; min-height:0;
+  #stagegrid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px;
+               width:100%; max-width:980px; height:100%; grid-auto-rows:1fr; }
+  #stagegrid .beat { border-radius:12px; overflow:hidden; min-height:0;
                      box-shadow:0 20px 50px -30px rgba(10,11,13,0.45); }
   #stagegrid .beat img { width:100%; height:100%; object-fit:cover; }
-  #stagetext { max-width:720px; text-align:center; }
-  #stagetext .big { font-size:26px; font-weight:700; letter-spacing:-0.01em;
-                    line-height:1.35; }
-  #stagetext .small { color:var(--muted); margin-top:12px; font-size:14px; }
-  #caption { flex:0 0 34px; display:flex; align-items:center; gap:9px;
-             color:var(--muted); font-size:13px; max-width:1060px;
-             width:100%; margin:0 auto; padding:0 26px; }
+  #stagetext { max-width:680px; text-align:center; }
+  #stagetext .big { font-size:24px; font-weight:700; line-height:1.35; }
+  #stagetext .small { color:var(--muted); margin-top:11px; font-size:13.5px; }
+  #caption { flex:0 0 32px; display:flex; align-items:center; gap:8px;
+             color:var(--muted); font-size:12.5px; max-width:980px; width:100%;
+             margin:0 auto; padding:0 24px; }
   .rec { width:8px; height:8px; border-radius:4px; background:var(--film);
          animation:pulse 1.1s infinite; display:none; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  footer { flex:0 0 96px; display:flex; align-items:center; gap:26px;
-           padding:0 26px 16px; max-width:1120px; margin:0 auto; width:100%; }
-  #plan { flex:1; display:flex; flex-wrap:wrap; gap:6px; align-content:center; }
-  .chip { padding:5px 12px; border-radius:999px; background:#fff;
-          border:1px solid var(--line); font-size:11.5px; color:var(--ink);
-          white-space:nowrap; max-width:250px; overflow:hidden;
-          text-overflow:ellipsis; }
+  footer { flex:0 0 88px; display:flex; align-items:center; gap:22px;
+           padding:0 24px 14px; width:100%; }
+  #plan { flex:1; display:flex; flex-wrap:wrap; gap:5px; align-content:center; }
+  .chip { padding:4px 11px; border-radius:999px; background:#fff;
+          border:1px solid var(--line); font-size:11px; white-space:nowrap;
+          max-width:230px; overflow:hidden; text-overflow:ellipsis; }
   .chip b { color:var(--design); font-weight:600; }
-  #thumbs { display:flex; gap:8px; }
-  #thumbs img { height:52px; border-radius:8px; border:1.5px solid var(--line);
+  #thumbs { display:flex; gap:7px; }
+  #thumbs img { height:46px; border-radius:7px; border:1.5px solid var(--line);
                 cursor:pointer; display:block; }
   #thumbs img:hover { border-color:var(--accent); }
 </style>
 </head>
 <body>
-<header>
-  <svg id="mark" viewBox="14 13 56 56" xmlns="http://www.w3.org/2000/svg">
-    <path fill-rule="evenodd" fill="#3B82F6" d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"/>
-  </svg>
-  <div>
-    <h1 id="runname">Agent run</h1>
-    <div class="sub" id="status">connecting…</div>
+<div id="rail">
+  <div id="railhead">
+    <div id="blobwrap">
+      <svg id="mark" viewBox="14 13 56 56" xmlns="http://www.w3.org/2000/svg">
+        <path fill-rule="evenodd" fill="#3B82F6" d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"/>
+      </svg>
+      <div id="blob"></div>
+    </div>
+    <div>
+      <h1>Filmo Director</h1>
+      <div class="sub" id="railsub">your film, steered in chat</div>
+    </div>
   </div>
-  <div id="steps">
-    <div class="step" data-s="read">Read</div>
-    <div class="step" data-s="decide">Decide</div>
-    <div class="step" data-s="film">Film</div>
-    <div class="step" data-s="design">Design</div>
-    <div class="step" data-s="review">Review</div>
-    <div class="step" data-s="done">Done</div>
-  </div>
-</header>
-<div id="stagewrap">
-  <div id="stage"></div>
-  <div id="caption"><div class="rec" id="recdot"></div><span id="captext"></span></div>
+  <div id="msgs"></div>
+  <div id="inputrow"><div id="inputbox">
+    <input id="inp" placeholder="Tell the director what to change…">
+    <button id="send">↑</button>
+  </div></div>
 </div>
-<footer>
-  <div id="plan"></div>
-  <div id="thumbs"></div>
-</footer>
+<div id="side">
+  <header>
+    <div>
+      <h2 id="runname">run</h2>
+      <div class="sub" id="status">connecting…</div>
+    </div>
+    <div id="steps">
+      <div class="step" data-s="read">Read</div>
+      <div class="step" data-s="decide">Decide</div>
+      <div class="step" data-s="film">Film</div>
+      <div class="step" data-s="design">Design</div>
+      <div class="step" data-s="review">Review</div>
+      <div class="step" data-s="done">Done</div>
+    </div>
+  </header>
+  <div id="stagewrap">
+    <div id="stage"></div>
+    <div id="caption"><div class="rec" id="recdot"></div><span id="captext"></span></div>
+  </div>
+  <footer>
+    <div id="plan"></div>
+    <div id="thumbs"></div>
+  </footer>
+</div>
 <script>
 const run = new URLSearchParams(location.search).get("run") || "";
-document.getElementById("runname").textContent = run || "no run selected";
+document.getElementById("runname").textContent = run || "no run";
 const $ = (id) => document.getElementById(id);
 let evts = [], done = false, lastTs = 0, liveFresh = false, liveUrl = "";
-let pinned = null, pinnedUntil = 0;
+let pinned = null, pinnedUntil = 0, chatWorking = false, phaseStart = 0, lastPhase = "";
+
+const VERBS = { read:"Scouting", decide:"Framing", film:"Rolling",
+                design:"Cutting", review:"Grading", assemble:"Printing" };
 
 function reduce() {
-  const S = { pages:[], plan:[], treatments:{}, beats:[], review:[],
-              film:"", phase:"read", status:"", lastTitle:"" };
+  const S = { pages:[], plan:[], treatments:{}, beats:[], review:[], film:"",
+              filmSeq:0, phase:"read", status:"", lastTitle:"" };
   for (const e of evts) {
     const k = e.kind;
     if (k === "read.page") { S.pages.push(e); S.phase = "read"; }
-    if (k === "decide.plan") {
-      S.plan = e.detail.split("\n").map(s => s.replace(/^\d+\.\s*/, ""));
-      S.phase = "decide";
-    }
+    if (k === "decide.plan") { S.plan = e.detail.split("\n").map(s => s.replace(/^\d+\.\s*/, "")); S.phase = "decide"; }
     if (k === "decide.treatments")
-      e.detail.split("\n").forEach(l => {
-        const m = l.match(/“(.+)”\s*→\s*(.+)/);
-        if (m) S.treatments[m[1]] = m[2];
-      });
+      e.detail.split("\n").forEach(l => { const m = l.match(/“(.+)”\s*→\s*(.+)/); if (m) S.treatments[m[1]] = m[2]; });
     if (k.startsWith("film.")) S.phase = "film";
     if (k === "design.beat" && e.artifact) { S.beats.push(e); S.phase = "design"; }
+    if (k === "assemble.render") S.phase = "assemble";
     if (k.startsWith("review.")) { S.phase = "review"; if (k !== "review.start") S.review.push(e); }
-    if (k === "assemble.film") S.film = e.artifact;
+    if (k === "assemble.film") { S.film = e.artifact; S.filmSeq = e.seq; }
     if (k === "run.done") { S.phase = "done"; S.status = "finished"; }
     if (k === "run.error") { S.phase = "done"; S.status = "failed"; }
     S.lastTitle = e.title;
@@ -126,24 +172,43 @@ function reduce() {
   return S;
 }
 
-const ORDER = ["read", "decide", "film", "design", "review", "done"];
-function setStage(html, cap) {
-  $("stage").innerHTML = html;
-  $("captext").textContent = cap || "";
+const ORDER = ["read", "decide", "film", "design", "assemble", "review", "done"];
+function setStage(html, cap) { $("stage").innerHTML = html; $("captext").textContent = cap || ""; }
+
+function addMsg(cls, text) {
+  const d = document.createElement("div");
+  d.className = "m " + cls; d.textContent = text;
+  $("msgs").appendChild(d); $("msgs").scrollTop = 1e9;
+  return d;
+}
+let verbEl = null;
+function setVerb(text) {
+  if (!text) { if (verbEl) verbEl.remove(); verbEl = null; return; }
+  if (!verbEl) {
+    verbEl = document.createElement("div");
+    verbEl.className = "verb";
+    verbEl.innerHTML = `<div class="dotp"></div><span></span>`;
+    $("msgs").appendChild(verbEl); $("msgs").scrollTop = 1e9;
+  }
+  verbEl.querySelector("span").textContent = text;
 }
 
 function render() {
   const S = reduce();
+  const working = (!done) || chatWorking;
+  document.body.className = working ? "working" : "";
   document.querySelectorAll(".step").forEach(el => {
-    const i = ORDER.indexOf(el.dataset.s), cur = ORDER.indexOf(S.phase);
+    const i = ORDER.indexOf(el.dataset.s), cur = ORDER.indexOf(S.phase === "assemble" ? "design" : S.phase);
     el.className = "step" + (i < cur ? " done" : i === cur ? " on" : "");
   });
-  $("status").textContent = done ? (S.status || "finished")
-    : (Date.now() / 1000 - lastTs > 20 ? "working" : "live");
-  $("mark").className = done ? "" : "live";
+  $("status").textContent = done ? (S.status || "finished") : "live";
   $("recdot").style.display = liveFresh ? "block" : "none";
+  if (S.phase !== lastPhase) { lastPhase = S.phase; phaseStart = Date.now(); }
+  if (working && S.phase !== "done") {
+    const v = VERBS[S.phase.split(".")[0]] || "Working";
+    setVerb(`${v}… ${Math.round((Date.now() - phaseStart) / 1000)}s`);
+  } else setVerb("");
 
-  // Footer: plan chips + beat thumbnails (quiet, always available).
   $("plan").innerHTML = S.plan.map(t => {
     const tr = S.treatments[t.slice(0, 44)] || S.treatments[t];
     return `<span class="chip">${t}${tr ? ` <b>→ ${tr}</b>` : ""}</span>`;
@@ -153,52 +218,39 @@ function render() {
   document.querySelectorAll("#thumbs img").forEach(im =>
     im.onclick = () => { pinned = S.beats[+im.dataset.i]; pinnedUntil = Date.now() + 8000; render(); });
 
-  // THE STAGE — one focal thing, by phase (or a pinned thumbnail).
   if (pinned && Date.now() < pinnedUntil) {
-    setStage(`<img src="/${pinned.artifact}">`,
-             `${pinned.title} — ${pinned.detail || ""}`);
+    setStage(`<img src="/${pinned.artifact}">`, `${pinned.title} — ${pinned.detail || ""}`);
     return;
   }
   pinned = null;
-  if (liveFresh && !done) {
-    setStage(`<img src="${liveUrl}">`, "Recording — the agent's viewport, live.");
-    return;
-  }
+  if (liveFresh && !done) { setStage(`<img src="${liveUrl}">`, "Recording — the agent's viewport, live."); return; }
   switch (S.phase) {
     case "read": {
       const p = S.pages[S.pages.length - 1];
       setStage(p && p.artifact ? `<img src="/${p.artifact}">` : "",
-               p ? `${p.title} — ${p.detail}` : "The agent is opening the site…");
-      break;
-    }
+               p ? `${p.title} — ${p.detail}` : "Opening the site…");
+      break; }
     case "decide":
       setStage(`<div id="stagetext"><div class="big">${S.plan.join("<br>")}</div>
-                <div class="small">The moments a customer cares about — chosen from the site's own words.</div></div>`,
-               "Planning the shot list.");
-      break;
+                <div class="small">The moments a customer cares about — the site's own words.</div></div>`,
+               "Framing the shot list."); break;
     case "film":
-      setStage(`<div id="stagetext"><div class="big">${S.lastTitle}</div></div>`,
-               "Filming.");
-      break;
-    case "design": {
+      setStage(`<div id="stagetext"><div class="big">${S.lastTitle}</div></div>`, "Rolling."); break;
+    case "design": case "assemble": {
       const cells = S.beats.map(b => `<div class="beat"><img src="/${b.artifact}"></div>`).join("");
-      setStage(`<div id="stagegrid">${cells}</div>`, "Designing the film, beat by beat.");
-      break;
-    }
+      setStage(`<div id="stagegrid">${cells}</div>`,
+               S.phase === "assemble" ? "Printing the film." : "Cutting, beat by beat.");
+      break; }
     case "review": {
       const last = S.review[S.review.length - 1];
-      setStage(`<div id="stagetext"><div class="big">${last ? last.title : "Reviewing…"}</div>
+      setStage(`<div id="stagetext"><div class="big">${last ? last.title : "Grading…"}</div>
                 <div class="small">${last ? (last.detail || "") : ""}</div></div>`,
-               "The reviewer checks story and coherence.");
-      break;
-    }
+               "The reviewer checks story and coherence."); break; }
     case "done":
-      if (S.film) setStage(`<video src="/${S.film}" controls autoplay muted></video>`,
+      if (S.film) setStage(`<video src="/${S.film}?v=${S.filmSeq}" controls muted></video>`,
                            S.review.some(e => e.kind === "review.pass")
-                             ? "Review passed — this is the shipped cut."
-                             : "The finished film.");
+                             ? "Review passed — this is the shipped cut." : "The finished film.");
       else setStage(`<div id="stagetext"><div class="big">${S.status === "failed" ? "The run failed." : "Finished."}</div></div>`, "");
-      break;
   }
 }
 
@@ -206,13 +258,14 @@ async function poll() {
   try {
     const r = await fetch(`/events/${run}?after=-1`);
     const all = await r.json();
-    if (all.length !== evts.length) {
-      evts = all; lastTs = all.length ? all[all.length - 1].ts : 0;
-      done = evts.some(e => e.kind === "run.done" || e.kind === "run.error");
-      render();
-    } else if (!done) { render(); }
-  } catch (e) { $("status").textContent = "waiting for run…"; }
-  if (!done) setTimeout(poll, 1000);
+    const grew = all.length !== evts.length;
+    evts = all; lastTs = all.length ? all[all.length - 1].ts : 0;
+    const wasDone = done;
+    done = evts.length > 0 && ["run.done", "run.error"].includes(evts[evts.length - 1].kind);
+    if (done && !wasDone && chatWorking) { chatWorking = false; addMsg("dir", "Done — the updated film is on the stage."); }
+    if (grew || !done) render();
+  } catch (e) { $("status").textContent = "waiting…"; }
+  setTimeout(poll, 1000);
 }
 poll();
 
@@ -224,15 +277,39 @@ async function livePoll() {
       if (liveUrl) URL.revokeObjectURL(liveUrl);
       liveUrl = URL.createObjectURL(blob);
       if (!liveFresh) { liveFresh = true; render(); }
-      else if (!pinned) {
-        const im = document.querySelector("#stage img");
-        if (im) im.src = liveUrl;
-      }
+      else if (!pinned) { const im = document.querySelector("#stage img"); if (im) im.src = liveUrl; }
     } else if (liveFresh) { liveFresh = false; render(); }
   } catch (e) { if (liveFresh) { liveFresh = false; render(); } }
   setTimeout(livePoll, 320);
 }
 livePoll();
+
+async function send() {
+  const text = $("inp").value.trim();
+  if (!text) return;
+  $("inp").value = "";
+  addMsg("user", text);
+  try {
+    const r = await fetch(`/chat/${run}`, { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text }) });
+    const res = await r.json();
+    addMsg("dir", res.reply || "…");
+    if (res.working) { chatWorking = true; done = false; render(); }
+  } catch (e) { addMsg("dir", "Connection hiccup — try again."); }
+}
+$("send").onclick = send;
+$("inp").addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+(async () => {
+  try {
+    const r = await fetch(`/chat/${run}`);
+    const hist = await r.json();
+    for (const m of hist) addMsg(m.role === "user" ? "user" : "dir", m.text);
+    if (!hist.length) throw 0;
+  } catch (e) {
+    addMsg("dir", "First cut ships autonomously — then tell me what to change: swap a beat's treatment, drop a beat, or redo the whole film. Taste stays true to the brand's own site.");
+  }
+})();
 </script>
 </body>
 </html>

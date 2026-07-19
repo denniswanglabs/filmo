@@ -1076,6 +1076,10 @@ def _refine_motif(motif: str, s: dict, used) -> str:
         motif = ("people-wall"
                  if sum(1 for d in details if _re.search(r"@", d)) >= 2
                  else ("check-list" if len(details) >= 2 else "card"))
+    if motif == "people-wall" and not (
+            s.get("quotes")
+            or sum(1 for d in details if _re.search(r"@", d)) >= 2):
+        motif = "check-list" if len(details) >= 2 else "card"
     # MINIMUM-MATERIAL contract: a beat must carry real content. kinetic-line
     # needs a >=3-word line AND must never swallow a stop that has details
     # (the 'Testimonials' one-word empty scene, Palmier 2026-07-18).
@@ -1410,6 +1414,8 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
                              "logos": logos})
             # Push in on graphic beats — vignettes must fill the frame.
             moments.append({"at": t_f, "x": cx, "y": cy + 310, "scale": 1.15})
+            beats.append({"i": i, "title": s["title"], "treatment": motif,
+                          "layout": "stacked", "at": t_f})
             beat_s = {"chip-sweep": 5.5, "stat-pop": 4.0, "kinetic-line": 3.5,
                       "logo-wall": 5.0,
                       "request-table": 5.5, "context-cards": 5.5,
@@ -1423,11 +1429,17 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
     moments.append({"at": t_f, "x": 6200, "y": 1810, "scale": 0.98})
     t_f += int(4.6 * FPS)
 
+    try:
+        with open(os.path.join(run_dir, "stops.json"), "w") as f:
+            json.dump({"stops": stops, "ctx": ctx}, f, indent=2, default=str)
+    except Exception:
+        pass
     props = {"fps": FPS, "total_frames": t_f, "theme": theme,
              "elements": elements, "moments": moments}
     props_path = os.path.join(run_dir, "walkrec-tour-props.json")
     with open(props_path, "w") as f:
         json.dump(props, f, indent=2)
+    run_dir = os.path.abspath(run_dir)
     out = os.path.join(run_dir, "film-tour.mp4")
     emit(run_dir, "assemble.render",
          f"Rendering the film — {t_f / FPS:.1f}s, {len(stops)} beats",

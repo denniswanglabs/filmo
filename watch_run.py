@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import run_events  # noqa: E402
+import director  # noqa: E402
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -39,6 +40,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/chat/"):
+            rid = os.path.basename(parsed.path)
+            try:
+                n = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(n) or b"{}")
+                res = director.handle(rid, str(body.get("message", ""))[:2000])
+            except Exception as e:
+                res = {"reply": f"Director error: {type(e).__name__}",
+                       "working": False}
+            self._send(200, json.dumps(res).encode(), "application/json")
+            return
+        self._send(404, b"not found", "text/plain")
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -59,6 +75,16 @@ class Handler(BaseHTTPRequestHandler):
             evts = run_events.read_events(os.path.join(HERE, "runs", rid),
                                           after=after)
             self._send(200, json.dumps(evts).encode(), "application/json")
+            return
+        if path.startswith("/chat/"):
+            rid = os.path.basename(path)
+            out = []
+            try:
+                with open(os.path.join(HERE, "runs", rid, "chat.jsonl")) as f:
+                    out = [json.loads(l) for l in f]
+            except Exception:
+                pass
+            self._send(200, json.dumps(out).encode(), "application/json")
             return
         if path.startswith("/live/"):
             rid = os.path.basename(path)
