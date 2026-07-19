@@ -29,6 +29,34 @@ sys.path.insert(0, HERE)
 
 import walk_native as wn  # noqa: E402
 
+# LIVE VIEWPORT contract (Dennis 2026-07-18: "see the agent screen record
+# live"): while a shot session is open, the agent publishes its viewport to
+# runs/<id>/live/current.jpg (~3fps, atomic replace). Publishing is built
+# into the PACING — every wait slices into publish ticks — so no code path
+# can hold the page without showing it. The viewer hides the pane when the
+# frame goes stale (>3s).
+
+
+def _publish_frame(page, run_dir: str) -> None:
+    try:
+        live = os.path.join(run_dir, "live")
+        os.makedirs(live, exist_ok=True)
+        tmp = os.path.join(live, ".frame.tmp")
+        page.screenshot(path=tmp, type="jpeg", quality=55)
+        os.replace(tmp, os.path.join(live, "current.jpg"))
+    except Exception:
+        pass
+
+
+def _pace(page, run_dir: str, ms: int) -> None:
+    """Wait `ms` while publishing the viewport every ~300ms."""
+    left = int(ms)
+    while left > 0:
+        step = min(300, left)
+        page.wait_for_timeout(step)
+        _publish_frame(page, run_dir)
+        left -= step
+
 # Trapezoid-velocity glide: short ease caps, CONSTANT speed in the middle.
 # The cubic in-out tween reads as "inconsistent scrolling speed" on long pans
 # (Dennis 2026-07-18); a constant-velocity glide with 15% ease caps doesn't.
@@ -56,9 +84,25 @@ _GLIDE_JS = """
 """
 
 
-def _glide(page, target_y: int, ms: int) -> None:
+def _glide(page, target_y: int, ms: int, run_dir: str = "") -> None:
+    """Glide while PUBLISHING: the tween runs in-page on rAF (unaffected by
+    CDP screenshots); python ticks frames out until it lands."""
     try:
-        page.evaluate(_GLIDE_JS, [int(target_y), int(ms)])
+        page.evaluate(
+            "(args) => { window.__glideDone = false;"
+            " (" + _GLIDE_JS + ")(args).then(() => { window.__glideDone = true; }); }",
+            [int(target_y), int(ms)])
+        waited = 0
+        while waited < ms + 1500:
+            page.wait_for_timeout(300)
+            waited += 300
+            if run_dir:
+                _publish_frame(page, run_dir)
+            try:
+                if page.evaluate("() => window.__glideDone === true"):
+                    break
+            except Exception:
+                break
     except Exception:
         wn._smooth_scroll_to(page, target_y, ms=ms)
 
@@ -168,15 +212,14 @@ def shot(url: str, target: str, out_path: str, run_dir: str,
             # into center — no mid-shot stop-starts (they read as chop).
             approach = max(0, target_y - 220)
             page.evaluate("(y) => window.scrollTo(0, y)", approach)
-            page.wait_for_timeout(600)
+            _pace(page, run_dir, 600)
             shot_begin = time.time()  # head up to here (load + jump) gets trimmed
-            page.wait_for_timeout(int(hold_ms * 0.8))  # opening hold
+            _pace(page, run_dir, int(hold_ms * 0.8))  # opening hold
             glide_ms = int(duration * 1000 * 0.45)
-            _glide(page, target_y, glide_ms)
-            page.wait_for_timeout(glide_ms + 150)
+            _glide(page, target_y, glide_ms, run_dir=run_dir)
         else:
             shot_begin = time.time()  # trim the load-flicker head
-            page.wait_for_timeout(int(hold_ms * 0.8))  # opening hold (hero)
+            _pace(page, run_dir, int(hold_ms * 0.8))  # opening hold (hero)
             # Hero shot: ONE long constant-velocity glide deep into the page.
             try:
                 deep = page.evaluate(
@@ -185,10 +228,9 @@ def shot(url: str, target: str, out_path: str, run_dir: str,
             except Exception:
                 deep = int(wn.VIEWPORT["height"] * 1.2)
             glide_ms = int(duration * 1000 * 0.62)
-            _glide(page, max(0, int(deep or 0)), glide_ms)
-            page.wait_for_timeout(glide_ms + 150)
+            _glide(page, max(0, int(deep or 0)), glide_ms, run_dir=run_dir)
 
-        page.wait_for_timeout(hold_ms + int(hold_ms * 0.6))  # settled close hold
+        _pace(page, run_dir, hold_ms + int(hold_ms * 0.6))  # settled close hold
 
         vid = page.video
         ctx.close()

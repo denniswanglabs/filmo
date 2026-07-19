@@ -28,6 +28,7 @@ sys.path.insert(0, HERE)
 
 import brand_extract  # noqa: E402
 import style_fill  # noqa: E402
+from run_events import emit  # noqa: E402
 
 FPS = 30
 
@@ -750,8 +751,16 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
 
     rp = read_pass.read_pass(url, run_dir)
     home_text = rp.get("body_text", "") or ""
+    emit(run_dir, "read.page", f"Read {url}",
+         f"{len(home_text)} chars of copy",
+         artifact=rp.get("hero_screenshot_path") or "")
     ledger = site_read.browse_site(url, run_dir, brain=None,
                                    homepage_text=home_text)
+    for p in (ledger.get("pages") or []):
+        shot = os.path.join(run_dir, "site-read", p["slug"], "shot-01.png")
+        emit(run_dir, "read.page", f"Read /{p['slug']}",
+             f"{len(p.get('body_text') or '')} chars of copy",
+             artifact=shot if os.path.exists(shot) else "")
     pages = {"home": home_text}
     page_urls = {"home": url}
     for p in (ledger.get("pages") or []):
@@ -949,10 +958,13 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
             if any(m in hay for m in _TESTIMONIAL_MARKERS) or \
                     any("@" in d for d in (s.get("details") or [])):
                 s["quotes"] = _harvest_quotes(page_urls.get(marker_slug, url))
-                print(f"[tour] quotes harvested: {len(s['quotes'])}",
-                      file=sys.stderr)
+                emit(run_dir, "read.quotes",
+                     f"Harvested {len(s['quotes'])} real quotes from /{marker_slug}",
+                     (s["quotes"][0]["q"][:90] + "…") if s.get("quotes") else "")
                 break
-    print("[tour] plan: " + " | ".join(s["title"] for s in stops), file=sys.stderr)
+    emit(run_dir, "decide.plan",
+         f"Planned {len(stops)} moments a customer cares about",
+         "\n".join(f"{i + 1}. {s['title']}" for i, s in enumerate(stops)))
     return stops
 
 
@@ -1170,10 +1182,14 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
         s["seg"] = ""
         if s["page"] in filmed_pages:
             s["motif"] = ""  # graphic; treatment assigned at build
-            print(f"[tour] stop {i + 1}: page already filmed -> motion graphic",
-                  file=sys.stderr)
+            emit(run_dir, "decide.guard",
+                 f"\u201c{s['title'][:48]}\u201d: page already filmed",
+                 "This stop becomes a motion graphic instead of a second recording.")
             continue
         seg = os.path.join(run_dir, f"shot-{i + 1}.mp4")
+        emit(run_dir, "film.recording",
+             f"Recording: {s['title'][:56]}",
+             f"Gliding through {s['page']}")
         ok = walk_shot.shot(s["page"], "" if i == 0 else s["target"], seg,
                             run_dir, duration=9.0)
         if ok and os.path.exists(seg):
@@ -1181,12 +1197,15 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             fp = _clip_fp(smooth)
             if any(_clips_similar(fp, kf) for kf in kept_fps):
                 s["motif"] = ""
-                print(f"[tour] stop {i + 1}: footage mirrors a kept clip -> "
-                      f"motion graphic", file=sys.stderr)
+                emit(run_dir, "decide.guard",
+                     f"\u201c{s['title'][:48]}\u201d: footage mirrors a kept clip",
+                     "Dropping the duplicate recording; this beat becomes a motion graphic.")
             else:
                 s["seg"] = smooth
                 kept_fps.append(fp)
                 filmed_pages.append(s["page"])
+                emit(run_dir, "film.shot", f"Shot kept: {s['title'][:56]}",
+                     "Smoothed to 60fps.", artifact=smooth)
         else:
             s["motif"] = ""
     stops = [s for s in stops if s.get("seg") or s.get("motif") is not None]
@@ -1264,9 +1283,10 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             weakest = min(data, key=lambda s: len(s.get("details") or [])
                           + len((s.get("chips") or [])[:10]))
             weakest["motif"] = _pick_motif(weakest["title"], set(_VIGNETTES))
-    print("[tour] treatments: " + " | ".join(
-        f"{s['title'][:24]}->{s['motif'] if not s.get('seg') else 'recording'}"
-        for s in stops), file=sys.stderr)
+    emit(run_dir, "decide.treatments", "Treatments assigned",
+         "\n".join(f"\u201c{s['title'][:44]}\u201d \u2192 "
+                    f"{'recording' if s.get('seg') else s['motif']}"
+                    for s in stops))
 
     seen_titles = set()
     glayout_cycle = ["stacked", "split-left", "split-right"]
@@ -1381,9 +1401,14 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     with open(props_path, "w") as f:
         json.dump(props, f, indent=2)
     out = os.path.join(run_dir, "film-tour.mp4")
+    emit(run_dir, "assemble.render",
+         f"Rendering the film — {t_f / FPS:.1f}s, {len(stops)} beats",
+         f"World palette {site_bg}, accent {pal['accent']}.")
     subprocess.run(["npx", "remotion", "render", "WalkrecWorld", out,
                     f"--props={props_path}", "--log=error"],
                    cwd=os.path.join(HERE, "studio"), check=True, timeout=900)
+    emit(run_dir, "assemble.film", "Film rendered", f"{t_f / FPS:.1f}s",
+         artifact=out)
     print(f"[walkrec] tour film: {out} ({t_f / FPS:.1f}s, {len(stops)} planned shots, bg {site_bg})")
     return out
 
@@ -1402,7 +1427,16 @@ def main():
                     help="v4: planned shot-list tour (analyze -> decide -> film)")
     a = ap.parse_args()
     if a.tour:
-        build_tour_film(a.url, a.run_id, a.logo_from)
+        run_dir = os.path.join(HERE, "runs", a.run_id)
+        emit(run_dir, "run.start", f"Launch agent started for {a.url}",
+             "Reading the site, planning the shots, filming.")
+        try:
+            build_tour_film(a.url, a.run_id, a.logo_from)
+            emit(run_dir, "run.done", "Run finished",
+                 "The film is rendered and ready.")
+        except BaseException as e:
+            emit(run_dir, "run.error", "Run failed", f"{type(e).__name__}: {e}")
+            raise
     elif a.vevara:
         build_vevara_film(a.url, a.run_id, a.clip, a.logo_from)
     elif a.night:
