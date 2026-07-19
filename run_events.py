@@ -30,7 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # every event ALSO lands in public.agent_events and artifacts upload to
 # storage — same bus, second sink, best-effort and non-blocking so a network
 # blip can never break a build.
-_IF_BASE = os.environ.get("INSFORGE_BASE_URL", "").rstrip("/")
+_IF_BASE = (os.environ.get("INSFORGE_BASE_URL")
+            or os.environ.get("INSFORGE_URL", "")).rstrip("/")
 _IF_KEY = os.environ.get("INSFORGE_API_KEY", "")
 _IF_BUCKET = os.environ.get("INSFORGE_BUCKET", "walk-videos")
 
