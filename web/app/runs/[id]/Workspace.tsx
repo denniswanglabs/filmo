@@ -37,9 +37,14 @@ function reduce(evts: AgentEvent[]) {
   for (const e of evts) {
     const k = e.kind
     if (k === 'run.start') {
-      const m = e.title.match(/for (.+)$/)
+      // Titles: "Opening https://x" (hosted) or "... for https://x" (local).
+      const m = e.title.match(/(https?:\/\/\S+)/)
       if (m) S.site = m[1]
       S.done = false
+    }
+    if (!S.site && k === 'read.page') {
+      const m = e.title.match(/(https?:\/\/\S+)/)
+      if (m) S.site = m[1]
     }
     if (k === 'read.page') { S.pages.push(e); S.phase = 'read' }
     if (k === 'brand.logo' && e.artifact_url) S.logo = e.artifact_url
