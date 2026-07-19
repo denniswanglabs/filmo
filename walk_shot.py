@@ -59,15 +59,8 @@ def _publish_frame(page, run_dir: str) -> None:
                     import threading
 
                     def _up(p=cur, r=rid):
-                        try:
-                            with open(p, "rb") as f:
-                                _re._if_req(
-                                    "PUT",
-                                    f"/api/storage/buckets/{_re._IF_BUCKET}"
-                                    f"/objects/agent/{r}/live.jpg",
-                                    f.read(), "image/jpeg")
-                        except Exception:
-                            pass
+                        _re.upload_object(f"agent/{r}/live.jpg", p,
+                                          overwrite=True)
                     threading.Thread(target=_up, daemon=True).start()
             except Exception:
                 pass

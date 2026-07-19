@@ -27,8 +27,12 @@ export async function GET(req: NextRequest) {
     return new Response('bad url', { status: 400 })
   }
   if (!IF_BASE || !IF_KEY) return new Response('unconfigured', { status: 500 })
+  // Uploaded object URLs percent-encode the key's slashes — validate the
+  // DECODED path, fetch the original.
+  let decodedPath = target.pathname
+  try { decodedPath = decodeURIComponent(target.pathname) } catch { /* raw */ }
   if (target.origin !== new URL(IF_BASE).origin
-      || !ALLOWED.test(target.pathname)) {
+      || !ALLOWED.test(decodedPath)) {
     return new Response('forbidden', { status: 403 })
   }
   const upstream = await fetch(target.toString(), {

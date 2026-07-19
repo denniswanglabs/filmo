@@ -22,6 +22,7 @@ import os
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -53,15 +54,74 @@ def _if_req(method: str, path: str, body: bytes, ctype: str):
     return urllib.request.urlopen(req, timeout=15)
 
 
+def _multipart(fields: dict, file_field: str, filename: str,
+               ctype: str, data: bytes):
+    """Encode a multipart/form-data body (stdlib only)."""
+    boundary = "----filmo%d" % int(time.time() * 1000)
+    out = []
+    for k, v in fields.items():
+        out.append(f"--{boundary}\r\nContent-Disposition: form-data; "
+                   f"name=\"{k}\"\r\n\r\n{v}\r\n".encode())
+    out.append(f"--{boundary}\r\nContent-Disposition: form-data; "
+               f"name=\"{file_field}\"; filename=\"{filename}\"\r\n"
+               f"Content-Type: {ctype}\r\n\r\n".encode())
+    out.append(data)
+    out.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(out), f"multipart/form-data; boundary={boundary}"
+
+
+def upload_object(key: str, path: str, overwrite: bool = False) -> str:
+    """Upload a file via the documented strategy flow (S3 presigned POST or
+    local direct PUT). Returns the object URL, '' on failure. Never raises."""
+    try:
+        ext = os.path.splitext(path)[1].lower()
+        ctype = ("video/mp4" if ext == ".mp4" else
+                 "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png")
+        with open(path, "rb") as f:
+            data = f.read()
+        if overwrite:
+            try:
+                req = urllib.request.Request(
+                    f"{_IF_BASE}/api/storage/buckets/{_IF_BUCKET}/objects/{key}",
+                    method="DELETE",
+                    headers={"Authorization": f"Bearer {_IF_KEY}"})
+                urllib.request.urlopen(req, timeout=10)
+            except Exception:
+                pass
+        strat = json.loads(_if_req(
+            "POST", f"/api/storage/buckets/{_IF_BUCKET}/upload-strategy",
+            json.dumps({"filename": key, "contentType": ctype,
+                        "size": len(data)}).encode(),
+            "application/json").read())
+        if strat.get("method") == "presigned":
+            fields = dict(strat.get("fields") or {})
+            body, mp_ctype = _multipart(fields, "file", key, ctype, data)
+            req = urllib.request.Request(strat["uploadUrl"], data=body,
+                                         method="POST",
+                                         headers={"Content-Type": mp_ctype})
+            urllib.request.urlopen(req, timeout=60)
+            _if_req("POST",
+                    f"/api/storage/buckets/{_IF_BUCKET}/objects/"
+                    f"{urllib.parse.quote(key, safe='')}/confirm-upload",
+                    json.dumps({"size": len(data)}).encode(),
+                    "application/json")
+        else:
+            body, mp_ctype = _multipart({}, "file", key, ctype, data)
+            req = urllib.request.Request(strat.get("uploadUrl", ""), data=body,
+                                         method="PUT",
+                                         headers={
+                                             "Authorization": f"Bearer {_IF_KEY}",
+                                             "Content-Type": mp_ctype})
+            urllib.request.urlopen(req, timeout=60)
+        return (f"{_IF_BASE}/api/storage/buckets/{_IF_BUCKET}/objects/"
+                f"{urllib.parse.quote(key, safe='')}")
+    except Exception:
+        return ""
+
+
 def _upload_artifact(run_id: str, seq: int, path: str) -> str:
     ext = os.path.splitext(path)[1] or ".bin"
-    key = f"agent/{run_id}/{seq}{ext}"
-    ctype = ("video/mp4" if ext == ".mp4" else
-             "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png")
-    with open(path, "rb") as f:
-        _if_req("PUT", f"/api/storage/buckets/{_IF_BUCKET}/objects/{key}",
-                f.read(), ctype)
-    return f"{_IF_BASE}/api/storage/buckets/{_IF_BUCKET}/objects/{key}"
+    return upload_object(f"agent/{run_id}/{seq}{ext}", path)
 
 
 def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
