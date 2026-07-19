@@ -40,6 +40,12 @@ export default function VideosPage() {
   // branch: a stale token routes to the sign-in gate rather than a false-empty list.
   const [runs, setRuns] = useState<Run[] | null>(null)
   const [authError, setAuthError] = useState(false)
+  const [q, setQ] = useState('')
+  const shown = (runs || []).filter((r) => {
+    const t = q.trim().toLowerCase()
+    if (!t) return true
+    return `${r.brand || ''} ${r.company_url || ''}`.toLowerCase().includes(t)
+  })
 
   const loadRuns = useCallback(async () => {
     // AUTHORITATIVE list read SERVER-SIDE (admin client, owner-scoped) via listMyRuns,
@@ -112,6 +118,14 @@ export default function VideosPage() {
           ) : (
             // Signed in → the relocated recents list (identical query + cards).
             <section>
+              <div className="mb-4">
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search films…"
+                  className="w-full rounded-xl border border-[#D4E2FB] bg-white px-4 py-2.5 text-sm text-[#0E1320] outline-none transition placeholder:text-[#8A94A6] focus:border-[#B9D2F8]"
+                />
+              </div>
               <div className="mb-3 flex items-center justify-between">
                 <span className="eyebrow">Recents</span>
                 <button
@@ -129,37 +143,40 @@ export default function VideosPage() {
                   No builds yet. Your first one will show up here.
                 </div>
               ) : (
-                <ul className="space-y-2">
-                  {runs.map((r) => (
+                <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {shown.map((r) => (
                     <li key={r.id}>
                       <Link
                         href={`/runs/${r.id}`}
-                        className="flex items-center justify-between gap-4 rounded-xl border border-[#D4E2FB] bg-white px-4 py-3 transition hover:border-[#B9D2F8] hover:bg-[#F8FAFF]"
+                        className="group block overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white transition hover:border-[#B9D2F8]"
                       >
-                        <div className="flex min-w-0 items-center gap-3">
+                        <div className="aspect-video w-full bg-[#0E1320]">
                           {r.final_url ? (
                             <video
                               src={`${r.final_url}#t=2`}
                               preload="metadata"
                               muted
                               playsInline
-                              className="h-12 w-20 flex-none rounded-lg bg-[#0E1320] object-cover"
+                              className="h-full w-full object-cover"
                             />
-                          ) : (
-                            <div className="h-12 w-20 flex-none rounded-lg bg-[#EDF1F7]" />
-                          )}
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-[#0E1320]">
+                          ) : null}
+                        </div>
+                        <div className="px-5 py-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="truncate text-base font-semibold text-[#0E1320]">
                               {r.brand || r.company_url}
                             </p>
-                            <p className="truncate text-sm text-[#5A6472]">
-                              {r.film_mode === 'walkrec' ? 'Agent tour' : 'Brand explainer'}
-                              {' · '}
-                              {relativeTime(r.created_at)}
-                            </p>
+                            <StatusChip status={r.status} />
                           </div>
+                          <p className="mt-1 truncate text-sm text-[#5A6472]">
+                            {r.film_mode === 'walkrec' ? 'Agent tour' : 'Brand explainer'}
+                            {' · '}
+                            {relativeTime(r.created_at)}
+                          </p>
+                          <span className="mt-4 block rounded-full border border-[#D4E2FB] py-2 text-center text-sm text-[#0E1320] transition group-hover:bg-[#F5F8FF]">
+                            Open film
+                          </span>
                         </div>
-                        <StatusChip status={r.status} />
                       </Link>
                     </li>
                   ))}

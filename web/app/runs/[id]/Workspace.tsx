@@ -6,7 +6,7 @@
 // same event contract, agent_events + storage instead of localhost.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { getAgentRun, sendDirectorMessage, type AgentEvent } from '../../actions'
+import { getAgentRun, listMyRuns, sendDirectorMessage, type AgentEvent } from '../../actions'
 
 const VERBS: Record<string, string> = {
   read: 'Scouting', decide: 'Framing', film: 'Rolling',
@@ -29,6 +29,14 @@ const THREAD_KINDS = new Set([
 // leaves work RECEIPTS (collapsed, verb + result). A thread of nothing but
 // receipts reads as a log; a thread of nothing but prose hides the work.
 const PROSE_KINDS = new Set(['chat.director', 'say.step'])
+
+function whenShort(ts: number): string {
+  const d = new Date(ts * 1000)
+  const days = Math.round((Date.now() - ts * 1000) / 86400000)
+  if (days < 1) return 'Updated today'
+  if (days === 1) return 'Updated yesterday'
+  return 'Updated ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 type LocalMsg = { ts: number; kind: 'user' | 'dir'; text: string }
 
@@ -96,7 +104,12 @@ export default function Workspace({ runKey, getToken }: {
   const [localMsgs, setLocalMsgs] = useState<LocalMsg[]>([])
   const [input, setInput] = useState('')
   const [pinned, setPinned] = useState<AgentEvent | null>(null)
-  const [tab, setTab] = useState<'film' | 'beats'>('film')
+  const [tab, setTab] = useState<'film' | 'films'>('film')
+  // The films this account has already produced — the library behind the
+  // Films tab. Loaded once, lazily, when the tab is first opened.
+  const [library, setLibrary] = useState<{
+    id: string; brand: string; url: string; ts: number; status: string
+  }[] | null>(null)
   const [openWork, setOpenWork] = useState<Record<number, boolean>>({})
   const [pending, setPending] = useState(false)
   const phaseStart = useRef(Date.now())
@@ -153,6 +166,27 @@ export default function Workspace({ runKey, getToken }: {
     tick()
     return () => { stop = true }
   }, [runKey, getToken])
+
+  useEffect(() => {
+    if (tab !== 'films' || library !== null) return
+    let stop = false
+    ;(async () => {
+      try {
+        const res = await listMyRuns((await getToken()) || '')
+        if (stop || 'authError' in res) return
+        setLibrary(res.runs
+          .filter((r) => r.final_url)
+          .map((r) => ({
+            id: r.id,
+            brand: r.brand || r.company_url || 'Launch film',
+            url: r.final_url as string,
+            ts: Date.parse(r.created_at) / 1000,
+            status: r.status,
+          })))
+      } catch { /* transient */ }
+    })()
+    return () => { stop = true }
+  }, [tab, library, getToken])
 
   // Live viewport probe (~1s): the frame URL 404s via the proxy when stale.
   useEffect(() => {
@@ -236,15 +270,31 @@ export default function Workspace({ runKey, getToken }: {
   let screen: React.ReactNode = null
   let pill = ''
   const lastPage = S.pages[S.pages.length - 1]
-  if (tab === 'beats' && S.beats.length) {
-    screen = (
-      <div className="wk-grid">
-        {S.beats.map((b) => (
-          <div key={b.seq} className="beat"><img src={b.artifact_url} alt="" /></div>
+  if (tab === 'films') {
+    screen = library === null ? (
+      <div className="wk-text"><div className="big">Loading your films…</div></div>
+    ) : library.length === 0 ? (
+      <div className="wk-text">
+        <div className="big">No finished films yet</div>
+        <div className="small">Every film you produce lands here.</div>
+      </div>
+    ) : (
+      <div className="wk-library">
+        {library.map((f) => (
+          <a key={f.id} className="wk-filmcard" href={`/runs/${f.id}`}>
+            <div className="prev">
+              <video src={`${f.url}#t=2`} preload="metadata" muted playsInline />
+            </div>
+            <div className="meta">
+              <div className="name">{f.brand}</div>
+              <div className="sub">{whenShort(f.ts)}</div>
+              <div className="open">Open film</div>
+            </div>
+          </a>
         ))}
       </div>
     )
-    pill = 'Beats — every scene of the film'
+    pill = library ? `${library.length} film${library.length === 1 ? '' : 's'} produced` : 'films'
   } else if (pinned) {
     screen = <img src={pinned.artifact_url} alt="" />
     pill = pinned.title
@@ -358,13 +408,13 @@ export default function Workspace({ runKey, getToken }: {
           <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
           <i>Builds</i>
         </a>
-        <button className={'wk-ic' + (tab === 'film' ? ' on' : '')} onClick={() => setTab('film')} title="The film">
+        <button className={'wk-ic' + (tab === 'film' ? ' on' : '')} onClick={() => setTab('film')} title="This film">
           <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>
           <i>Film</i>
         </button>
-        <button className={'wk-ic' + (tab === 'beats' ? ' on' : '')} onClick={() => setTab('beats')} title="Beats">
+        <button className={'wk-ic' + (tab === 'films' ? ' on' : '')} onClick={() => setTab('films')} title="Films you've made">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="3" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
-          <i>Beats</i>
+          <i>Films</i>
         </button>
         <div className="wk-railspace" />
         <div className="wk-filmomark" title="Filmo">
@@ -438,7 +488,7 @@ export default function Workspace({ runKey, getToken }: {
             <div className="dots"><i /><i /><i /></div>
             <div className="wk-tabs">
               <button className={tab === 'film' ? 'on' : ''} onClick={() => setTab('film')}>Film</button>
-              <button className={tab === 'beats' ? 'on' : ''} onClick={() => setTab('beats')}>Beats</button>
+              <button className={tab === 'films' ? 'on' : ''} onClick={() => setTab('films')}>Films</button>
             </div>
             <div className="wk-urlpill" title={S.site}>{host || '…'}</div>
             {pill ? <div className="wk-statuschip">{pill}</div> : null}
@@ -494,12 +544,15 @@ export default function Workspace({ runKey, getToken }: {
           padding:0 20px; }
         .wk-railhead h1 { font-size:14.5px; font-weight:700; margin:0; }
         .wk-railhead .sub { color:#8A8A86; font-size:12px; }
+        /* STILL BY DEFAULT: the head mark is identity, not activity. The
+           tail blob (wk-tailblob) is the thing that moves while working. */
         .wk-blob { width:36px; height:36px; position:relative; flex-shrink:0;
           background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
-          animation:wkmorph 3.2s ease-in-out infinite, wkspin 8s linear infinite; }
+          border-radius:44% 56% 52% 48% / 50% 46% 54% 50%; }
         .wk-blob::after { content:""; position:absolute; width:34%; height:34%;
+          transform:translate(-46%, 8%);
           right:16%; top:26%; background:#fff; border-radius:50%;
-          animation:wkhole 3.2s ease-in-out infinite; }
+        }
         @keyframes wkmorph {
           0%,100% { border-radius:58% 42% 55% 45% / 48% 60% 40% 52%; transform:scale(1); }
           33% { border-radius:42% 58% 38% 62% / 60% 42% 58% 40%; transform:scale(0.92); }
@@ -569,6 +622,23 @@ export default function Workspace({ runKey, getToken }: {
           background:#0B0B09;
           border:1px solid #E6E6E3; background:#fff; }
         .wk-grid .beat img { width:100%; height:100%; object-fit:contain; }
+        .wk-library { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+          gap:18px; width:100%; height:100%; padding:22px; overflow-y:auto;
+          align-content:start; }
+        .wk-filmcard { display:flex; flex-direction:column; border-radius:14px;
+          overflow:hidden; background:#fff; border:1px solid #E6E6E3;
+          text-decoration:none; color:inherit; transition:border-color .15s; }
+        .wk-filmcard:hover { border-color:#C9C9C4; }
+        .wk-filmcard .prev { aspect-ratio:16/9; background:#0B0B09; }
+        .wk-filmcard .prev video { width:100%; height:100%; object-fit:cover;
+          display:block; }
+        .wk-filmcard .meta { padding:14px 16px 16px; }
+        .wk-filmcard .name { font-size:15px; font-weight:650; color:#1B1B1A; }
+        .wk-filmcard .sub { font-size:12.5px; color:#8A8A86; margin-top:2px; }
+        .wk-filmcard .open { margin-top:12px; text-align:center; font-size:13px;
+          padding:7px 0; border:1px solid #E6E6E3; border-radius:99px;
+          color:#1B1B1A; }
+        .wk-filmcard:hover .open { background:#F5F5F3; }
         .wk-liveprobe { position:absolute; width:1px; height:1px;
           opacity:0; pointer-events:none; }
         .wk-betachip { display:inline-block; vertical-align:3px;
