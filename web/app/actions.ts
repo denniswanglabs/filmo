@@ -90,6 +90,49 @@ export async function saveEditedProps(input: {
   return { ok: true }
 }
 
+
+// ─────────────────────────────── Credits (beta) ───────────────────────────────
+// 1 video = 100 credits. Daily cap 300 (rolling 24h), lifetime cap 1,500 while
+// in beta. The ledger is append-only (spends negative, refunds positive, run_id
+// links a spend to its build); balances are DERIVED, never stored.
+const VIDEO_CREDIT_COST = 100
+const DAILY_CREDIT_CAP = 300
+const LIFETIME_CREDIT_CAP = 1500
+
+async function creditBalances(db: ReturnType<typeof adminClient>, userId: string) {
+  const { data: rows } = await db.database
+    .from('credit_ledger')
+    .select('delta, created_at')
+    .eq('user_id', userId)
+  const all = (rows as { delta: number; created_at: string }[]) || []
+  const dayStart = Date.now() - 24 * 60 * 60_000
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+  // "Used" is net spend (refunds net out), floored at 0.
+  const lifetimeUsed = Math.max(0, -sum(all.map((r) => r.delta)))
+  const dailyUsed = Math.max(0, -sum(
+    all.filter((r) => Date.parse(r.created_at) >= dayStart).map((r) => r.delta)))
+  return { dailyUsed, lifetimeUsed }
+}
+
+/** Ploy-style credit card data for the signed-in user. Owner gets unlimited. */
+export async function getCredits(accessToken: string): Promise<{
+  dailyUsed: number; dailyCap: number
+  lifetimeUsed: number; lifetimeCap: number
+  videoCost: number; unlimited: boolean
+} | { error: 'not-signed-in' }> {
+  const me = await verifyUser(accessToken)
+  if (!me) return { error: 'not-signed-in' as const }
+  const unlimited = (me.email || '').toLowerCase() === OWNER_EMAIL
+  const db = adminClient()
+  const bal = unlimited ? { dailyUsed: 0, lifetimeUsed: 0 }
+    : await creditBalances(db, me.id)
+  return {
+    dailyUsed: bal.dailyUsed, dailyCap: DAILY_CREDIT_CAP,
+    lifetimeUsed: bal.lifetimeUsed, lifetimeCap: LIFETIME_CREDIT_CAP,
+    videoCost: VIDEO_CREDIT_COST, unlimited,
+  }
+}
+
 // Create a build the way the worker expects: a `runs` row (status=queued) + a `jobs`
 // row (status=queued). The Railway worker's claim_next_job picks it up. user_id comes
 // from the signed-in user (the run owner). Returns the new run id + key.
@@ -148,7 +191,6 @@ export async function createBuild(input: {
   // (never the client) and the admin count bypasses RLS, so it can't be gamed. The owner
   // is exempt. We RETURN a structured { limit } (not throw) so the UI shows the friendly
   // message inline rather than the opaque "Server Components render" server-action error.
-  const BETA_VIDEO_LIMIT = 3
   // The free allowance runs for LAUNCH WEEK only — through end of Tue Jul 21 2026,
   // US Central (one week from the 2026-07-14 Discord launch). After that, non-owner
   // builds pause with a friendly message. Bump this one date to extend the window.
@@ -161,24 +203,21 @@ export async function createBuild(input: {
           'Filmo’s free launch week has ended, so new builds are paused for now. Thanks for trying it!',
       }
     }
-    const dayStart = new Date(Date.now() - 24 * 60 * 60_000).toISOString()
-    const { data: mine } = await db.database
-      .from('runs')
-      .select('id, run_key, status')
-      .eq('user_id', me.id)
-      .gte('created_at', dayStart)
-    // A "chance" is consumed ONLY by a video the user actually MADE in the last 24h:
-    // a run that DELIVERED (status delivered / completed_with_warnings) AND is NOT an
-    // operator gift (run_key does not start with 'gift-'). Failed/abandoned attempts
-    // (blocked_url, payment_timeout, failed) and gift runs do NOT count.
-    const used = (mine || []).filter((r) =>
-      (r.status === 'delivered' || r.status === 'completed_with_warnings') &&
-      !(r.run_key || '').startsWith('gift-'),
-    ).length
-    if (used >= BETA_VIDEO_LIMIT) {
+    // CREDITS (beta): 1 video = 100 credits; 300/day rolling 24h (= 3 films),
+    // 1,500 lifetime. Balance is the SUM of an append-only ledger (spends are
+    // negative; failed builds are refunded by the worker), so failed attempts
+    // do not consume the allowance. Server-side, admin client — can't be gamed.
+    const bal = await creditBalances(db, me.id)
+    if (bal.dailyUsed + VIDEO_CREDIT_COST > DAILY_CREDIT_CAP) {
       return {
         limit: true as const,
-        message: `You've used your ${BETA_VIDEO_LIMIT} beta videos for today. Filmo is in beta — each account gets ${BETA_VIDEO_LIMIT} videos a day. Come back tomorrow!`,
+        message: `You've used today's ${DAILY_CREDIT_CAP} credits (${DAILY_CREDIT_CAP / VIDEO_CREDIT_COST} films). Credits refresh through the day — come back soon!`,
+      }
+    }
+    if (bal.lifetimeUsed + VIDEO_CREDIT_COST > LIFETIME_CREDIT_CAP) {
+      return {
+        limit: true as const,
+        message: `You've reached the beta's ${LIFETIME_CREDIT_CAP}-credit allowance. Paid credits are coming — thanks for filming with us!`,
       }
     }
   }
@@ -228,6 +267,15 @@ export async function createBuild(input: {
     db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }]),
   )
   if (jobErr) throw new Error('jobs.insert: ' + JSON.stringify(jobErr))
+
+  // Charge the video at creation (owner exempt). The worker refunds this row
+  // if the build fails, so failed attempts never consume the allowance. The
+  // partial unique index (run_id, reason) makes the charge idempotent.
+  if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
+    await withRetry(() => db.database.from('credit_ledger').insert([{
+      user_id: me.id, delta: -VIDEO_CREDIT_COST, reason: 'video', run_id: runId,
+    }]))
+  }
 
   return { runId, runKey }
 }

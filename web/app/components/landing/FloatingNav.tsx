@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../lib/auth'
+import { getCredits } from '../../actions'
 import { scrollToHeroComposer } from './Motion'
 import { Wordmark } from '../Brand'
 
@@ -55,7 +56,25 @@ interface FloatingNavProps {
 }
 
 export default function FloatingNav({ buildEnabled = true, onBuildClick, showBuild = true }: FloatingNavProps) {
-  const { user, loading, signOut } = useAuth()
+  const { user, loading, signOut, getToken } = useAuth()
+  const [credits, setCredits] = useState<{
+    dailyUsed: number; dailyCap: number
+    lifetimeUsed: number; lifetimeCap: number; unlimited: boolean
+  } | null>(null)
+  const [creditsOpen, setCreditsOpen] = useState(false)
+  useEffect(() => {
+    if (!user) { setCredits(null); return }
+    let stop = false
+    ;(async () => {
+      try {
+        const t = await getToken()
+        if (!t) return
+        const c = await getCredits(t)
+        if (!stop && !('error' in c)) setCredits(c)
+      } catch { /* quiet */ }
+    })()
+    return () => { stop = true }
+  }, [user, getToken])
   const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -227,6 +246,43 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick, showBui
               {/* Identity + sign out. The "Your Videos" / "Analytics" links live in the
                   center row (lg+) and in the mobile menu (below lg) — kept out of here so
                   the right group can never grow wide enough to collide with the center. */}
+              {credits && !credits.unlimited && (
+                <div className="relative hidden sm:block">
+                  <button
+                    onClick={() => setCreditsOpen((o) => !o)}
+                    className="whitespace-nowrap rounded-full bg-[#EAF1FF] px-3 py-1 text-sm font-medium text-[#3B82F6] transition hover:bg-[#DCE9FF]"
+                  >
+                    {Math.max(0, credits.dailyCap - credits.dailyUsed)} credits
+                  </button>
+                  {creditsOpen && (
+                    <div className="absolute right-0 top-10 z-50 w-64 rounded-2xl border border-[#E3E9F2] bg-white p-4 shadow-xl">
+                      <div className="mb-3 flex items-baseline justify-between">
+                        <span className="text-sm font-semibold text-[#0E1320]">Credit usage</span>
+                        <span className="text-xs text-[#8A94A6]">100 = 1 film</span>
+                      </div>
+                      <div className="mb-1 flex justify-between text-xs text-[#5A6472]">
+                        <span>Daily</span>
+                        <span className="tabular-nums">{credits.dailyUsed}/{credits.dailyCap} · rolling 24h</span>
+                      </div>
+                      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-[#EDF1F7]">
+                        <div className="h-full rounded-full bg-[#3B82F6]"
+                          style={{ width: `${Math.min(100, (credits.dailyUsed / credits.dailyCap) * 100)}%` }} />
+                      </div>
+                      <div className="mb-1 flex justify-between text-xs text-[#5A6472]">
+                        <span>Lifetime</span>
+                        <span className="tabular-nums">{credits.lifetimeUsed}/{credits.lifetimeCap}</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-[#EDF1F7]">
+                        <div className="h-full rounded-full bg-[#3B82F6]"
+                          style={{ width: `${Math.min(100, (credits.lifetimeUsed / credits.lifetimeCap) * 100)}%` }} />
+                      </div>
+                      <div className="mt-3 text-[11px] leading-snug text-[#8A94A6]">
+                        Failed builds are refunded automatically. Paid credits are coming after the beta.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <span className="hidden max-w-[120px] truncate text-base text-[#5A6472] lg:inline xl:max-w-[160px]">
                 {displayName(user)}
               </span>

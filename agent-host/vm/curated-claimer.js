@@ -349,6 +349,24 @@ function mapLedgerToRun(ledger) {
 // large upload mid-flight. The SDK uses Node's undici fetch, which keep-alives /
 // pools connections per origin by default, so steady-state calls reuse the warm
 // connection (the ~0.8s cold-TLS penalty only hits the first call after restart).
+// CREDITS: a failed build refunds its charge (the web charged 100 at
+// creation). The (run_id, reason) partial unique index makes this idempotent
+// — a run that fails twice (retry + wall-clock) refunds once. Best-effort:
+// a refund that loses a race never blocks the failure path.
+async function refundCredits(runId) {
+  if (!runId) return
+  try {
+    const { data: run } = await ifCall('runs.select(refund)',
+      () => db.database.from('runs').select('user_id').eq('id', runId).maybeSingle())
+    const uid = run && run.user_id
+    if (!uid) return
+    const { error } = await db.database.from('credit_ledger').insert([{
+      user_id: uid, delta: 100, reason: 'refund', run_id: runId,
+    }])
+    if (!error) log(`  credits: refunded run ${runId}`)
+  } catch (e) { log('  credits refund error', String(e && e.message || e)) }
+}
+
 const UPLOAD_TIMEOUT_MS = Number(process.env.UPLOAD_TIMEOUT_MS || 150000)
 async function putObject(key, blob) {
   await ifCall(`storage.remove ${key}`, () => db.storage.from(BUCKET).remove([key]),
@@ -1429,6 +1447,7 @@ async function processJob(job) {
     } else {
       await setRun(runId, { status: 'failed', phase: 'failed' })
       await setJob(job.id, { status: 'failed', error: `walkrec exit ${code}, final_url ${shippedUrl ? 'set' : 'missing'}` })
+      await refundCredits(runId)
       log(`  FAILED walkrec run ${runKey} (exit ${code}, final_url ${shippedUrl ? 'set' : 'missing'})`)
     }
     return
@@ -1451,6 +1470,7 @@ async function processJob(job) {
       // succeeded — only the InsForge upload didn't — so the file is the source of truth.
       const retryProps = { ...props, ship_retryable: haveVideo, local_video_path: haveVideo ? localPath : null }
       await setRun(runId, { ...mapped, status: 'failed', phase: 'upload_failed', final_url: null, props: retryProps })
+      await refundCredits(runId)
       await setJob(job.id, { status: 'failed', error: `video upload failed (render OK; mp4 preserved at ${localPath} for re-ship)` })
       await emit(runId, `Render finished but the upload to storage failed after retries. Your video is safe on the worker and can be re-shipped (no re-render needed).`, 'filmo', 'warn')
       log(`  UPLOAD FAILED run ${runKey} (render ok, mp4 preserved at ${localPath}, ship_retryable=${haveVideo})`)
@@ -1466,6 +1486,7 @@ async function processJob(job) {
   } else {
     await setRun(runId, { status: 'failed', phase: ledger.phase || 'failed' })
     await setJob(job.id, { status: 'failed', error: `exit ${code}, ledger ${mapped.status}` })
+    await refundCredits(runId)
     log(`  FAILED run ${runKey} (exit ${code}, ledger ${mapped.status})`)
   }
 }
@@ -1554,6 +1575,7 @@ async function runJobBounded(job) {
       try {
         if (job.run_id) await setRun(job.run_id, { status: 'failed', phase: 'wedged' })
         await setJob(job.id, { status: 'failed', error: 'wall-clock wedge (>30min)' })
+        await refundCredits(job.run_id)
       } catch (e) { log('  wedge-mark failed', String(e && e.message || e)) }
       resolve('wallclock')
     }, JOB_WALLCLOCK_MS)
@@ -1585,7 +1607,7 @@ async function sweepStaleClaims() {
     let n = 0
     for (const j of stale) {
       await setJob(j.id, { status: 'failed', error: `stale claim reaped (claimed_by=${j.claimed_by || 'null'})` })
-      if (j.run_id) await setRun(j.run_id, { status: 'failed', phase: 'stale_reclaim' })
+      if (j.run_id) { await setRun(j.run_id, { status: 'failed', phase: 'stale_reclaim' }); await refundCredits(j.run_id) }
       n++
     }
     if (n) log(`  reaper: failed ${n} stale-claimed zombie job(s)`)
