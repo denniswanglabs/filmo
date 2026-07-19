@@ -95,13 +95,19 @@ export async function saveEditedProps(input: {
 // 1 video = 100 credits. Daily cap 300 (rolling 24h), lifetime cap 1,500 while
 // in beta. The ledger is append-only (spends negative, refunds positive, run_id
 // links a spend to its build); balances are DERIVED, never stored.
-const VIDEO_CREDIT_COST = 100
-// An applied director edit re-renders the film — real compute, ~1/5 of a
-// build. Conversation is free: questions, and anything the taste gates
-// decline, never cost credits (the worker charges only on applied work).
-const EDIT_CREDIT_COST = 20
-const DAILY_CREDIT_CAP = 300
-const LIFETIME_CREDIT_CAP = 1500
+// CREDITS ARE TOKENS. 1 credit = 35 tokens of model work, so the price of
+// a thing is what it actually costs to think about:
+//   a film  ≈ 22,400 tokens (plan ~9k + a critic that SEES 6 stills ~13k)
+//           → 640 credits
+//   an edit ≈  2,500 tokens (beats + events tail + the reply)
+//           →  70 credits
+// A day's 3,000 credits therefore buys 3 films AND 10 edits (2,620) with
+// five more edits of headroom — the allowance Dennis specified, derived
+// rather than guessed. Conversation and gate-declined edits stay free.
+const VIDEO_CREDIT_COST = 640
+const EDIT_CREDIT_COST = 70
+const DAILY_CREDIT_CAP = 3000
+const LIFETIME_CREDIT_CAP = 15000
 
 async function creditBalances(db: ReturnType<typeof adminClient>, userId: string) {
   const { data: rows } = await db.database
@@ -215,7 +221,7 @@ export async function createBuild(input: {
     if (bal.dailyUsed + VIDEO_CREDIT_COST > DAILY_CREDIT_CAP) {
       return {
         limit: true as const,
-        message: `You've used today's ${DAILY_CREDIT_CAP} credits (${DAILY_CREDIT_CAP / VIDEO_CREDIT_COST} films). Credits refresh through the day — come back soon!`,
+        message: `You've used today's ${DAILY_CREDIT_CAP.toLocaleString()} credits. They refresh tomorrow morning — see you then.`,
       }
     }
     if (bal.lifetimeUsed + VIDEO_CREDIT_COST > LIFETIME_CREDIT_CAP) {
@@ -867,6 +873,15 @@ export async function getAgentRun(
 export async function sendDirectorMessage(
   runKey: string, message: string, accessToken: string,
 ) {
+  // Distinguish "your session died" from "this run isn't yours" — the
+  // generic failure told Dennis to retry something that could never work.
+  const me = await verifyUser(accessToken)
+  if (!me) {
+    return {
+      error: 'auth' as const,
+      message: 'Your session expired — sign in again and your note will send.',
+    }
+  }
   const ctx = await ownedRun(runKey, accessToken)
   if (!ctx) return { error: 'not-found' as const }
   const { db, run } = ctx

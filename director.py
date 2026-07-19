@@ -260,7 +260,7 @@ def _parse(run_dir: str, state: dict, message: str):
 # An applied edit re-renders the film — real compute, so it costs credits.
 # Conversation (answers, and anything the taste gates decline) is free: the
 # user must never pay for the system saying no.
-EDIT_CREDIT_COST = 20
+EDIT_CREDIT_COST = 70
 
 
 def _apply_work(run_id: str, run_dir: str, state: dict, actions,

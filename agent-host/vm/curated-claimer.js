@@ -361,7 +361,7 @@ async function refundCredits(runId) {
     const uid = run && run.user_id
     if (!uid) return
     const { error } = await db.database.from('credit_ledger').insert([{
-      user_id: uid, delta: 100, reason: 'refund', run_id: runId,
+      user_id: uid, delta: 640, reason: 'refund', run_id: runId,
     }])
     if (!error) log(`  credits: refunded run ${runId}`)
   } catch (e) { log('  credits refund error', String(e && e.message || e)) }

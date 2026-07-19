@@ -431,7 +431,10 @@ export default function Workspace({ runKey, getToken }: {
       </div>
       <div className="wk-rail">
         <div className="wk-railhead">
-          <div className="wk-blob" />
+          <svg className="wk-blob" viewBox="14 13 56 56" aria-hidden>
+            <path fillRule="evenodd" fill="#3B82F6"
+              d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z" />
+          </svg>
           <div>
             <h1>{brandTitle} <span className="wk-betachip">beta</span></h1>
             <div className="sub">{S.done ? (S.status || 'finished') : 'live'}</div>
@@ -538,13 +541,8 @@ export default function Workspace({ runKey, getToken }: {
           background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
           border-radius:44% 56% 52% 48% / 50% 46% 54% 50%;
           animation:wkmorph 2.4s ease-in-out infinite; }
-        .wk-tailblob::after { content:""; position:absolute; width:34%;
-          height:34%; right:16%; top:26%; background:#fff; border-radius:50%;
-          animation:wkhole 2.4s ease-in-out infinite; }
-        /* AT REST: perfectly round, hole centred, nothing animating. */
+        /* AT REST: perfectly round and still. Motion is the only signal. */
         .wk-tailblob.still { animation:none; border-radius:50%; }
-        .wk-tailblob.still::after { animation:none;
-          right:auto; top:50%; left:50%; transform:translate(-50%, -50%); }
         .wk-tabs { display:flex; gap:2px; background:#F1F1EF; border-radius:8px;
           padding:2px; }
         .wk-tabs button { border:none; background:none; font:12px Inter,sans-serif;
@@ -569,13 +567,7 @@ export default function Workspace({ runKey, getToken }: {
         .wk-railhead .sub { color:#8A8A86; font-size:12px; }
         /* STILL BY DEFAULT: the head mark is identity, not activity. The
            tail blob (wk-tailblob) is the thing that moves while working. */
-        .wk-blob { width:36px; height:36px; position:relative; flex-shrink:0;
-          background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
-          border-radius:44% 56% 52% 48% / 50% 46% 54% 50%; }
-        .wk-blob::after { content:""; position:absolute; width:34%; height:34%;
-          transform:translate(-46%, 8%);
-          right:16%; top:26%; background:#fff; border-radius:50%;
-        }
+        .wk-blob { width:36px; height:36px; flex-shrink:0; display:block; }
         @keyframes wkmorph {
           0%,100% { border-radius:58% 42% 55% 45% / 48% 60% 40% 52%; transform:scale(1); }
           33% { border-radius:42% 58% 38% 62% / 60% 42% 58% 40%; transform:scale(0.92); }

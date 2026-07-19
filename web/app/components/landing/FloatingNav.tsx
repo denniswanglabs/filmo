@@ -277,9 +277,7 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick, showBui
                     <div className="absolute right-0 top-10 z-50 w-64 rounded-2xl border border-[#E3E9F2] bg-white p-4 shadow-xl">
                       <div className="mb-3 flex items-baseline justify-between">
                         <span className="text-sm font-semibold text-[#0E1320]">Credit usage</span>
-                        <span className="text-xs text-[#8A94A6]">
-                          {credits.videoCost} = 1 film · {credits.editCost} = 1 edit
-                        </span>
+                        <span className="text-xs text-[#8A94A6]">Free while in beta</span>
                       </div>
                       <div className="mb-1 flex justify-between text-xs text-[#5A6472]">
                         <span>Daily</span>
@@ -289,17 +287,9 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick, showBui
                         <div className="h-full rounded-full bg-[#3B82F6]"
                           style={{ width: `${Math.min(100, (credits.dailyUsed / credits.dailyCap) * 100)}%` }} />
                       </div>
-                      <div className="mb-1 flex justify-between text-xs text-[#5A6472]">
-                        <span>Lifetime</span>
-                        <span className="tabular-nums">{credits.lifetimeUsed}/{credits.lifetimeCap}</span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-[#EDF1F7]">
-                        <div className="h-full rounded-full bg-[#3B82F6]"
-                          style={{ width: `${Math.min(100, (credits.lifetimeUsed / credits.lifetimeCap) * 100)}%` }} />
-                      </div>
                       <div className="mt-3 text-[11px] leading-snug text-[#8A94A6]">
-                        Failed builds are refunded, and edits the director declines are free.
-                        Paid credits are coming after the beta.
+                        Enough for about three films and ten edits a day. Credits refresh
+                        every morning; failed builds are refunded.
                       </div>
                     </div>
                   )}
