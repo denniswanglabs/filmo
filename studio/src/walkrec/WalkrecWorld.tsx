@@ -562,8 +562,12 @@ const VignetteQuoteCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const frame = useCurrentFrame();
   const local = frame - el.at;
   const lines = el.lines || [];
-  const attr = lines.find((l) => /@|founder|ceo|cto|head of|director/i.test(l));
-  const quote = lines.find((l) => l !== attr && l.length >= 12) || lines[0] || "";
+  // "@" (or a role-comma pattern) marks an ATTRIBUTION; the quote is the
+  // first line that is NOT one — roles must never invert (an attribution
+  // rendered as the quote is wrong information).
+  const isAttr = (l: string) => /@/.test(l) || /^(founder|co-founder|ceo|cto|head of|director)\b/i.test(l);
+  const attr = lines.find(isAttr);
+  const quote = lines.find((l) => !isAttr(l) && l.length >= 12) || "";
   const pQ = vinP(local, 6, 18);
   const pA = vinP(local, 30, 14);
   return (

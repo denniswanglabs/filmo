@@ -532,7 +532,7 @@ def _harvest_chips(corpus: str, target: str, title: str, want: int = 10):
         lc = frag.lower()
         if lc in NAV or lc.startswith(CTA_START):
             continue
-        if _re.fullmatch(r"[\d:.,%$€£+/ ]+", frag):
+        if _re.fullmatch(r"[\d:.,%$€£+/kKmM ]+", frag):
             continue  # bare times/numbers are not feature labels
         if title and lc in title.lower():
             continue
@@ -857,6 +857,14 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
             stops.append({"title": marker_line, "page": url,
                           "target": marker_line, "details": [],
                           "entities": ents, "chips": []})
+            # CONTENT-ONCE: the wall owns these names — no other beat may
+            # present them (the chip sweep was duplicating the model list).
+            reserved = {e.lower() for e in ents}
+            for s in stops[:-1]:
+                s["chips"] = [c for c in (s.get("chips") or [])
+                              if c.lower() not in reserved]
+                s["details"] = [d for d in (s.get("details") or [])
+                                if d.lower() not in reserved]
         if len(s.get("details") or []) < 2:
             have = s.get("details") or []
             mined = _harvest_details(corpus_nl, s.get("target", ""), s["title"])
@@ -987,20 +995,16 @@ def _refine_motif(motif: str, s: dict, used) -> str:
     if motif not in _VIGNETTES:  # line-art tier
         if len(s.get("entities") or []) >= 4 and "logo-wall" not in used:
             return "logo-wall"
-        if len(chips) >= 6 and "chip-sweep" not in used:
-            return "chip-sweep"
         if any(_is_stat_line(d) for d in details) and "stat-pop" not in used:
             return "stat-pop"
         if any(_re.search(r"@|founder|ceo|cto", d, _re.I) for d in details) \
                 and "quote-card" not in used:
             return "quote-card"
-        if len(details) >= 2 and "check-list" not in used:
-            return "check-list"
-        if (3 <= len((s.get("title") or "").split()) <= 8
-                and "kinetic-line" not in used):
-            return "kinetic-line"
         if len(details) >= 2:
             return "check-list"  # may repeat: real info beats line art
+        if (not details and 3 <= len((s.get("title") or "").split()) <= 8
+                and "kinetic-line" not in used):
+            return "kinetic-line"
     return motif
 
 
@@ -1078,12 +1082,9 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     for i, s in enumerate(stops):
         s["seg"] = ""
         if s["page"] in filmed_pages:
-            s["motif"] = _refine_motif(
-                _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
-                s, used_motifs)
-            used_motifs.add(s["motif"])
-            print(f"[tour] stop {i + 1}: page already filmed -> motion graphic "
-                  f"({s['motif']})", file=sys.stderr)
+            s["motif"] = ""  # graphic; treatment assigned at build
+            print(f"[tour] stop {i + 1}: page already filmed -> motion graphic",
+                  file=sys.stderr)
             continue
         seg = os.path.join(run_dir, f"shot-{i + 1}.mp4")
         ok = walk_shot.shot(s["page"], "" if i == 0 else s["target"], seg,
@@ -1092,22 +1093,16 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             smooth = _smooth60(seg, os.path.join(run_dir, f"shot-{i + 1}-60.mp4"))
             fp = _clip_fp(smooth)
             if any(_clips_similar(fp, kf) for kf in kept_fps):
-                s["motif"] = _refine_motif(
-                    _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
-                    s, used_motifs)
-                used_motifs.add(s["motif"])
+                s["motif"] = ""
                 print(f"[tour] stop {i + 1}: footage mirrors a kept clip -> "
-                      f"motion graphic ({s['motif']})", file=sys.stderr)
+                      f"motion graphic", file=sys.stderr)
             else:
                 s["seg"] = smooth
                 kept_fps.append(fp)
                 filmed_pages.append(s["page"])
         else:
-            s["motif"] = _refine_motif(
-                _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
-                s, used_motifs)
-            used_motifs.add(s["motif"])
-    stops = [s for s in stops if s.get("seg") or s.get("motif")]
+            s["motif"] = ""
+    stops = [s for s in stops if s.get("seg") or s.get("motif") is not None]
     if not stops:
         raise RuntimeError("no shots captured")
 
@@ -1156,6 +1151,36 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     # another beat's framing; camera zooms slightly on titles.
     cluster_pos = [(3600, 700), (700, 2800), (4200, 3400), (1800, 5000),
                    (6400, 4600), (900, 6600)]
+    # MOTIF ASSIGNMENT (single pass): content-once dedupe in beat order,
+    # then refine on what each beat will ACTUALLY show, then a film-wide
+    # variety guarantee — >=4 graphic beats include at least one line-art
+    # drawing (flip the weakest data beat).
+    _LINE_ART = ("house", "chat", "tag", "globe", "card")
+    presented, used_motifs = set(), set()
+    gstops = [s for s in stops if not s.get("seg")]
+    for s in gstops:
+        s["chips"] = [c for c in (s.get("chips") or [])
+                      if c.lower() not in presented]
+        s["details"] = [d for d in (s.get("details") or [])
+                        if d.lower() not in presented]
+        s["motif"] = _refine_motif(
+            _pick_motif(s["title"] + " " + s.get("target", ""), used_motifs),
+            s, used_motifs)
+        used_motifs.add(s["motif"])
+        presented.update(x.lower() for x in (s.get("chips") or [])[:10])
+        presented.update(x.lower() for x in (s.get("details") or []))
+        presented.update(e.lower() for e in (s.get("entities") or []))
+    if len(gstops) >= 4 and not any(s["motif"] in _LINE_ART for s in gstops):
+        data = [s for s in gstops if s["motif"] in
+                ("check-list", "chip-sweep", "request-table", "context-cards")]
+        if data:
+            weakest = min(data, key=lambda s: len(s.get("details") or [])
+                          + len((s.get("chips") or [])[:10]))
+            weakest["motif"] = _pick_motif(weakest["title"], set(_VIGNETTES))
+    print("[tour] treatments: " + " | ".join(
+        f"{s['title'][:24]}->{s['motif'] if not s.get('seg') else 'recording'}"
+        for s in stops), file=sys.stderr)
+
     seen_titles = set()
     glayout_cycle = ["stacked", "split-left", "split-right"]
     glayout_i = 0
