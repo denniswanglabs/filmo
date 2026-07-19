@@ -310,7 +310,7 @@ const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
   const local = frame - el.at;
   const ring = vinPop(local, 62, 12);
   return (
-    <div style={{ display: "flex", gap: 22, transform: `translateY(${vinFloat(local, 84)}px)` }}>
+    <div style={{ display: "flex", gap: 22, justifyContent: "center", transform: `translateY(${vinFloat(local, 84)}px)` }}>
       {[0, 1, 2].map((c) => {
         const p = vinP(local, c * 9, 16);
         const highlighted = c === 1;
@@ -628,8 +628,16 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
       );
     case "graphic": {
       const Vignette = el.motif ? VIGNETTES[el.motif] : undefined;
+      // The wrapper must be exactly as wide as the vignette's natural layout —
+      // a wider child overflows a centered parent to the right and the whole
+      // beat reads off-center (Dennis 2026-07-18).
+      const VIGNETTE_W: Record<string, number> = {
+        "chip-sweep": 980, "logo-wall": 940, "kinetic-line": 1100,
+        "chat-exchange": 620,
+      };
+      const gw = (el.motif && VIGNETTE_W[el.motif]) || el.w || 760;
       return (
-        <div style={{ ...base, width: el.w ?? 760 }}>
+        <div style={{ ...base, width: gw }}>
           {/* Inner scale keeps vignette layouts authored at comfortable px
               while filling the frame (Dennis: content must come BIG). */}
           <div style={{ transform: "scale(1.3)", transformOrigin: "center" }}>

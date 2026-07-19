@@ -1137,7 +1137,7 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                       for n in (s.get("entities") or [])[:8]]
                      if motif == "logo-wall" else [])
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
-                             "y": cy + 300, "w": 760, "at": t_f + 12,
+                             "y": cy + 300, "at": t_f + 12,
                              "motif": motif, "text": s["title"],
                              "lines": s.get("details") or [],
                              "chips": s.get("chips") or [],
