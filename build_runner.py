@@ -1142,34 +1142,14 @@ def main():
             emit(run_dir, "run.error", "The run hit a wall",
                  f"{type(e).__name__}: {e}")
             raise
-        final = os.path.join(run_dir, "final.mp4")
-        _sh.copyfile(out, final)
-        # PYTHON OWNS WALKREC DELIVERY: walkrec films are 60fps and routinely
-        # exceed the InsForge gateway's ~18MB body ceiling that the claimer's
-        # SDK upload obeys, and the claimer's classic ledger check knows
-        # nothing about walkrec (it failed every exit-0 walkrec build). The
-        # strategy-flow upload goes direct to S3 (no gateway cap); the run
-        # row's final_url is the delivery receipt the claimer verifies.
-        rid = run_events._hosted_run_id(run_dir)
-        if rid:
-            url = run_events.upload_object(f"{a.run_id}/final.mp4", final,
-                                           overwrite=True)
-            if url:
-                try:
-                    run_events._if_req(
-                        "PATCH", f"/api/database/records/runs?id=eq.{rid}",
-                        json.dumps({"final_url": url}).encode(),
-                        "application/json")
-                except Exception as e:
-                    print(f"[walkrec] final_url patch failed: {e}",
-                          file=sys.stderr)
-            else:
-                print("[walkrec] final upload failed (strategy flow)",
-                      file=sys.stderr)
+        # PYTHON OWNS WALKREC DELIVERY (shared contract with the director
+        # path): strategy-flow upload (no gateway cap) + runs.final_url as
+        # the receipt the claimer verifies.
+        run_events.ship_final(run_dir, a.run_id, out)
         emit(run_dir, "run.done", "Film delivered",
              "The tour film is rendered and shipped.")
         run_events.flush_sinks()
-        print(f"[walkrec] final: {final}")
+        print(f"[walkrec] final: {os.path.join(run_dir, 'final.mp4')}")
         return
     goal = a.goal or ("%d-second promo plus a short product walkthrough" % a.duration)
     globals()["ACTIVE_LOOK"] = a.look

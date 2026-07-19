@@ -236,9 +236,12 @@ def _apply_work(run_id: str, run_dir: str, state: dict, actions) -> None:
     pub = os.path.join(HERE, "studio", "public")
     out, _beats = pw._assemble_and_render(run_id, run_dir, pub,
                                           stops, state["ctx"])
+    import run_events as _re
+    _re.ship_final(run_dir, run_id, out)
     emit(run_dir, "review.done", "Change applied — film updated",
          artifact=out)
     emit(run_dir, "run.done", "Run finished", "The updated film is ready.")
+    _re.flush_sinks()
 
 
 def handle_job(run_key: str, insforge_run_id: str, message: str) -> int:

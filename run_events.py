@@ -144,6 +144,36 @@ def upload_object(key: str, path: str, overwrite: bool = False) -> str:
         return ""
 
 
+def ship_final(run_dir: str, run_key: str, film_path: str) -> str:
+    """Deliver a walkrec film: copy to runs/<key>/final.mp4, upload via the
+    strategy flow (no gateway cap), PATCH runs.final_url with a fresh ?v=
+    cache-buster. ONE contract for both the build and director paths — the
+    director's re-render used to update only the canvas artifact, leaving
+    final_url serving the pre-edit cut. Returns the URL ('' off-hosted)."""
+    rid = _hosted_run_id(run_dir)
+    if not rid:
+        return ""
+    final = os.path.join(run_dir, "final.mp4")
+    try:
+        if os.path.abspath(film_path) != os.path.abspath(final):
+            import shutil
+            shutil.copyfile(film_path, final)
+    except Exception:
+        return ""
+    url = upload_object(f"{run_key}/final.mp4", final, overwrite=True)
+    if not url:
+        print("[ship!] final upload failed (strategy flow)", file=sys.stderr)
+        return ""
+    url = f"{url}?v={int(time.time())}"
+    try:
+        _if_req_retry("PATCH", f"/api/database/records/runs?id=eq.{rid}",
+                      json.dumps({"final_url": url}).encode(),
+                      "application/json")
+    except Exception as e:
+        print(f"[ship!] final_url patch failed: {e}", file=sys.stderr)
+    return url
+
+
 def _upload_artifact(run_id: str, seq: int, path: str) -> str:
     ext = os.path.splitext(path)[1] or ".bin"
     return upload_object(f"agent/{run_id}/{seq}{ext}", path)
