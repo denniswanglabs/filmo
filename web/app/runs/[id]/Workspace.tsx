@@ -74,6 +74,7 @@ export default function Workspace({ runKey, getToken }: {
   const [liveFresh, setLiveFresh] = useState(false)
   const [liveTick, setLiveTick] = useState(0)
   const [queueAhead, setQueueAhead] = useState<number | null>(null)
+  const [filmUrl, setFilmUrl] = useState('')
   const [localMsgs, setLocalMsgs] = useState<LocalMsg[]>([])
   const [input, setInput] = useState('')
   const [pinned, setPinned] = useState<AgentEvent | null>(null)
@@ -103,14 +104,30 @@ export default function Workspace({ runKey, getToken }: {
       try {
         const after = evtsRef.current.length
           ? evtsRef.current[evtsRef.current.length - 1].seq : -1
-        const res = await getAgentRun(runKey, after, (await getToken()) || '')
+        // Rows whose artifact hasn't attached yet (insert-first sink):
+        // ask the server to re-read them until the PATCH lands.
+        const pendingArtifacts = evtsRef.current
+          .filter((e) => !e.artifact_url && (
+            e.kind === 'design.beat' || e.kind === 'assemble.film'
+            || e.kind === 'read.page' || e.kind === 'brand.logo'
+            || e.kind === 'film.shot' || e.kind === 'review.done'))
+          .map((e) => e.seq)
+        const res = await getAgentRun(runKey, after, (await getToken()) || '',
+          pendingArtifacts)
         if (!('error' in res)) {
-          if (res.events.length) {
-            evtsRef.current = [...evtsRef.current, ...res.events]
-            setEvts(evtsRef.current)
+          let next = evtsRef.current
+          if (res.refreshed && res.refreshed.length) {
+            const bySeq = new Map(res.refreshed.map((e) => [e.seq, e]))
+            next = next.map((e) => bySeq.get(e.seq) || e)
+          }
+          if (res.events.length) next = [...next, ...res.events]
+          if (next !== evtsRef.current) {
+            evtsRef.current = next
+            setEvts(next)
           }
           if (typeof res.queueAhead === 'number') setQueueAhead(res.queueAhead)
           else if (res.events.length) setQueueAhead(null)
+          if (res.filmUrl) setFilmUrl(res.filmUrl)
         }
       } catch { /* transient */ }
       setTimeout(tick, 1500)
@@ -257,6 +274,7 @@ export default function Workspace({ runKey, getToken }: {
     )
     pill = S.phase === 'review' ? 'Grading — story and coherence' : 'Cutting — beat by beat'
   } else {
+    if (!S.film && filmUrl) S.film = filmUrl
     if (S.film) {
       const starts = S.beats.map((b) => {
         const m = b.detail.match(/· ([\d.]+)s/)

@@ -634,6 +634,7 @@ async function ownedRun(runKey: string, accessToken: string) {
  *  objects render in the browser. */
 export async function getAgentRun(
   runKey: string, after: number, accessToken: string,
+  refreshSeqs?: number[],
 ) {
   const ctx = await ownedRun(runKey, accessToken)
   if (!ctx) return { error: 'not-found' as const }
@@ -645,12 +646,28 @@ export async function getAgentRun(
     .gt('seq', after)
     .order('seq', { ascending: true })
     .limit(400)
-  const events = ((evts as AgentEvent[]) || []).map((e) => ({
-    ...e,
-    artifact_url: e.artifact_url
-      ? `/api/agent-artifact?u=${encodeURIComponent(e.artifact_url)}`
-      : '',
-  }))
+  const proxied = (rows: AgentEvent[] | null | undefined) =>
+    (rows || []).map((e) => ({
+      ...e,
+      artifact_url: e.artifact_url
+        ? `/api/agent-artifact?u=${encodeURIComponent(e.artifact_url)}`
+        : '',
+    }))
+  const events = proxied(evts as AgentEvent[])
+  // ARTIFACTS ATTACH BY PATCH after their row lands (insert-first sink), so
+  // an incremental seq cursor never sees them. The client sends the seqs it
+  // holds with empty artifacts; rows whose artifact has since attached come
+  // back for upsert.
+  let refreshed: AgentEvent[] = []
+  if (refreshSeqs && refreshSeqs.length) {
+    const { data: re } = await db.database
+      .from('agent_events')
+      .select('seq,ts,kind,title,detail,artifact_url')
+      .eq('run_id', run.id)
+      .in('seq', refreshSeqs.slice(0, 40))
+      .neq('artifact_url', '')
+    refreshed = proxied(re as AgentEvent[])
+  }
   const liveUrl = `/api/agent-artifact?u=${encodeURIComponent(
     `${(process.env.INSFORGE_URL || process.env.NEXT_PUBLIC_INSFORGE_URL || '').replace(/\/$/, '')}`
     + `/api/storage/buckets/${process.env.INSFORGE_BUCKET || 'walk-videos'}`
@@ -678,7 +695,11 @@ export async function getAgentRun(
         || (j.status === 'queued' && j.created_at < mine.created_at)).length
     }
   }
-  return { run, events, runId: run.id, liveUrl, queueAhead }
+  // The delivery receipt is always current on the run row — the done-state
+  // film falls back to it when assemble.film's artifact hasn't attached yet.
+  const filmUrl = proxyPlayableUrl(
+    (run as { final_url?: string | null }).final_url) || ''
+  return { run, events, refreshed, runId: run.id, liveUrl, queueAhead, filmUrl }
 }
 
 /** One director chat turn: log the user message as an agent event and enqueue
