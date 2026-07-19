@@ -20,7 +20,7 @@ function md(text: string) {
 
 const THREAD_KINDS = new Set([
   'run.start', 'read.page', 'read.quotes', 'decide.plan', 'decide.guard',
-  'film.recording', 'film.shot', 'design.beat', 'review.lint',
+  'film.recording', 'film.shot', 'film.failed', 'design.beat', 'review.lint',
   'review.finding', 'review.pass', 'review.apply', 'review.done',
   'assemble.film', 'run.error', 'chat.user', 'chat.director',
 ])
@@ -212,6 +212,11 @@ export default function Workspace({ runKey, getToken }: {
   items.sort((a, b) => a.ts - b.ts)
 
   const working = !S.done
+  const host = (S.site || '').replace(/^https?:\/\//, '').split('/')[0]
+  const brandTitle = host
+    ? host.split('.')[0].charAt(0).toUpperCase()
+      + host.split('.')[0].slice(1) + ' launch film'
+    : 'Launch film'
   const verb = VERBS[S.phase] || 'Working'
   const elapsed = Math.round((Date.now() - phaseStart.current) / 1000)
 
@@ -335,7 +340,7 @@ export default function Workspace({ runKey, getToken }: {
         <div className="wk-brand" title={S.site || 'brand'}>
           {S.logo
             ? <img src={S.logo} alt="" />
-            : <span>{(S.site || 'F')[0].toUpperCase()}</span>}
+            : <span>{(host || 'F')[0].toUpperCase()}</span>}
         </div>
         <a className="wk-ic" href="/" title="All builds">
           <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
@@ -358,7 +363,7 @@ export default function Workspace({ runKey, getToken }: {
         <div className="wk-railhead">
           <div className="wk-blob" />
           <div>
-            <h1>Filmo Director <span className="wk-betachip">beta</span></h1>
+            <h1>{brandTitle} <span className="wk-betachip">beta</span></h1>
             <div className="sub">{S.done ? (S.status || 'finished') : 'live'}</div>
           </div>
         </div>
@@ -423,7 +428,8 @@ export default function Workspace({ runKey, getToken }: {
               <button className={tab === 'film' ? 'on' : ''} onClick={() => setTab('film')}>Film</button>
               <button className={tab === 'beats' ? 'on' : ''} onClick={() => setTab('beats')}>Beats</button>
             </div>
-            <div className="pill">{pill}</div>
+            <div className="wk-urlpill" title={S.site}>{host || '…'}</div>
+            {pill ? <div className="wk-statuschip">{pill}</div> : null}
             {liveFresh && working ? <div className="rec" /> : null}
             {working ? (
               <img className="wk-liveprobe" src={`${liveUrl}&t=${liveTick}`}
@@ -520,9 +526,9 @@ export default function Workspace({ runKey, getToken }: {
         .wk-inputbox button { border:none; background:#1B1B1A; color:#fff;
           width:34px; height:34px; border-radius:17px; cursor:pointer;
           font-size:15px; }
-        .wk-canvaswrap { flex:1; min-width:0; display:flex; align-items:center;
-          justify-content:center; padding:26px; }
-        .wk-canvas { width:100%; max-width:1100px; height:100%; max-height:760px;
+        .wk-canvaswrap { flex:1 1 0; min-width:0; min-height:0; display:flex;
+          align-items:stretch; justify-content:center; padding:18px; }
+        .wk-canvas { flex:1; min-width:0; min-height:0; max-width:1240px;
           background:#fff; border-radius:16px; display:flex; flex-direction:column;
           overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.04),
           0 24px 70px -30px rgba(0,0,0,0.18); }
@@ -531,10 +537,14 @@ export default function Workspace({ runKey, getToken }: {
         .wk-chrome .dots { display:flex; gap:6px; }
         .wk-chrome .dots i { width:10px; height:10px; border-radius:5px;
           background:#E4E4E1; }
-        .wk-chrome .pill { flex:1; max-width:560px; margin:0 auto;
+        .wk-urlpill { flex:1; max-width:520px; margin:0 auto;
           background:#F5F5F3; border-radius:8px; padding:5px 14px;
-          text-align:center; color:#8A8A86; font-size:12.5px;
+          text-align:center; color:#6E6E6A; font-size:12.5px;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .wk-statuschip { flex:0 0 auto; background:#F5F5F3; border-radius:99px;
+          padding:4px 12px; color:#8A8A86; font-size:11.5px;
+          white-space:nowrap; max-width:240px; overflow:hidden;
+          text-overflow:ellipsis; }
         .wk-chrome .rec { width:8px; height:8px; border-radius:4px;
           background:#EF4444; animation:wkpulse 1.1s infinite; }
         .wk-screen { flex:1; min-height:0; display:flex; align-items:center;

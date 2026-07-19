@@ -1205,19 +1205,39 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
              f"Gliding through {s['page']}")
         ok = walk_shot.shot(s["page"], "" if i == 0 else s["target"], seg,
                             run_dir, duration=9.0)
+        capture_err = ""
         if not ok:
             # Hosted worker: the main python has no playwright — the capture
             # venv does (same contract as capture_screenshots). Subprocess
-            # walk_shot's CLI under that interpreter.
+            # walk_shot's CLI under that interpreter, CAPTURING its output:
+            # the audit runs shipped films with zero recordings because every
+            # failure here was silent (no event, stderr discarded).
             import capture_screenshots as _cs
             if (os.path.exists(_cs.CAPTURE_PY)
                     and os.path.realpath(_cs.CAPTURE_PY)
                     != os.path.realpath(sys.executable)):
-                r = subprocess.run(
-                    [_cs.CAPTURE_PY, os.path.join(HERE, "walk_shot.py"),
-                     s["page"], "" if i == 0 else s["target"], seg, run_dir,
-                     "9.0"], timeout=240)
-                ok = r.returncode == 0 and os.path.exists(seg)
+                try:
+                    r = subprocess.run(
+                        [_cs.CAPTURE_PY, os.path.join(HERE, "walk_shot.py"),
+                         s["page"], "" if i == 0 else s["target"], seg,
+                         run_dir, "9.0"],
+                        timeout=240, capture_output=True, text=True)
+                    ok = r.returncode == 0 and os.path.exists(seg)
+                    if not ok:
+                        capture_err = ((r.stderr or "") + "\n"
+                                       + (r.stdout or "")).strip()[-400:]
+                        print(f"[walkrec] shot retry rc={r.returncode}: "
+                              f"{capture_err}", file=sys.stderr)
+                except subprocess.TimeoutExpired:
+                    capture_err = "capture timed out after 240s"
+            else:
+                capture_err = "no capture interpreter available"
+        if not ok:
+            # LOUD FAILURE CONTRACT: a lost recording must be visible in the
+            # thread with its reason, never silently degraded.
+            emit(run_dir, "film.failed",
+                 f"Recording failed: {s['title'][:56]}",
+                 capture_err or "capture returned no video")
         if ok and os.path.exists(seg):
             smooth = _smooth60(seg, os.path.join(run_dir, f"shot-{i + 1}-60.mp4"))
             fp = _clip_fp(smooth)
@@ -1235,8 +1255,10 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
         else:
             s["motif"] = ""
     stops = [s for s in stops if s.get("seg") or s.get("motif") is not None]
-    if not stops:
-        raise RuntimeError("no shots captured")
+    if not any(s.get("seg") for s in stops):
+        raise RuntimeError(
+            "no recordings captured — refusing to ship a walkrec film with "
+            "no screen footage (see the Recording failed events for causes)")
 
     theme_src = brand_extract.extract_brand(url, logo_from=logo_from or run_dir)
     pal = theme_src["palette"]
