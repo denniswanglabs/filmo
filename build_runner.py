@@ -1141,6 +1141,10 @@ def main():
         except BaseException as e:
             emit(run_dir, "run.error", "The run hit a wall",
                  f"{type(e).__name__}: {e}")
+            # The failure tail (film.failed diagnostics, run.error) must
+            # reach the DB before the process dies — daemon sink threads
+            # don't survive the raise.
+            run_events.flush_sinks()
             raise
         # PYTHON OWNS WALKREC DELIVERY (shared contract with the director
         # path): strategy-flow upload (no gateway cap) + runs.final_url as

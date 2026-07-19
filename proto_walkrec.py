@@ -1213,9 +1213,14 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
             # the audit runs shipped films with zero recordings because every
             # failure here was silent (no event, stderr discarded).
             import capture_screenshots as _cs
+            # ABSPATH, NEVER REALPATH: a venv's bin/python is a SYMLINK to
+            # the base interpreter, so realpath() said "same interpreter"
+            # on every Linux container and silently skipped the retry —
+            # zero recordings in every hosted film. The venv-ness lives in
+            # the path (pyvenv.cfg beside it), not the binary.
             if (os.path.exists(_cs.CAPTURE_PY)
-                    and os.path.realpath(_cs.CAPTURE_PY)
-                    != os.path.realpath(sys.executable)):
+                    and os.path.abspath(_cs.CAPTURE_PY)
+                    != os.path.abspath(sys.executable)):
                 try:
                     r = subprocess.run(
                         [_cs.CAPTURE_PY, os.path.join(HERE, "walk_shot.py"),
