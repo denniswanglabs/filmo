@@ -5,6 +5,7 @@
 // updates chronologically. Direct React port of the validated local viewer;
 // same event contract, agent_events + storage instead of localhost.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { getAgentRun, sendDirectorMessage, type AgentEvent } from '../../actions'
 
 const VERBS: Record<string, string> = {
@@ -62,6 +63,12 @@ export default function Workspace({ runKey, getToken }: {
   const lastPhase = useRef('')
   const threadRef = useRef<HTMLDivElement>(null)
   const evtsRef = useRef<AgentEvent[]>([])
+  // FULL-SCREEN SURFACE CONTRACT: the page template wraps content in a
+  // framer-motion fade with a transform — a transformed ancestor hijacks
+  // position:fixed and inherits its opacity. The workspace therefore
+  // PORTALS to document.body, outside any page-transition wrapper.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
   const S = reduce(evts)
 
@@ -196,7 +203,8 @@ export default function Workspace({ runKey, getToken }: {
     if (working && liveUrl) setLiveFresh(true)
   }, [liveTick, working, liveUrl])
 
-  return (
+  if (!mounted) return null
+  return createPortal(
     <div className="wk-root">
       <div className="wk-rail">
         <div className="wk-railhead">
@@ -334,6 +342,7 @@ export default function Workspace({ runKey, getToken }: {
         .wk-text .big { font-size:22px; font-weight:650; line-height:1.4; }
         .wk-text .small { color:#8A8A86; margin-top:10px; font-size:13.5px; }
       `}</style>
-    </div>
+    </div>,
+    document.body,
   )
 }
