@@ -562,6 +562,104 @@ export async function listMyRuns(accessToken: string | null | undefined): Promis
   return { runs: (data as Run[]) ?? [] }
 }
 
+// ───────────────────────────────── Assets library ─────────────────────────────
+// Everything Filmo has taken from a customer's site or made from it, in one
+// place. This is the provenance ledger made browsable: every page it read,
+// every mark it captured, every second it recorded, every scene it cut. All
+// of it already exists as agent_events artifacts + runs.final_url — the
+// library is a VIEW, never a second copy.
+export type AssetKind = 'film' | 'recording' | 'capture' | 'mark' | 'scene'
+
+export interface AssetRow {
+  id: string
+  kind: AssetKind
+  name: string
+  url: string
+  runId: string
+  brand: string
+  ts: number
+  video: boolean
+}
+
+const ASSET_OF_KIND: Record<string, AssetKind> = {
+  'read.page': 'capture',
+  'brand.logo': 'mark',
+  'film.shot': 'recording',
+  'design.beat': 'scene',
+}
+
+/** Strip the event's verb so the asset reads as a thing, not a log line. */
+function assetName(kind: string, title: string): string {
+  const t = (title || '').trim()
+  if (kind === 'read.page') {
+    const m = t.replace(/^Read\s+/i, '')
+    try {
+      return m.startsWith('http') ? new URL(m).pathname || '/' : m
+    } catch { return m }
+  }
+  if (kind === 'film.shot') return t.replace(/^Shot kept:\s*/i, '')
+  if (kind === 'design.beat') return t.replace(/\s*\(.*\)$/, '').replace(/:/, ' —')
+  if (kind === 'brand.logo') return 'Brand mark'
+  return t
+}
+
+export async function listAssets(accessToken: string | null | undefined): Promise<
+  { authError: true } | { assets: AssetRow[] }
+> {
+  const me = await verifyUser(accessToken)
+  if (!me) return { authError: true }
+  const db = adminClient()
+  const { data: runRows } = await db.database
+    .from('runs')
+    .select('id, brand, company_url, final_url, created_at')
+    .eq('user_id', me.id)
+    .order('created_at', { ascending: false })
+    .limit(40)
+  const runs = (runRows as {
+    id: string; brand: string | null; company_url: string | null
+    final_url: string | null; created_at: string
+  }[]) || []
+  if (!runs.length) return { assets: [] }
+  const byId = new Map(runs.map((r) => [r.id, r]))
+
+  const { data: evtRows } = await db.database
+    .from('agent_events')
+    .select('run_id, seq, ts, kind, title, artifact_url')
+    .in('run_id', runs.map((r) => r.id))
+    .in('kind', Object.keys(ASSET_OF_KIND))
+    .neq('artifact_url', '')
+    .order('ts', { ascending: false })
+    .limit(600)
+
+  const assets: AssetRow[] = []
+  for (const r of runs) {
+    if (!r.final_url) continue
+    assets.push({
+      id: `film-${r.id}`, kind: 'film',
+      name: `${r.brand || r.company_url || 'Launch'} film`,
+      url: proxyPlayableUrl(r.final_url) || '',
+      runId: r.id, brand: r.brand || r.company_url || '',
+      ts: Date.parse(r.created_at) / 1000, video: true,
+    })
+  }
+  for (const e of ((evtRows as {
+    run_id: string; seq: number; ts: number; kind: string
+    title: string; artifact_url: string
+  }[]) || [])) {
+    const run = byId.get(e.run_id)
+    if (!run) continue
+    assets.push({
+      id: `${e.run_id}-${e.seq}`, kind: ASSET_OF_KIND[e.kind],
+      name: assetName(e.kind, e.title),
+      url: `/api/agent-artifact?u=${encodeURIComponent(e.artifact_url)}`,
+      runId: e.run_id, brand: run.brand || run.company_url || '',
+      ts: e.ts, video: /\.mp4(\?|$)/i.test(e.artifact_url),
+    })
+  }
+  assets.sort((a, b) => b.ts - a.ts)
+  return { assets }
+}
+
 // ─────────────────────────────── Owner analytics ───────────────────────────────
 // The business-wide P&L: EVERY run's revenue / COGS / profit, plus splits. Admin
 // client bypasses RLS, so this is owner-only — the gate is a real security boundary,

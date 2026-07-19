@@ -158,6 +158,15 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick, showBui
               Your Videos
             </Link>
           )}
+          {/* Any signed-in user: the raw material behind their films. */}
+          {!loading && user && (
+            <Link
+              href="/assets"
+              className="shrink-0 whitespace-nowrap text-[15px] font-medium text-[#5A6472] transition hover:text-amber xl:text-[17px]"
+            >
+              Assets
+            </Link>
+          )}
           {/* Owner-only: business analytics dashboard. */}
           {isOwner && (
             <Link
@@ -225,6 +234,15 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick, showBui
                       className="block w-full px-4 py-2.5 text-left text-sm text-[#5A6472] transition hover:bg-[#F5F8FF] hover:text-[#0E1320]"
                     >
                       Your Videos
+                    </Link>
+                  )}
+                  {!loading && user && (
+                    <Link
+                      href="/assets"
+                      onClick={() => setMenuOpen(false)}
+                      className="block w-full px-4 py-2.5 text-left text-sm text-[#5A6472] transition hover:bg-[#F5F8FF] hover:text-[#0E1320]"
+                    >
+                      Assets
                     </Link>
                   )}
                   {/* Owner-only analytics — reachable on mobile too. */}
