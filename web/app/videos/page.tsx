@@ -16,6 +16,23 @@ import SiteFooter from '../components/landing/SiteFooter'
 import LandingBackdrop from '../components/landing/LandingBackdrop'
 import { type Run } from '../../lib/types'
 
+
+// Runs of the SAME site look identical without a timestamp — eight
+// "insforge.dev / A 30-second brand explainer" rows are unfindable. Every row
+// carries when it was made (and which pipeline made it).
+function relativeTime(iso: string): string {
+  const then = Date.parse(iso)
+  if (!then) return ''
+  const mins = Math.round((Date.now() - then) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.round(hrs / 24)
+  if (days < 7) return `${days}d ago`
+  return new Date(then).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 export default function VideosPage() {
   const { user, loading, getToken } = useAuth()
 
@@ -119,11 +136,28 @@ export default function VideosPage() {
                         href={`/runs/${r.id}`}
                         className="flex items-center justify-between gap-4 rounded-xl border border-[#D4E2FB] bg-white px-4 py-3 transition hover:border-[#B9D2F8] hover:bg-[#F8FAFF]"
                       >
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-[#0E1320]">
-                            {r.brand || r.company_url}
-                          </p>
-                          <p className="truncate text-sm text-[#5A6472]">{r.goal || 'Brand video'}</p>
+                        <div className="flex min-w-0 items-center gap-3">
+                          {r.final_url ? (
+                            <video
+                              src={`${r.final_url}#t=2`}
+                              preload="metadata"
+                              muted
+                              playsInline
+                              className="h-12 w-20 flex-none rounded-lg bg-[#0E1320] object-cover"
+                            />
+                          ) : (
+                            <div className="h-12 w-20 flex-none rounded-lg bg-[#EDF1F7]" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-[#0E1320]">
+                              {r.brand || r.company_url}
+                            </p>
+                            <p className="truncate text-sm text-[#5A6472]">
+                              {r.film_mode === 'walkrec' ? 'Agent tour' : 'Brand explainer'}
+                              {' · '}
+                              {relativeTime(r.created_at)}
+                            </p>
+                          </div>
                         </div>
                         <StatusChip status={r.status} />
                       </Link>

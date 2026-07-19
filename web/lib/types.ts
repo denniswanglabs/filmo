@@ -39,6 +39,8 @@ export interface Run {
   edited_url?: string | null
   created_at: string
   updated_at: string | null
+  /** 'walkrec' = the agent-toured film (beta); 'classic' = the pattern-library cut. */
+  film_mode?: string | null
 }
 
 export interface RunEvent {

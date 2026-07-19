@@ -550,7 +550,7 @@ export async function listMyRuns(accessToken: string | null | undefined): Promis
   const { data } = await db.database
     .from('runs')
     .select(
-      'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at',
+      'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at, film_mode',
     )
     .eq('user_id', me.id)
     .order('created_at', { ascending: false })
