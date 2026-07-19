@@ -1153,6 +1153,7 @@ async function processJob(job) {
   const url = p.company_url || p.url
   const t0 = Date.now()
   const activeProducer = CLAIMER_MODE === 'hermes' ? HERMES_PRODUCER : PRODUCER
+  CURRENT_CLAIMED_JOB_ID = job.id
   log(`claimed job ${job.id} -> run ${runKey} (${url}) [mode=${CLAIMER_MODE}, producer=${activeProducer}]`)
   await setRun(runId, { status: 'running', phase: 'planning' })
 
@@ -1471,6 +1472,23 @@ async function enqueueTestJob(companyUrl = 'https://stripe.com') {
 // that ignores its kill, etc.) the daemon ALWAYS returns to polling. Set above both
 // inner ceilings so it only fires on a true wedge, never on a healthy long render.
 const JOB_WALLCLOCK_MS = Number(process.env.JOB_WALLCLOCK_MS || 30 * 60 * 1000) // 30 min
+// DEPLOY-SAFE CLAIMS (3x observed 2026-07-19): Railway sends SIGTERM before
+// swapping containers, and a dying container can claim a job in its final
+// seconds — orphaning it for STALE_CLAIM_MS. On SIGTERM, release THIS
+// worker's in-flight claims back to 'queued' so the next container picks
+// them up immediately.
+let CURRENT_CLAIMED_JOB_ID = null
+process.on('SIGTERM', async () => {
+  try {
+    if (CURRENT_CLAIMED_JOB_ID) {
+      await setJob(CURRENT_CLAIMED_JOB_ID,
+        { status: 'queued', claimed_at: null, claimed_by: null })
+      log(`SIGTERM: released claim on job ${CURRENT_CLAIMED_JOB_ID}`)
+    }
+  } catch {}
+  process.exit(0)
+})
+
 const STALE_CLAIM_MS = Number(process.env.STALE_CLAIM_MS || 35 * 60 * 1000) // a job 'claimed' longer than this by a non-current worker is a zombie
 const STALE_SWEEP_INTERVAL_MS = Number(process.env.STALE_SWEEP_INTERVAL_MS || 2 * 60 * 1000)
 
