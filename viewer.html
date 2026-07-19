@@ -2,94 +2,69 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Filmo — Agent Mission Control</title>
+<title>Filmo — Agent Run</title>
 <style>
-  /* Filmo design language: light world, ink #0A0B0D, blue #3B82F6, dotted
-     texture. ONE PAGE, NO SCROLL: fixed grid regions render CURRENT STATE
-     reduced from the event stream (not a growing log). */
+  /* Filmo light language. UNCLUTTERED CONTRACT: one focal STAGE whose content
+     follows the run's phase (hierarchy through time, not space); one caption
+     line; one quiet strip. No scroll, no panel grid. */
   :root { --bg:#FFFFFF; --ink:#0A0B0D; --muted:#5A6472; --accent:#3B82F6;
-          --soft:#E8F0FF; --line:#D4E2FB; --read:#0EA5E9; --film:#EF4444;
-          --ok:#10B981; --design:#8B5CF6; --review:#F59E0B; }
+          --soft:#E8F0FF; --line:#D4E2FB; --ok:#10B981; --film:#EF4444;
+          --design:#8B5CF6; --review:#F59E0B; }
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; overflow:hidden; }
   body { background:var(--bg); color:var(--ink);
-         font:13px/1.45 Inter,-apple-system,sans-serif;
-         background-image:radial-gradient(rgba(59,130,246,0.10) 1px, transparent 1px);
+         font:14px/1.5 Inter,-apple-system,sans-serif;
+         background-image:radial-gradient(rgba(59,130,246,0.08) 1px, transparent 1px);
          background-size:22px 22px;
          display:flex; flex-direction:column; }
-  header { flex:0 0 52px; display:flex; align-items:center; gap:12px;
-           padding:0 18px; border-bottom:1px solid var(--line);
-           background:rgba(255,255,255,0.9); }
+  header { flex:0 0 56px; display:flex; align-items:center; gap:13px;
+           padding:0 26px; }
   #mark { width:30px; height:30px; }
   #mark.live { animation:spinbreathe 2.6s ease-in-out infinite; }
   @keyframes spinbreathe {
     0% { transform:rotate(0) scale(1); } 50% { transform:rotate(180deg) scale(0.86); }
     100% { transform:rotate(360deg) scale(1); } }
   h1 { font-size:14px; font-weight:700; }
-  .sub { color:var(--muted); font-size:12px; }
-  #steps { margin-left:auto; display:flex; gap:6px; }
-  .step { padding:4px 12px; border-radius:999px; border:1px solid var(--line);
-          color:var(--muted); font-size:11px; font-weight:700;
-          letter-spacing:0.05em; text-transform:uppercase; }
-  .step.on { border-color:var(--accent); color:var(--accent); background:var(--soft); }
-  .step.done { color:var(--ok); border-color:#BBF0DC; background:#EAFBF3; }
-  main { flex:1; display:grid; min-height:0; padding:12px; gap:12px;
-         grid-template-columns: 3fr 5fr 3fr;
-         grid-template-rows: 1fr 1fr 1fr; }
-  .panel { background:#fff; border:1px solid var(--line); border-radius:14px;
-           padding:10px 14px; min-height:0; display:flex; flex-direction:column;
-           box-shadow:0 10px 30px -22px rgba(59,130,246,0.35); overflow:hidden; }
-  .ph { font-size:10.5px; font-weight:700; letter-spacing:0.08em;
-        text-transform:uppercase; color:var(--muted); margin-bottom:6px;
-        flex:0 0 auto; }
-  .ph b { color:var(--accent); }
-  #p-plan   { grid-column:1; grid-row:1 / 3; }
-  #p-review { grid-column:1; grid-row:3; }
-  #p-beats  { grid-column:2; grid-row:1 / 3; }
-  #p-filmrow{ grid-column:2; grid-row:3; }
-  #p-live   { grid-column:3; grid-row:1; }
-  #p-pages  { grid-column:3; grid-row:2; }
-  #p-tick   { grid-column:3; grid-row:3; }
-  .body { flex:1; min-height:0; overflow:hidden; }
-  ol.plan { padding-left:18px; display:flex; flex-direction:column; gap:5px; }
-  ol.plan li { font-weight:600; font-size:12.5px; }
-  ol.plan .tr { color:var(--muted); font-weight:500; font-size:11.5px; }
-  ol.plan .tr b { color:var(--design); font-weight:700; }
-  #beatgrid { display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;
-              height:100%; grid-auto-rows:1fr; }
-  .beat { border:1px solid var(--line); border-radius:10px; overflow:hidden;
-          display:flex; flex-direction:column; min-height:0; background:#F8FAFF; }
-  .beat img { width:100%; flex:1; object-fit:cover; min-height:0; }
-  .beat .cap { flex:0 0 auto; padding:4px 8px; font-size:10.5px;
-               color:var(--muted); border-top:1px solid var(--line);
-               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .beat .cap b { color:var(--design); }
-  .beat.empty { align-items:center; justify-content:center;
-                color:var(--line); font-size:11px; }
-  #film { width:100%; height:100%; object-fit:contain; background:#000;
-          border-radius:10px; display:none; }
-  #filmwait { color:var(--muted); font-size:12px; }
-  #liveimg { width:100%; height:100%; object-fit:cover; border-radius:10px;
-             display:none; }
-  #liveidle { color:var(--muted); font-size:12px; }
-  .rec { display:inline-block; width:8px; height:8px; border-radius:4px;
-         background:var(--film); animation:pulse 1.1s infinite; margin-right:6px; }
+  .sub { color:var(--muted); font-size:12.5px; }
+  #steps { margin-left:auto; display:flex; gap:5px; }
+  .step { padding:3px 11px; border-radius:999px; font-size:10.5px;
+          font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+          color:#B6BFCE; }
+  .step.on { color:#fff; background:var(--accent); }
+  .step.done { color:var(--ok); }
+  #stagewrap { flex:1; min-height:0; display:flex; flex-direction:column;
+               align-items:center; justify-content:center; padding:6px 26px 0; }
+  #stage { max-width:1060px; width:100%; flex:1; min-height:0;
+           display:flex; align-items:center; justify-content:center; }
+  #stage img, #stage video { max-width:100%; max-height:100%; border-radius:16px;
+           box-shadow:0 40px 90px -45px rgba(10,11,13,0.5); display:block; }
+  #stagegrid { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;
+               width:100%; max-width:1060px; height:100%; grid-auto-rows:1fr; }
+  #stagegrid .beat { border-radius:14px; overflow:hidden; min-height:0;
+                     box-shadow:0 20px 50px -30px rgba(10,11,13,0.45); }
+  #stagegrid .beat img { width:100%; height:100%; object-fit:cover; }
+  #stagetext { max-width:720px; text-align:center; }
+  #stagetext .big { font-size:26px; font-weight:700; letter-spacing:-0.01em;
+                    line-height:1.35; }
+  #stagetext .small { color:var(--muted); margin-top:12px; font-size:14px; }
+  #caption { flex:0 0 34px; display:flex; align-items:center; gap:9px;
+             color:var(--muted); font-size:13px; max-width:1060px;
+             width:100%; margin:0 auto; padding:0 26px; }
+  .rec { width:8px; height:8px; border-radius:4px; background:var(--film);
+         animation:pulse 1.1s infinite; display:none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  #pagestrip { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;
-               height:100%; grid-auto-rows:1fr; overflow:hidden; }
-  .pg { border:1px solid var(--line); border-radius:8px; overflow:hidden;
-        display:flex; flex-direction:column; min-height:0; }
-  .pg img { width:100%; flex:1; object-fit:cover; object-position:top; min-height:0; }
-  .pg .cap { padding:2px 6px; font-size:10px; color:var(--muted);
-             white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #ticker { display:flex; flex-direction:column; gap:5px; }
-  .tk { font-size:11.5px; color:var(--muted); white-space:nowrap;
-        overflow:hidden; text-overflow:ellipsis; }
-  .tk b { color:var(--ink); font-weight:600; }
-  #reviewlist { display:flex; flex-direction:column; gap:5px; }
-  .rv { font-size:11.5px; }
-  .rv b { color:var(--review); }
-  .rv.ok b { color:var(--ok); }
+  footer { flex:0 0 96px; display:flex; align-items:center; gap:26px;
+           padding:0 26px 16px; max-width:1120px; margin:0 auto; width:100%; }
+  #plan { flex:1; display:flex; flex-wrap:wrap; gap:6px; align-content:center; }
+  .chip { padding:5px 12px; border-radius:999px; background:#fff;
+          border:1px solid var(--line); font-size:11.5px; color:var(--ink);
+          white-space:nowrap; max-width:250px; overflow:hidden;
+          text-overflow:ellipsis; }
+  .chip b { color:var(--design); font-weight:600; }
+  #thumbs { display:flex; gap:8px; }
+  #thumbs img { height:52px; border-radius:8px; border:1.5px solid var(--line);
+                cursor:pointer; display:block; }
+  #thumbs img:hover { border-color:var(--accent); }
 </style>
 </head>
 <body>
@@ -98,7 +73,7 @@
     <path fill-rule="evenodd" fill="#3B82F6" d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"/>
   </svg>
   <div>
-    <h1 id="runname">Agent mission control</h1>
+    <h1 id="runname">Agent run</h1>
     <div class="sub" id="status">connecting…</div>
   </div>
   <div id="steps">
@@ -110,39 +85,27 @@
     <div class="step" data-s="done">Done</div>
   </div>
 </header>
-<main>
-  <div class="panel" id="p-plan"><div class="ph">The plan — <b>what a customer cares about</b></div>
-    <div class="body"><ol class="plan" id="plan"></ol></div></div>
-  <div class="panel" id="p-review"><div class="ph">Review</div>
-    <div class="body" id="reviewlist"><div class="rv">Waiting for the reviewer…</div></div></div>
-  <div class="panel" id="p-beats"><div class="ph">The film, beat by beat</div>
-    <div class="body"><div id="beatgrid"></div></div></div>
-  <div class="panel" id="p-filmrow"><div class="ph">Final film</div>
-    <div class="body" style="display:flex;align-items:center;justify-content:center">
-      <video id="film" controls muted></video><div id="filmwait">Rendering…</div>
-    </div></div>
-  <div class="panel" id="p-live"><div class="ph"><span id="livedot"></span>Agent viewport</div>
-    <div class="body" style="display:flex;align-items:center;justify-content:center">
-      <img id="liveimg"><div id="liveidle">Idle — shows the agent's screen while it records.</div>
-    </div></div>
-  <div class="panel" id="p-pages"><div class="ph">Pages the agent read</div>
-    <div class="body"><div id="pagestrip"></div></div></div>
-  <div class="panel" id="p-tick"><div class="ph">Activity</div>
-    <div class="body"><div id="ticker"></div></div></div>
-</main>
+<div id="stagewrap">
+  <div id="stage"></div>
+  <div id="caption"><div class="rec" id="recdot"></div><span id="captext"></span></div>
+</div>
+<footer>
+  <div id="plan"></div>
+  <div id="thumbs"></div>
+</footer>
 <script>
 const run = new URLSearchParams(location.search).get("run") || "";
 document.getElementById("runname").textContent = run || "no run selected";
-let evts = [], done = false, lastTs = 0;
 const $ = (id) => document.getElementById(id);
+let evts = [], done = false, lastTs = 0, liveFresh = false, liveUrl = "";
+let pinned = null, pinnedUntil = 0;
 
 function reduce() {
-  const S = { pages:[], plan:[], treatments:{}, beats:{}, review:[], film:"",
-              phase:"read", status:"", guards:[] };
+  const S = { pages:[], plan:[], treatments:{}, beats:[], review:[],
+              film:"", phase:"read", status:"", lastTitle:"" };
   for (const e of evts) {
     const k = e.kind;
-    if (k === "read.page") S.pages.push(e), S.phase = "read";
-    if (k === "read.quotes") S.guards.push(e);
+    if (k === "read.page") { S.pages.push(e); S.phase = "read"; }
     if (k === "decide.plan") {
       S.plan = e.detail.split("\n").map(s => s.replace(/^\d+\.\s*/, ""));
       S.phase = "decide";
@@ -152,100 +115,121 @@ function reduce() {
         const m = l.match(/“(.+)”\s*→\s*(.+)/);
         if (m) S.treatments[m[1]] = m[2];
       });
-    if (k === "decide.guard") S.guards.push(e);
     if (k.startsWith("film.")) S.phase = "film";
-    if (k === "design.beat") {
-      const m = e.title.match(/Beat (\d+)/);
-      if (m) S.beats[m[1]] = e;
-      S.phase = "design";
-    }
-    if (k.startsWith("review.")) {
-      S.phase = "review";
-      if (k !== "review.start") S.review.push(e);
-    }
+    if (k === "design.beat" && e.artifact) { S.beats.push(e); S.phase = "design"; }
+    if (k.startsWith("review.")) { S.phase = "review"; if (k !== "review.start") S.review.push(e); }
     if (k === "assemble.film") S.film = e.artifact;
     if (k === "run.done") { S.phase = "done"; S.status = "finished"; }
     if (k === "run.error") { S.phase = "done"; S.status = "failed"; }
+    S.lastTitle = e.title;
   }
   return S;
 }
 
 const ORDER = ["read", "decide", "film", "design", "review", "done"];
+function setStage(html, cap) {
+  $("stage").innerHTML = html;
+  $("captext").textContent = cap || "";
+}
+
 function render() {
   const S = reduce();
-  // stepper
   document.querySelectorAll(".step").forEach(el => {
     const i = ORDER.indexOf(el.dataset.s), cur = ORDER.indexOf(S.phase);
     el.className = "step" + (i < cur ? " done" : i === cur ? " on" : "");
   });
-  // plan + treatments
-  $("plan").innerHTML = S.plan.map(t =>
-    `<li>${t}<div class="tr">→ <b>${S.treatments[t.slice(0, 44)] || S.treatments[t] || "…"}</b></div></li>`).join("");
-  // beats grid (fixed 6 slots)
-  const N = Math.max(6, Object.keys(S.beats).length);
-  let bg = "";
-  for (let i = 1; i <= N; i++) {
-    const b = S.beats[String(i)];
-    bg += b
-      ? `<div class="beat"><img src="/${b.artifact}"><div class="cap"><b>${b.title.replace(/^Beat \d+:\s*/, "")}</b> ${b.detail}</div></div>`
-      : `<div class="beat empty">beat ${i}</div>`;
-  }
-  $("beatgrid").innerHTML = bg;
-  $("beatgrid").style.gridTemplateColumns = N > 6 ? "repeat(3,1fr)" : "repeat(2,1fr)";
-  // review
-  if (S.review.length)
-    $("reviewlist").innerHTML = S.review.map(e => {
-      const ok = e.kind === "review.pass" || e.kind === "review.done";
-      return `<div class="rv${ok ? " ok" : ""}"><b>${e.title}</b> — ${e.detail || ""}</div>`;
-    }).join("");
-  // pages
-  $("pagestrip").innerHTML = S.pages.slice(0, 6).map(p =>
-    `<div class="pg">${p.artifact ? `<img src="/${p.artifact}">` : ""}<div class="cap">${p.title.replace(/^Read\s*/, "")}</div></div>`).join("");
-  // film
-  if (S.film) {
-    $("filmwait").style.display = "none";
-    const v = $("film");
-    if (!v.src.endsWith(S.film)) v.src = "/" + S.film;
-    v.style.display = "block";
-  }
-  // ticker: last 4 events
-  $("ticker").innerHTML = evts.slice(-4).reverse().map(e =>
-    `<div class="tk"><b>${e.kind}</b> ${e.title}</div>`).join("");
-  // status + mark
-  const live = !done;
   $("status").textContent = done ? (S.status || "finished")
-    : (Date.now() / 1000 - lastTs > 20 ? "working — long step in progress" : "live");
-  $("mark").className = live ? "live" : "";
+    : (Date.now() / 1000 - lastTs > 20 ? "working" : "live");
+  $("mark").className = done ? "" : "live";
+  $("recdot").style.display = liveFresh ? "block" : "none";
+
+  // Footer: plan chips + beat thumbnails (quiet, always available).
+  $("plan").innerHTML = S.plan.map(t => {
+    const tr = S.treatments[t.slice(0, 44)] || S.treatments[t];
+    return `<span class="chip">${t}${tr ? ` <b>→ ${tr}</b>` : ""}</span>`;
+  }).join("");
+  $("thumbs").innerHTML = S.beats.map((b, i) =>
+    `<img src="/${b.artifact}" data-i="${i}" title="${b.title}">`).join("");
+  document.querySelectorAll("#thumbs img").forEach(im =>
+    im.onclick = () => { pinned = S.beats[+im.dataset.i]; pinnedUntil = Date.now() + 8000; render(); });
+
+  // THE STAGE — one focal thing, by phase (or a pinned thumbnail).
+  if (pinned && Date.now() < pinnedUntil) {
+    setStage(`<img src="/${pinned.artifact}">`,
+             `${pinned.title} — ${pinned.detail || ""}`);
+    return;
+  }
+  pinned = null;
+  if (liveFresh && !done) {
+    setStage(`<img src="${liveUrl}">`, "Recording — the agent's viewport, live.");
+    return;
+  }
+  switch (S.phase) {
+    case "read": {
+      const p = S.pages[S.pages.length - 1];
+      setStage(p && p.artifact ? `<img src="/${p.artifact}">` : "",
+               p ? `${p.title} — ${p.detail}` : "The agent is opening the site…");
+      break;
+    }
+    case "decide":
+      setStage(`<div id="stagetext"><div class="big">${S.plan.join("<br>")}</div>
+                <div class="small">The moments a customer cares about — chosen from the site's own words.</div></div>`,
+               "Planning the shot list.");
+      break;
+    case "film":
+      setStage(`<div id="stagetext"><div class="big">${S.lastTitle}</div></div>`,
+               "Filming.");
+      break;
+    case "design": {
+      const cells = S.beats.map(b => `<div class="beat"><img src="/${b.artifact}"></div>`).join("");
+      setStage(`<div id="stagegrid">${cells}</div>`, "Designing the film, beat by beat.");
+      break;
+    }
+    case "review": {
+      const last = S.review[S.review.length - 1];
+      setStage(`<div id="stagetext"><div class="big">${last ? last.title : "Reviewing…"}</div>
+                <div class="small">${last ? (last.detail || "") : ""}</div></div>`,
+               "The reviewer checks story and coherence.");
+      break;
+    }
+    case "done":
+      if (S.film) setStage(`<video src="/${S.film}" controls autoplay muted></video>`,
+                           S.review.some(e => e.kind === "review.pass")
+                             ? "Review passed — this is the shipped cut."
+                             : "The finished film.");
+      else setStage(`<div id="stagetext"><div class="big">${S.status === "failed" ? "The run failed." : "Finished."}</div></div>`, "");
+      break;
+  }
 }
 
 async function poll() {
   try {
     const r = await fetch(`/events/${run}?after=-1`);
     const all = await r.json();
-    if (all.length !== evts.length) { evts = all; lastTs = all.length ? all[all.length - 1].ts : 0; }
-    done = evts.some(e => e.kind === "run.done" || e.kind === "run.error");
-    render();
+    if (all.length !== evts.length) {
+      evts = all; lastTs = all.length ? all[all.length - 1].ts : 0;
+      done = evts.some(e => e.kind === "run.done" || e.kind === "run.error");
+      render();
+    } else if (!done) { render(); }
   } catch (e) { $("status").textContent = "waiting for run…"; }
-  if (!done) setTimeout(poll, 1000); else render();
+  if (!done) setTimeout(poll, 1000);
 }
 poll();
 
-// live viewport slot
 async function livePoll() {
   try {
     const r = await fetch(`/live/${run}?t=${Date.now()}`, { cache: "no-store" });
     if (r.ok) {
       const blob = await r.blob();
-      const old = $("liveimg").dataset.url;
-      $("liveimg").src = $("liveimg").dataset.url = URL.createObjectURL(blob);
-      if (old) URL.revokeObjectURL(old);
-      $("liveimg").style.display = "block"; $("liveidle").style.display = "none";
-      $("livedot").className = "rec";
-    } else {
-      $("liveimg").style.display = "none"; $("liveidle").style.display = "block";
-      $("livedot").className = "";
-    }
-  } catch (e) {}
+      if (liveUrl) URL.revokeObjectURL(liveUrl);
+      liveUrl = URL.createObjectURL(blob);
+      if (!liveFresh) { liveFresh = true; render(); }
+      else if (!pinned) {
+        const im = document.querySelector("#stage img");
+        if (im) im.src = liveUrl;
+      }
+    } else if (liveFresh) { liveFresh = false; render(); }
+  } catch (e) { if (liveFresh) { liveFresh = false; render(); } }
   setTimeout(livePoll, 320);
 }
 livePoll();
