@@ -1308,7 +1308,13 @@ async function processJob(job) {
     '--brain', p.brain || 'super-free',
     '--duration', String(p.duration || 30)]
   if (p.emphasis) args.push('--emphasis', p.emphasis)
-  if (p.look === 'engineered-night') args.push('--look', 'engineered-night')
+  if (p.look === 'engineered-night' || p.look === 'walkrec') args.push('--look', p.look)
+  // Walkrec beta: the pipeline's hosted event sink needs the runs.id UUID.
+  try {
+    const rdir = join(PIPELINE_DIR, 'runs', runKey)
+    mkdirSync(rdir, { recursive: true })
+    writeFileSync(join(rdir, 'insforge-run-id'), String(runId))
+  } catch {}
   // ElevenLabs is the DEFAULT VO: set WS_VO_PROVIDER=elevenlabs so the pipeline
   // (align_vo.py) tries ElevenLabs FIRST. On ANY ElevenLabs failure (401 /
   // quota_exceeded / network / no key) align_vo AUTOMATICALLY falls back to the

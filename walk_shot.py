@@ -37,13 +37,40 @@ import walk_native as wn  # noqa: E402
 # frame goes stale (>3s).
 
 
+_LIVE_TICK = {"n": 0}
+
+
 def _publish_frame(page, run_dir: str) -> None:
     try:
         live = os.path.join(run_dir, "live")
         os.makedirs(live, exist_ok=True)
         tmp = os.path.join(live, ".frame.tmp")
         page.screenshot(path=tmp, type="jpeg", quality=55)
-        os.replace(tmp, os.path.join(live, "current.jpg"))
+        cur = os.path.join(live, "current.jpg")
+        os.replace(tmp, cur)
+        # Hosted: ~1fps of the ~3fps local cadence uploads to storage so the
+        # web workspace can show the agent's screen live. Best-effort.
+        _LIVE_TICK["n"] += 1
+        if _LIVE_TICK["n"] % 3 == 0:
+            try:
+                import run_events as _re
+                rid = _re._hosted_run_id(run_dir)
+                if rid and _re._IF_BASE and _re._IF_KEY:
+                    import threading
+
+                    def _up(p=cur, r=rid):
+                        try:
+                            with open(p, "rb") as f:
+                                _re._if_req(
+                                    "PUT",
+                                    f"/api/storage/buckets/{_re._IF_BUCKET}"
+                                    f"/objects/agent/{r}/live.jpg",
+                                    f.read(), "image/jpeg")
+                        except Exception:
+                            pass
+                    threading.Thread(target=_up, daemon=True).start()
+            except Exception:
+                pass
     except Exception:
         pass
 

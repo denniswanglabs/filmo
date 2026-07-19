@@ -20,9 +20,70 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# HOSTED SINK (walkrec beta): when the worker env carries InsForge access,
+# every event ALSO lands in public.agent_events and artifacts upload to
+# storage — same bus, second sink, best-effort and non-blocking so a network
+# blip can never break a build.
+_IF_BASE = os.environ.get("INSFORGE_BASE_URL", "").rstrip("/")
+_IF_KEY = os.environ.get("INSFORGE_API_KEY", "")
+_IF_BUCKET = os.environ.get("INSFORGE_BUCKET", "walk-videos")
+
+
+def _hosted_run_id(run_dir: str) -> str:
+    """The InsForge runs.id for this run dir ('' when not a hosted run).
+    The worker writes runs/<dir>/insforge-run-id at claim time."""
+    try:
+        with open(os.path.join(run_dir, "insforge-run-id")) as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def _if_req(method: str, path: str, body: bytes, ctype: str):
+    req = urllib.request.Request(
+        _IF_BASE + path, data=body, method=method,
+        headers={"Authorization": f"Bearer {_IF_KEY}", "Content-Type": ctype})
+    return urllib.request.urlopen(req, timeout=15)
+
+
+def _upload_artifact(run_id: str, seq: int, path: str) -> str:
+    ext = os.path.splitext(path)[1] or ".bin"
+    key = f"agent/{run_id}/{seq}{ext}"
+    ctype = ("video/mp4" if ext == ".mp4" else
+             "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png")
+    with open(path, "rb") as f:
+        _if_req("PUT", f"/api/storage/buckets/{_IF_BUCKET}/objects/{key}",
+                f.read(), ctype)
+    return f"{_IF_BASE}/api/storage/buckets/{_IF_BUCKET}/objects/{key}"
+
+
+def _hosted_sink(run_dir: str, evt: dict, artifact_path: str) -> None:
+    rid = _hosted_run_id(run_dir)
+    if not (rid and _IF_BASE and _IF_KEY):
+        return
+
+    def work():
+        try:
+            url = ""
+            if artifact_path and os.path.exists(artifact_path):
+                try:
+                    url = _upload_artifact(rid, evt["seq"], artifact_path)
+                except Exception:
+                    url = ""
+            row = {"run_id": rid, "seq": evt["seq"], "ts": evt["ts"],
+                   "kind": evt["kind"], "title": evt["title"],
+                   "detail": evt["detail"], "artifact_url": url}
+            _if_req("POST", "/api/database/records/agent_events",
+                    json.dumps([row]).encode(), "application/json")
+        except Exception:
+            pass
+    threading.Thread(target=work, daemon=True).start()
 
 
 def _events_path(run_dir: str) -> str:
@@ -50,6 +111,8 @@ def emit(run_dir: str, kind: str, title: str, detail: str = "",
             f.write(json.dumps(evt, ensure_ascii=False) + "\n")
         print(f"[{kind}] {title}" + (f" — {detail}" if detail else ""),
               file=sys.stderr)
+        _hosted_sink(run_dir, evt,
+                     os.path.join(HERE, artifact) if artifact else "")
     except Exception:
         pass
 

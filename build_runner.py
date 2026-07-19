@@ -1108,13 +1108,29 @@ def main():
                     help="video quality (the upfront cost-plus choice): standard "
                          "(Remotion + edge-tts, no Higgsfield/ElevenLabs, ~$5) | premium "
                          "(cinematic Higgsfield + ElevenLabs VO, ~$6-9)")
-    ap.add_argument("--look", choices=["classic", "engineered-night"], default="classic",
-                    help="visual style family: classic light Timeline, or the "
-                         "Engineered Night one-world dark style")
+    ap.add_argument("--look", choices=["classic", "engineered-night", "walkrec"],
+                    default="classic",
+                    help="visual style family: classic light Timeline, "
+                         "engineered-night dark one-world, or walkrec — the "
+                         "agent-toured film (BETA: free, Sonnet-planned, "
+                         "narrated live via agent_events)")
     ap.add_argument("--brain", choices=list(brain_mod.VALID_BRAINS), default=brain_mod.DEFAULT_BRAIN,
                     help="planner LLM (operator), all via OpenRouter: ultra-paid | "
                          "super-free (default, $0) | super-paid")
     a = ap.parse_args()
+    if a.look == "walkrec":
+        # WALKREC BETA (Dennis 2026-07-19): the agent-toured film. Free while
+        # in beta (no payment gate), Sonnet-planned (the hackathon-era
+        # Nemotron lock is scoped to classic per Dennis's sign-off), fully
+        # narrated through run_events -> agent_events.
+        import shutil as _sh
+        import proto_walkrec
+        out = proto_walkrec.build_tour_film(a.url, a.run_id)
+        final = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "runs", a.run_id, "final.mp4")
+        _sh.copyfile(out, final)
+        print(f"[walkrec] final: {final}")
+        return
     goal = a.goal or ("%d-second promo plus a short product walkthrough" % a.duration)
     globals()["ACTIVE_LOOK"] = a.look
     run(a.url, goal, a.run_id, a.mode, a.duration, a.pace, a.style,

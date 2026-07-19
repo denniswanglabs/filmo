@@ -1196,6 +1196,19 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
              f"Gliding through {s['page']}")
         ok = walk_shot.shot(s["page"], "" if i == 0 else s["target"], seg,
                             run_dir, duration=9.0)
+        if not ok:
+            # Hosted worker: the main python has no playwright — the capture
+            # venv does (same contract as capture_screenshots). Subprocess
+            # walk_shot's CLI under that interpreter.
+            import capture_screenshots as _cs
+            if (os.path.exists(_cs.CAPTURE_PY)
+                    and os.path.realpath(_cs.CAPTURE_PY)
+                    != os.path.realpath(sys.executable)):
+                r = subprocess.run(
+                    [_cs.CAPTURE_PY, os.path.join(HERE, "walk_shot.py"),
+                     s["page"], "" if i == 0 else s["target"], seg, run_dir,
+                     "9.0"], timeout=240)
+                ok = r.returncode == 0 and os.path.exists(seg)
         if ok and os.path.exists(seg):
             smooth = _smooth60(seg, os.path.join(run_dir, f"shot-{i + 1}-60.mp4"))
             fp = _clip_fp(smooth)
