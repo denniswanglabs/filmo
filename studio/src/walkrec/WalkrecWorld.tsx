@@ -71,6 +71,14 @@ export interface WalkrecProps {
     fontBody: string;
     wordmark: string;
     logoSrc?: string;
+    /** OPTIONAL plate the brand mark must sit on to stay legible. The world's
+     *  `bg` is sampled from the customer's OWN page, and a brand's logo ink
+     *  comes from that same palette — so the sampled colour is exactly the one
+     *  most likely to swallow the mark. proto_walkrec._logo_plate measures the
+     *  mark's ink against the world and sets this ONLY when the world would
+     *  swallow it; absent (the common case, incl. every self-grounded app-icon)
+     *  the logo renders exactly as it always has. */
+    logoPlate?: string;
     music?: string;
   };
   elements: WalkrecElement[];
@@ -79,6 +87,149 @@ export interface WalkrecProps {
 
 const resolveAsset = (p: string): string =>
   p.startsWith("http") || p.startsWith("/") ? p : staticFile(p);
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * LEGIBILITY INVARIANT (Dennis 2026-07-19: a delivered stripe.com film shipped
+ * with its headline, its 2.9% stat and its whole check-list painted near-white
+ * on a near-white ground — invisible for entire beats).
+ *
+ * THE RULE: no text is ever painted in a colour chosen independently of the
+ * ground it lands on.
+ *
+ * A harvested ink carries no memory of the background that made it legible.
+ * The curated stripe.com palette pairs fg #FFFFFF with bg #0A2540 (15.9:1 —
+ * correct in its own pair); the world film keeps that ink and replaces the
+ * ground with the site's OWN measured background #FEFDFE, and #FFFFFF on
+ * #FEFDFE is 1.01:1. The ink survived the trip; the assumption that made it
+ * readable did not.
+ *
+ * So every colour in this file is resolved THROUGH a surface. `surfaceInk`
+ * answers "what ink can THIS ground carry", and the root resolves the whole
+ * theme against the world before a single element sees it — which makes the
+ * property hold for every vignette, present and future, by construction
+ * (the same move as the centering invariant in the `graphic` case below).
+ *
+ * A colour that already passes is returned UNCHANGED, so nothing that works
+ * today changes: a genuinely dark brand (ink #F2F5F9 on bg #0A2540 = 15.9:1)
+ * and a passing brand accent (#635BFF on #FEFDFE = 4.7:1) survive exactly as
+ * harvested. Only failing pairs are rescued.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+const AA_TEXT = 4.5; // body copy, and the strongest ink whatever its size
+const AA_LARGE = 3; // large display type and non-text marks (WCAG 1.4.11)
+// Rescue targets. A rescued colour clears the bar with margin instead of
+// stopping at it — a headline that merely passes 4.5:1 reads as a grey
+// accident, not as the film's ink.
+const INK_TARGET = 13;
+const MUTED_TARGET = 6;
+
+const rgbOf = (hex: string): [number, number, number] => {
+  let h = (hex || "").trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (!/^[0-9a-fA-F]{6}$/.test(h.slice(0, 6))) return [0, 0, 0];
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+};
+
+const hexOf = (rgb: number[]): string =>
+  `#${rgb.map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, "0")).join("")}`;
+
+/** WCAG 2.1 relative luminance. */
+const luminance = (hex: string): number => {
+  const [r, g, b] = rgbOf(hex).map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+/** WCAG contrast ratio: 1:1 (identical) … 21:1 (black on white). */
+const contrast = (a: string, b: string): number => {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+};
+
+const mixHex = (a: string, b: string, k: number): string => {
+  const ra = rgbOf(a);
+  const rb = rgbOf(b);
+  return hexOf([0, 1, 2].map((i) => ra[i] + (rb[i] - ra[i]) * k));
+};
+
+/** The ink this surface can actually carry.
+ *
+ *  Passing colours are returned untouched. A failing colour is shaded toward
+ *  the surface's opposite pole — keeping its hue, so a brand's warm ink stays
+ *  warm — until it clears `target`. The preferred pole is chosen by the
+ *  surface's own luminance, so a light ground darkens its ink and a dark
+ *  ground lightens it; the other pole is only tried if the first cannot get
+ *  there (a mid-luminance ground). */
+const legibleOn = (ink: string, surface: string, min: number, target = min): string => {
+  if (contrast(ink, surface) >= min) return ink;
+  const poles = luminance(surface) > 0.179 ? ["#000000", "#FFFFFF"] : ["#FFFFFF", "#000000"];
+  let best = ink;
+  let bestRatio = contrast(ink, surface);
+  for (const pole of poles) {
+    for (let k = 0.04; k <= 1.0001; k += 0.04) {
+      const c = mixHex(ink, pole, k);
+      const ratio = contrast(c, surface);
+      if (ratio > bestRatio) {
+        best = c;
+        bestRatio = ratio;
+      }
+      if (ratio >= target) return c;
+    }
+  }
+  return best;
+};
+
+export interface SurfaceInk {
+  ink: string; // strongest text on this surface
+  inkMuted: string; // secondary text
+  accent: string; // brand accent for large text and marks
+  accentText: string; // brand accent for SMALL text (stricter bar)
+  onAccent: string; // text painted on top of an accent FILL
+}
+
+const surfaceCache = new Map<string, SurfaceInk>();
+
+/** The palette as one SURFACE can carry it. Pure and memoised: the same
+ *  (palette, surface) pair always resolves to the same colours, so frames
+ *  stay identical to each other and across the render farm. */
+const surfaceInk = (t: WalkrecProps["theme"], surface: string): SurfaceInk => {
+  const key = `${t.ink}|${t.inkMuted}|${t.accent}|${surface}`;
+  const hit = surfaceCache.get(key);
+  if (hit) return hit;
+  const accent = legibleOn(t.accent, surface, AA_LARGE, AA_LARGE + 0.3);
+  const v: SurfaceInk = {
+    ink: legibleOn(t.ink, surface, AA_TEXT, INK_TARGET),
+    inkMuted: legibleOn(t.inkMuted, surface, AA_TEXT, MUTED_TARGET),
+    accent,
+    accentText: legibleOn(t.accent, surface, AA_TEXT, AA_TEXT + 0.3),
+    // Resolved against the accent AS PAINTED, so a rescued accent fill still
+    // gets a label that reads on it.
+    onAccent: legibleOn("#FFFFFF", accent, AA_TEXT, AA_TEXT + 0.3),
+  };
+  surfaceCache.set(key, v);
+  return v;
+};
+
+/** The theme as the WORLD ground can carry it. Resolved ONCE at the root, so
+ *  everything downstream — every element kind, every vignette, every future
+ *  one — receives a palette already legible on the canvas it paints on.
+ *  Vignettes that paint on a CARD re-resolve against `t.card` themselves.
+ *
+ *  KNOWN RESIDUAL (measured, deliberately not chased): the atmosphere below
+ *  washes `accent` at 13% over one corner, so the true ground there is not
+ *  flat `bg`. For TEXT this is immaterial — rescued ink lands at 14-16:1, and
+ *  the wash moves that by well under a point. Resolving against the washed
+ *  colour instead was tried and reverted: it drags a dark world's accent from
+ *  2.91:1 to the 3:1 bar and visibly restates the brand colour on every
+ *  dark-ground film (delta 13 across ~550k px), which is an aesthetic call for
+ *  Dennis, not a legibility fix. */
+const worldTheme = (t: WalkrecProps["theme"]): WalkrecProps["theme"] => {
+  const s = surfaceInk(t, t.bg);
+  return { ...t, ink: s.ink, inkMuted: s.inkMuted, accent: s.accent };
+};
 
 /** Camera pose at `frame`: tween INTO each moment over REFRAME_F with the
  *  swift-S curve, then hold until the next moment begins. */
@@ -263,11 +414,12 @@ const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
   const chipLine = lines.find((l) => /time|date|viewing|visit|when|schedule/i.test(l));
   const rowLines = lines.filter((l) => l !== chipLine);
   const rows = [0, 1, 2];
+  const c = surfaceInk(t, t.card); // painted on a card, not on the world
   return (
     <div style={{ background: t.card, borderRadius: 36, padding: "34px 38px", width: el.narrow ? 620 : 720, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 70)}px)` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, opacity: vinP(local, 0) }}>
-        <HouseGlyph color={t.accent} size={34} />
-        <div style={{ fontFamily: t.fontBody, fontSize: 19, fontWeight: 700, color: t.ink, opacity: 0.8, textAlign: "left" }}>{el.text}</div>
+        <HouseGlyph color={c.accent} size={34} />
+        <div style={{ fontFamily: t.fontBody, fontSize: 19, fontWeight: 700, color: c.ink, opacity: 0.8, textAlign: "left" }}>{el.text}</div>
       </div>
       {rows.map((r) => {
         const p = vinP(local, 10 + r * 8, 16);
@@ -275,25 +427,25 @@ const VignetteRequestTable: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
         const line = rowLines[r];
         const initial = (line || el.text || "A")[0].toUpperCase();
         return (
-          <div key={r} style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 18px", borderRadius: 20, background: `${t.ink}0D`, marginBottom: 14, opacity: p, transform: `translateY(${24 * (1 - p)}px)` }}>
-            <div style={{ width: 52, height: 52, borderRadius: 26, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <div key={r} style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 18px", borderRadius: 20, background: `${c.ink}0D`, marginBottom: 14, opacity: p, transform: `translateY(${24 * (1 - p)}px)` }}>
+            <div style={{ width: 52, height: 52, borderRadius: 26, background: `${c.accent}26`, color: c.accentText, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               {initial}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minWidth: 0 }}>
               {line ? (
-                <div style={{ fontFamily: t.fontBody, fontSize: 21, fontWeight: 600, color: t.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{line}</div>
+                <div style={{ fontFamily: t.fontBody, fontSize: 21, fontWeight: 600, color: c.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{line}</div>
               ) : (
-                <Bar w={200 - r * 26} h={13} o={0.3} color={t.ink} />
+                <Bar w={200 - r * 26} h={13} o={0.3} color={c.ink} />
               )}
-              <Bar w={132} h={10} color={t.ink} />
+              <Bar w={132} h={10} color={c.ink} />
             </div>
             {chip > 0 ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 16px", borderRadius: 999, background: `${t.accent}16`, border: `2px solid ${t.accent}55`, transform: `scale(${chip})`, flexShrink: 0 }}>
-                <ClockGlyph color={t.accent} />
+              <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 16px", borderRadius: 999, background: `${c.accent}16`, border: `2px solid ${c.accent}55`, transform: `scale(${chip})`, flexShrink: 0 }}>
+                <ClockGlyph color={c.accent} />
                 {chipLine ? (
-                  <span style={{ fontFamily: t.fontBody, fontSize: 16, fontWeight: 700, color: t.accent, whiteSpace: "nowrap" }}>{chipLine}</span>
+                  <span style={{ fontFamily: t.fontBody, fontSize: 16, fontWeight: 700, color: c.accentText, whiteSpace: "nowrap" }}>{chipLine}</span>
                 ) : (
-                  <Bar w={44} h={11} o={0.85} color={t.accent} />
+                  <Bar w={44} h={11} o={0.85} color={c.accent} />
                 )}
               </div>
             ) : null}
@@ -312,38 +464,39 @@ const VignetteContextCards: React.FC<{ el: WalkrecElement; t: WalkrecProps["them
   const frame = useCurrentFrame();
   const local = frame - el.at;
   const ring = vinPop(local, 62, 12);
+  const s = surfaceInk(t, t.card); // painted on cards, not on the world
   return (
     <div style={{ display: "flex", gap: 22, justifyContent: "center", transform: `translateY(${vinFloat(local, 84)}px)` }}>
       {[0, 1, 2].map((c) => {
         const p = vinP(local, c * 9, 16);
         const highlighted = c === 1;
         return (
-          <div key={c} style={{ width: el.narrow ? 190 : 224, borderRadius: 28, background: t.card, boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${t.accent}` : "none", outlineOffset: -2 }}>
-            <div style={{ height: el.narrow ? 96 : 118, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div key={c} style={{ width: el.narrow ? 190 : 224, borderRadius: 28, background: t.card, boxShadow: "0 34px 70px -30px rgba(15,20,40,0.26)", overflow: "hidden", opacity: p, transform: `translateY(${30 * (1 - p)}px) scale(${highlighted ? 1 + 0.05 * ring : 1})`, outline: highlighted && ring > 0 ? `4px solid ${s.accent}` : "none", outlineOffset: -2 }}>
+            <div style={{ height: el.narrow ? 96 : 118, background: `linear-gradient(135deg, ${s.accent}30, ${s.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {isPersonName((el.lines || [])[c] || "") ? (
-                <div style={{ width: 72, height: 72, borderRadius: 36, background: `${t.accent}30`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ width: 72, height: 72, borderRadius: 36, background: `${s.accent}30`, color: s.accentText, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {((el.lines || [])[c] || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("")}
                 </div>
               ) : (
-                <HouseGlyph color={t.accent} size={46} />
+                <HouseGlyph color={s.accent} size={46} />
               )}
             </div>
             <div style={{ padding: "18px 18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
               {(el.lines || [])[c] ? (
-                <div style={{ fontFamily: t.fontBody, fontSize: 17, fontWeight: 600, color: t.ink, textAlign: "left", lineHeight: 1.3, minHeight: 44 }}>{(el.lines || [])[c]}</div>
+                <div style={{ fontFamily: t.fontBody, fontSize: 17, fontWeight: 600, color: s.ink, textAlign: "left", lineHeight: 1.3, minHeight: 44 }}>{(el.lines || [])[c]}</div>
               ) : (
                 <>
-                  <Bar w={150 - c * 14} h={13} o={0.32} color={t.ink} />
-                  <Bar w={104} h={11} color={t.ink} />
+                  <Bar w={150 - c * 14} h={13} o={0.32} color={s.ink} />
+                  <Bar w={104} h={11} color={s.ink} />
                 </>
               )}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 {[0, 1].map((k) => {
                   const chip = vinPop(local, 30 + c * 9 + k * 5);
                   return chip > 0 ? (
-                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 999, background: `${t.ink}12`, transform: `scale(${chip})` }}>
-                      <div style={{ width: 10, height: 10, borderRadius: 5, background: t.accent, opacity: 0.75 }} />
-                      <Bar w={34} h={9} o={0.34} color={t.ink} />
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 999, background: `${s.ink}12`, transform: `scale(${chip})` }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 5, background: s.accent, opacity: 0.75 }} />
+                      <Bar w={34} h={9} o={0.34} color={s.ink} />
                     </div>
                   ) : null;
                 })}
@@ -365,38 +518,41 @@ const VignetteChat: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] }> =
   const dotsDone = local > 52;
   const pCard = vinPop(local, 60, 14);
   const dot = (i: number) => 0.35 + 0.65 * Math.abs(Math.sin((Math.PI * (local - i * 4)) / 24));
+  // Two surfaces in one vignette: the incoming bubbles sit on a CARD, the
+  // reply sits on an ACCENT FILL — each gets the ink it can carry.
+  const c = surfaceInk(t, t.card);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18, width: 620, transform: `translateY(${vinFloat(local, 86)}px)` }}>
       <div style={{ alignSelf: "flex-start", maxWidth: 440, padding: "20px 24px", borderRadius: "26px 26px 26px 8px", background: t.card, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.24)", opacity: pL, transform: `translateY(${20 * (1 - pL)}px)` }}>
-        <div style={{ fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: t.ink, textAlign: "left", lineHeight: 1.4 }}>{el.text}</div>
+        <div style={{ fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: c.ink, textAlign: "left", lineHeight: 1.4 }}>{el.text}</div>
       </div>
-      <div style={{ alignSelf: "flex-end", maxWidth: 440, padding: "18px 24px", borderRadius: "26px 26px 8px 26px", background: t.accent, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.3)", opacity: pR, transform: `translateY(${20 * (1 - pR)}px)` }}>
+      <div style={{ alignSelf: "flex-end", maxWidth: 440, padding: "18px 24px", borderRadius: "26px 26px 8px 26px", background: c.accent, boxShadow: "0 26px 60px -28px rgba(15,20,40,0.3)", opacity: pR, transform: `translateY(${20 * (1 - pR)}px)` }}>
         {!dotsDone ? (
           <div style={{ display: "flex", gap: 8, padding: "4px 2px" }}>
             {[0, 1, 2].map((i) => (
-              <div key={i} style={{ width: 11, height: 11, borderRadius: 6, background: "#FFFFFF", opacity: dot(i) }} />
+              <div key={i} style={{ width: 11, height: 11, borderRadius: 6, background: c.onAccent, opacity: dot(i) }} />
             ))}
           </div>
         ) : (el.lines || [])[0] ? (
-          <div style={{ fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: "#FFFFFF", textAlign: "left", lineHeight: 1.4 }}>{(el.lines || [])[0]}</div>
+          <div style={{ fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: c.onAccent, textAlign: "left", lineHeight: 1.4 }}>{(el.lines || [])[0]}</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-            <Bar w={236} h={12} o={0.92} color="#FFFFFF" />
-            <Bar w={150} h={12} o={0.6} color="#FFFFFF" />
+            <Bar w={236} h={12} o={0.92} color={c.onAccent} />
+            <Bar w={150} h={12} o={0.6} color={c.onAccent} />
           </div>
         )}
       </div>
       {pCard > 0 ? (
         <div style={{ alignSelf: "flex-end", display: "flex", alignItems: "center", gap: 16, padding: "16px 22px", borderRadius: 22, background: t.card, boxShadow: "0 30px 64px -28px rgba(15,20,40,0.26)", transform: `scale(${pCard})`, transformOrigin: "bottom right" }}>
-          <div style={{ width: 84, height: 62, borderRadius: 14, background: `linear-gradient(135deg, ${t.accent}30, ${t.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <HouseGlyph color={t.accent} size={34} />
+          <div style={{ width: 84, height: 62, borderRadius: 14, background: `linear-gradient(135deg, ${c.accent}30, ${c.accent}0C)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <HouseGlyph color={c.accent} size={34} />
           </div>
           {(el.lines || [])[1] ? (
-            <div style={{ fontFamily: t.fontBody, fontSize: 17, fontWeight: 600, color: t.ink, textAlign: "left", maxWidth: 240 }}>{(el.lines || [])[1]}</div>
+            <div style={{ fontFamily: t.fontBody, fontSize: 17, fontWeight: 600, color: c.ink, textAlign: "left", maxWidth: 240 }}>{(el.lines || [])[1]}</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <Bar w={130} h={12} o={0.32} color={t.ink} />
-              <Bar w={88} h={10} color={t.ink} />
+              <Bar w={130} h={12} o={0.32} color={c.ink} />
+              <Bar w={88} h={10} color={c.ink} />
             </div>
           )}
         </div>
@@ -420,13 +576,16 @@ const VignettePriceCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   // original) must not render as a checked benefit.
   const rest = lines.filter((l) => l !== price && !/^[€$£¥]\s?\d[\d.,]*$/.test(l.trim()));
   const pPrice = vinPop(local, 24, 14);
+  // This vignette paints on a CARD, not on the world ground — a white card
+  // carried white labels beside visible accent checkmarks for six seconds.
+  const c = surfaceInk(t, t.card);
   return (
     <div style={{ background: t.card, borderRadius: 36, padding: "40px 48px", width: el.narrow ? 600 : 680, boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", transform: `translateY(${vinFloat(local, 84)}px)` }}>
-      <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", color: t.ink, opacity: 0.55 * vinP(local, 0), textAlign: "left" }}>
+      <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", color: c.ink, opacity: 0.55 * vinP(local, 0), textAlign: "left" }}>
         {(el.text || "").toUpperCase()}
       </div>
       {price ? (
-        <div style={{ fontFamily: t.fontDisplay, fontSize: 84, fontWeight: 700, letterSpacing: "-0.02em", color: t.accent, textAlign: "left", margin: "14px 0 6px", opacity: Math.min(1, pPrice), transform: `scale(${0.8 + 0.2 * pPrice})`, transformOrigin: "left center" }}>
+        <div style={{ fontFamily: t.fontDisplay, fontSize: 84, fontWeight: 700, letterSpacing: "-0.02em", color: c.accent, textAlign: "left", margin: "14px 0 6px", opacity: Math.min(1, pPrice), transform: `scale(${0.8 + 0.2 * pPrice})`, transformOrigin: "left center" }}>
           {price}
         </div>
       ) : null}
@@ -436,10 +595,10 @@ const VignettePriceCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
           return (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, opacity: p, transform: `translateY(${16 * (1 - p)}px)` }}>
               <svg viewBox="0 0 24 24" style={{ width: 24, height: 24, flexShrink: 0 }}>
-                <circle cx="12" cy="12" r="11" fill={`${t.accent}26`} />
-                <path d="M 7 12.5 l 3.2 3.2 L 17 9" fill="none" stroke={t.accent} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="12" cy="12" r="11" fill={`${c.accent}26`} />
+                <path d="M 7 12.5 l 3.2 3.2 L 17 9" fill="none" stroke={c.accent} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <div style={{ fontFamily: t.fontBody, fontSize: 21, fontWeight: 600, color: t.ink, textAlign: "left" }}>{l}</div>
+              <div style={{ fontFamily: t.fontBody, fontSize: 21, fontWeight: 600, color: c.ink, textAlign: "left" }}>{l}</div>
             </div>
           );
         })}
@@ -453,6 +612,12 @@ const VignetteChipSweep: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const frame = useCurrentFrame();
   const local = frame - el.at;
   const chips = (el.chips || []).slice(0, 10);
+  // A chip is its own little surface: the plain ones are the card, the hot
+  // ones are an accent wash over the world ground — composited here so the
+  // label is measured against the pixels it actually lands on.
+  const plain = surfaceInk(t, t.card);
+  const hotBg = mixHex(t.bg, t.accent, 0x1f / 255);
+  const hotInk = surfaceInk(t, hotBg);
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 18, justifyContent: "center", width: el.narrow ? 620 : 980, transform: `translateY(${vinFloat(local, chips.length * 6 + 40)}px)` }}>
       {chips.map((c, i) => {
@@ -462,8 +627,8 @@ const VignetteChipSweep: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
           <div key={i} style={{
             padding: "18px 30px", borderRadius: 999,
             background: hot ? `${t.accent}1F` : t.card,
-            border: `2.5px solid ${hot ? t.accent : `${t.ink}22`}`,
-            color: hot ? t.accent : t.ink,
+            border: `2.5px solid ${hot ? hotInk.accent : `${plain.ink}22`}`,
+            color: hot ? hotInk.accentText : plain.ink,
             fontFamily: t.fontBody, fontSize: 27, fontWeight: 700,
             boxShadow: "0 22px 48px -24px rgba(15,20,40,0.25)",
             opacity: p, transform: `translateY(${26 * (1 - p)}px)`,
@@ -543,6 +708,7 @@ const VignetteLogoWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] 
   const wide = !el.narrow;
   const tile = wide ? (cols >= 4 ? 190 : 210) : (cols >= 4 ? 140 : 160);
   const mark = cols >= 4 ? 44 : 56;
+  const s = surfaceInk(t, t.card); // tiles are cards
   return (
     <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, ${tile}px)`, gap: wide ? 20 : 14, justifyContent: "center", transform: `translateY(${vinFloat(local, logos.length * 5 + 40)}px)` }}>
       {logos.map((l, i) => {
@@ -553,11 +719,11 @@ const VignetteLogoWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"] 
             {l.src ? (
               <Img src={l.src} style={{ width: mark, height: mark, objectFit: "contain", margin: "0 auto 12px", display: "block" }} />
             ) : (
-              <div style={{ width: mark, height: mark, borderRadius: mark / 2, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: mark * 0.42, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+              <div style={{ width: mark, height: mark, borderRadius: mark / 2, background: `${s.accent}26`, color: s.accentText, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: mark * 0.42, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
                 {(l.name || "?")[0].toUpperCase()}
               </div>
             )}
-            <div style={{ fontFamily: t.fontBody, fontSize: cols >= 4 ? 15 : 18, fontWeight: 600, color: t.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+            <div style={{ fontFamily: t.fontBody, fontSize: cols >= 4 ? 15 : 18, fontWeight: 600, color: s.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
           </div>
         );
       })}
@@ -579,16 +745,17 @@ const VignetteQuoteCard: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]
   const quote = hq ? hq.q : (lines.find((l) => !isAttr(l) && l.length >= 12) || "");
   const pQ = vinP(local, 6, 18);
   const pA = vinP(local, 30, 14);
+  const s = surfaceInk(t, t.card); // the quote sits on a card
   return (
     <div style={{ width: el.narrow ? 620 : 780, background: t.card, borderRadius: 36, padding: "44px 52px", boxShadow: "0 40px 90px -36px rgba(15,20,40,0.28)", textAlign: "left", transform: `translateY(${vinFloat(local, 70)}px)` }}>
       <svg viewBox="0 0 48 36" style={{ width: 44, height: 33, marginBottom: 18, opacity: vinP(local, 0, 12) }}>
-        <path d="M 0 36 V 22 Q 0 0 20 0 v 10 Q 10 10 10 22 h 10 v 14 Z M 28 36 V 22 Q 28 0 48 0 v 10 Q 38 10 38 22 h 10 v 14 Z" fill={t.accent} />
+        <path d="M 0 36 V 22 Q 0 0 20 0 v 10 Q 10 10 10 22 h 10 v 14 Z M 28 36 V 22 Q 28 0 48 0 v 10 Q 38 10 38 22 h 10 v 14 Z" fill={s.accent} />
       </svg>
-      <div style={{ fontFamily: t.fontDisplay, fontSize: quote.length > 110 ? (el.narrow ? 23 : 27) : (el.narrow ? 28 : 34), fontWeight: 600, lineHeight: 1.4, color: t.ink, opacity: pQ, transform: `translateY(${18 * (1 - pQ)}px)` }}>
+      <div style={{ fontFamily: t.fontDisplay, fontSize: quote.length > 110 ? (el.narrow ? 23 : 27) : (el.narrow ? 28 : 34), fontWeight: 600, lineHeight: 1.4, color: s.ink, opacity: pQ, transform: `translateY(${18 * (1 - pQ)}px)` }}>
         {quote}
       </div>
       {attr ? (
-        <div style={{ marginTop: 22, fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: t.inkMuted, opacity: pA, transform: `translateY(${12 * (1 - pA)}px)` }}>
+        <div style={{ marginTop: 22, fontFamily: t.fontBody, fontSize: 20, fontWeight: 600, color: s.inkMuted, opacity: pA, transform: `translateY(${12 * (1 - pA)}px)` }}>
           {attr}
         </div>
       ) : null}
@@ -608,6 +775,7 @@ const VignettePeopleWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"
     .map((q) => [q.name, q.a].filter(Boolean).join(" · ")).filter(Boolean);
   const tags = (fromQuotes.length ? fromQuotes
     : (el.lines || []).filter((l) => /@/.test(l))).slice(0, 4);
+  const s = surfaceInk(t, t.card); // people tags are cards
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 20, justifyContent: "center", width: el.narrow ? 620 : 900, transform: `translateY(${vinFloat(local, tags.length * 6 + 40)}px)` }}>
       {tags.map((tag, i) => {
@@ -616,10 +784,10 @@ const VignettePeopleWall: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"
         const initial = (tag.split("@")[1] || tag).trim()[0] || "?";
         return (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 24px", borderRadius: 22, background: t.card, boxShadow: "0 24px 52px -26px rgba(15,20,40,0.25)", transform: `scale(${p})` }}>
-            <div style={{ width: 48, height: 48, borderRadius: 24, background: `${t.accent}26`, color: t.accent, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 21, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 24, background: `${s.accent}26`, color: s.accentText, fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 21, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               {initial.toUpperCase()}
             </div>
-            <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 600, color: t.ink, textAlign: "left", maxWidth: 320 }}>{tag}</div>
+            <div style={{ fontFamily: t.fontBody, fontSize: 18, fontWeight: 600, color: s.ink, textAlign: "left", maxWidth: 320 }}>{tag}</div>
           </div>
         );
       })}
@@ -726,7 +894,7 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
       return (
         <div style={{ ...base }}>
           {el.logoSrc ? (
-            <Img src={resolveAsset(el.logoSrc)} style={{ width: 84, height: 84, objectFit: "contain", borderRadius: 20, margin: "0 auto 26px", display: "block" }} />
+            <Img src={resolveAsset(el.logoSrc)} style={{ width: 84, height: 84, objectFit: "contain", borderRadius: 20, margin: "0 auto 26px", display: "block", ...(t.logoPlate ? { background: t.logoPlate, padding: 12, boxSizing: "border-box" as const } : null) }} />
           ) : null}
           {/* Pipeline-authored copy declares its lines — meaning-bearing
               breaks are never left to width-wrapping (Dennis 2026-07-18:
@@ -746,7 +914,8 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
               padding: "20px 44px",
               borderRadius: 999,
               background: t.accent,
-              color: "#FFFFFF",
+              // The label lives on the accent FILL, not on the world ground.
+              color: surfaceInk(t, t.bg).onAccent,
               fontFamily: t.fontBody,
               fontSize: 26,
               fontWeight: 600,
@@ -770,7 +939,11 @@ const El: React.FC<{ el: WalkrecElement; t: WalkrecProps["theme"]; frame: number
 export const WalkrecWorld: React.FC<WalkrecProps> = (props) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const { theme: t, elements, moments, total_frames } = props;
+  const { elements, moments, total_frames } = props;
+  // THE LEGIBILITY INVARIANT, applied once at the root: nothing below this
+  // line ever sees the raw harvested palette, so no element can paint text in
+  // a colour that was never checked against this world's ground.
+  const t = worldTheme(props.theme);
   const cam = cameraPose(frame, moments);
   const s = cam.scale;
 

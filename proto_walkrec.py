@@ -335,6 +335,129 @@ def _site_bg_from_shot(shot_path: str) -> str:
                               sum(p[2] for p in px) // n)
 
 
+def _srgb_lum(r: int, g: int, b: int) -> float:
+    """WCAG relative luminance. Same maths the run header's RunMark uses, so a
+    mark is judged by ONE standard whether it is drawn in chrome or in film."""
+    def ch(v: int) -> float:
+        c = v / 255.0
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+
+
+def _contrast(a: float, b: float) -> float:
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
+def _logo_ink(logo_path: str):
+    """(is_self_grounded, ink_luminance) for a harvested mark, or None when it
+    cannot be read. Local file only — NO network, no new dependency: rasters go
+    through ffmpeg rawvideo + stdlib parse (the discipline _site_bg_from_shot
+    and brand_extract._accent_from_pixels already use), SVGs are read as text.
+
+    'Self-grounded' means the asset carries its own opaque background (the
+    app-icon .ico/.png case, 59 of the 63 marks staged to date). Those never let
+    the world colour touch their ink, so they need no plate."""
+    if not logo_path or not os.path.exists(logo_path):
+        return None
+    ext = os.path.splitext(logo_path)[1].lower()
+    try:
+        if ext == ".svg":
+            import re as _re
+            with open(logo_path, encoding="utf-8", errors="ignore") as fh:
+                s = fh.read()
+            # A full-bleed <rect> is the SVG way of carrying your own ground.
+            grounded = bool(_re.search(r"<rect[^>]*width=\"(?:100%|\d+)\"", s))
+            cols = [c for c in _re.findall(
+                r"(?:fill|stroke)=\"#([0-9a-fA-F]{6})\"", s)]
+            if not cols:
+                return None
+            vals = [_srgb_lum(int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+                    for c in cols]
+            return grounded, sum(vals) / len(vals)
+        raw = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", logo_path, "-vf", "scale=48:48",
+             "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+            capture_output=True, timeout=30).stdout
+        if len(raw) < 16:
+            return None
+        total = opaque = 0
+        acc = wgt = 0.0
+        for i in range(0, len(raw) - 3, 4):
+            a = raw[i + 3]
+            total += 1
+            if a >= 250:
+                opaque += 1
+            if a < 24:
+                continue
+            w = a / 255.0
+            acc += _srgb_lum(raw[i], raw[i + 1], raw[i + 2]) * w
+            wgt += w
+        if not total or wgt < 1:
+            return None
+        return (opaque / total) > 0.90, acc / wgt
+    except Exception:
+        return None
+
+
+def _logo_plate(logo_path: str, world_bg: str) -> str:
+    """The colour the mark must sit on so its own ink survives the world it is
+    dropped into — '' when the world already serves it and no plate is owed.
+
+    THE DEFECT THIS KILLS: the walkrec world paints `bg` with a colour sampled
+    from the CUSTOMER'S OWN PAGE, then drew the harvested logo straight onto it
+    with no contrast check (WalkrecWorld cta). A brand's logo ink and its site
+    chrome come from the same palette by construction, so 'sampled from their
+    page' is precisely the colour most likely to swallow their mark. dark_world
+    was already computed one line above to flip `ink`, `inkMuted` and `card` —
+    the logo simply never consulted it. This closes that asymmetry, and does it
+    by MEASURING the mark rather than by trusting the world's own flag."""
+    read = _logo_ink(logo_path)
+    if not read:
+        return ""
+    grounded, ink = read
+    if grounded:
+        return ""  # carries its own background; the world never touches it
+    try:
+        wr, wg, wb = (int(world_bg[i:i + 2], 16) for i in (1, 3, 5))
+    except Exception:
+        return ""
+    world = _srgb_lum(wr, wg, wb)
+    if _contrast(ink, world) >= 3.0:
+        return ""  # already legible where it lands
+    # Two candidates are provably enough: every ink clears 3:1 against one.
+    return "#FFFFFF" if _contrast(ink, 1.0) >= _contrast(ink, 0.0109) else "#14161A"
+
+
+def _stage_mark(src: str, dest: str) -> None:
+    """Copy a harvested mark into studio/public, enforcing asset hygiene on the
+    way in (raster: max 800px on the long edge; SVG: passed through, it is
+    vector). Marks arrive at whatever size the site happened to publish — an
+    apple-touch-icon is routinely 1024px, which is 1.3x the cap and pure render
+    cost for something drawn at 84px. Downscale only, never upscale: a small
+    mark is never inflated to meet a floor it cannot really meet.
+
+    Local ffmpeg only, no network. Any failure falls back to the plain copy, so
+    hygiene can never be the reason a film loses its logo."""
+    try:
+        ext = os.path.splitext(src)[1].lower()
+        if ext != ".svg":
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x",
+                 src], capture_output=True, timeout=20, text=True).stdout.strip()
+            w, h = (int(v) for v in probe.split("x")[:2])
+            if max(w, h) > 800:
+                r = subprocess.run(
+                    ["ffmpeg", "-v", "error", "-y", "-i", src, "-vf",
+                     "scale='if(gt(iw,ih),800,-1)':'if(gt(iw,ih),-1,800)':flags=lanczos",
+                     dest], capture_output=True, timeout=60)
+                if r.returncode == 0 and os.path.getsize(dest) > 0:
+                    return
+    except Exception:
+        pass
+    shutil.copyfile(src, dest)
+
+
 def build_vevara_film(url: str, run_id: str, clip: str, logo_from: str = "") -> str:
     """v3 (Dennis 2026-07-18): the Vevara-grammar film ON THE BRAND'S OWN
     PALETTE — world bg sampled from the captured page, camera moments with the
@@ -377,8 +500,14 @@ def build_vevara_film(url: str, run_id: str, clip: str, logo_from: str = "") -> 
     logo_rel = ""
     if logo and os.path.exists(logo):
         logo_rel = f"walkrec-logo-{run_id}{os.path.splitext(logo)[1] or '.png'}"
-        shutil.copyfile(logo, os.path.join(pub, logo_rel))
+        _stage_mark(logo, os.path.join(pub, logo_rel))
         theme["logoSrc"] = logo_rel
+        # A mark is either legible on the world it lands in, or it gets the
+        # plate that makes it so. '' = the world already serves it (the common
+        # case), and the renderer then draws exactly what it drew before.
+        plate = _logo_plate(logo, site_bg)
+        if plate:
+            theme["logoPlate"] = plate
     music_src = os.path.join(HERE, "assets", "music", "calm.mp3")
     if os.path.exists(music_src):
         rel = f"walkrec-music-{run_id}.mp3"
@@ -1706,8 +1835,14 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     logo_rel = ""
     if logo and os.path.exists(logo):
         logo_rel = f"walkrec-logo-{run_id}{os.path.splitext(logo)[1] or '.png'}"
-        shutil.copyfile(logo, os.path.join(pub, logo_rel))
+        _stage_mark(logo, os.path.join(pub, logo_rel))
         theme["logoSrc"] = logo_rel
+        # A mark is either legible on the world it lands in, or it gets the
+        # plate that makes it so. '' = the world already serves it (the common
+        # case), and the renderer then draws exactly what it drew before.
+        plate = _logo_plate(logo, site_bg)
+        if plate:
+            theme["logoPlate"] = plate
     music_src = os.path.join(HERE, "assets", "music", "calm.mp3")
     if os.path.exists(music_src):
         rel = f"walkrec-music-{run_id}.mp3"

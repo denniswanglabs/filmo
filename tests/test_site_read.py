@@ -168,5 +168,107 @@ class PageShotMatching(unittest.TestCase):
         self.assertEqual(style_fill._night_page_shot_for("pricing", {}), "")
 
 
+class ConcurrentCaptureSafety(unittest.TestCase):
+    """The picked pages are captured concurrently (site_read._DEFAULT_CONCURRENCY).
+
+    These lock the invariants a silent race would break. None of them fail loudly
+    in production: a ledger in completion order still renders a film, just one
+    where combined_corpus reads the pages in a shuffled order and
+    style_fill._night_page_shot_for breaks a scoring tie on the wrong page — a
+    video that is subtly wrong with nothing in the log to say so."""
+
+    CANDS = [{"url": "https://x.example/" + s, "slug": s, "source": "probe"}
+             for s in ("pricing", "features", "how-it-works", "product")]
+
+    @staticmethod
+    def _shots(url, out_dir):
+        slug = url.rsplit("/", 1)[-1]
+        return {"shots": [{"body_text": "body of " + slug, "title": slug,
+                           "path": "/shots/%s.png" % slug}]}
+
+    def _run(self, capture_fn, width=4, cands=None):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(site_read, "discover_candidates",
+                                   return_value=list(cands or self.CANDS)):
+                return site_read.browse_site(
+                    "https://x.example", d, brain=None, capture_fn=capture_fn,
+                    homepage_text="", max_workers=width)
+
+    def test_ledger_is_in_picked_order_not_completion_order(self):
+        # Slowest page first, fastest last: completion order is the exact
+        # REVERSE of picked order, so an unordered collect cannot pass by luck.
+        import time
+        delays = {"pricing": 0.40, "features": 0.30,
+                  "how-it-works": 0.20, "product": 0.05}
+
+        def cap(url, out_dir, max_shots=1):
+            os.makedirs(out_dir, exist_ok=True)
+            time.sleep(delays[url.rsplit("/", 1)[-1]])
+            return self._shots(url, out_dir)
+
+        led = self._run(cap)
+        self.assertEqual([p["slug"] for p in led["pages"]],
+                         ["pricing", "features", "how-it-works", "product"])
+        # ...and every page kept its OWN text (no cross-wiring of results).
+        for p in led["pages"]:
+            self.assertEqual(p["body_text"], "body of " + p["slug"])
+            self.assertEqual(p["shot"], "/shots/%s.png" % p["slug"])
+
+    def test_one_capture_failing_does_not_take_down_its_siblings(self):
+        def cap(url, out_dir, max_shots=1):
+            os.makedirs(out_dir, exist_ok=True)
+            if url.endswith("/features"):
+                raise RuntimeError("bot-block")
+            return self._shots(url, out_dir)
+
+        led = self._run(cap)
+        self.assertTrue(led["ok"])
+        self.assertEqual([p["slug"] for p in led["pages"]],
+                         ["pricing", "how-it-works", "product"])
+
+    def test_a_repeated_slug_is_captured_only_once(self):
+        # Two picks sharing a slug share an output directory, so concurrently
+        # they would be two captures racing on one shot-01.png.
+        import threading
+        calls, lock = [], threading.Lock()
+
+        def cap(url, out_dir, max_shots=1):
+            os.makedirs(out_dir, exist_ok=True)
+            with lock:
+                calls.append(out_dir)
+            return self._shots(url, out_dir)
+
+        led = self._run(cap, cands=[self.CANDS[0], self.CANDS[1],
+                                    dict(self.CANDS[0])])
+        self.assertEqual(len(calls), len(set(calls)), "same dir captured twice")
+        self.assertEqual([p["slug"] for p in led["pages"]],
+                         ["pricing", "features"])
+
+    def test_width_one_is_a_true_revert(self):
+        # SITE_READ_CONCURRENCY=1 is the escape hatch if a host proves too tight;
+        # it must produce the same ledger, not merely a working one.
+        def cap(url, out_dir, max_shots=1):
+            os.makedirs(out_dir, exist_ok=True)
+            return self._shots(url, out_dir)
+
+        self.assertEqual(self._run(cap, width=1)["pages"],
+                         self._run(cap, width=4)["pages"])
+
+    def test_probe_width_does_not_change_the_candidate_list(self):
+        # The concurrent slug probe replays the original serial loop against
+        # pre-probed results: same membership, same order, same source tags.
+        from unittest import mock
+        real = {"pricing", "features", "docs"}
+        with mock.patch.object(site_read, "_fetch_html", return_value=""), \
+             mock.patch.object(site_read, "_page_exists",
+                               side_effect=lambda u: u.rsplit("/", 1)[-1] in real):
+            cands = site_read.discover_candidates("https://x.example")
+        self.assertEqual([(c["slug"], c["source"]) for c in cands],
+                         [("pricing", "probe"), ("features", "probe"),
+                          ("docs", "probe")])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
