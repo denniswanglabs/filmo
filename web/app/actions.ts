@@ -1043,12 +1043,18 @@ export async function sendFeedback(input: {
 // if that stops being true the stats become a floor rather than a total, which
 // is why the window is stated here rather than buried in a query.
 const OVERVIEW_RUN_LIMIT = 400
-// `agent_events` are fetched in batches of run ids because a `.in()` carrying
-// 400 uuids is a query string nobody should build. 100 ids ≈ 3.8KB of query
-// string — comfortably inside every URL limit, and chosen to cover the largest
-// real account in ONE round trip rather than two: this read is on the home
-// page's critical path and each extra trip to Singapore costs a visible beat.
-const OVERVIEW_ID_BATCH = 100
+// `agent_events` are fetched in batches of run ids, because a `.in()` carrying
+// 400 uuids is a query string nobody should build.
+//
+// ★ MEASURED, NOT CHOSEN BY FEEL. Each id costs ~43 bytes once quoted and
+// URL-encoded, and the gateway in front of InsForge drops a request line past
+// ~4KB. It does not drop it loudly: the SDK hands back `{ data: null }`, which
+// reads exactly like "this account has no events". Raising this to 100 (≈4.3KB)
+// was tried and turned a real account's 66 pages read and 228 assets into
+// zeroes with no error anywhere — a strip full of confident, wrong numbers.
+// 50 ids ≈ 2.2KB, half the ceiling. Do not raise it without measuring the
+// encoded length, and read the throw in overviewEvents before you do.
+const OVERVIEW_ID_BATCH = 50
 const OVERVIEW_EVENTS_PER_BATCH = 1500
 
 interface OverviewRunRow {
@@ -1075,12 +1081,16 @@ interface OverviewEventRow {
   artifact_url: string
 }
 
-/** Every run this user owns, newest first. `.eq('user_id')` is the boundary. */
+/** Every run this user owns, newest first. `.eq('user_id')` is the boundary.
+ *  Throws on a failed read for the same reason overviewEvents does: an account
+ *  whose runs could not be read is not an account with no runs, and only one of
+ *  those two is safe to render. An EMPTY array is a real answer and passes
+ *  through — that is a brand-new signup, and the Overview has a page for it. */
 async function overviewRuns(
   db: ReturnType<typeof adminClient>,
   userId: string,
 ): Promise<OverviewRunRow[]> {
-  const { data } = await db.database
+  const { data, error } = await db.database
     .from('runs')
     .select(
       'id, brand, company_url, status, film_mode, created_at, final_url,'
@@ -1089,6 +1099,9 @@ async function overviewRuns(
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(OVERVIEW_RUN_LIMIT)
+  if (error || data == null) {
+    throw new Error('overview: runs read failed — refusing to report an empty account')
+  }
   // The SDK types a select carrying an ALIASED jsonb sub-path
   // (`total_frames:props->total_frames`) as GenericStringError[], because its
   // generated row types only know real columns. The rows are real; the type is
@@ -1110,7 +1123,18 @@ async function overviewRuns(
   }))
 }
 
-/** The named event kinds for these runs, in seq order, batched by run id. */
+/** The named event kinds for these runs, in seq order, batched by run id.
+ *
+ *  ── A FAILED READ IS NOT AN EMPTY ONE ──────────────────────────────────────
+ *  THROWS rather than returning what it managed to collect. Every caller below
+ *  turns these rows into a number or a claim, and both of those degrade the
+ *  same silent way when a batch quietly comes back empty: the strip prints
+ *  zeroes it presents as counts, and the cards announce that pages were never
+ *  filmed because the evidence that they were is missing. A read that did not
+ *  happen must be indistinguishable from a read that failed — which means it
+ *  has to stop here. The Overview catches this and offers a retry; that is the
+ *  honest answer, and an unreadable page is a better outcome than a confident
+ *  wrong one. */
 async function overviewEvents(
   db: ReturnType<typeof adminClient>,
   runIds: string[],
@@ -1120,14 +1144,19 @@ async function overviewEvents(
   for (let i = 0; i < runIds.length; i += OVERVIEW_ID_BATCH) {
     const batch = runIds.slice(i, i + OVERVIEW_ID_BATCH)
     if (!batch.length) continue
-    const { data } = await db.database
+    const { data, error } = await db.database
       .from('agent_events')
       .select('run_id, seq, kind, title, detail, artifact_url')
       .in('run_id', batch)
       .in('kind', kinds)
       .order('seq', { ascending: true })
       .limit(OVERVIEW_EVENTS_PER_BATCH)
-    for (const e of ((data as OverviewEventRow[]) ?? [])) out.push(e)
+    // `data == null` with no error is the shape an over-long request line comes
+    // back as (see OVERVIEW_ID_BATCH), so absence is checked as well as error.
+    if (error || data == null) {
+      throw new Error('overview: agent_events read failed — refusing to report partial counts')
+    }
+    for (const e of (data as OverviewEventRow[])) out.push(e)
   }
   return out
 }

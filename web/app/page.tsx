@@ -18,14 +18,16 @@ import {
 /* ───────────────────────────────────────────────────────────────────────────
    `/` IS A DOOR, NOT A PAGE.
 
-   The studio is the product; the landing is the front door. So this route
-   resolves to one of three things and renders exactly one of them:
+   The studio is the product; the landing is the front door. So `/` RENDERS the
+   landing for everyone, signed in or not (see step 2 of the decision below),
+   and hands anyone onward only when they ask it to:
 
-     signed out ................ the landing
-     signed in ................. their Overview (`/overview`)
-     signed in, with `?new=1` .. the studio's own "New filmo" surface, in place
+     on load, anybody .................... the landing
+     the CTA, signed in .................. their Overview (`/overview`)
+     the CTA, signed in, with `?new=1` ... the studio's "New filmo" surface, here
+     a URL stashed before sign-in ........ straight into that build
 
-   Three things about that are load-bearing enough to state out loud:
+   Three things about the hand-off are load-bearing enough to state out loud:
 
    1. NO HTTP REDIRECT IS INVOLVED, ANYWHERE. The session lives in
       origin-scoped localStorage (`insforge.ts`), which no server and no
@@ -36,10 +38,10 @@ import {
       people who had already hit it. There is no way to make that mistake from
       here, and that is deliberate.
 
-   2. THE DESTINATION IS A ROUTE THAT EXISTS FOR AN EMPTY ACCOUNT. This used to
-      send a signed-in visitor to their most recent run, and that is precisely
+   2. THE DESTINATION IS A ROUTE THAT EXISTS FOR AN EMPTY ACCOUNT. The CTA used
+      to send a signed-in visitor to their most recent run, and that is exactly
       why a brand-new signup could not be sent anywhere: the studio has no route
-      of its own — it is `runs/[id]` — so redirecting an account with no runs
+      of its own — it is `runs/[id]` — so handing an account with no runs to it
       would either invent an id (greeting a first-time user with "This run could
       not be found") or bounce them back here forever. `/overview` is the route
       that was missing. It renders zeroes and an invitation for an account with
