@@ -337,21 +337,78 @@ export function rehydrateSessionIntoClient(): AuthLikeUser | null {
 // whatever bearer getToken hands them — so WITHOUT this, an expired in-memory token would sit
 // there 401-ing every server action until sign-out. Called by auth.tsx's readAccessToken
 // before every token read: if the current token is inside its last 60s (or gone) and we hold
-// a refresh credential, run the SDK's public refreshSession() (body-mode) and persist the
-// result. Single-flight so the 3s run-page poll can't stampede parallel refreshes.
-let freshnessFlight: Promise<void> | null = null
-export async function ensureFreshAccessToken(): Promise<void> {
-  if (freshnessFlight) return freshnessFlight
-  freshnessFlight = (async () => {
+// a refresh credential, run the SDK's body-mode refresh and persist the result. Single-flight
+// so the 3s run-page poll can't stampede parallel refreshes.
+//
+// THE FALSE-LOGOUT CLASS THIS CLOSES (both halves reproduced against a scripted InsForge
+// mock, 2026-07-20, before the fix was written):
+//
+//   1. THE SETTLED-FLIGHT TRAP. The previous shape was
+//        `freshnessFlight = (async () => { … finally { freshnessFlight = null } })()`.
+//      On the two SYNCHRONOUS early-return paths (no refresh token; token still fresh) the
+//      async body completes before its first await, so the `finally` nulled the flight DURING
+//      evaluation of the right-hand side — and the assignment then stored the already-settled
+//      promise. Every later call hit `if (freshnessFlight) return freshnessFlight` and got
+//      that stale settled promise: one getToken() while the token was fresh made this
+//      function a PERMANENT no-op for the page's lifetime. Fifteen minutes later the token
+//      expired, nothing ever refreshed it, every server action 401'd, and /overview showed
+//      the sign-in gate to a user whose refresh token sat valid in localStorage the whole
+//      time (a reload reset module state, which is why reloading "fixed" it). The cleanup
+//      now runs in `.finally()` attached AFTER the assignment, and only clears its own
+//      flight.
+//
+//   2. ONE UNRETRIED NETWORK ATTEMPT. The SDK gives the refresh POST zero retries
+//      (handleRequest: `canRetry = IDEMPOTENT_METHODS.has(method)` — POST is not — so
+//      `maxAttempts = 0`, and its own 408 timeout throws immediately). The old catch
+//      swallowed that single failure, so one InsForge blip on the one call that mattered
+//      handed every waiting caller a dead token. The refresh now retries transient failures
+//      (500/408/network) with backoff, re-seeding the latest stored (possibly rotated)
+//      refresh token before each retry; a 401/403 from the grant is a REAL revocation and
+//      is never retried.
+//
+// The outcome return lets a caller that was 401'd by a server action distinguish "refreshed,
+// retry your call" ('ok') from "auth service unreachable, show a retry UI" ('unavailable')
+// from "the refresh credential itself is dead, the gate is honest" ('signed-out').
+// `force` bypasses the local freshness check — the server outranks our clock: after a
+// server-side 401 the token IS stale no matter how fresh the client thinks it is.
+// Existing callers that ignore both stay exactly as they were.
+export type FreshnessOutcome = 'ok' | 'unavailable' | 'signed-out'
+let freshnessFlight: Promise<FreshnessOutcome> | null = null
+let lastRealRefreshAt = 0 // epoch ms of the last flight that actually minted a token
+
+export async function ensureFreshAccessToken(
+  opts: { force?: boolean } = {},
+): Promise<FreshnessOutcome> {
+  // Join any in-progress flight. A force caller accepts its outcome only when that flight
+  // REALLY refreshed just now; a flight that merely no-op'd ("still fresh") proves nothing
+  // against a server that already rejected the token, so force falls through to a real
+  // refresh. The loop re-joins if another caller started the next flight first — there is
+  // never more than one refresh POST in the air (refresh tokens rotate; racing two grants
+  // with the same token risks a false revocation).
+  for (;;) {
+    const inFlight = freshnessFlight
+    if (!inFlight) break
+    const outcome = await inFlight
+    if (!opts.force || (outcome === 'ok' && Date.now() - lastRealRefreshAt < 2000)) {
+      return outcome
+    }
+    // force fell through: loop, in case another caller already started the next
+    // flight (join it rather than racing a second refresh POST into a rotation).
+  }
+  const flight = (async (): Promise<FreshnessOutcome> => {
     try {
       const stored = readRawStored()
       const refreshToken = stored?.refreshToken
-      if (!refreshToken) return // nothing to refresh with — legacy session, behave as before
+      // Nothing to refresh with (signed out, or a legacy session from before the
+      // refresh-capture shipped): a 401 on this session is genuinely unrecoverable.
+      if (!refreshToken) return 'signed-out'
 
-      const tm = reachTokenManager() as { getAccessToken?: () => string | null } | null
-      const current = tm?.getAccessToken?.() ?? stored?.accessToken ?? null
-      const secondsLeft = current ? jwtSecondsLeft(current) : -1
-      if (secondsLeft !== null && secondsLeft > 60) return // still fresh — no-op
+      if (!opts.force) {
+        const tm = reachTokenManager() as { getAccessToken?: () => string | null } | null
+        const current = tm?.getAccessToken?.() ?? stored?.accessToken ?? null
+        const secondsLeft = current ? jwtSecondsLeft(current) : -1
+        if (secondsLeft !== null && secondsLeft > 60) return 'ok' // still fresh — no-op
+      }
 
       seedRefreshTokenIntoClient(refreshToken)
       // CRITICAL: use http.refreshAndSaveSession(), NOT auth.refreshSession(). The public
@@ -369,8 +426,27 @@ export async function ensureFreshAccessToken(): Promise<void> {
       const refresher =
         http.http?.refreshAndSaveSession?.bind(http.http) ??
         http.auth?.http?.refreshAndSaveSession?.bind(http.auth.http)
-      if (!refresher) return
-      await refresher()
+      if (!refresher) return 'unavailable'
+
+      // The retry the SDK refuses to do for a POST. Transient failures (5xx / the SDK's
+      // own 408 timeout / network status 0) get three attempts with backoff; a 401/403
+      // from the grant means the refresh token itself was rejected — definitive, stop.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await refresher()
+          break
+        } catch (e) {
+          const status = (e as { statusCode?: number })?.statusCode
+          if (status === 401 || status === 403) return 'signed-out'
+          if (attempt >= 2) return 'unavailable'
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
+          // authAwareFetch may have captured a rotation in the meantime (another tab):
+          // always retry with the LATEST stored credential.
+          const rotated = readRawStored()?.refreshToken
+          if (rotated) seedRefreshTokenIntoClient(rotated)
+        }
+      }
+      lastRealRefreshAt = Date.now()
 
       // Persist the freshened access token so reloads + getToken fallbacks see it.
       const freshToken = (reachTokenManager() as { getAccessToken?: () => string | null } | null)
@@ -379,13 +455,19 @@ export async function ensureFreshAccessToken(): Promise<void> {
       if (freshToken && user?.id) {
         persistSession({ accessToken: freshToken, user: user as AuthLikeUser })
       }
+      return 'ok'
     } catch {
       /* best-effort — callers fall back to whatever token exists; verifyUser re-validates */
-    } finally {
-      freshnessFlight = null
+      return 'unavailable'
     }
   })()
-  return freshnessFlight
+  freshnessFlight = flight
+  // Cleanup AFTER the assignment, guarded to this flight — never the pre-assignment
+  // `finally` that settled the flight forever (bug 1 above).
+  void flight.finally(() => {
+    if (freshnessFlight === flight) freshnessFlight = null
+  })
+  return flight
 }
 
 // ───────────────────────── Transient-read resilience ─────────────────────────

@@ -35,6 +35,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
+import { ensureFreshAccessToken } from '../../lib/insforge'
 import {
   getOverviewStats, getSuggestions, listMyRuns,
   type OverviewStats, type Suggestion,
@@ -97,26 +98,52 @@ export default function OverviewPage() {
 
   const load = useCallback(async () => {
     setReadFailed(false)
-    const token = await getToken()
-    try {
-      // Three independent owner-scoped reads, in parallel: the strip, the
-      // cards, and the same run list /videos shows.
+    // Three independent owner-scoped reads, in parallel: the strip, the
+    // cards, and the same run list /videos shows.
+    const read = async () => {
+      const token = await getToken()
       const [statsRes, sugRes, runsRes] = await Promise.all([
         getOverviewStats(token),
         getSuggestions(token),
         listMyRuns(token),
       ])
-      // THE DEFINITIVE ANSWER comes from the server's verifyUser, not from the
-      // optimistically-painted `user`. A rejection here means the session is
-      // genuinely dead, so we ask for a sign-in rather than show an empty home.
-      if ('authError' in statsRes || 'authError' in sugRes || 'authError' in runsRes) {
-        setAuthError(true)
-        return
+      return { statsRes, sugRes, runsRes }
+    }
+    const deniedIn = (r: Awaited<ReturnType<typeof read>>) =>
+      'authError' in r.statsRes || 'authError' in r.sugRes || 'authError' in r.runsRes
+    try {
+      let r = await read()
+      // ONE STALE 401 IS NOT A SIGNOUT. The reproduced false-logout class
+      // (2026-07-20): the access token expires mid-session, the reads carry the
+      // dead bearer, verifyUser answers a clean 401 each — while a perfectly
+      // valid refresh token sits in localStorage. So before the gate is even
+      // considered: force ONE refresh (the server outranks the client's clock)
+      // and retry the reads ONCE on the fresh token. The invariant this
+      // establishes: a user holding a valid refresh token never sees the
+      // sign-in gate — they see their data, or a "try again", never the door.
+      if (deniedIn(r)) {
+        const freshness = await ensureFreshAccessToken({ force: true })
+        if (freshness === 'ok') r = await read()
+        if (deniedIn(r)) {
+          if (freshness === 'unavailable') {
+            // The auth service itself was unreachable: the session is UNKNOWN,
+            // not dead. That is a blip with a retry button, never the gate.
+            setReadFailed(true)
+            return
+          }
+          // Definitive: the refresh credential is gone/revoked ('signed-out'),
+          // or a token minted seconds ago was still rejected. The gate is honest.
+          setAuthError(true)
+          return
+        }
+      }
+      if ('authError' in r.statsRes || 'authError' in r.sugRes || 'authError' in r.runsRes) {
+        return // unreachable after the block above; narrows the types below
       }
       setAuthError(false)
-      setStats(statsRes.stats)
-      setSuggestions(sugRes.suggestions)
-      setRuns(runsRes.runs)
+      setStats(r.statsRes.stats)
+      setSuggestions(r.sugRes.suggestions)
+      setRuns(r.runsRes.runs)
     } catch {
       // verifyUser THROWS (rather than returning null) when the auth service is
       // unreachable, precisely so a brownout cannot read as "signed out". Say
