@@ -149,7 +149,7 @@ export default function AssetsPage() {
           Make a filmo and everything Filmo reads, records and cuts on the way
           collects here — the pages, the marks, the footage, every scene.
         </span>
-        <Link className="lib-emptycta" href="/?new=1">New filmo</Link>
+        <Link className="lib-emptycta" href="/new">New filmo</Link>
       </div>
     )
   } else {

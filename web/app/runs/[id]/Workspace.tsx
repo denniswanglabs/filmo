@@ -135,6 +135,14 @@ type LocalMsg = { ts: number; kind: 'user' | 'dir'; text: string }
 // PRODUCT's navigation, not the page's: where you are changes what is
 // highlighted, never what exists. Add an entry here, add it there.
 //
+// THE ICONS ARE PART OF THAT CONTRACT and are the easiest half of it to break,
+// because a glyph can drift without anything failing: Overview's house was drawn
+// from a different path in each file for months and both files looked correct on
+// their own. One entry, one picture, in both files — check the other side before
+// touching any svg on this rail. (2026-07-19: Overview took the four-pane
+// dashboard grid, Filmos took a film strip, Assets took a stack of pictures; the
+// Film tab keeps the play-in-rect, which is why Filmos could not have it.)
+//
 // ── THE ROOMS OF THIS PAGE, AS OPPOSED TO THE ROUTES OFF IT ─────────────────
 // A `Surface` is a room the rail can walk you into WITHOUT leaving this page:
 // the component renders every one of them itself, so a surface can never
@@ -676,6 +684,17 @@ function WorkspaceRun({ runKey, getToken }: {
         {/* Making a filmo is the primary act, so it sits directly under the
             mark where the hand already is — the position Ploy gives its own
             new-thread button. */}
+        {/* ── STILL A TAB, DELIBERATELY (2026-07-19) ──────────────────────────
+            OverviewRail's copy of this entry now points at the route `/new`,
+            because a rail on /overview or /assets has no run to keep you in and
+            the composer needed somewhere to live. HERE it stays a SURFACE, and
+            the reason is the one already written into the Surface type above:
+            you are standing in a run. `setTab('new')` swaps the stage and leaves
+            the run polling underneath, so coming back to Film shows the film
+            where it actually is now; `<Link href="/new">` would tear this
+            workspace down to show the same composer. Same entry, same label,
+            same glyph, same position — different mechanic, which is exactly the
+            difference the TWIN note licenses (Filmos has had it all along). */}
         <button className={'wk-ic' + (tab === 'new' ? ' on' : '')}
           aria-current={tab === 'new' ? 'true' : undefined}
           onClick={() => setTab('new')} title="Start a new filmo">
@@ -683,9 +702,12 @@ function WorkspaceRun({ runKey, getToken }: {
           <i>New filmo</i>
         </button>
         {/* The signed-in home. A route, not a room — it is about the account,
-            not about this run, so it cannot be a tab on a page that is. */}
+            not about this run, so it cannot be a tab on a page that is.
+            The glyph is the dashboard grid: this entry opens EVERYTHING YOU
+            HAVE, AT A GLANCE, and the house it used to wear said "home", which
+            names a position in a site map rather than a view. */}
         <Link className="wk-ic" href="/overview" title="Your studio overview">
-          <svg viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/><path d="M5.75 9.5V20h12.5V9.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="3" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
           <i>Overview</i>
         </Link>
         {/* ONE NAME PER THING. `Builds` and `Films` were two rail entries for
@@ -693,17 +715,26 @@ function WorkspaceRun({ runKey, getToken }: {
             about what it was: Builds left the app for the marketing landing,
             Films showed the library that actually answers the question. The
             surviving entry is the library, and it now wears the product's own
-            word for what it holds: Filmos. */}
+            word for what it holds: Filmos.
+            ── AND IT WEARS FILM. The four-pane grid it used to carry is a
+            DASHBOARD glyph — it has gone to Overview, where that is the claim.
+            A library of films gets a film strip. Not the play-in-rect: the Film
+            tab two rows down already owns that, and "watch this one" and "every
+            one I've made" cannot be the same picture in the same rail. */}
         <button className={'wk-ic' + (tab === 'builds' ? ' on' : '')}
           aria-current={tab === 'builds' ? 'true' : undefined}
           onClick={() => setTab('builds')} title="Filmos you've made">
-          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="3" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M7.5 5v14M16.5 5v14M3 12h4.5M16.5 12H21" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
           <i>Filmos</i>
         </button>
         {/* The raw material, already built at /assets: captures, marks,
-            recordings, stills. Also a route — it spans every run. */}
+            recordings, stills. Also a route — it spans every run.
+            All four of those things are PICTURES, so the glyph is a stack of
+            pictures: a sheet behind, a framed image in front. The stacked
+            diamond it used to wear is the "layers" glyph, which is true of
+            almost anything and therefore says almost nothing. */}
         <Link className="wk-ic" href="/assets" title="Everything captured and made for your filmos">
-          <svg viewBox="0 0 24 24"><path d="M12 3.5 3.5 8l8.5 4.5L20.5 8 12 3.5Z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg viewBox="0 0 24 24"><path d="M17 20.5H5.5A2 2 0 0 1 3.5 18.5V7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/><rect x="7" y="3.5" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none"/><circle cx="11.5" cy="8" r="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="m8 15.5 3.5-3.5 2 2 2.5-2.5 4 4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
           <i>Assets</i>
         </Link>
         <button className={'wk-ic' + (tab === 'film' ? ' on' : '')}

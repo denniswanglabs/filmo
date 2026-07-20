@@ -176,7 +176,7 @@ export default function VideosPage() {
           visitor would, records the pages that carry the argument, and cuts a
           film from what it actually found. Your filmos collect here.
         </span>
-        <Link className="lib-emptycta" href="/?new=1">New filmo</Link>
+        <Link className="lib-emptycta" href="/new">New filmo</Link>
       </div>
     )
   } else {

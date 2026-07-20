@@ -38,11 +38,20 @@
 // component (from a `loading.tsx`) and inside a client page's render.
 import FilmoMark from './landing2/FilmoMark'
 
-/** The studio's daylight — Workspace's `.wk-root`, the run boot screen. */
+// ── THE THREE GROUNDS ───────────────────────────────────────────────────────
+// Named rather than typed as a union so a surface with its own colour (the
+// Workspace screen is #FAFAF8) can still pass a literal. Which one a route
+// takes is a fact about that route's DESTINATION, so it is declared in that
+// route's loading.tsx and nowhere else — and it has to be re-checked whenever
+// the destination is re-skinned, which has already happened once: /videos,
+// /assets, /analytics and /login all moved off white onto the studio ground
+// when they were rebuilt onto the rail.
+
+/** The studio's daylight — `.wk-root`, `.ov-root`, `.lib-root`, `.lgn-root`. */
 export const GROUND_STUDIO = '#F1F1EF'
 /** The landing's night — PloyLanding pins the body to this. */
 export const GROUND_NIGHT = '#0A0A0B'
-/** Everything else: /videos, /assets, /login, /how-it-works, the editor. */
+/** The white chrome: /how-it-works, /inside, and the editor's own canvas. */
 export const GROUND_LIGHT = '#FFFFFF'
 
 export type FilmoLoaderProps = {

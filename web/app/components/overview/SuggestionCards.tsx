@@ -230,7 +230,7 @@ export default function SuggestionCards({ suggestions, getToken, hasWork }: {
                 first-time visitor would, records the pages that carry the
                 argument, and cuts you a film from what it actually found.
               </span>
-              <Link className="ovsug-btn ovsug-cta" href="/?new=1">New filmo</Link>
+              <Link className="ovsug-btn ovsug-cta" href="/new">New filmo</Link>
             </>
           )}
         </div>
