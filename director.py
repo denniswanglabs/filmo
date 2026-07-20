@@ -145,11 +145,17 @@ def _resolve_actions(stops, actions):
             applied.append(("drop", s["title"]))
         elif a.get("action") == "swap_treatment":
             to = a.get("to", "")
-            if pw._refine_motif(to, s, set()) != to:
+            # Same tie-break the reviewer uses: the floor, plus what the rest
+            # of the cut has already spent. `stops` is the current cut, so the
+            # index has to be resolved from it rather than from `vign`.
+            bi = stops.index(s)
+            picked = pw._pick_repair(stops, bi, to)
+            if picked == pw._CUT:
                 rejected.append(
                     (s["title"],
                      f"“{to}” fails its material floor on this beat"))
                 continue
+            to = picked
             s["motif"] = to
             s["motif_locked"] = True
             applied.append(("swap", s["title"], to))

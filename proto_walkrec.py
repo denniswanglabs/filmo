@@ -348,6 +348,71 @@ def _contrast(a: float, b: float) -> float:
     return (max(a, b) + 0.05) / (min(a, b) + 0.05)
 
 
+def _hex_rgb(h: str):
+    """[r, g, b] from '#rrggbb' / '#rgb'; None when unparseable."""
+    h = (h or "").strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) < 6:
+        return None
+    try:
+        return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    except ValueError:
+        return None
+
+
+def _contrast_hex(a: str, b: str) -> float:
+    """WCAG contrast ratio between two colours: 1.0 (identical) … 21.0.
+    Hex-string face of `_contrast` above (which takes luminances — _logo_plate
+    already leans on it), so both are ONE standard rather than two."""
+    ra, rb = _hex_rgb(a), _hex_rgb(b)
+    if not ra or not rb:
+        return 21.0  # unparseable: do not "rescue" a colour we cannot read
+    return _contrast(_srgb_lum(*ra), _srgb_lum(*rb))
+
+
+def _legible_ink(ink: str, ground: str, min_ratio: float = 4.5,
+                 target: float = 13.0) -> str:
+    """The ink this GROUND can carry.
+
+    A harvested ink carries no memory of the background that made it legible.
+    BRAND_PALETTES['stripe.com'] pairs fg #FFFFFF with bg #0A2540 — 15.9:1,
+    correct in its own pair. The callers below keep that ink and replace the
+    ground with the site's OWN measured background (#FEFDFE), where #FFFFFF is
+    1.01:1: the 2026-07-19 stripe.com film shipped with an invisible headline,
+    an invisible 2.9% stat and an invisible check-list. So an ink is never
+    accepted without the ground it will actually land on.
+
+    An ink that already passes is returned UNCHANGED — a genuinely dark world
+    keeps its harvested white, and a brand accent that reads keeps its hue. A
+    failing ink is shaded toward the ground's opposite pole, preserving hue,
+    until it clears `target` (a margin past the bar, so a rescued headline
+    reads as ink rather than as a grey that merely passes)."""
+    if not ink or not ground:
+        return ink
+    if _contrast_hex(ink, ground) >= min_ratio:
+        return ink
+    src, gnd = _hex_rgb(ink), _hex_rgb(ground)
+    if not src or not gnd:
+        return ink
+    poles = ((0, 0, 0), (255, 255, 255))
+    if _srgb_lum(*gnd) <= 0.179:            # dark ground -> lighten first
+        poles = poles[::-1]
+    best, best_ratio = ink, _contrast_hex(ink, ground)
+    for pole in poles:
+        k = 0.04
+        while k <= 1.0001:
+            cand = "#%02x%02x%02x" % tuple(
+                int(round(src[i] + (pole[i] - src[i]) * k)) for i in range(3))
+            ratio = _contrast_hex(cand, ground)
+            if ratio > best_ratio:
+                best, best_ratio = cand, ratio
+            if ratio >= target:
+                return cand
+            k += 0.04
+    return best
+
+
 def _logo_ink(logo_path: str):
     """(is_self_grounded, ink_luminance) for a harvested mark, or None when it
     cannot be read. Local file only — NO network, no new dependency: rasters go
@@ -486,11 +551,18 @@ def build_vevara_film(url: str, run_id: str, clip: str, logo_from: str = "") -> 
         shot = brand_extract._shot_path_from_manifest(manifest) or ""
     site_bg = _site_bg_from_shot(shot) or pal.get("bg") or "#FFFFFF"
 
+    # THE GROUND DECIDES THE INK. `site_bg` is measured off the screenshot's
+    # pixels; `pal["ink"]` is harvested from a curated palette that supplied
+    # its OWN background. Marrying them without a contrast test is what put a
+    # white headline on a white world.
     theme = {
         "bg": site_bg,
-        "ink": pal.get("ink") or "#0F2338",
-        "inkMuted": "#6B6257" if site_bg.lower() != "#ffffff" else "#5A6472",
-        "accent": pal["accent"],
+        "ink": _legible_ink(pal.get("ink") or "#0F2338", site_bg),
+        "inkMuted": _legible_ink(
+            "#6B6257" if site_bg.lower() != "#ffffff" else "#5A6472",
+            site_bg, target=6.0),
+        "accent": _legible_ink(pal["accent"], site_bg,
+                               min_ratio=3.0, target=3.3),
         "card": "#FFFFFF",
         "fontDisplay": "Manrope, sans-serif",
         "fontBody": "Inter, sans-serif",
@@ -1824,11 +1896,20 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     site_bg = _site_bg_from_shot(shot_png) or pal.get("bg") or "#FFFFFF"
     _r, _g, _b = (int(site_bg[i:i + 2], 16) for i in (1, 3, 5))
     dark_world = (_r * 299 + _g * 587 + _b * 114) // 1000 < 120
+    # `dark_world` only ever chose between two CONSTANTS — the harvested
+    # `pal["ink"]` sat in the light branch unguarded, so a brand whose curated
+    # palette is dark (stripe.com: fg #FFFFFF / bg #0A2540) but whose real
+    # homepage is near-white got #FFFFFF ink on a #FEFDFE ground: 1.01:1.
+    _card = "#191C22" if dark_world else "#FFFFFF"
     theme = {"bg": site_bg,
-             "ink": "#F2F5F9" if dark_world else (pal.get("ink") or "#0F2338"),
-             "inkMuted": "#9AA3B2" if dark_world else "#6B6257",
-             "accent": pal["accent"],
-             "card": "#191C22" if dark_world else "#FFFFFF",
+             "ink": _legible_ink(
+                 "#F2F5F9" if dark_world else (pal.get("ink") or "#0F2338"),
+                 site_bg),
+             "inkMuted": _legible_ink(
+                 "#9AA3B2" if dark_world else "#6B6257", site_bg, target=6.0),
+             "accent": _legible_ink(pal["accent"], site_bg,
+                                    min_ratio=3.0, target=3.3),
+             "card": _card,
              "fontDisplay": "Manrope, sans-serif", "fontBody": "Inter, sans-serif",
              "wordmark": name}
     logo = theme_src.get("logo_src")
@@ -1867,8 +1948,11 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
          f"({shots} real recording{'s' if shots != 1 else ''} gliding through "
          f"the site and {graphics} built from your own copy), and the closing "
          f"card. It closes on \u201c{stops[-1]['title']}\u201d."
-         + (" One thing I couldn't settle: " + unresolved[0]["issue"]
-            + "." if unresolved else "")
+         + ((f" {len(unresolved)} thing"
+             + ("s" if len(unresolved) != 1 else "")
+             + " I couldn't settle: "
+             + "; ".join(f["issue"] for f in unresolved) + ".")
+            if unresolved else "")
          + " Tell me what to change \u2014 drop a beat, swap how one is "
          "treated, or ask why I made a call \u2014 and I'll recut it.")
     return out
@@ -2146,9 +2230,16 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
 # name            claim the film may make when the check passes        blocking
 _CHECKS = (
     ("beat-content", "every beat carries something real from your pages", True),
+    # beat-visible ships NON-blocking for now: its 6.0 floor rests on an n=6
+    # calibration (see _INK_FLOOR), and a false block denies a customer a film.
+    # A blank beat still gets cut in round 1 via its _CUT fix and still reaches
+    # the handover as a named finding — flip to True once the floor has seen
+    # more than six real beats.
+    ("beat-visible", "every beat is actually legible on screen", False),
     ("ticked-items", "nothing wears a green check that isn't a benefit", True),
     ("treatment-fit", "each treatment has the material it needs", False),
     ("no-repeat-run", "no two beats in a row share a treatment", False),
+    ("no-redundancy", "no two beats make the same point twice", False),
     ("pacing", "no beat runs past nine seconds", False),
     ("title-match", "every title matches what's under it and the film "
                     "doesn't repeat itself", False),
@@ -2170,6 +2261,72 @@ def _finding(beat, what: str, issue: str, fix: str = None) -> dict:
 def _finding_title(f: dict) -> str:
     head = f"Beat {f['beat'] + 1}" if f["beat"] is not None else f["what"]
     return f"{head}: {f['issue']}"
+
+
+# Calibrated 2026-07-20 against runs/walkrec-palmier-live/beat-{0..5}.jpg (six
+# real beats: std 10.1 / 12.2 / 13.0 / 14.0 / 16.0 / 39.8) and two synthetic
+# controls — a flat #FAFAFA field reads 0.00, and a #FBFBFB block on white (the
+# white-on-white failure itself) reads 1.02. The populations are a factor of ten
+# apart; the floor sits between them, biased LOW so a marginal beat passes.
+_INK_FLOOR = 6.0
+_MIN_BEATS_AFTER_CUT = 3
+
+
+def _cut_allowed(stops, i, pending) -> bool:
+    """May beat `i` be cut, given the cuts already proposed this round? A lint
+    that cuts past these floors has replaced one dishonest film with an empty
+    one: a film needs beats, and a tour needs at least one real recording."""
+    remaining = [j for j in range(len(stops)) if j != i and j not in pending]
+    if len(remaining) < _MIN_BEATS_AFTER_CUT:
+        return False
+    if stops[i].get("seg") and not any(stops[j].get("seg") for j in remaining):
+        return False
+    return True
+
+
+def _frame_ink(still: str):
+    """How much VISIBLE structure a beat's still carries: the spread of the same
+    16x16 grayscale fingerprint the duplicate guard already takes (_still_fp —
+    ffmpeg, ~0.04s, no browser, no network, no decode). A frame whose ink never
+    varies is a frame with nothing on it, whatever the plan says is there.
+    Returns None when the still is missing: a check that could not look must not
+    be counted as one that looked and approved."""
+    fp = _still_fp(still)
+    if not fp:
+        return None
+    b = fp[0]
+    mean = sum(b) / 256.0
+    return (sum((x - mean) ** 2 for x in b) / 256.0) ** 0.5
+
+
+def _lint_blank(stops, beats):
+    """BEAT-VISIBLE: the pixel half of beat-content, measured on the RENDERED
+    artifact so it cannot be satisfied by intent. Every other data check reads
+    the plan, so a beat whose material renders white-on-white — or whose ticked
+    rows render without their labels — satisfies all of them and is blank to the
+    viewer (stripe.com 2026-07-20: three of five beats, certified as holding).
+
+    This is a BACKSTOP. Ink is chosen at assembly and a contrast floor belongs
+    there, where the failure is impossible rather than detected. What this adds
+    is the causes a contrast rule cannot know about: a missing asset, an element
+    sized to nothing, an entrance that never ran, a font that never loaded.
+
+    Returns (ran, findings) — `ran` only when a still was read for EVERY beat."""
+    out, looked, pending = [], 0, set()
+    for b in beats:
+        ink = _frame_ink(b.get("still") or "")
+        if ink is None:
+            continue
+        looked += 1
+        if ink >= _INK_FLOOR:
+            continue
+        fix = _CUT if _cut_allowed(stops, b["i"], pending) else None
+        if fix:
+            pending.add(b["i"])
+        out.append(_finding(b["i"], b.get("title", ""),
+                            f"renders blank to a viewer (ink {ink:.1f}, "
+                            f"floor {_INK_FLOOR:.0f})", fix))
+    return (bool(beats) and looked == len(beats)), out
 
 
 def _lint_content(stops):
@@ -2224,7 +2381,10 @@ def _lint_treatment_fit(stops):
         # a beat the ladder could no longer rescue and beat-content then had
         # to reject. With no material for any treatment, the honest fix is
         # the ladder's own bottom rung — cut the beat.
-        fallback = "check-list" if len(ticks) >= 2 else _CUT
+        # A fixed default is how a vocabulary repair became a repetition. Ask
+        # for check-list, but land on whatever unspent treatment holds here.
+        fallback = _pick_repair(stops, i, "check-list" if len(ticks) >= 2
+                                else "")
         if motif == "chip-sweep" and len(s.get("chips") or []) < 6:
             findings.append(_finding(i, s.get("title", ""),
                                      "chip-sweep below material floor",
@@ -2245,23 +2405,160 @@ def _lint_treatment_fit(stops):
     return findings
 
 
+_STOPWORDS = frozenset(
+    "a an and are as at be built by for from get how in into is it its let of "
+    "on or our that the their they this to up us we with you your".split())
+
+
+def _title_words(t: str):
+    """A title's meaningful words, in order, for the redundancy comparison.
+    Stopwords out so two titles are compared on what they CLAIM rather than on
+    the scaffolding they share with every other line of marketing copy."""
+    return [w for w in re.findall(r"[a-z0-9]+", (t or "").lower())
+            if w not in _STOPWORDS and len(w) > 2]
+
+
+def _lint_redundancy(stops):
+    """NO-REDUNDANCY: two beats making one point, in one visual form.
+
+    The critic sees these and says so — "Beat 2: Near-duplicate of beat 0's
+    title/promise, redundant hero beat" (stripe.com 2026-07-20) — but its menu
+    is per-beat while redundancy is a property of a PAIR, so it reaches for
+    `none`, the finding carries no fix, and the film opens with two beats
+    making one point. Decided here instead, where a fix can be attached.
+
+    Narrow on purpose. A pair counts only when both beats wear the SAME
+    treatment (the thing that makes them read as one long beat) and either
+    close on the same claim or are near-identical throughout. The LATER beat
+    goes and the film runs one beat shorter — a shorter honest film beats a
+    padded one, and dropping a beat cannot invent copy."""
+    out, pending = [], set()
+    seen = []
+    for i, s in enumerate(stops):
+        motif = "recording" if s.get("seg") else (s.get("motif") or "")
+        words = _title_words(s.get("title", ""))
+        if not words:
+            seen.append((i, motif, words))
+            continue
+        for j, jmotif, jwords in seen:
+            if jmotif != motif or not jwords:
+                continue
+            # SAME CLOSING CLAIM: two titles ending on the same two content
+            # words promise the same thing, however differently they open.
+            tail = words[-2:] == jwords[-2:] and len(words) >= 2
+            a, b = set(words), set(jwords)
+            near = len(a & b) / max(len(a | b), 1) >= 0.6
+            if not (tail or near):
+                continue
+            fix = _CUT if _cut_allowed(stops, i, pending) else None
+            if fix:
+                pending.add(i)
+            out.append(_finding(
+                i, s.get("title", ""),
+                f"says what beat {j + 1} already said, in the same "
+                f"treatment ({motif})", fix))
+            break
+        seen.append((i, motif, words))
+    return out
+
+
 def _lint_repeats(stops):
     """NO-REPEAT-RUN: two neighbouring beats wearing the same treatment read
-    as one long beat."""
+    as one long beat.
+
+    Recordings are NOT exempt. They used to be, so a film could open on two
+    consecutive screen recordings while this check passed and the handover then
+    claimed "no two beats in a row share a treatment" (stripe.com 2026-07-20,
+    beats 1 and 2). A check may not claim more than it tests. There is no
+    automatic fix — a recording cannot be swapped to another treatment and
+    dropping one is the director's call — so this reaches the customer as a
+    disclosure, which is exactly why P5 had to stop reporting only the first."""
     findings, prev = [], None
     for i, s in enumerate(stops):
         motif = "recording" if s.get("seg") else s.get("motif", "")
-        if motif == prev and motif != "recording":
+        if motif and motif == prev:
             findings.append(_finding(i, s.get("title", ""),
                                      f"adjacent repeated treatment ({motif})"))
         prev = motif
     return findings
 
 
+# ---- THE VARIETY TIE-BREAK ------------------------------------------------
+# Treatment is a FILM-WIDE property that was being decided one beat at a time.
+# A repair that reads only its own beat re-spends a form the film has already
+# worn: stripe.com 2026-07-20 swapped a beat to stat-pop while another stat-pop
+# stood two beats along, and the vocabulary violation it was "fixing" was not
+# real (see _SWAP_TARGETS). Half of all swap repairs in the run history created
+# a duplicate this way.
+#
+# THIS IS A TIE-BREAK AND NOTHING MORE. Every candidate below has ALREADY
+# cleared its own material floor, so variety still never outranks content — the
+# rule deleted at the top of the assembly ("a beat's treatment now always
+# follows its material") stays deleted. All this does is stop two beats
+# spending the same form when a second form fits the same material equally
+# well, and degrade to the LEAST-USED option instead of a fixed default.
+
+
+def _assigned_motifs(stops, skip=None):
+    """What the film has already spent, counted by treatment. `skip` is the stop
+    being repaired — its own current treatment is not competition for itself."""
+    used = {}
+    for i, s in enumerate(stops):
+        if i == skip or s.get("seg"):
+            continue
+        m = s.get("motif") or ""
+        if m:
+            used[m] = used.get(m, 0) + 1
+    return used
+
+
+def _pick_repair(stops, bi, preferred, menu=None):
+    """The treatment a repair should actually land on.
+
+    Order: the requested target when it holds AND the film has not spent it;
+    otherwise the LEAST-USED candidate that clears its own material floor on
+    this beat; otherwise _CUT. Never returns the treatment the beat already
+    carries (a no-op that still costs a full re-render), and never returns one
+    an immediate neighbour is wearing.
+
+    Callers decide what _CUT means for them — the lint takes it as its fix, the
+    critic and the director take it as "reject this swap"."""
+    s = stops[bi]
+    used = _assigned_motifs(stops, skip=bi)
+    current = s.get("motif") or ""
+    neighbours = {stops[j].get("motif") for j in (bi - 1, bi + 1)
+                  if 0 <= j < len(stops) and not stops[j].get("seg")}
+    order = tuple(menu or _SWAP_TARGETS)
+
+    def holds(m):
+        return (bool(m) and m != current and m not in neighbours
+                and _refine_motif(m, s, set(used)) == m)
+
+    if preferred and preferred not in used and holds(preferred):
+        return preferred
+    cands = [m for m in order if holds(m)]
+    if cands:
+        return min(cands, key=lambda m: (used.get(m, 0), order.index(m)))
+    # Nothing unspent fits. CONTENT WINS: take the requested target even though
+    # it repeats, rather than cut a beat that has real material to show.
+    if preferred and holds(preferred):
+        return preferred
+    return _CUT
+
+
 _CRITIC_MENU = ("none", "drop", "swap_treatment")
-_SWAP_TARGETS = ("check-list", "chip-sweep", "kinetic-line", "quote-card",
-                 "people-wall", "stat-pop", "house", "chat", "globe", "card",
-                 "tag")
+# THE MENU IS THE VOCABULARY. The prompt shows this tuple to the critic as the
+# set of legal treatments, so anything assignable that is missing from it reads
+# to the critic as a violation to be repaired: price-card is a first-class
+# treatment with its own keywords, floor exemption and renderer branch, and the
+# critic reported it as "not in allowed vocabulary" and swapped a correct beat
+# away from it (stripe.com 2026-07-20). Ordered least-generic first — the
+# variety tie-break uses this order to break ties between equally-unused
+# candidates, so the specific vignettes should come before the line art.
+_SWAP_TARGETS = ("request-table", "context-cards", "chat-exchange",
+                 "price-card", "quote-card", "people-wall", "logo-wall",
+                 "chip-sweep", "stat-pop", "check-list", "kinetic-line",
+                 "house", "chat", "globe", "card", "tag")
 
 
 def _critic_review(run_dir, stops, beats, brain="sonnet5"):
@@ -2280,37 +2577,60 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
         import validate_planner as vp
     except Exception:
         return False, [], []
+    # ONE BLOCK PER BEAT, image immediately under its own label. The stills used
+    # to be appended as an anonymous tail after a single text block listing every
+    # beat, so image-to-beat correspondence was positional and implicit \u2014 and the
+    # ffmpeg extraction that produces them runs check=False, so one missing still
+    # silently shifted every later image against the wrong beat.
     plan_lines = []
     content = []
+    shown = 0
     for b in beats:
         s = stops[b["i"]] if b["i"] < len(stops) else {}
-        plan_lines.append(
-            f"beat {b['i']}: title=\u201c{b['title']}\u201d "
-            f"treatment={b['treatment']} layout={b['layout']} "
-            f"material={ (s.get('details') or [])[:3] }")
+        # NO ANSWER KEY. `material=[...]` handed the model the intended content
+        # as text beside the frame, so a beat whose copy rendered white-on-white
+        # still "matched its title" \u2014 the model reconciled toward the legible
+        # input, which was the plan (stripe.com 2026-07-20). The title is the
+        # claim under test; what the beat shows must come from the image.
+        line = (f"beat {b['i']}: title=\u201c{b['title']}\u201d "
+                f"treatment={b['treatment']} layout={b['layout']}")
+        plan_lines.append(line)
         still = b.get("still")
         if still and os.path.exists(still):
             with open(still, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
+            content.append({"type": "text", "text": f"--- {line}"})
             content.append({"type": "image_url",
                             "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+            shown += 1
     sys_prompt = (
-        "You review a product launch film. Judge STORY and COHERENCE: does "
-        "each beat's title match what the beat shows, is any beat empty or "
-        "redundant, does the sequence flow? You may ONLY act via this menu "
-        "per beat: none | drop | swap_treatment (to one of: "
+        "You review a product launch film. Each beat below is followed by a "
+        "still from the RENDERED film. Judge the IMAGE, not the description. "
+        "FIRST, for each still: can you actually read every word of text in "
+        "it? Text the same colour as its background, text clipped by its box, "
+        "a list whose rows have no labels, or a frame that is essentially "
+        "empty is a FAILED beat however good the plan behind it was — say so "
+        "and mark it an issue. THEN judge story: does the title match what "
+        "the image shows, is any beat redundant with another, does the "
+        "sequence flow? You may ONLY act via this menu per beat: none | drop "
+        "| swap_treatment (to one of: "
         + ", ".join(_SWAP_TARGETS) + "). You cannot write copy. Return STRICT "
         'JSON: [{"beat": <index>, "verdict": "ok"|"issue", "issue": "<short '
         'reason>", "action": "none"|"drop"|"swap_treatment", "to": "<target '
         'or empty>"}] — one object per beat, no prose.')
     user_content = ([{"type": "text", "text": "\n".join(plan_lines)}] + content
                     if content else "\n".join(plan_lines))
+    looked = shown == len(beats) and bool(beats)
     try:
         raw = vp.call_model([{"role": "system", "content": sys_prompt},
                              {"role": "user", "content": user_content}],
                             brain=brain) or ""
     except (Exception, SystemExit):
         try:
+            # TEXT-ONLY RETRY. This path has not seen the film, and a check that
+            # ran blind must not license the words "Watched it back" — rule 2
+            # one level deeper: the call succeeded, the LOOK did not.
+            looked = False
             raw = vp.call_model([{"role": "system", "content": sys_prompt},
                                  {"role": "user",
                                   "content": "\n".join(plan_lines)}],
@@ -2345,14 +2665,20 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
             to = str(c.get("to") or "")
             if to not in _SWAP_TARGETS or stops[bi].get("seg"):
                 continue
-            if _refine_motif(to, stops[bi], set()) != to:
-                continue  # target's material floor must hold
+            # The floor AND the film's other beats. Passing set() here read the
+            # target's material while ignoring what the rest of the cut had
+            # already spent, so a legal swap could still collide.
+            to = _pick_repair(stops, bi, to)
+            if to == _CUT:
+                continue  # nothing holds on this beat; leave it alone
+            c = dict(c, to=to)
         if act != "none":
             actions.append({"beat": bi, "action": act,
                             "to": str(c.get("to") or ""), "issue": short})
     # COVERAGE, NOT PRESENCE: a reply about four of six beats has not
-    # evaluated "every title matches what's under it".
-    ran = bool(beats) and all(b["i"] in seen for b in beats)
+    # evaluated "every title matches what's under it" — and neither has a
+    # reply that covered every beat without seeing any of them.
+    ran = bool(beats) and all(b["i"] in seen for b in beats) and looked
     return ran, actions, objections
 
 
@@ -2369,11 +2695,14 @@ def _run_checks(run_dir, stops, beats, film_s, brain="sonnet5"):
                if not (a["action"] == "swap_treatment"
                        and a["beat"] < len(stops)
                        and stops[a["beat"]].get("motif") == a["to"])]
+    blank_ran, blank_findings = _lint_blank(stops, beats)
     results = {
         "beat-content": (True, _lint_content(stops)),
+        "beat-visible": (blank_ran, blank_findings),
         "ticked-items": (True, _lint_ticks(stops)),
         "treatment-fit": (True, _lint_treatment_fit(stops)),
         "no-repeat-run": (True, _lint_repeats(stops)),
+        "no-redundancy": (True, _lint_redundancy(stops)),
         "pacing": (True, _lint_pacing(beats, film_s)),
         _CRITIC_CHECK: (critic_ran, objections if critic_ran else []),
     }
@@ -2451,6 +2780,18 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats, film_s,
         if not open_findings and not actions:
             break   # ALL terminal reporting happens once, below
         lint_fixes = [f for c in checks for f in c["findings"] if f["fix"]]
+        # AN ACTION THAT COULD NOT BE APPLIED IS NOT A FIX. The round budget is
+        # a cost decision (a re-render is ~4 minutes) and it stands — but the
+        # last round used to emit "Action: drop" to the feed and then break
+        # before applying it, so the thread showed a decision the film never
+        # made (stripe.com 2026-07-20, beat 4). Say so instead.
+        if rnd >= _REVIEW_ROUNDS and (lint_fixes or actions):
+            emit(run_dir, "review.note",
+                 f"{len(lint_fixes) + len(actions)} fix"
+                 f"{'es' if len(lint_fixes) + len(actions) != 1 else ''} found "
+                 "with no round left to apply",
+                 "The review budget is one re-cut. These are reported below "
+                 "rather than made.")
         if rnd >= _REVIEW_ROUNDS or (not lint_fixes and not actions):
             break
         _n = len(lint_fixes) + len(actions)
@@ -2529,9 +2870,15 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats, film_s,
                         for c in blocking))
     # Not blocking, but not clean: the film ships and the handover names what
     # is still wrong (build_tour_film reads `unresolved`).
+    # ALL OF THEM. `unresolved[0]` reported one issue where the reject event
+    # beside it counted three (stripe.com 2026-07-20 said "runs 9.1s" and
+    # dropped both title-match findings on the floor). The disclosure is the
+    # only place a non-blocking finding ever reaches the customer, so it does
+    # not get to choose which ones.
     _say(run_dir,
          _review_claim(checks)
-         + " What I couldn't settle: " + unresolved[0]["issue"] + ".")
+         + " What I couldn't settle: "
+         + "; ".join(f["issue"] for f in unresolved) + ".")
     return film, beats, film_s, unresolved
 
 
