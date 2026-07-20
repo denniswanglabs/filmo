@@ -92,9 +92,8 @@ export async function saveEditedProps(input: {
 
 
 // ─────────────────────────────── Credits (beta) ───────────────────────────────
-// 1 video = 100 credits. Daily cap 300 (rolling 24h), lifetime cap 1,500 while
-// in beta. The ledger is append-only (spends negative, refunds positive, run_id
-// links a spend to its build); balances are DERIVED, never stored.
+// The ledger is append-only (spends negative, refunds positive, run_id links a
+// spend to its build); balances are DERIVED, never stored.
 // CREDITS ARE TOKENS. 1 credit = 35 tokens of model work, so the price of
 // a thing is what it actually costs to think about:
 //   a film  ≈ 22,400 tokens (plan ~9k + a critic that SEES 6 stills ~13k)
@@ -213,10 +212,11 @@ export async function createBuild(input: {
           'Filmo’s free launch week has ended, so new builds are paused for now. Thanks for trying it!',
       }
     }
-    // CREDITS (beta): 1 video = 100 credits; 300/day rolling 24h (= 3 films),
-    // 1,500 lifetime. Balance is the SUM of an append-only ledger (spends are
-    // negative; failed builds are refunded by the worker), so failed attempts
-    // do not consume the allowance. Server-side, admin client — can't be gamed.
+    // CREDITS (beta): costs and caps are the constants above — never restate
+    // them here, or the comment rots the moment they move. Balance is the SUM
+    // of an append-only ledger (spends negative; failed builds refunded by the
+    // worker), so failed attempts do not consume the allowance. Server-side,
+    // admin client — can't be gamed.
     const bal = await creditBalances(db, me.id)
     if (bal.dailyUsed + VIDEO_CREDIT_COST > DAILY_CREDIT_CAP) {
       return {
@@ -915,4 +915,103 @@ export async function sendDirectorMessage(
     }]))
   if (jobErr) return { error: 'enqueue-failed' as const }
   return { ok: true as const, seq }
+}
+
+// ─────────────────────────────── Feedback ───────────────────────────────
+// DURABILITY BEFORE DELIVERY. A note is STORED first and notified second, so
+// what someone took the trouble to write survives a mail provider that is
+// rate-limited, misconfigured, or simply not wired yet. Nothing about sending
+// mail is a precondition for accepting it — `notified` on the row records
+// whether it actually reached an inbox, so a later digest can sweep up
+// everything that didn't rather than re-sending blindly.
+const FEEDBACK_MAX = 5000
+
+/** Best-effort notification. Returns whether an inbox actually received it.
+ *  Never throws and never blocks acceptance — a false here means the note is
+ *  safely in the table waiting to be swept, not that it was lost. */
+async function notifyFeedback(body: string): Promise<boolean> {
+  const resend = process.env.RESEND_API_KEY || ''
+  const hook = process.env.FEEDBACK_WEBHOOK_URL || ''
+  try {
+    if (resend) {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${resend}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: process.env.FEEDBACK_FROM || 'Filmo <onboarding@resend.dev>',
+          to: [OWNER_EMAIL],
+          subject: 'Filmo feedback',
+          text: body,
+        }),
+      })
+      return r.ok
+    }
+    if (hook) {
+      const r = await fetch(hook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: OWNER_EMAIL, subject: 'Filmo feedback', text: body }),
+      })
+      return r.ok
+    }
+  } catch { /* the row is already safe; delivery is the only thing that failed */ }
+  return false
+}
+
+/** Take a note from inside the studio. Signed-out senders are accepted — we
+ *  would rather hear it anonymously than refuse it. */
+export async function sendFeedback(input: {
+  message: string
+  accessToken?: string | null
+  /** Where they were standing: a run id, a route. Makes a vague note actionable. */
+  context?: string
+}): Promise<{ ok: true; notified: boolean } | { ok: false; message: string }> {
+  const message = (input.message || '').trim()
+  if (!message) {
+    return { ok: false as const, message: 'Write a line first and I’ll pass it on.' }
+  }
+  if (message.length > FEEDBACK_MAX) {
+    return {
+      ok: false as const,
+      message: `That’s longer than ${FEEDBACK_MAX.toLocaleString()} characters — trim it and send again.`,
+    }
+  }
+  const me = input.accessToken ? await verifyUser(input.accessToken) : null
+  const db = adminClient()
+
+  // 1) STORE. If this fails there is nothing to be optimistic about, so it is
+  //    the only step that can reject the note.
+  const { data, error } = await withRetry(() =>
+    db.database.from('feedback').insert([{
+      user_id: me?.id ?? null,
+      email: me?.email ?? '',
+      message,
+      context: (input.context || '').slice(0, 300),
+    }]).select('id'),
+  )
+  if (error) {
+    return {
+      ok: false as const,
+      message: 'That didn’t save — try again in a moment.',
+    }
+  }
+
+  // 2) NOTIFY. Best-effort, and its failure is invisible to the sender: from
+  //    their side the note landed, because it did.
+  const notified = await notifyFeedback(
+    [
+      `From: ${me?.email || 'anonymous'}`,
+      input.context ? `Context: ${input.context}` : '',
+      '',
+      message,
+    ].filter(Boolean).join('\n'),
+  )
+  const row = (data as { id: string }[] | null)?.[0]
+  if (notified && row?.id) {
+    await db.database.from('feedback').update({ notified: true }).eq('id', row.id)
+  }
+  return { ok: true as const, notified }
 }

@@ -53,13 +53,13 @@
   #blobwrap { width:36px; height:36px; position:relative; flex-shrink:0; }
   #blob { position:absolute; inset:0;
           background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
-          animation:blobmorph 3.2s ease-in-out infinite, blobspin 8s linear infinite; }
+          border-radius:44% 56% 52% 48% / 50% 46% 54% 50%; }
   /* The mark's lens hole survives the melt — and WANDERS: the white circle
      drifts slowly around the body on the SAME 3.2s clock as the deformation,
      so hole and blob read as one organism. */
   #blob::after { content:""; position:absolute; width:34%; height:34%;
                  right:16%; top:26%; background:#fff; border-radius:50%;
-                 animation:holemorph 3.2s ease-in-out infinite; }
+                 }
   @keyframes blobmorph {
     0%,100% { border-radius:58% 42% 55% 45% / 48% 60% 40% 52%; transform:scale(1); }
     33% { border-radius:42% 58% 38% 62% / 60% 42% 58% 40%; transform:scale(0.92); }
@@ -139,8 +139,11 @@ const VERBS = { read:"Scouting", decide:"Framing", film:"Rolling",
                 design:"Cutting", assemble:"Printing", review:"Grading" };
 const THREAD_KINDS = new Set(["run.start", "read.page", "read.quotes",
   "decide.plan", "decide.guard", "film.recording", "film.shot", "design.beat",
-  "review.lint", "review.finding", "review.pass", "review.apply",
-  "review.done", "assemble.film", "run.error"]);
+  "review.lint", "review.finding", "review.pass", "review.reject",
+  "review.apply", "review.done", "assemble.film", "run.error", "say.step"]);
+// Prose kinds render as SPEECH (production parity: say.step is the agent
+// talking; everything else is a collapsed work receipt).
+const PROSE_KINDS = new Set(["say.step", "chat.director"]);
 
 function reduce() {
   const S = { pages:[], plan:[], beats:[], review:[], film:"", filmSeq:0,
@@ -170,6 +173,7 @@ function threadItems(S) {
   for (const m of localMsgs) items.push(m);
   for (const e of evts) {
     if (!THREAD_KINDS.has(e.kind)) continue;
+    if (PROSE_KINDS.has(e.kind)) { items.push({ ts: e.ts, kind: "dir", text: e.title }); continue; }
     items.push({ ts: e.ts, kind: "work", e });
   }
   return items.sort((a, b) => a.ts - b.ts);

@@ -349,21 +349,29 @@ function mapLedgerToRun(ledger) {
 // large upload mid-flight. The SDK uses Node's undici fetch, which keep-alives /
 // pools connections per origin by default, so steady-state calls reuse the warm
 // connection (the ~0.8s cold-TLS penalty only hits the first call after restart).
-// CREDITS: a failed build refunds its charge (the web charged 100 at
-// creation). The (run_id, reason) partial unique index makes this idempotent
-// — a run that fails twice (retry + wall-clock) refunds once. Best-effort:
-// a refund that loses a race never blocks the failure path.
+// CREDITS: a failed build gives back exactly what it took. The refund MIRRORS
+// the spend row instead of restating the price — a literal here is a second
+// source of truth for the tariff and silently desyncs the moment the web's
+// VIDEO_CREDIT_COST moves (it already had, sitting at a stale 640/"charged 100"
+// while the comment and the constant disagreed). Reading the spend also means
+// a run that was never charged — owner-exempt, or a charge whose insert lost
+// its retries — cannot be refunded into existence.
+// The (run_id, reason) partial unique index makes this idempotent — a run that
+// fails twice (retry + wall-clock) refunds once. Best-effort: a refund that
+// loses a race never blocks the failure path.
 async function refundCredits(runId) {
   if (!runId) return
   try {
-    const { data: run } = await ifCall('runs.select(refund)',
-      () => db.database.from('runs').select('user_id').eq('id', runId).maybeSingle())
-    const uid = run && run.user_id
-    if (!uid) return
+    const { data: spend } = await ifCall('credit_ledger.select(spend)',
+      () => db.database.from('credit_ledger')
+        .select('user_id, delta').eq('run_id', runId).eq('reason', 'video')
+        .maybeSingle())
+    // No spend row → nothing was charged → nothing to give back.
+    if (!spend || !spend.user_id || !(spend.delta < 0)) return
     const { error } = await db.database.from('credit_ledger').insert([{
-      user_id: uid, delta: 640, reason: 'refund', run_id: runId,
+      user_id: spend.user_id, delta: -spend.delta, reason: 'refund', run_id: runId,
     }])
-    if (!error) log(`  credits: refunded run ${runId}`)
+    if (!error) log(`  credits: refunded ${-spend.delta} for run ${runId}`)
   } catch (e) { log('  credits refund error', String(e && e.message || e)) }
 }
 

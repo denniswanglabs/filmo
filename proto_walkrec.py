@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -741,7 +742,15 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                 "You are planning the SHOT LIST for a product launch video. From "
                 "the site text below, pick up to %d moments a potential customer "
                 "most cares about (the core promise, the standout capability, "
-                "pricing/social proof), ordered most important first. Return "
+                "pricing/social proof), ordered most important first. "
+                # PAGE SPREAD IS THE BRIEF, not a post-filter: the recorder
+                # films one shot per page, so moments stacked on one page
+                # cannot become footage no matter how good they are.
+                "SPREAD THEM ACROSS PAGES: at most ONE moment per [PAGE ...] "
+                "slug, and cover as many different pages as you can — this is "
+                "a tour, and a tour that revisits one page is not one. Only "
+                "return a second moment from a page when the site has fewer "
+                "pages than moments worth filming. Return "
                 "STRICT JSON: an array of objects "
                 '{"title": a short VERBATIM HEADING copied exactly from the '
                 "text — a real heading, UNDER 60 characters and at most 8 words, "
@@ -774,10 +783,21 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
             # PROPERTY") — stable sort keeps the brain's importance order
             # within each class.
             cand = sorted(cand, key=lambda c: str(c.get("title") or "").isupper())
-            stops = []
-            for c in cand[:max_stops * 2]:
-                if len(stops) >= max_stops:
-                    break
+            # URL DIVERSITY IS A PLANNING CONSTRAINT (F14). The recorder
+            # keeps ONE shot per page, so a stop sharing a page with an
+            # earlier stop can never become footage — it is a graphic beat
+            # the moment it is chosen, whatever the plan pretends. Six stops
+            # that resolved to two filmable URLs shipped a "tour" that was
+            # two-thirds motion graphics (insforge.dev 2026-07-19); the
+            # guards each did the right thing with a plan that could not
+            # work. So the plan is built filmable-first:
+            #   PASS 1 takes the most important moment on each DISTINCT page.
+            #   PASS 2 backfills same-page moments, DECLARED graphic-only and
+            #          never outnumbering the filmable stops.
+            # A site with two worthwhile pages therefore yields a SHORTER
+            # film, which is the honest outcome — never a padded one.
+            stops, spare = [], []
+            for c in cand[:max_stops * 3]:
                 title = str(c.get("title") or "").strip()
                 slug = str(c.get("page") or "home").strip()
                 target = str(c.get("target") or title).strip()
@@ -789,44 +809,26 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                     continue
                 if slug not in page_urls:
                     slug = "home"
-                # DIVERSITY: after the first stop, skip targets living in the
-                # hero region of a page another stop already films (two shots
-                # of the same fold made v4's footage repeat).
-                page_text_lc = pages.get(
-                    next((k for k, u in page_urls.items() if u == page_urls[slug]), "home"),
-                    "").lower()
-                hero_lc = page_text_lc[:500]
-                same_page_used = any(s["page"] == page_urls[slug] for s in stops)
-                if stops and same_page_used and target.lower() in hero_lc:
+                st = {"title": title, "page": page_urls[slug],
+                      "target": target,
+                      "details": _verbatim_details(c, corpus_lc),
+                      "entities": _verbatim_entities(c, corpus_lc)}
+                if any(s["title"].lower() == title.lower()
+                       for s in stops + spare):
                     continue
-                if any(s["title"].lower() == title.lower() for s in stops):
-                    continue
-                stops.append({"title": title, "page": page_urls[slug],
-                              "target": target,
-                              "details": _verbatim_details(c, corpus_lc),
-                              "entities": _verbatim_entities(c, corpus_lc)})
-            if len(stops) < max_stops:
-                # Top-up pass: relax only the hero-region diversity rule (the
-                # strictest filter) — on dense one-pagers it can kill every
-                # candidate and leave a one-stop film.
-                for c in cand[:max_stops * 2]:
-                    if len(stops) >= max_stops:
-                        break
-                    title = str(c.get("title") or "").strip()
-                    slug = str(c.get("page") or "home").strip()
-                    target = str(c.get("target") or title).strip()
-                    if not title or _norm_ws(title) not in corpus_lc:
-                        continue
-                    if len(title) > 60 or len(title.split()) > 8:
-                        continue
-                    if slug not in page_urls:
-                        slug = "home"
-                    if any(s["title"].lower() == title.lower() for s in stops):
-                        continue
-                    stops.append({"title": title, "page": page_urls[slug],
-                                  "target": target,
-                                  "details": _verbatim_details(c, corpus_lc),
-                                  "entities": _verbatim_entities(c, corpus_lc)})
+                # The old hero-region rule (skip a target in the hero fold of
+                # a page another stop films) is SUBSUMED: no two filmable
+                # stops share a page at all now.
+                if any(s["page"] == st["page"] for s in stops):
+                    spare.append(st)
+                elif len(stops) < max_stops:
+                    stops.append(st)
+            filmable = len(stops)
+            for st in spare:
+                if len(stops) >= max_stops or len(stops) - filmable >= filmable:
+                    break
+                st["graphic_only"] = True
+                stops.append(st)
             stops = stops or None
     except (Exception, SystemExit) as e:
         print(f"[tour] brain plan failed ({e}); deterministic fallback",
@@ -902,9 +904,15 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
              and any(m in ln.lower() for m in _ENTITY_MARKERS)),
             "")
         if marker_line:
+            # EARNED, AND A GRAPHIC BY NATURE: the wall exists only when the
+            # site names >=4 partners with real marks, and it is a vignette
+            # rather than footage — so it declares itself graphic-only up
+            # front instead of being discovered as unfilmable at the
+            # recorder, and it is exempt from the graphics-vs-filmable cap.
             stops.append({"title": marker_line, "page": url,
                           "target": marker_line, "details": [],
                           "entities": ents, "chips": [],
+                          "graphic_only": True, "earned": True,
                           "marks": {m["name"]: m.get("src", "")
                                     for m in marks}})
             # CONTENT-ONCE: the wall owns these names — no other beat may
@@ -932,13 +940,41 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
                      f"Harvested {len(s['quotes'])} real quotes from /{marker_slug}",
                      (s["quotes"][0]["q"][:90] + "…") if s.get("quotes") else "")
                 break
+    # PAGE-ONCE, ENFORCED AT THE END (F14): every path into this list passes
+    # through here — the brain's picks, the promoted hero, the synthetic hero
+    # stop, the deterministic fallback and the ecosystem wall. The first stop
+    # on a page is the filmable one; any later stop on that page declares
+    # itself a graphic beat in the PLAN, so the film's shape is decided while
+    # it can still be reasoned about rather than discovered one wasted
+    # capture at a time. ONE enforcement point, so no path can bypass it.
+    # RE-DERIVED, NOT INHERITED: the flag is recomputed in FINAL beat order,
+    # because the order changes after selection (hero promotion reorders the
+    # list). Carrying a stale flag forward put a graphic first and the
+    # recording second on the same page — the reverse of what the hero
+    # promotion above is for. Only the ecosystem wall keeps its own flag: it
+    # is a vignette by nature, not because a page was taken.
+    claimed = set()
+    for s in stops:
+        if s.get("earned"):
+            continue
+        if s["page"] in claimed:
+            s["graphic_only"] = True
+        else:
+            s["graphic_only"] = False
+            claimed.add(s["page"])
+    _filmable = sum(1 for s in stops if not s.get("graphic_only"))
     emit(run_dir, "decide.plan",
          f"Planned {len(stops)} moments a customer cares about",
-         "\n".join(f"{i + 1}. {s['title']}" for i, s in enumerate(stops)))
+         "\n".join(f"{i + 1}. {s['title']}"
+                   + (" (graphic — page already covered)"
+                      if s.get("graphic_only") and not s.get("earned")
+                      else " (graphic)" if s.get("graphic_only") else "")
+                   for i, s in enumerate(stops)))
     _say(run_dir,
-         f"Here's the tour I'd film — {len(stops)} moments, opening on "
-         f"\u201c{stops[0]['title']}\u201d and closing on "
-         f"\u201c{stops[-1]['title']}\u201d. Rolling now: I glide through "
+         f"Here's the tour I'd film — {len(stops)} moments across "
+         f"{_filmable} page{'s' if _filmable != 1 else ''} I can record, "
+         f"opening on “{stops[0]['title']}” and closing on "
+         f"“{stops[-1]['title']}”. Rolling now: I glide through "
          "each page rather than cutting between screenshots, so it reads "
          "like someone showing you around.")
     return stops
@@ -1035,6 +1071,101 @@ def _is_stat_line(line: str) -> bool:
     return bool(_STAT_RE.search(line or ""))
 
 
+# ---- THE GREEN-CHECK GATE -------------------------------------------------
+# A ticked row asserts "the product does this for you". Harvested strings are
+# verbatim by construction but NOT automatically benefit-shaped: "Test Failed"
+# is the status label of a preview-branch demo widget, and the check-list
+# treatment promoted it into a benefits list under a green tick (insforge.dev
+# 2026-07-19) — the words traced to the page, the meaning was inverted.
+# SHAPE decides what may wear a check, never provenance.
+# The gate is deliberately biased toward DROPPING: "No credit card needed"
+# reads as a negation and goes with it. A list one item shorter is honest; a
+# list padded back up with a failure state is not.
+_TICKED_MOTIFS = frozenset({"check-list", "price-card"})
+
+_STATUS_WORDS = (
+    "failed", "failure", "error", "errors", "denied", "rejected", "invalid",
+    "expired", "unavailable", "offline", "timeout", "timed out", "unknown",
+    "unauthorized", "forbidden", "missing", "broken", "crashed", "deprecated",
+    "disabled", "blocked", "warning", "pending", "aborted", "cancelled",
+    "canceled", "declined", "revoked", "suspended", "throttled", "not found",
+    "coming soon", "beta", "waitlist",
+)
+_NEGATION_START = ("no ", "not ", "never", "cannot", "can't", "won't",
+                   "don't", "doesn't", "isn't", "aren't", "without ")
+# A short line ending in a past participle reports an OUTCOME ("Test Failed",
+# "Build Passed", "Payment Declined") — including the ones that sound good.
+_PAST_OUTCOME = re.compile(r"\b[a-z]{3,}ed\b\s*$", re.I)
+
+
+def _is_benefit_shaped(item: str) -> bool:
+    """May this line wear a green check? A status, an error, a negation or a
+    bare past-tense outcome describes what HAPPENED on a page, not what the
+    product does for you — each is true as text and a lie under a tick."""
+    t = (item or "").strip()
+    if not t:
+        return False
+    lc = t.lower()
+    if any(re.search(r"\b" + re.escape(w) + r"\b", lc) for w in _STATUS_WORDS):
+        return False
+    if lc.startswith(_NEGATION_START):
+        return False
+    if len(t.split()) <= 3 and _PAST_OUTCOME.search(lc):
+        return False
+    return True
+
+
+def _beat_lines(s: dict, motif: str):
+    """The detail lines a beat renders. Treatments that TICK their rows only
+    ever receive rows that may be ticked. The gate lives at the one place
+    lines reach the props, so a treatment added later cannot bypass it."""
+    details = s.get("details") or []
+    return _tickable(details) if motif in _TICKED_MOTIFS else details
+
+
+def _tickable(items):
+    """The subset of a list eligible for a green check. Callers use the
+    LENGTH of this for a treatment's material floor and the list itself for
+    the beat's lines, so a gated-out item can never be counted toward a floor
+    it then fails to fill."""
+    return [i for i in (items or []) if _is_benefit_shaped(i)]
+
+
+def _shown_material(s: dict, motif: str):
+    """What the beat will ACTUALLY put on screen under `motif` — the same list
+    its vignette renders. The degrade ladder's bottom rung and the reviewer's
+    beat-content check both read this, so "has content" means ONE thing in the
+    film and in the review, and a new treatment has one place to declare
+    itself. The line-art tier returns [] on purpose: a drawing shows nothing
+    of the site."""
+    if s.get("seg"):
+        return [s["seg"]]
+    details = s.get("details") or []
+    if motif in _TICKED_MOTIFS:
+        return _tickable(details)
+    if motif == "chip-sweep":
+        return (s.get("chips") or [])[:10]
+    if motif == "logo-wall":
+        return s.get("entities") or []
+    if motif == "quote-card":
+        return s.get("quotes") or []
+    if motif == "people-wall":
+        return (s.get("quotes") or []) or [d for d in details if "@" in d]
+    if motif == "stat-pop":
+        return [d for d in details if _is_stat_line(d)]
+    if motif == "kinetic-line":
+        t = s.get("title") or ""
+        return [t] if len(t.split()) >= 3 else []
+    if motif in ("request-table", "context-cards", "chat-exchange"):
+        return details
+    return []
+
+
+# The ladder's bottom rung returns this instead of a treatment: there is no
+# treatment that could carry this stop, so the stop leaves the film.
+_CUT = "cut"
+
+
 def _refine_motif(motif: str, s: dict, used) -> str:
     """Content beats keywords: a chip-sweep needs >=6 real chips; a stat-pop
     needs a number; anything data-rich beats line art; a punchy title beats a
@@ -1042,6 +1173,13 @@ def _refine_motif(motif: str, s: dict, used) -> str:
     import re as _re
     details = s.get("details") or []
     chips = s.get("chips") or []
+    # EVERY check-list rung below counts TICKABLE rows, not raw harvested
+    # lines: a treatment's material floor has to be measured in the material
+    # it will actually SHOW, or the ladder lands on a treatment that renders
+    # less than it was chosen for (three harvested lines, one of them "Test
+    # Failed", is a two-row list — see _is_benefit_shaped).
+    ticks = _tickable(details)
+    people = sum(1 for d in details if _re.search(r"@", d))
     # A WALL NEEDS MARKS: a logo wall whose tiles are mostly initial badges
     # is the system announcing it has no logos (eight lettered circles under
     # "Works perfectly with", insforge.dev 2026-07-19). Fewer than half the
@@ -1053,17 +1191,14 @@ def _refine_motif(motif: str, s: dict, used) -> str:
         if len(ents) < 4 or real * 2 < len(ents):
             motif = "chip-sweep" if len(chips) >= 6 else "check-list"
     if motif == "chip-sweep" and len(chips) < 6:
-        motif = "check-list" if len(details) >= 2 else "kinetic-line"
+        motif = "check-list" if len(ticks) >= 2 else "kinetic-line"
     if motif == "stat-pop" and not any(_is_stat_line(d) for d in details):
-        motif = "check-list" if len(details) >= 2 else "kinetic-line"
+        motif = "check-list" if len(ticks) >= 2 else "kinetic-line"
     if motif == "quote-card" and not s.get("quotes"):
-        motif = ("people-wall"
-                 if sum(1 for d in details if _re.search(r"@", d)) >= 2
-                 else ("check-list" if len(details) >= 2 else "card"))
-    if motif == "people-wall" and not (
-            s.get("quotes")
-            or sum(1 for d in details if _re.search(r"@", d)) >= 2):
-        motif = "check-list" if len(details) >= 2 else "card"
+        motif = ("people-wall" if people >= 2
+                 else ("check-list" if len(ticks) >= 2 else "card"))
+    if motif == "people-wall" and not (s.get("quotes") or people >= 2):
+        motif = "check-list" if len(ticks) >= 2 else "card"
     # MINIMUM-MATERIAL contract: a beat must carry real content. kinetic-line
     # needs a >=3-word line AND must never swallow a stop that has details
     # (the 'Testimonials' one-word empty scene, Palmier 2026-07-18).
@@ -1071,12 +1206,12 @@ def _refine_motif(motif: str, s: dict, used) -> str:
         words = len((s.get("title") or "").split())
         if s.get("quotes"):
             motif = "quote-card"
-        elif details:
-            motif = ("people-wall" if sum(
-                1 for d in details if _re.search(r"@", d)) >= 2
-                else "check-list")
+        elif people >= 2:
+            motif = "people-wall"
+        elif len(ticks) >= 2:
+            motif = "check-list"
         elif words < 3:
-            motif = "card"  # line-art fallback; better a drawing than a word
+            motif = "card"
     if motif not in _VIGNETTES:  # line-art tier
         if len(s.get("entities") or []) >= 4 and "logo-wall" not in used:
             return "logo-wall"
@@ -1087,11 +1222,23 @@ def _refine_motif(motif: str, s: dict, used) -> str:
         if (sum(1 for d in details if _re.search(r"@", d)) >= 2
                 and "people-wall" not in used):
             return "people-wall"
-        if len(details) >= 2:
+        if len(_tickable(details)) >= 2:
             return "check-list"  # may repeat: real info beats line art
         if (not details and 3 <= len((s.get("title") or "").split()) <= 8
                 and "kinetic-line" not in used):
             return "kinetic-line"
+    # BOTTOM RUNG (F4). Every rung above only ever SWAPS one treatment for
+    # another, so a stop with nothing behind it always landed somewhere
+    # rather than nowhere: 8.4s of a title beside a decorative wireframe
+    # globe ("Customer Stories", insforge.dev 2026-07-19 — a 638-char page
+    # whose duplicate footage was correctly dropped, leaving the beat with
+    # no content and no film). Same shape as the wall-needs-marks gate at
+    # the top: when the treatment would show nothing OF THE SITE, there is
+    # no treatment left to fall back to, so the STOP goes and the film runs
+    # one beat shorter. This supersedes the old "better a drawing than a
+    # word" fallback — a drawing shows nothing, which is the defect.
+    if not s.get("seg") and not _shown_material(s, motif):
+        return _CUT
     return motif
 
 
@@ -1172,6 +1319,95 @@ def _logo_uri(name: str) -> str:
         return ""
 
 
+# ---- THE PACING CEILING ---------------------------------------------------
+# Project budget: no scene over 9s. A beat's SPAN is what a viewer sits
+# through — its own dwell PLUS whatever plays before the next beat announces
+# itself (a stacked beat's title card, or the closing CTA). That is exactly
+# how the design.beat timestamps read back, and read back it shipped beats of
+# 9.4s and 9.7s (insforge.dev 2026-07-19).
+# The ceiling is enforced HERE, in the assembler, where dwells are FINAL: a
+# treatment swap changes a beat's length after planning, so a planner-side
+# budget can always be reopened by review. Every dwell in the layout goes
+# through _dwell_frames, so a new treatment cannot add an uncapped one.
+BEAT_CEILING_S = 9.0
+TITLE_LEAD_S = 2.4   # a stacked beat's title card plays before the beat
+CTA_S = 4.6          # the closing card, charged to the last beat's span
+OPEN_S = 4.4         # the branded open, charged to the first beat's span
+# A beat cannot be shorter than its own entrance. If a lead-in ever grows so
+# large that the floor wins, _lint_pacing reports the overrun rather than
+# letting it pass silently.
+MIN_DWELL_S = 2.5
+
+_GLAYOUT_CYCLE = ("stacked", "split-left", "split-right")
+
+
+def _beat_forms(stops):
+    """The visual FORM each stop takes, decided ONCE. The pacing ceiling needs
+    to know what follows a beat before it can size it, and the layout loop
+    needs the same answer — two copies of this branch would drift. 'stacked'
+    beats are preceded by their own title card; 'center'/'kinetic'/'split-*'
+    carry their title inside the beat."""
+    forms, seen, gi = [], set(), 0
+    for s in stops:
+        dup = s["title"].lower() in seen
+        seen.add(s["title"].lower())
+        if s.get("seg"):
+            forms.append("stacked")
+        elif dup:
+            forms.append("center")
+        elif s.get("motif") == "kinetic-line":
+            forms.append("kinetic")
+        else:
+            forms.append(_GLAYOUT_CYCLE[gi % len(_GLAYOUT_CYCLE)])
+            gi += 1
+    return forms
+
+
+def _lead_after(forms, i: int) -> float:
+    """Seconds between beat i's dwell ending and beat i+1 appearing — the next
+    beat's title card, or the closing CTA when i is the last beat."""
+    if i + 1 >= len(forms):
+        return CTA_S
+    return TITLE_LEAD_S if forms[i + 1] == "stacked" else 0.0
+
+
+def _dwell_frames(dwell_s: float, lead_next_s: float) -> int:
+    """Frames a beat holds the screen, capped so its SPAN (dwell + the lead-in
+    of whatever follows) stays inside BEAT_CEILING_S."""
+    capped = min(dwell_s, BEAT_CEILING_S - lead_next_s)
+    return int(max(MIN_DWELL_S, capped) * FPS)
+
+
+def _lint_pacing(beats, film_s):
+    """POST-CONDITION on the rendered cut, measured exactly as the thread
+    reports it: one design.beat timestamp to the next, and the last one to the
+    end of the film. Structurally guaranteed by _dwell_frames — checked anyway
+    because a new lead-in constant could reopen the budget silently."""
+    out = []
+    if beats and beats[0]["at"] / FPS > BEAT_CEILING_S + 0.05:
+        out.append(_finding(None, "the opening card",
+                            f"holds {beats[0]['at'] / FPS:.1f}s before the "
+                            f"first beat (ceiling {BEAT_CEILING_S:.0f}s)"))
+    for k, b in enumerate(beats):
+        end = beats[k + 1]["at"] / FPS if k + 1 < len(beats) else film_s
+        span = end - b["at"] / FPS
+        if span > BEAT_CEILING_S + 0.05:
+            out.append(_finding(
+                b["i"], b["title"],
+                f"runs {span:.1f}s (ceiling {BEAT_CEILING_S:.0f}s)"))
+    return out
+
+
+def _film_seconds(path: str, planned_s: float) -> float:
+    """The film's REAL length, read off the rendered artifact. Falls back to
+    the planned length — which Remotion renders frame-exactly — so a missing
+    ffprobe degrades to an exact number rather than to an estimate."""
+    try:
+        return _probe_duration(path)
+    except Exception:
+        return planned_s
+
+
 def build_tour_film(url: str, run_id: str, logo_from: str = "",
                     brain: str = "sonnet5") -> str:
     """v4: planned shots -> titled Vevara film on the site's own palette.
@@ -1191,10 +1427,20 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     filmed_pages, kept_fps, used_motifs = [], [], set()
     for i, s in enumerate(stops):
         s["seg"] = ""
+        if s.get("graphic_only"):
+            # DECLARED IN THE PLAN, not discovered here (see plan_tour's
+            # page-once pass). The recorder no longer spends a 9s capture to
+            # learn what the planner already knew.
+            s["motif"] = ""  # graphic; treatment assigned at build
+            emit(run_dir, "decide.guard",
+                 f"“{s['title'][:48]}”: planned as a graphic beat",
+                 "Its page is already covered by another shot, so this beat "
+                 "is built from your own copy instead of a second recording.")
+            continue
         if s["page"] in filmed_pages:
             s["motif"] = ""  # graphic; treatment assigned at build
             emit(run_dir, "decide.guard",
-                 f"\u201c{s['title'][:48]}\u201d: page already filmed",
+                 f"“{s['title'][:48]}”: page already filmed",
                  "This stop becomes a motion graphic instead of a second recording.")
             continue
         seg = os.path.join(run_dir, f"shot-{i + 1}.mp4")
@@ -1314,29 +1560,36 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
 
     ctx = {"theme": theme, "name": name, "host": host, "tagline": tagline,
            "logo_rel": logo_rel, "site_bg": site_bg, "accent": pal["accent"]}
-    out, beats = _assemble_and_render(run_id, run_dir, pub, stops, ctx)
-    fixed = _review_and_fix(run_id, run_dir, pub, stops, ctx, beats)
+    out, beats, film_s = _assemble_and_render(run_id, run_dir, pub, stops, ctx)
+    out, beats, film_s, unresolved = _review_and_fix(
+        run_id, run_dir, pub, stops, ctx, beats, film_s, brain=brain)
     # The one long message the thread earns: what it is, what's in it, and
-    # the invitation to change it. Composed from the film's OWN final state
-    # so it can never describe a cut that wasn't made.
-    live = [s for s in stops if not s.get("_drop")]
-    shots = sum(1 for s in live if s.get("seg"))
-    secs = (beats[-1]["at"] / FPS + 5) if beats else 0
+    # the invitation to change it. Composed from the film's OWN FINAL state —
+    # the measured length of the cut that shipped, the stops that survived
+    # review, and whatever the review could not clear. It can neither
+    # describe a cut that wasn't made nor a length that wasn't rendered.
+    shots = sum(1 for s in stops if s.get("seg"))
+    graphics = len(stops) - shots
     _say(run_dir,
-         f"Done \u2014 your {ctx['host']} film runs about {secs:.0f} seconds "
-         f"across {len(live)} beats, with {shots} real recording"
-         f"{'s' if shots != 1 else ''} gliding through the site and the rest "
-         f"built from your own copy. It closes on "
-         f"\u201c{live[-1]['title']}\u201d. Tell me what to change \u2014 "
-         "drop a beat, swap how one is treated, or ask why I made a call "
-         "\u2014 and I'll recut it.")
-    return fixed or out
+         f"Done \u2014 your {ctx['host']} film runs {film_s:.0f} seconds: a "
+         f"branded open, {len(stops)} beat{'s' if len(stops) != 1 else ''} "
+         f"({shots} real recording{'s' if shots != 1 else ''} gliding through "
+         f"the site and {graphics} built from your own copy), and the closing "
+         f"card. It closes on \u201c{stops[-1]['title']}\u201d."
+         + (" One thing I couldn't settle: " + unresolved[0]["issue"]
+            + "." if unresolved else "")
+         + " Tell me what to change \u2014 drop a beat, swap how one is "
+         "treated, or ask why I made a call \u2014 and I'll recut it.")
+    return out
 
 
 def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
     """Assembly tail: motif assignment -> world layout -> props -> render ->
     per-beat design stills. Split from build_tour_film so the REVIEWER can
-    re-run it with adjusted stops (auto-apply). Returns (film, beats_meta)."""
+    re-run it with adjusted stops (auto-apply).
+    Returns (film, beats_meta, film_seconds) — the length MEASURED off the
+    rendered artifact, so every downstream number is authored from the film
+    rather than reconstructed from the plan."""
     theme = ctx["theme"]; name = ctx["name"]; host = ctx["host"]
     tagline = ctx["tagline"]; logo_rel = ctx["logo_rel"]
     site_bg = ctx["site_bg"]
@@ -1351,17 +1604,15 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
         {"id": "sub", "kind": "sub", "x": 960, "y": 724, "w": 980, "at": 20,
          "text": f"A planned tour of {host}, filmed by the launch agent.", "dir": "bottom"},
     ]
-    t_f = int(4.4 * FPS)
+    t_f = int(OPEN_S * FPS)
 
     # Spatial clusters spread FAR apart (>=2400px) so no neighbor bleeds into
     # another beat's framing; camera zooms slightly on titles.
     cluster_pos = [(3600, 700), (700, 2800), (4200, 3400), (1800, 5000),
                    (6400, 4600), (900, 6600)]
-    # MOTIF ASSIGNMENT (single pass): content-once dedupe in beat order,
-    # then refine on what each beat will ACTUALLY show, then a film-wide
-    # variety guarantee — >=4 graphic beats include at least one line-art
-    # drawing (flip the weakest data beat).
-    _LINE_ART = ("house", "chat", "tag", "globe", "card")
+    # MOTIF ASSIGNMENT (single pass): content-once dedupe in beat order, then
+    # refine on what each beat will ACTUALLY show, then cut the stops the
+    # ladder could only answer with decoration.
     presented, used_motifs = set(), set()
     gstops = [s for s in stops if not s.get("seg")]
     for s in gstops:
@@ -1379,14 +1630,30 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
         presented.update(x.lower() for x in (s.get("chips") or [])[:10])
         presented.update(x.lower() for x in (s.get("details") or []))
         presented.update(e.lower() for e in (s.get("entities") or []))
-    if len(gstops) >= 4 and not any(s["motif"] in _LINE_ART for s in gstops):
-        data = [s for s in gstops if s["motif"] in
-                ("check-list", "chip-sweep", "request-table", "context-cards")
-                and not s.get("motif_locked")]
-        if data:
-            weakest = min(data, key=lambda s: len(s.get("details") or [])
-                          + len((s.get("chips") or [])[:10]))
-            weakest["motif"] = _pick_motif(weakest["title"], set(_VIGNETTES))
+    # VARIETY NEVER OUTRANKS CONTENT: the rule here used to flip the weakest
+    # data beat to a line-art drawing whenever >=4 graphic beats carried none,
+    # for film-wide variety. A drawing shows nothing of the site, so the flip
+    # HID real harvested content behind decoration — the same defect the
+    # bottom rung below cuts. Variety is carried by the layout cycle instead
+    # (stacked / split-left / split-right, plus the camera); a beat's
+    # treatment now always follows its material.
+    #
+    # BOTTOM RUNG OF THE DEGRADE LADDER: every other rung only SWAPS a
+    # treatment, so a stop with nothing behind it always landed somewhere
+    # rather than nowhere — 8.4s of a title beside a decorative wireframe
+    # globe ("Customer Stories", insforge.dev 2026-07-19: a 638-char page
+    # whose footage was correctly dropped as a duplicate, leaving the beat
+    # with no content and no film). A stop with neither kept footage nor
+    # anything showable is CUT and the film runs one beat shorter.
+    cut = [s for s in gstops if s.get("motif") == _CUT]
+    for s in cut:
+        emit(run_dir, "decide.guard",
+             f"“{s['title'][:48]}”: nothing to show",
+             "No footage and nothing quotable behind this stop — cutting the "
+             "beat rather than filling it with decoration.")
+    if cut:
+        stops[:] = [s for s in stops if s.get("motif") != _CUT]
+        gstops = [s for s in stops if not s.get("seg")]
     # STABILITY INVARIANT: treatments are decided ONCE, at first assembly.
     # Re-renders (reviewer swaps, director edits) must never re-roll the
     # other beats — unlocked motifs re-rolled every round, so the film the
@@ -1399,31 +1666,33 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
                     f"{'recording' if s.get('seg') else s['motif']}"
                     for s in stops))
 
-    seen_titles = set()
-    glayout_cycle = ["stacked", "split-left", "split-right"]
-    glayout_i = 0
+    # FORM FIRST, THEN TIME: a beat cannot be sized until we know what plays
+    # after it (see _beat_forms / _lead_after), so the layout decision is made
+    # for the whole film up front and consumed here.
+    forms = _beat_forms(stops)
     for i, s in enumerate(stops):
         cx, cy = cluster_pos[i % len(cluster_pos)]
-        # CONTRACT: a title text renders as a beat at most once per film —
-        # a graphic stop whose title an earlier beat already carries plays
-        # title-less at its cluster center (the vignette IS the content).
-        dup_title = s["title"].lower() in seen_titles
-        seen_titles.add(s["title"].lower())
-        if dup_title and not s.get("seg"):
-            motif = s.get("motif", "card")
-            logos = _stop_logos(s) if motif == "logo-wall" else []
+        form = forms[i]
+        lead_next = _lead_after(forms, i)
+        motif = s.get("motif", "card")
+        logos = _stop_logos(s) if motif == "logo-wall" else []
+        lines = _beat_lines(s, motif)
+        if form == "center":
+            # CONTRACT: a title text renders as a beat at most once per film —
+            # a graphic stop whose title an earlier beat already carries plays
+            # title-less at its cluster center (the vignette IS the content).
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx, "y": cy,
                              "at": t_f + 12, "motif": motif, "text": s["title"],
-                             "lines": s.get("details") or [],
+                             "lines": lines,
                              "chips": s.get("chips") or [], "logos": logos})
             moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.12})
             beats.append({"i": i, "title": s["title"], "treatment": motif,
                           "layout": "center", "at": t_f})
             beat_s = {"chip-sweep": 5.5, "stat-pop": 4.0, "kinetic-line": 3.5,
                       "logo-wall": 5.0, "people-wall": 5.0}.get(motif, 5.5)
-            t_f += int(beat_s * FPS)
+            t_f += _dwell_frames(beat_s, lead_next)
             continue
-        if s.get("motif") == "kinetic-line" and not s.get("seg"):
+        if form == "kinetic":
             # The kinetic line IS the title — one beat, no duplicate headline.
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx, "y": cy,
                              "at": t_f + 12, "motif": "kinetic-line",
@@ -1432,45 +1701,40 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
             beats.append({"i": i, "title": s["title"],
                           "treatment": "kinetic-line", "layout": "center",
                           "at": t_f})
-            t_f += int(3.5 * FPS)
+            t_f += _dwell_frames(3.5, lead_next)
             continue
-        if not s.get("seg"):
-            layout = glayout_cycle[glayout_i % len(glayout_cycle)]
-            glayout_i += 1
-            if layout != "stacked":
-                # SPLIT beat: title and vignette side by side, ONE framing —
-                # a different rhythm and geometry from stacked beats
-                # (variability contract + Dennis's split-layout preference).
-                sign = -1 if layout == "split-left" else 1
-                motif = s.get("motif", "card")
-                logos = _stop_logos(s) if motif == "logo-wall" else []
-                elements.append({"id": f"t{i}", "kind": "headline",
-                                 "x": cx + sign * -390, "y": cy, "w": 560,
-                                 "at": t_f + 12, "text": s["title"], "size": 60,
-                                 "align": "left",
-                                 "accentWord": max(s["title"].split(), key=len).strip(".,"),
-                                 "dir": "left" if sign < 0 else "right"})
-                elements.append({"id": f"g{i}", "kind": "graphic",
-                                 "x": cx + sign * 330, "y": cy, "at": t_f + 20,
-                                 "motif": motif, "text": s["title"],
-                                 "lines": s.get("details") or [],
-                                 "chips": s.get("chips") or [],
-                                 "quotes": s.get("quotes") or [],
-                                 "logos": logos, "narrow": True})
-                moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.05})
-                beats.append({"i": i, "title": s["title"], "treatment": motif,
-                              "layout": layout, "at": t_f})
-                beat_s = {"chip-sweep": 6.0, "stat-pop": 4.5, "logo-wall": 5.5,
-                          "quote-card": 5.5, "people-wall": 5.5}.get(motif, 6.0)
-                t_f += int(beat_s * FPS)
-                continue
+        if form in ("split-left", "split-right"):
+            # SPLIT beat: title and vignette side by side, ONE framing —
+            # a different rhythm and geometry from stacked beats
+            # (variability contract + Dennis's split-layout preference).
+            sign = -1 if form == "split-left" else 1
+            elements.append({"id": f"t{i}", "kind": "headline",
+                             "x": cx + sign * -390, "y": cy, "w": 560,
+                             "at": t_f + 12, "text": s["title"], "size": 60,
+                             "align": "left",
+                             "accentWord": max(s["title"].split(), key=len).strip(".,"),
+                             "dir": "left" if sign < 0 else "right"})
+            elements.append({"id": f"g{i}", "kind": "graphic",
+                             "x": cx + sign * 330, "y": cy, "at": t_f + 20,
+                             "motif": motif, "text": s["title"],
+                             "lines": lines,
+                             "chips": s.get("chips") or [],
+                             "quotes": s.get("quotes") or [],
+                             "logos": logos, "narrow": True})
+            moments.append({"at": t_f, "x": cx, "y": cy + 10, "scale": 1.05})
+            beats.append({"i": i, "title": s["title"], "treatment": motif,
+                          "layout": form, "at": t_f})
+            beat_s = {"chip-sweep": 6.0, "stat-pop": 4.5, "logo-wall": 5.5,
+                      "quote-card": 5.5, "people-wall": 5.5}.get(motif, 6.0)
+            t_f += _dwell_frames(beat_s, lead_next)
+            continue
         # Title beat — the site's own words, section-title sized (stacked).
         elements.append({"id": f"t{i}", "kind": "headline", "x": cx, "y": cy - 340,
                          "w": 1180, "at": t_f + 14, "text": s["title"], "size": 72,
                          "accentWord": max(s["title"].split(), key=len).strip(".,"),
                          "dir": "bottom"})
         moments.append({"at": t_f, "x": cx, "y": cy - 320, "scale": 1.12})
-        t_f += int(2.4 * FPS)
+        t_f += int(TITLE_LEAD_S * FPS)
         if s.get("seg"):
             # Footage beat — the planned shot below its title.
             seg_dur = _probe_duration(s["seg"])
@@ -1481,16 +1745,14 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
             moments.append({"at": t_f, "x": cx, "y": cy + 340, "scale": 1.0})
             beats.append({"i": i, "title": s["title"], "treatment": "recording",
                           "layout": "stacked", "at": t_f})
-            t_f += int(min(seg_dur, 7.0) * FPS)
+            t_f += _dwell_frames(min(seg_dur, 7.0), lead_next)
         else:
             # Motion-graphic beat — a concept vignette that ENACTS the title
-            # (or a line-art motif fallback) instead of a redundant recording.
-            motif = s.get("motif", "card")
-            logos = _stop_logos(s) if motif == "logo-wall" else []
+            # instead of a redundant recording.
             elements.append({"id": f"g{i}", "kind": "graphic", "x": cx,
                              "y": cy + 300, "at": t_f + 12,
                              "motif": motif, "text": s["title"],
-                             "lines": s.get("details") or [],
+                             "lines": lines,
                              "chips": s.get("chips") or [],
                              "quotes": s.get("quotes") or [],
                              "logos": logos})
@@ -1503,13 +1765,13 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
                       "request-table": 5.5, "context-cards": 5.5,
                       "chat-exchange": 5.5, "price-card": 5.0,
                       "check-list": 5.0}.get(motif, 5.5)
-            t_f += int(beat_s * FPS)
+            t_f += _dwell_frames(beat_s, lead_next)
 
     elements.append({"id": "cta", "kind": "cta", "x": 6200, "y": 1800,
                      "at": t_f + 16, "text": "See it live", "label": host,
                      "value": "Get started", "logoSrc": logo_rel or None, "dir": "bottom"})
     moments.append({"at": t_f, "x": 6200, "y": 1810, "scale": 0.98})
-    t_f += int(4.6 * FPS)
+    t_f += int(CTA_S * FPS)
 
     try:
         with open(os.path.join(run_dir, "stops.json"), "w") as f:
@@ -1525,6 +1787,7 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
     out = os.path.join(run_dir, "film-tour.mp4")
     emit(run_dir, "assemble.render",
          f"Rendering the film — {t_f / FPS:.1f}s, {len(stops)} beats",
+         f"Plus the branded open and the closing card. "
          f"World palette {site_bg}, accent {ctx['accent']}.")
     subprocess.run(["npx", "remotion", "render", "WalkrecWorld", out,
                     f"--props={props_path}", "--log=error",
@@ -1536,13 +1799,20 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
                     "--concurrency=1",
                     "--offthreadvideo-cache-size-in-bytes=314572800"],
                    cwd=os.path.join(HERE, "studio"), check=True, timeout=1800)
-    emit(run_dir, "assemble.film", "Film rendered", f"{t_f / FPS:.1f}s",
+    # MEASURED, NEVER ESTIMATED (F7): every number the customer reads about
+    # this film is authored from the RENDERED ARTIFACT, here, once. The
+    # handover line used to be reconstructed from the plan (last beat + 5s)
+    # and told the customer "about 48 seconds" for a 53.2s film (insforge.dev
+    # 2026-07-19) \u2014 three different lengths in one thread.
+    film_s = _film_seconds(out, t_f / FPS)
+    emit(run_dir, "assemble.film", "Film rendered", f"{film_s:.1f}s",
          artifact=out)
     _say(run_dir,
-         f"The film is printed \u2014 {t_f / FPS:.0f} seconds across "
-         f"{len(beats)} beats. Before I hand it over, let me watch it back "
-         "the way a viewer would: does every title match what's under it, "
-         "does anything repeat, does it end well?")
+         f"The film is printed \u2014 {film_s:.0f} seconds: a branded open, "
+         f"{len(beats)} beat{'s' if len(beats) != 1 else ''}, and the closing "
+         "card. Before I hand it over, let me watch it back the way a viewer "
+         "would: does every title match what's under it, does anything "
+         "repeat, does it end well?")
     for b in beats:
         fsec = min((b["at"] + 84) / FPS, t_f / FPS - 0.3)
         still = os.path.join(run_dir, f"beat-{b['i']}.jpg")
@@ -1555,31 +1825,144 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
                  f"Beat {b['i'] + 1}: {b['treatment']} ({b['layout']})",
                  f"\u201c{b['title'][:60]}\u201d \u00b7 {b['at'] / FPS:.1f}s",
                  artifact=still)
-    print(f"[walkrec] tour film: {out} ({t_f / FPS:.1f}s, {len(stops)} planned shots, bg {site_bg})")
-    return out, beats
+    print(f"[walkrec] tour film: {out} ({film_s:.1f}s measured, "
+          f"{len(stops)} planned shots, bg {site_bg})")
+    return out, beats, film_s
 
 
-def _lint_stops(stops):
-    """Deterministic post-conditions: re-check tonight's contracts on the
-    final beat plan. Returns [(stop_index, issue, fix_motif_or_None)]."""
-    findings = []
-    prev = None
+# ---- THE REVIEW CONTRACT --------------------------------------------------
+# A gate that cannot fail is not a gate, and a pass may only assert what was
+# actually evaluated. Both halves failed together on insforge.dev 2026-07-19:
+# "Watched it back and it holds — every title matches what's under it and
+# nothing repeats" was emitted over a cut carrying a green-ticked "Test
+# Failed" and an 8.4s empty Customer Stories beat. No check had looked at
+# either property, and no outcome of the review could have stopped the film.
+#
+#   1. NAMED CHECKS. Every property the reviewer claims is a check below, with
+#      a verdict over the CURRENT cut. The pass sentence is composed from the
+#      claims of the checks that ran and passed — a property no check covers
+#      cannot appear in it.
+#   2. A CHECK THAT DID NOT RUN IS NOT A PASS. The stills critic needs a
+#      model; when it is unavailable its silence used to be indistinguishable
+#      from approval. It now reports that it could not look, and the film
+#      narrows its claim instead of inheriting the silence.
+#   3. THE GATE CAN FAIL. Findings are re-checked against the RE-CUT rather
+#      than assumed fixed. Anything still standing is a rejection: honesty
+#      failures (a beat with nothing to show, a green check on a non-benefit)
+#      REFUSE DELIVERY; the rest are disclosed in the handover, and the film
+#      never describes itself as clean.
+#
+# name            claim the film may make when the check passes        blocking
+_CHECKS = (
+    ("beat-content", "every beat carries something real from your pages", True),
+    ("ticked-items", "nothing wears a green check that isn't a benefit", True),
+    ("treatment-fit", "each treatment has the material it needs", False),
+    ("no-repeat-run", "no two beats in a row share a treatment", False),
+    ("pacing", "no beat runs past nine seconds", False),
+    ("title-match", "every title matches what's under it and the film "
+                    "doesn't repeat itself", False),
+)
+# The check the STILLS CRITIC owns — the only one that needs a model, and so
+# the only one that can fail to run at all.
+_CRITIC_CHECK = "title-match"
+
+_REVIEW_ROUNDS = 2   # the first cut plus ONE re-cut; a re-render is ~4 minutes
+
+
+def _finding(beat, what: str, issue: str, fix: str = None) -> dict:
+    """One reviewer finding. `beat` is the stop index (None for the parts of
+    the film that are not beats, e.g. the opening card); `fix` is a treatment
+    the reviewer may swap to, or None when nothing automatic will help."""
+    return {"beat": beat, "what": what, "issue": issue, "fix": fix}
+
+
+def _finding_title(f: dict) -> str:
+    head = f"Beat {f['beat'] + 1}" if f["beat"] is not None else f["what"]
+    return f"{head}: {f['issue']}"
+
+
+def _lint_content(stops):
+    """BEAT-CONTENT: a beat with neither kept footage nor anything its
+    treatment can show. Reads the same _shown_material the ladder used to
+    pick the treatment, so the film and the review cannot disagree about
+    what "has content" means."""
+    out = []
     for i, s in enumerate(stops):
-        motif = "recording" if s.get("seg") else s.get("motif", "")
+        if s.get("seg"):
+            continue
+        motif = s.get("motif") or ""
+        if not _shown_material(s, motif):
+            out.append(_finding(i, s.get("title", ""),
+                                f"nothing behind this beat for a "
+                                f"{motif or 'graphic'} to show"))
+    return out
+
+
+def _lint_ticks(stops):
+    """TICKED-ITEMS: a treatment that puts green checks on its rows may only
+    carry rows that earned one (see _is_benefit_shaped). Enforced upstream by
+    _beat_lines; checked here because a green check on a failure state is a
+    claim the film makes on the customer's behalf."""
+    out = []
+    for i, s in enumerate(stops):
+        motif = s.get("motif") or ""
+        if s.get("seg") or motif not in _TICKED_MOTIFS:
+            continue
+        bad = [d for d in (s.get("details") or []) if not _is_benefit_shaped(d)]
+        shown = _beat_lines(s, motif)
+        for d in bad:
+            if d in shown:
+                out.append(_finding(i, s.get("title", ""),
+                                    f"“{d[:40]}” is ticked as a benefit"))
+    return out
+
+
+def _lint_treatment_fit(stops):
+    """TREATMENT-FIT: each treatment's material floor, re-checked on the final
+    beat plan. Floors count only material the treatment will actually SHOW —
+    a check-list's floor counts tickable rows, not raw harvested lines."""
+    findings = []
+    for i, s in enumerate(stops):
+        if s.get("seg"):
+            continue
+        motif = s.get("motif", "")
         details = s.get("details") or []
-        if motif == prev and motif not in ("recording",):
-            findings.append((i, f"adjacent repeated treatment ({motif})", None))
-        if motif == "chip-sweep" and len((s.get("chips") or [])) < 6:
-            findings.append((i, "chip-sweep below material floor", "check-list"
-                             if len(details) >= 2 else "card"))
+        ticks = _tickable(details)
+        # A FALLBACK MAY NOT BE A TREATMENT THAT SHOWS NOTHING. "card" (line
+        # art) was the old floor here; swapping to it and LOCKING it produced
+        # a beat the ladder could no longer rescue and beat-content then had
+        # to reject. With no material for any treatment, the honest fix is
+        # the ladder's own bottom rung — cut the beat.
+        fallback = "check-list" if len(ticks) >= 2 else _CUT
+        if motif == "chip-sweep" and len(s.get("chips") or []) < 6:
+            findings.append(_finding(i, s.get("title", ""),
+                                     "chip-sweep below material floor",
+                                     fallback))
         if motif == "quote-card" and not s.get("quotes"):
-            findings.append((i, "quote-card without a harvested quote",
-                             "people-wall" if sum(1 for d in details
-                                                  if "@" in d) >= 2 else "card"))
+            findings.append(_finding(
+                i, s.get("title", ""), "quote-card without a harvested quote",
+                "people-wall" if sum(1 for d in details if "@" in d) >= 2
+                else fallback))
         if motif == "logo-wall" and sum(
                 1 for e in (s.get("entities") or []) if e) < 4:
-            findings.append((i, "logo wall below 4 partners", "check-list"
-                             if len(details) >= 2 else "card"))
+            findings.append(_finding(i, s.get("title", ""),
+                                     "logo wall below 4 partners", fallback))
+        if motif in _TICKED_MOTIFS and len(ticks) < 2 and motif != "price-card":
+            findings.append(_finding(i, s.get("title", ""),
+                                     "check-list below two real benefits",
+                                     fallback))
+    return findings
+
+
+def _lint_repeats(stops):
+    """NO-REPEAT-RUN: two neighbouring beats wearing the same treatment read
+    as one long beat."""
+    findings, prev = [], None
+    for i, s in enumerate(stops):
+        motif = "recording" if s.get("seg") else s.get("motif", "")
+        if motif == prev and motif != "recording":
+            findings.append(_finding(i, s.get("title", ""),
+                                     f"adjacent repeated treatment ({motif})"))
         prev = motif
     return findings
 
@@ -1593,12 +1976,19 @@ _SWAP_TARGETS = ("check-list", "chip-sweep", "kinetic-line", "quote-card",
 def _critic_review(run_dir, stops, beats, brain="sonnet5"):
     """LLM critic with a CLOSED action menu. Sees the beat stills + the plan;
     may only drop a beat or swap its treatment — it can never write content,
-    so every honesty gate survives review. Returns gated actions."""
+    so every honesty gate survives review.
+
+    Returns (ran, actions, objections). `ran` is the honest part: this is the
+    only check that needs a model, and a model that never answered used to be
+    indistinguishable from one that found nothing — the film then claimed
+    every title matched what was under it on the strength of an exception
+    swallowed three frames down. `ran` is True only when the reply covered
+    EVERY beat, so the claim is backed by a look at each one."""
     import base64
     try:
         import validate_planner as vp
     except Exception:
-        return []
+        return False, [], []
     plan_lines = []
     content = []
     for b in beats:
@@ -1635,9 +2025,9 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
                                   "content": "\n".join(plan_lines)}],
                                 brain=brain) or ""
         except (Exception, SystemExit):
-            return []
+            return False, [], []
     cand = _extract_json_list(raw) or []
-    actions, drops = [], 0
+    actions, objections, seen, drops = [], [], set(), 0
     for c in cand:
         try:
             bi = int(c.get("beat", -1))
@@ -1646,6 +2036,16 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
         act = str(c.get("action") or "none")
         if bi < 0 or bi >= len(stops) or act not in _CRITIC_MENU:
             continue
+        seen.add(bi)
+        short = (lambda t: t[:117] + "…" if len(t) > 120 else t)(
+            str(c.get("issue") or ""))
+        # AN OBJECTION IS A FINDING even when the critic asks for nothing.
+        # Verdicts whose action was "none" used to be discarded, so a beat the
+        # reviewer had flagged as wrong vanished between seeing it and
+        # reporting it — and the film shipped described as holding.
+        if str(c.get("verdict") or "") == "issue":
+            objections.append(_finding(bi, stops[bi].get("title", ""),
+                                       short or "the reviewer flagged this beat"))
         if act == "drop":
             if drops >= 2 or stops[bi].get("seg"):
                 continue  # never drop recordings; max 2 drops
@@ -1658,24 +2058,19 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
                 continue  # target's material floor must hold
         if act != "none":
             actions.append({"beat": bi, "action": act,
-                            "to": str(c.get("to") or ""),
-                            "issue": (lambda t: t[:117] + "…"
-                                      if len(t) > 120 else t)(
-                                          str(c.get("issue") or ""))})
-    return actions
+                            "to": str(c.get("to") or ""), "issue": short})
+    # COVERAGE, NOT PRESENCE: a reply about four of six beats has not
+    # evaluated "every title matches what's under it".
+    ran = bool(beats) and all(b["i"] in seen for b in beats)
+    return ran, actions, objections
 
 
-def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats):
-    """One review cycle (auto-apply, per Dennis): deterministic linter +
-    stills-seeing critic -> gated actions -> re-assemble once. Everything
-    visible in the feed as review.* events. Returns the fixed film or None."""
-    emit(run_dir, "review.start", "Reviewing story and architecture",
-         f"{len(beats)} beats: linter + critic pass.")
-    findings = _lint_stops(stops)
-    for i, issue, fix in findings:
-        emit(run_dir, "review.lint", f"Beat {i + 1}: {issue}",
-             f"Fix: swap to {fix}." if fix else "Flagged for the critic.")
-    actions = _critic_review(run_dir, stops, beats)
+def _run_checks(run_dir, stops, beats, film_s, brain="sonnet5"):
+    """Every named check, run over the CURRENT cut. Returns (checks, actions)
+    where each check is {name, claim, blocking, ran, findings}. The reviewer
+    may say nothing this list does not support."""
+    critic_ran, actions, objections = _critic_review(run_dir, stops, beats,
+                                                     brain=brain)
     # NO-OP GUARD: a swap to the treatment the beat already carries changes
     # nothing but still triggers a full ~4-minute re-render (observed: the
     # critic asked stat-pop -> stat-pop). Filter before deciding to apply.
@@ -1683,44 +2078,170 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats):
                if not (a["action"] == "swap_treatment"
                        and a["beat"] < len(stops)
                        and stops[a["beat"]].get("motif") == a["to"])]
-    for a in actions:
-        emit(run_dir, "review.finding",
-             f"Beat {a['beat'] + 1}: {a['issue'] or a['action']}",
-             f"Action: {a['action']}"
-             + (f" \u2192 {a['to']}" if a['to'] else ""))
-    lint_fixes = [(i, fix) for i, _, fix in findings if fix]
-    if not lint_fixes and not actions:
-        emit(run_dir, "review.pass", "Review passed",
-             "Story and treatments hold; shipping the first cut.")
+    results = {
+        "beat-content": (True, _lint_content(stops)),
+        "ticked-items": (True, _lint_ticks(stops)),
+        "treatment-fit": (True, _lint_treatment_fit(stops)),
+        "no-repeat-run": (True, _lint_repeats(stops)),
+        "pacing": (True, _lint_pacing(beats, film_s)),
+        _CRITIC_CHECK: (critic_ran, objections if critic_ran else []),
+    }
+    checks = []
+    for name, claim, blocking in _CHECKS:
+        ran, findings = results[name]
+        checks.append({"name": name, "claim": claim, "blocking": blocking,
+                       "ran": ran, "findings": findings})
+    return checks, actions
+
+
+def _review_claim(checks) -> str:
+    """The sentence the film is allowed to say about itself: the claims of the
+    checks that RAN and PASSED, plus an explicit note for any that could not
+    run. Composed, never authored — a property no check covers cannot appear
+    in it, which is the entire point of the list."""
+    held = [c["claim"] for c in checks if c["ran"] and not c["findings"]]
+    missed = [c for c in checks if not c["ran"]]
+    # Only the stills critic actually LOOKS at the film; the rest read the
+    # cut's structure. The verb has to match which of those happened.
+    looked = any(c["ran"] for c in checks if c["name"] == _CRITIC_CHECK)
+    # "it holds" is a verdict on the WHOLE cut and is forfeited the moment any
+    # check has a finding, however many others passed.
+    holds = "" if any(c["findings"] for c in checks) else " and it holds"
+    if held:
+        body = (("Watched it back" if looked else "Checked the cut over")
+                + holds + " — " + held[0]
+                + ("".join(", " + h for h in held[1:-1]) if len(held) > 2 else "")
+                + (", and " + held[-1] if len(held) > 1 else "") + ".")
+    else:
+        body = "Watched it back."
+    if missed:
+        body += (" I couldn't run the frame-by-frame look this time, so I'm "
+                 "not claiming " + missed[0]["claim"] + " — only what I "
+                 "could check on the cut itself.")
+    return body
+
+
+def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats, film_s,
+                    brain="sonnet5"):
+    """The review GATE (auto-apply, per Dennis): named checks over the cut ->
+    gated fixes -> re-assemble -> RE-CHECK the new cut. Everything visible in
+    the feed as review.* events.
+
+    Returns (film, beats, film_s, unresolved) — the same order
+    _assemble_and_render returns, plus whatever review could not clear.
+    Raises when a blocking check still fails after the re-cut: a film the
+    reviewer has just described as broken must not be handed over as if it
+    were finished."""
+    film = os.path.join(os.path.abspath(run_dir), "film-tour.mp4")
+    recut = False
+    checks = []
+    for rnd in range(1, _REVIEW_ROUNDS + 1):
+        emit(run_dir, "review.start",
+             "Reviewing story and architecture"
+             + (f" (round {rnd})" if rnd > 1 else ""),
+             f"{len(beats)} beats against {len(_CHECKS)} checks"
+             + ("; re-checking the new cut." if rnd > 1 else "."))
+        checks, actions = _run_checks(run_dir, stops, beats, film_s, brain)
+        for c in checks:
+            kind = ("review.finding" if c["name"] == _CRITIC_CHECK
+                    else "review.lint")
+            for f in c["findings"]:
+                emit(run_dir, kind, _finding_title(f),
+                     f"Check {c['name']}. "
+                     + ("Fix: cut the beat." if f["fix"] == _CUT
+                        else f"Fix: swap to {f['fix']}." if f["fix"]
+                        else "No automatic fix."))
+        for a in actions:
+            emit(run_dir, "review.finding",
+                 f"Beat {a['beat'] + 1}: {a['issue'] or a['action']}",
+                 f"Action: {a['action']}"
+                 + (f" → {a['to']}" if a['to'] else ""))
+        open_findings = [f for c in checks for f in c["findings"]]
+        if not open_findings and not actions:
+            break   # ALL terminal reporting happens once, below
+        lint_fixes = [f for c in checks for f in c["findings"] if f["fix"]]
+        if rnd >= _REVIEW_ROUNDS or (not lint_fixes and not actions):
+            break
+        _n = len(lint_fixes) + len(actions)
         _say(run_dir,
-             "Watched it back and it holds — every title matches what's "
-             "under it and nothing repeats. Shipping this cut.")
-        return None
-    _n = len(lint_fixes) + len(actions)
+             f"{_n} thing{'s' if _n != 1 else ''} bothered me on the way "
+             f"through, so I'm fixing {'them' if _n != 1 else 'it'} before you "
+             "see it — then re-cutting.")
+        # A fix of _CUT is the ladder's bottom rung reached from review: there
+        # is no treatment left for this beat, so it leaves the film with the
+        # critic's drops rather than being locked to a drawing.
+        drop_idx = sorted({a["beat"] for a in actions if a["action"] == "drop"}
+                          | {f["beat"] for f in lint_fixes if f["fix"] == _CUT},
+                          reverse=True)
+        for f in lint_fixes:
+            if f["fix"] == _CUT:
+                continue
+            stops[f["beat"]]["motif"] = f["fix"]
+            stops[f["beat"]]["motif_locked"] = True
+        for a in actions:
+            if a["action"] == "swap_treatment":
+                stops[a["beat"]]["motif"] = a["to"]
+                stops[a["beat"]]["motif_locked"] = True
+        for i in drop_idx:
+            stops.pop(i)
+        # Keep the pre-review cut for comparison. It is a debugging artifact,
+        # not a contract — losing it must never cost the run its film.
+        prereview = os.path.join(run_dir, "film-tour-prereview.mp4")
+        if not os.path.exists(prereview):
+            try:
+                shutil.copyfile(film, prereview)
+            except OSError as e:
+                print(f"[walkrec] prereview copy skipped: {e}", file=sys.stderr)
+        emit(run_dir, "review.apply", f"Applying {_n} adjustments",
+             "Re-assembling and re-rendering the film.")
+        film, beats, film_s = _assemble_and_render(run_id, run_dir, pub,
+                                                   stops, ctx)
+        recut = True
+    # ONE TERMINAL REPORT. The reviewer does not get to round the film up to
+    # "it holds" — that was the original defect — and it does not get to end
+    # the thread in silence either: a check that could not run is disclosed,
+    # a finding that survived is a rejection, and an honesty finding that
+    # survived refuses delivery outright.
+    unresolved = [f for c in checks for f in c["findings"]]
+    blocking = [c for c in checks if c["blocking"] and c["findings"]]
+    if not unresolved:
+        skipped = [c["name"] for c in checks if not c["ran"]]
+        if recut:
+            emit(run_dir, "review.done", "Review complete — film updated",
+                 artifact=film)
+        else:
+            emit(run_dir, "review.pass",
+                 "Review passed" + (" on the checks that could run"
+                                    if skipped else ""),
+                 ", ".join(c["name"] for c in checks if c["ran"])
+                 + " — all clear."
+                 + (f" Could not run: {', '.join(skipped)}." if skipped else ""))
+        _say(run_dir, _review_claim(checks) + " Shipping this cut.")
+        return film, beats, film_s, []
+    detail = "; ".join(f"{c['name']} ({len(c['findings'])})"
+                       for c in checks if c["findings"])
+    emit(run_dir, "review.reject",
+         f"Review did not pass — {len(unresolved)} issue"
+         f"{'s' if len(unresolved) != 1 else ''} left in the cut", detail)
+    if blocking:
+        # REFUSE DELIVERY. A beat with nothing to show, or a green check on a
+        # failure state, is the film making a claim on the customer's behalf
+        # that isn't true. The assembler prevents both by construction, so
+        # reaching here means a contract broke — ship nothing and say why.
+        _say(run_dir,
+             "I'm not handing this over: " + blocking[0]["findings"][0]["issue"]
+             + ". That's a claim the film would be making for you that I "
+             "can't stand behind, and re-cutting didn't clear it.")
+        raise RuntimeError(
+            "walkrec review rejected the cut: "
+            + "; ".join(f"{c['name']}: {c['findings'][0]['issue']}"
+                        for c in blocking))
+    # Not blocking, but not clean: the film ships and the handover names what
+    # is still wrong (build_tour_film reads `unresolved`).
     _say(run_dir,
-         f"{_n} thing{'s' if _n != 1 else ''} bothered me on the way "
-         f"through, so I'm fixing {'them' if _n != 1 else 'it'} before you "
-         "see it — then re-cutting.")
-    drop_idx = sorted({a["beat"] for a in actions if a["action"] == "drop"},
-                      reverse=True)
-    for i, fix in lint_fixes:
-        stops[i]["motif"] = fix
-        stops[i]["motif_locked"] = True
-    for a in actions:
-        if a["action"] == "swap_treatment":
-            stops[a["beat"]]["motif"] = a["to"]
-            stops[a["beat"]]["motif_locked"] = True
-    for i in drop_idx:
-        stops.pop(i)
-    shutil.copyfile(os.path.join(run_dir, "film-tour.mp4"),
-                    os.path.join(run_dir, "film-tour-prereview.mp4"))
-    emit(run_dir, "review.apply",
-         f"Applying {len(lint_fixes) + len(actions)} adjustments",
-         "Re-assembling and re-rendering the film.")
-    out, _beats2 = _assemble_and_render(run_id, run_dir, pub, stops, ctx)
-    emit(run_dir, "review.done", "Review complete — film updated",
-         artifact=out)
-    return out
+         _review_claim(checks)
+         + " What I couldn't settle: " + unresolved[0]["issue"] + ".")
+    return film, beats, film_s, unresolved
 
 
 def main():

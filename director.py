@@ -216,8 +216,8 @@ def _render_async(run_id: str, run_dir: str, state: dict, applied):
                       else f"“{a[1][:40]}” → {a[2]}") for a in applied),
                  "Re-assembling and re-rendering.")
             pub = os.path.join(HERE, "studio", "public")
-            out, _ = pw._assemble_and_render(run_id, run_dir, pub, stops,
-                                             state["ctx"])
+            out, _beats, _film_s = pw._assemble_and_render(
+                run_id, run_dir, pub, stops, state["ctx"])
             emit(run_dir, "review.done", "Change applied — film updated",
                  artifact=out)
             emit(run_dir, "run.done", "Run finished",
@@ -260,6 +260,18 @@ def _parse(run_dir: str, state: dict, message: str):
 # An applied edit re-renders the film — real compute, so it costs credits.
 # Conversation (answers, and anything the taste gates decline) is free: the
 # user must never pay for the system saying no.
+#
+# ── SECOND COPY OF A PRICE ───────────────────────────────────────────────
+# AUTHORITY: `EDIT_CREDIT_COST` in `web/app/actions.ts` (~line 107), which
+# sits under the derivation comment that explains where 70 comes from (an
+# edit ≈ 2,500 tokens) and beside VIDEO_CREDIT_COST / the daily cap it was
+# derived against. This is a duplicate, not the source: the TS constant
+# gates the user's balance BEFORE the job is queued, and this one writes the
+# ledger row AFTER the render. A change to one alone silently quotes one
+# price and charges another — the user is admitted at 70 and debited
+# whatever the worker still believes. There is no shared config the two
+# runtimes both read, so this cross-reference is the seam: change the
+# authority first, then this line in the same commit.
 EDIT_CREDIT_COST = 70
 
 
@@ -296,8 +308,8 @@ def _apply_work(run_id: str, run_dir: str, state: dict, actions,
     _rev.charge_credits(run_dir, EDIT_CREDIT_COST,
                         f"edit:{job_id or int(time.time())}")
     pub = os.path.join(HERE, "studio", "public")
-    out, _beats = pw._assemble_and_render(run_id, run_dir, pub,
-                                          stops, state["ctx"])
+    out, _beats, _film_s = pw._assemble_and_render(run_id, run_dir, pub,
+                                                   stops, state["ctx"])
     import run_events as _re
     _re.ship_final(run_dir, run_id, out)
     emit(run_dir, "review.done", "Change applied — film updated",

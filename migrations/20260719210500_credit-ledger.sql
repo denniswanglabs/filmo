@@ -1,7 +1,8 @@
 -- Credit system (beta): append-only ledger, server-key writes only.
 -- Balance is derived (SUM(delta)); spends are negative, refunds/grants positive.
--- Caps live in the app (daily 300 / lifetime 1500; 1 video = 100) so tuning
--- them never needs a migration.
+-- Caps and prices live in the app (web/app/actions.ts) so tuning them never
+-- needs a migration — and are deliberately NOT restated here, because a
+-- second copy of a tariff rots silently the moment the first one moves.
 create table if not exists public.credit_ledger (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
