@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../lib/auth'
+import { OAUTH_RETURN } from '../lib/insforge'
 import { createBuild, listMyRuns } from './actions'
 import { AuthGate } from './components/AuthGate'
 import PloyLanding from './components/landing2/PloyLanding'
@@ -324,6 +325,34 @@ export default function Home() {
         clearPendingBuild()
       }
 
+      // 1.5 OAUTH RETURN, SIGNED IN, NOTHING TO RESUME → INTO THE STUDIO.
+      //     This reader is mid-journey, not visiting: they clicked "Enter the
+      //     studio", which is the click that sent them to Google, and Google has
+      //     just handed them back here signed in. The resume path above already
+      //     took anyone with a stashed build; reaching this line with a `user`
+      //     means there is nothing to pick up — so carry them the rest of the way
+      //     to /overview instead of depositing them on the marketing page to
+      //     press the same button again (Dennis, 2026-07-20: "i arrive at the
+      //     landing page having signed in… i have to click on enter the studio
+      //     again"). /overview is the empty-account-safe destination enterStudio
+      //     also uses; the boot cover stays up through the client replace.
+      //
+      //     Two gates, both load-bearing:
+      //       • OAUTH_RETURN — only the return HOP continues inward. A plain
+      //         signed-in visit to `/` (no `insforge_code` in the URL) is not a
+      //         journey and still gets the landing, per Dennis's standing rule
+      //         ("no signed in still go through the landing page").
+      //       • user — SUCCESS only. A FAILED return resolves `user = null`
+      //         (auth.tsx sets oauthReturnFailed + no session), so this cannot
+      //         fire on it; that path falls through to the gate-reopen effect
+      //         above, which must keep showing the red notice (5c74691), not be
+      //         preempted by a redirect.
+      if (OAUTH_RETURN && user) {
+        setBooting(true)
+        router.replace('/overview')
+        return
+      }
+
       // 2. EVERYONE GETS THE LANDING. `/` is the front door, not a router
       //    (Dennis, 2026-07-19: "no signed in still go through the landing
       //    page"). It used to bounce a signed-in visitor straight into the
@@ -345,7 +374,7 @@ export default function Home() {
       // no sign that their click did anything.
       if (fresh && !user && !landing) setGateOpen(true)
     })()
-  }, [loading, user, runBuild, enterStudio, showLanding])
+  }, [loading, user, runBuild, enterStudio, showLanding, router])
 
   // The landing's CTA. Signed out, this is where sign-in begins; the Google
   // path returns to `/` and the decision above takes it from there.

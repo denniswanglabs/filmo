@@ -1,6 +1,7 @@
 'use client'
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { insforge, persistSession, readPersistedSession, rehydrateSessionIntoClient, ensureFreshAccessToken, OAUTH_RETURN } from './insforge'
+import { clearPendingBuild } from './pending-build'
 
 interface AuthUser {
   id: string
@@ -112,6 +113,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     await insforge.auth.signOut()
     persistSession(null) // drop the durable copy so a reload doesn't restore a dead session
+    // A deliberate sign-out is the reader closing the book — nothing should
+    // resume after it. Drop any build stashed before a Google round-trip
+    // (ws_pending_build) so the next visit's gate can't greet them with a phantom
+    // "Your prompt is ready" auto-resume from an attempt they'd walked away from
+    // (2026-07-20). This is the ONLY place the stash is cleared on purpose: a
+    // stash surviving a FAILED sign-in is exactly what makes resume work, so it
+    // must never be cleared on any path but an intentional sign-out.
+    clearPendingBuild()
     setUser(null)
   }, [])
 
