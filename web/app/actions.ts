@@ -53,6 +53,54 @@ async function withRetry<T extends { data?: unknown; error: unknown }>(
   return last as T
 }
 
+// ─────────── Owner-scoped read that overlaps verification with the query ───────────
+// verifyUser is a network round-trip to InsForge auth (~1 leg); the owner read is
+// another. Historically every action ran them SERIALLY — verify, THEN read — so a
+// signed-in page paid both legs end to end. These can overlap: the JWT's `sub` names
+// its own subject, so we can start the read for that CLAIMED owner concurrently with
+// verification. The decode is UNVERIFIED and decides only the query's WHO; verifyUser's
+// result decides WHETHER the rows may be returned. A forged/expired token is rejected
+// below and its speculative rows are DISCARDED, never returned — the same security
+// boundary as a serial verify-then-read (the admin client's `.eq('user_id', …)` remains
+// the only owner gate, and it is fed the VERIFIED id whenever the two disagree).
+//
+// `sub` is InsForge's user-id claim (confirmed against a live token: payload keys are
+// email, exp, iat, role, sub). An undecodable token simply skips the speculation and
+// falls back to the old serial path — correctness never depends on the decode.
+function decodeUserIdUnverified(accessToken: string | null | undefined): string | null {
+  if (!accessToken || typeof accessToken !== 'string') return null
+  try {
+    const part = accessToken.split('.')[1]
+    if (!part) return null
+    let b64 = part.replace(/-/g, '+').replace(/_/g, '/')
+    while (b64.length % 4 !== 0) b64 += '='
+    const sub = (JSON.parse(Buffer.from(b64, 'base64').toString('utf8')) as { sub?: unknown }).sub
+    return typeof sub === 'string' && sub ? sub : null
+  } catch {
+    return null
+  }
+}
+
+async function ownerGatedRead<T>(
+  accessToken: string | null | undefined,
+  read: (db: ReturnType<typeof adminClient>, userId: string) => Promise<T>,
+): Promise<{ authError: true } | { data: T }> {
+  const db = adminClient()
+  const localId = decodeUserIdUnverified(accessToken)
+  // Speculate on the token's claimed subject, concurrently with verification.
+  const speculative = localId ? read(db, localId) : null
+  // If we end up abandoning it (forged token, or a mismatch), its rejection must
+  // never surface as an unhandled promise rejection in the server runtime.
+  if (speculative) speculative.catch(() => {})
+  const me = await verifyUser(accessToken)
+  if (!me) return { authError: true }
+  // Valid token → `sub` IS the verified id, so the speculation is exactly right and
+  // is used as-is. The `me.id === localId` guard is belt-and-braces: on any mismatch
+  // we throw the speculation away and read again with the VERIFIED id.
+  const data = speculative && me.id === localId ? await speculative : await read(db, me.id)
+  return { data }
+}
+
 // ─────────────────────────── In-browser editor: save ───────────────────────────
 // Persist the editor's edited props into runs.props_edited (a separate jsonb column
 // from the clean, worker-generated `props`, so "revert to original" stays possible).
@@ -646,23 +694,28 @@ async function isRerenderInFlight(
 export type MyRunsResult = { authError: true } | { runs: Run[] }
 
 export async function listMyRuns(accessToken: string | null | undefined): Promise<MyRunsResult> {
-  // 1) Verify the caller server-side. A stale/expired token → authError (the page shows
-  //    the sign-in gate), NEVER a false-empty list.
-  const me = await verifyUser(accessToken)
-  if (!me) return { authError: true }
+  // Verify server-side (stale token → authError → the sign-in gate, NEVER a
+  // false-empty list) and read owner-scoped — but OVERLAP the two: ownerGatedRead
+  // starts the read for the token's claimed subject while verifyUser is in flight,
+  // and only returns it once verification confirms the caller. Same owner boundary
+  // (`.eq('user_id', …)` on the admin client), one fewer serial leg.
+  const r = await ownerGatedRead(accessToken, myRunsFor)
+  return 'authError' in r ? r : { runs: r.data }
+}
 
-  // 2) Admin-read this user's runs, owner-scoped. Same columns + ordering + limit the
-  //    page used client-side, so the rendered list is byte-for-byte what it showed before.
-  const db = adminClient()
+// The read half of listMyRuns, keyed by an ALREADY-DECIDED user id. Same columns +
+// ordering + limit the page used client-side, so the rendered list is byte-for-byte
+// what it showed before.
+async function myRunsFor(db: ReturnType<typeof adminClient>, userId: string): Promise<Run[]> {
   const { data } = await db.database
     .from('runs')
     .select(
       'id, brand, company_url, goal, quality, status, phase, price_cents, margin, final_url, created_at, film_mode',
     )
-    .eq('user_id', me.id)
+    .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(20)
-  return { runs: (data as Run[]) ?? [] }
+  return (data as Run[]) ?? []
 }
 
 // ───────────────────────────────── Assets library ─────────────────────────────
@@ -706,23 +759,65 @@ function assetName(kind: string, title: string): string {
   return t
 }
 
-export async function listAssets(accessToken: string | null | undefined): Promise<
-  { authError: true } | { assets: AssetRow[] }
-> {
-  const me = await verifyUser(accessToken)
-  if (!me) return { authError: true }
-  const db = adminClient()
+// ── A FILMO AND EVERYTHING IT PRODUCED ──────────────────────────────────────
+// The library groups its raw material under the film that produced it, because
+// the whole surface is a provenance ledger: an asset means the most next to the
+// film it came from. Each group is one run's own identity + its assets, and
+// groups are newest FILM first — ordered by the run's created_at, not by an
+// asset's timestamp, so "newest film" is the run that STARTED most recently even
+// when an older run happened to emit a late event. A run that produced no asset
+// yields no group (never an empty header). Every asset here belongs to one of
+// these runs by construction — the event read is scoped to their ids and film
+// rows come from the runs themselves — so there is no "unattached" bucket.
+export interface AssetGroup {
+  runId: string
+  /** The film's display identity: its brand, else its host, else its address. */
+  brand: string
+  /** Bare host of the run's address (www dropped), or '' — shown as a second
+   *  line only when it says something the brand line does not. */
+  host: string
+  /** The run's own created_at (ISO) — the header date, and the group's sort key. */
+  createdAt: string
+  /** This run's assets: the finished film first (the headline artifact), then
+   *  the raw material newest-first. */
+  assets: AssetRow[]
+}
+
+export type ListAssetsResult = { authError: true } | { groups: AssetGroup[] }
+
+/** Bare host of a run's address (lowercased, www dropped), or ''. */
+function assetGroupHost(companyUrl: string | null | undefined): string {
+  const raw = (companyUrl || '').trim()
+  if (!raw) return ''
+  try {
+    return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+      .hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+export async function listAssets(accessToken: string | null | undefined): Promise<ListAssetsResult> {
+  const r = await ownerGatedRead(accessToken, listAssetGroupsFor)
+  return 'authError' in r ? r : { groups: r.data }
+}
+
+// The read half, keyed by an already-decided user id. Builds one group per run
+// (in run order, newest first) and drops runs that produced nothing.
+async function listAssetGroupsFor(
+  db: ReturnType<typeof adminClient>, userId: string,
+): Promise<AssetGroup[]> {
   const { data: runRows } = await db.database
     .from('runs')
     .select('id, brand, company_url, final_url, created_at')
-    .eq('user_id', me.id)
+    .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(40)
   const runs = (runRows as {
     id: string; brand: string | null; company_url: string | null
     final_url: string | null; created_at: string
   }[]) || []
-  if (!runs.length) return { assets: [] }
+  if (!runs.length) return []
   const byId = new Map(runs.map((r) => [r.id, r]))
 
   const { data: evtRows } = await db.database
@@ -734,10 +829,27 @@ export async function listAssets(accessToken: string | null | undefined): Promis
     .order('ts', { ascending: false })
     .limit(600)
 
-  const assets: AssetRow[] = []
+  const groups = new Map<string, AssetGroup>()
+  const groupFor = (r: typeof runs[number]): AssetGroup => {
+    let g = groups.get(r.id)
+    if (!g) {
+      const host = assetGroupHost(r.company_url)
+      g = {
+        runId: r.id,
+        brand: r.brand || host || r.company_url || 'Untitled filmo',
+        host,
+        createdAt: r.created_at,
+        assets: [],
+      }
+      groups.set(r.id, g)
+    }
+    return g
+  }
+
+  // Film rows — the headline artifact of each group.
   for (const r of runs) {
     if (!r.final_url) continue
-    assets.push({
+    groupFor(r).assets.push({
       id: `film-${r.id}`, kind: 'film',
       name: `${r.brand || r.company_url || 'Launch'} film`,
       url: proxyPlayableUrl(r.final_url) || '',
@@ -745,13 +857,14 @@ export async function listAssets(accessToken: string | null | undefined): Promis
       ts: Date.parse(r.created_at) / 1000, video: true,
     })
   }
+  // Event assets (evtRows already ordered ts desc).
   for (const e of ((evtRows as {
     run_id: string; seq: number; ts: number; kind: string
     title: string; artifact_url: string
   }[]) || [])) {
     const run = byId.get(e.run_id)
     if (!run) continue
-    assets.push({
+    groupFor(run).assets.push({
       id: `${e.run_id}-${e.seq}`, kind: ASSET_OF_KIND[e.kind],
       name: assetName(e.kind, e.title),
       url: `/api/agent-artifact?u=${encodeURIComponent(e.artifact_url)}`,
@@ -759,8 +872,18 @@ export async function listAssets(accessToken: string | null | undefined): Promis
       ts: e.ts, video: /\.mp4(\?|$)/i.test(e.artifact_url),
     })
   }
-  assets.sort((a, b) => b.ts - a.ts)
-  return { assets }
+
+  // Emit in run order (newest film first). Within a group: film first, then the
+  // raw material newest-first.
+  const ordered: AssetGroup[] = []
+  for (const r of runs) {
+    const g = groups.get(r.id)
+    if (!g) continue
+    g.assets.sort((a, b) =>
+      (b.kind === 'film' ? 1 : 0) - (a.kind === 'film' ? 1 : 0) || b.ts - a.ts)
+    ordered.push(g)
+  }
+  return ordered
 }
 
 // ─────────────────────────────── Owner analytics ───────────────────────────────
@@ -1368,26 +1491,39 @@ export type OverviewStatsResult = { authError: true } | { stats: OverviewStats }
 // check is indistinguishable from one that is wrong.
 const ASSET_RUN_WINDOW = 40
 
+const EMPTY_OVERVIEW_STATS: OverviewStats = {
+  filmos: 0, filmSeconds: 0, filmSecondsMeasuredOf: 0,
+  pagesRead: 0, recordings: 0, assets: 0,
+}
+
 export async function getOverviewStats(
   accessToken: string | null | undefined,
 ): Promise<OverviewStatsResult> {
   const me = await verifyUser(accessToken)
   if (!me) return { authError: true }
-  const db = adminClient()
-  const runs = await overviewRuns(db, me.id)
-  const empty: OverviewStats = {
-    filmos: 0, filmSeconds: 0, filmSecondsMeasuredOf: 0,
-    pagesRead: 0, recordings: 0, assets: 0,
-  }
-  if (!runs.length) return { stats: empty }
+  return { stats: await overviewStatsFor(adminClient(), me.id) }
+}
 
+// The read half of the strip, keyed by an already-decided user id.
+async function overviewStatsFor(
+  db: ReturnType<typeof adminClient>, userId: string,
+): Promise<OverviewStats> {
+  const runs = await overviewRuns(db, userId)
+  if (!runs.length) return EMPTY_OVERVIEW_STATS
   // ASSET_OF_KIND is the library's definition of what counts as an asset;
   // re-deriving it here is how the two surfaces would drift apart.
   const assetKinds = Object.keys(ASSET_OF_KIND)
   const kinds = Array.from(new Set([...assetKinds, 'assemble.film']))
   const events = await overviewEvents(db, runs.map((r) => r.id), kinds)
-  const byRun = eventsByRun(events)
+  return computeOverviewStats(runs, eventsByRun(events))
+}
 
+// Reduce owner runs + their events into the strip's six numbers. PURE — it reads
+// no rows — so getOverviewHome can hand it a byRun built from a SHARED, wider
+// event read: it only ever counts the kinds it names and ignores the rest.
+function computeOverviewStats(
+  runs: OverviewRunRow[], byRun: Map<string, OverviewEventRow[]>,
+): OverviewStats {
   const assetWindow = new Set(runs.slice(0, ASSET_RUN_WINDOW).map((r) => r.id))
   const pages = new Set<string>()
   let filmos = 0
@@ -1416,14 +1552,12 @@ export async function getOverviewStats(
   }
 
   return {
-    stats: {
-      filmos,
-      filmSeconds: Math.round(filmSeconds),
-      filmSecondsMeasuredOf: measured,
-      pagesRead: pages.size,
-      recordings,
-      assets,
-    },
+    filmos,
+    filmSeconds: Math.round(filmSeconds),
+    filmSecondsMeasuredOf: measured,
+    pagesRead: pages.size,
+    recordings,
+    assets,
   }
 }
 
@@ -1564,13 +1698,26 @@ export async function getSuggestions(
 ): Promise<SuggestionsResult> {
   const me = await verifyUser(accessToken)
   if (!me) return { authError: true }
-  const db = adminClient()
-  const runs = await overviewRuns(db, me.id)
-  if (!runs.length) return { suggestions: [] }
+  return { suggestions: await suggestionsFor(adminClient(), me.id) }
+}
 
+// The read half of the cards, keyed by an already-decided user id.
+async function suggestionsFor(
+  db: ReturnType<typeof adminClient>, userId: string,
+): Promise<Suggestion[]> {
+  const runs = await overviewRuns(db, userId)
+  if (!runs.length) return []
   const events = await overviewEvents(db, runs.map((r) => r.id),
     ['read.page', 'film.recording', 'film.shot', 'chat.user'])
-  const byRun = eventsByRun(events)
+  return computeSuggestions(runs, eventsByRun(events))
+}
+
+// Derive the "For you" cards from owner runs + their events. PURE — reads no rows
+// — so getOverviewHome can hand it a byRun from a SHARED, wider event read; it
+// only ever inspects the kinds it names.
+function computeSuggestions(
+  runs: OverviewRunRow[], byRun: Map<string, OverviewEventRow[]>,
+): Suggestion[] {
   const nameOf = (r: OverviewRunRow) =>
     siteHost(r.company_url) || r.brand || 'this site'
 
@@ -1732,7 +1879,53 @@ export async function getSuggestions(
     if (landed) break
   }
 
-  return { suggestions: out.slice(0, SUGGESTION_CAP) }
+  return out.slice(0, SUGGESTION_CAP)
+}
+
+// ─────────────────────── /overview: ONE read for the home ───────────────────────
+// The Overview needs three things — the strip, the cards, and the recent-runs
+// list. It used to fetch them as THREE separate server actions, and Next.js
+// serializes server actions globally, so a Promise.all on the client did not
+// overlap them: they queued end to end, each paying its own verifyUser leg
+// (measured ~3 × ~600ms ≈ 1.2s of pure waiting the user did nothing for). This
+// merges them into ONE action: a single verifyUser, ONE shared owner-runs read
+// and ONE shared event read feeding BOTH the strip and the cards (the two used to
+// read the same runs + events twice over), and the /videos-style run list read in
+// parallel. The old three stay exported for any other caller; the Overview calls
+// only this. Verification overlaps the reads via ownerGatedRead.
+export type OverviewHomeResult =
+  | { authError: true }
+  | { stats: OverviewStats; suggestions: Suggestion[]; runs: Run[] }
+
+// The union of the kinds the strip and the cards each need, read once. Each
+// consumer ignores the kinds it does not name, so a shared read is safe.
+const OVERVIEW_HOME_KINDS = Array.from(new Set([
+  ...Object.keys(ASSET_OF_KIND), 'assemble.film', // strip
+  'read.page', 'film.recording', 'film.shot', 'chat.user', // cards
+]))
+
+export async function getOverviewHome(
+  accessToken: string | null | undefined,
+): Promise<OverviewHomeResult> {
+  const r = await ownerGatedRead(accessToken, overviewHomeFor)
+  return 'authError' in r ? r : r.data
+}
+
+async function overviewHomeFor(
+  db: ReturnType<typeof adminClient>, userId: string,
+): Promise<{ stats: OverviewStats; suggestions: Suggestion[]; runs: Run[] }> {
+  // The overview window and the /videos list are independent reads — run them
+  // together. The event read must wait on the overview runs (it is scoped to
+  // their ids), then feeds both the strip and the cards from one result.
+  const [ovRuns, myRuns] = await Promise.all([overviewRuns(db, userId), myRunsFor(db, userId)])
+  if (!ovRuns.length) return { stats: EMPTY_OVERVIEW_STATS, suggestions: [], runs: myRuns }
+  const events = await overviewEvents(db, ovRuns.map((r) => r.id), OVERVIEW_HOME_KINDS)
+  const byRun = eventsByRun(events)
+  return {
+    stats: computeOverviewStats(ovRuns, byRun),
+    suggestions: computeSuggestions(ovRuns, byRun),
+    runs: myRuns,
+  }
 }
 
 // ═══════════════════ THE RAIL'S LIVE-FILM ENTRY ═══════════════════

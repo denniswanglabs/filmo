@@ -36,10 +36,7 @@ import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
 import { ensureFreshAccessToken } from '../../lib/insforge'
-import {
-  getOverviewStats, getSuggestions, listMyRuns,
-  type OverviewStats, type Suggestion,
-} from '../actions'
+import { getOverviewHome, type OverviewStats, type Suggestion } from '../actions'
 import type { Run } from '../../lib/types'
 import FeedbackModal from '../runs/[id]/FeedbackModal'
 import OverviewRail from '../components/overview/OverviewRail'
@@ -98,33 +95,28 @@ export default function OverviewPage() {
 
   const load = useCallback(async () => {
     setReadFailed(false)
-    // Three independent owner-scoped reads, in parallel: the strip, the
-    // cards, and the same run list /videos shows.
-    const read = async () => {
-      const token = await getToken()
-      const [statsRes, sugRes, runsRes] = await Promise.all([
-        getOverviewStats(token),
-        getSuggestions(token),
-        listMyRuns(token),
-      ])
-      return { statsRes, sugRes, runsRes }
-    }
-    const deniedIn = (r: Awaited<ReturnType<typeof read>>) =>
-      'authError' in r.statsRes || 'authError' in r.sugRes || 'authError' in r.runsRes
+    // ONE owner-scoped read for the whole home — the strip, the cards, and the
+    // /videos run list — merged server-side (getOverviewHome). This USED to be
+    // three separate server actions, and because Next.js serializes server
+    // actions globally a client-side Promise.all did not overlap them: they
+    // queued end to end, each paying its own verifyUser leg (~3 × ~600ms of pure
+    // waiting). One action, one verification, the reads shared/parallel inside.
+    const read = async () => getOverviewHome(await getToken())
+    const denied = (r: Awaited<ReturnType<typeof read>>) => 'authError' in r
     try {
       let r = await read()
       // ONE STALE 401 IS NOT A SIGNOUT. The reproduced false-logout class
-      // (2026-07-20): the access token expires mid-session, the reads carry the
-      // dead bearer, verifyUser answers a clean 401 each — while a perfectly
-      // valid refresh token sits in localStorage. So before the gate is even
+      // (2026-07-20): the access token expires mid-session, the read carries the
+      // dead bearer, verifyUser answers a clean 401 — while a perfectly valid
+      // refresh token sits in localStorage. So before the gate is even
       // considered: force ONE refresh (the server outranks the client's clock)
-      // and retry the reads ONCE on the fresh token. The invariant this
+      // and retry the read ONCE on the fresh token. The invariant this
       // establishes: a user holding a valid refresh token never sees the
       // sign-in gate — they see their data, or a "try again", never the door.
-      if (deniedIn(r)) {
+      if (denied(r)) {
         const freshness = await ensureFreshAccessToken({ force: true })
         if (freshness === 'ok') r = await read()
-        if (deniedIn(r)) {
+        if (denied(r)) {
           if (freshness === 'unavailable') {
             // The auth service itself was unreachable: the session is UNKNOWN,
             // not dead. That is a blip with a retry button, never the gate.
@@ -137,13 +129,11 @@ export default function OverviewPage() {
           return
         }
       }
-      if ('authError' in r.statsRes || 'authError' in r.sugRes || 'authError' in r.runsRes) {
-        return // unreachable after the block above; narrows the types below
-      }
+      if ('authError' in r) return // unreachable after the block; narrows below
       setAuthError(false)
-      setStats(r.statsRes.stats)
-      setSuggestions(r.sugRes.suggestions)
-      setRuns(r.runsRes.runs)
+      setStats(r.stats)
+      setSuggestions(r.suggestions)
+      setRuns(r.runs)
     } catch {
       // verifyUser THROWS (rather than returning null) when the auth service is
       // unreachable, precisely so a brownout cannot read as "signed out". Say
@@ -153,10 +143,10 @@ export default function OverviewPage() {
   }, [getToken])
 
   // KEYED ON THE USER'S ID, NEVER THE USER OBJECT — see the full note in
-  // /videos. This page pays the most for the difference: `load` fires THREE
-  // server actions, and Next.js serializes server actions globally, so one
-  // redundant re-run costs three more queued round trips (measured: 6 actions
-  // for a single visit).
+  // /videos. This still matters even though `load` now fires ONE server action
+  // (getOverviewHome) rather than three: Next.js serializes server actions
+  // globally, so a redundant re-run keyed on a fresh-but-equal user object would
+  // queue a whole extra home read behind the first.
   const userId = user?.id
   useEffect(() => { if (userId) void load() }, [userId, load])
 

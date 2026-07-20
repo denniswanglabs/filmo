@@ -1,7 +1,8 @@
 'use client'
 // ═══════════════════════ /assets — THE PROVENANCE LEDGER ═════════════════════
 //
-// Everything Filmo has taken from a customer's site or made from it, browsable.
+// Everything Filmo has taken from a customer's site or made from it, browsable
+// AND GROUPED UNDER THE FILM THAT PRODUCED IT.
 //
 // The product's whole claim is that nothing in a film is invented: every line
 // comes from a page it read, every mark is one the site actually serves, every
@@ -9,25 +10,27 @@
 // as it is CHECKABLE — so this page shows the raw material itself, and every
 // tile walks back to the run that produced it.
 //
-// ── WHAT CHANGED, AND WHAT DELIBERATELY DID NOT (2026-07-19) ────────────────
-// The page was wearing the old blue landing chrome — FloatingNav, SiteFooter,
-// LandingBackdrop — which is the marketing shell, not the product's. It now
-// wears the studio ground and the product's rail, like the Overview and like
-// its sibling /videos. Those landing components are NOT deleted; /how-it-works
-// still ships them. This file just stopped importing them.
+// ── WHY GROUPS (2026-07-20) ─────────────────────────────────────────────────
+// A flat wall of 260 tiles mixing page captures, marks, recordings, stills and
+// films answers "what does Filmo collect" but not "what did THIS film come
+// from" — and the second question is the point of a provenance ledger. So the
+// material now sits under the filmo that made it: each group headed by that
+// film's identity (its brand, its host, its date), newest film first, its assets
+// beneath. The filter strip still narrows by kind — it now narrows WITHIN every
+// group at once (a group with nothing of the selected kind drops out).
 //
-// Three behaviours from the first version were kept because they were right:
-//   · FILTERING BY KIND, and each filter saying what the kind IS — the library
+// Every asset belongs to exactly one of these films by construction — the server
+// scopes the event read to the same runs the film rows come from — so there is
+// no "unattached" group, and none is invented for a case the data cannot produce.
+//
+// ── WHAT WAS KEPT, BECAUSE IT WAS RIGHT ─────────────────────────────────────
+//   · FILTERING BY KIND, each filter saying what the kind IS — the library
 //     doubles as an explanation of what the agent actually collects.
-//   · EVERY TILE LINKS TO ITS RUN. Provenance is the point (see AssetTile).
-//   · A STALE TOKEN NEVER YIELDS A FALSE-EMPTY LIBRARY. As of 2026-07-20 it no
-//     longer prompts sign-in either: an authError is a hypothesis, and `load`
+//   · EVERY TILE LINKS TO ITS RUN, and now the group header does too.
+//   · A STALE TOKEN NEVER YIELDS A FALSE-EMPTY LIBRARY, and never the sign-in
+//     gate for a recoverable session: an authError is a hypothesis, and `load`
 //     runs the /overview refresh-retry belt before any gate is considered.
-//
-// One thing was fixed rather than kept: the old read swallowed a thrown server
-// action whole (`catch { return }`), which on a FIRST load left the page saying
-// "Loading assets…" forever with nothing on the way. A failed read is not an
-// empty account and it is not a loading one — see `load` below.
+//   · A FAILED READ is neither an empty account nor a loading one (see `load`).
 //
 // The route stays /assets. It is a URL people may already hold, and renaming a
 // path to match a noun breaks links to buy nothing.
@@ -35,18 +38,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
 import { ensureFreshAccessToken } from '../../lib/insforge'
-import { listAssets, type AssetKind, type AssetRow } from '../actions'
+import { listAssets, type AssetKind, type AssetGroup } from '../actions'
 import FilmoLoader from '../components/FilmoLoader'
 import LibraryShell from '../components/library/LibraryShell'
 import FilterStrip, { type FilterOption } from '../components/library/FilterStrip'
-import AssetTile from '../components/library/AssetTile'
+import AssetGroupSection from '../components/library/AssetGroupSection'
 
 type Kind = AssetKind | 'all'
 
 // Type names are the user's words for the thing, not the pipeline's event
-// kinds — "Page capture", not "read.page". Preserved verbatim from the first
-// version of this page, hints included: naming what each kind IS is what makes
-// the strip an explanation rather than a set of switches.
+// kinds — "Page capture", not "read.page". Naming what each kind IS is what
+// makes the strip an explanation rather than a set of switches.
 const KINDS: { key: Kind; label: string; hint?: string }[] = [
   { key: 'all', label: 'All assets' },
   { key: 'film', label: 'Films', hint: 'The finished cut' },
@@ -58,7 +60,7 @@ const KINDS: { key: Kind; label: string; hint?: string }[] = [
 
 export default function AssetsPage() {
   const { user, loading, getToken } = useAuth()
-  const [assets, setAssets] = useState<AssetRow[] | null>(null)
+  const [groups, setGroups] = useState<AssetGroup[] | null>(null)
   const [authError, setAuthError] = useState(false)
   // A read that FAILED is not an account that is empty, and it is not one that
   // is still loading either. Only set when there is nothing already on screen.
@@ -88,7 +90,7 @@ export default function AssetsPage() {
             // not dead — a blip with a retry, never the gate. Treated exactly
             // like a thrown read below: KEEP a list already on screen (Refresh
             // is right there), and only say "try again" with nothing to keep.
-            setAssets((prev) => { if (prev == null) setReadFailed(true); return prev })
+            setGroups((prev) => { if (prev == null) setReadFailed(true); return prev })
             return
           }
           // Definitive: the refresh credential is gone/revoked ('signed-out'),
@@ -99,13 +101,13 @@ export default function AssetsPage() {
       }
       if ('authError' in res) return // unreachable after the block; narrows below
       setAuthError(false)
-      setAssets(res.assets)
+      setGroups(res.groups)
     } catch {
       // A thrown server action is a network/timeout blip. If a library is
       // already on screen, KEEP it — blanking a good list on a hiccup is worse
       // than a stale one, and Refresh is right there. If there is nothing on
       // screen, say so, because the alternative is a spinner that never ends.
-      setAssets((prev) => { if (prev == null) setReadFailed(true); return prev })
+      setGroups((prev) => { if (prev == null) setReadFailed(true); return prev })
     }
   }, [getToken])
 
@@ -117,14 +119,16 @@ export default function AssetsPage() {
   const userId = user?.id
   useEffect(() => { if (userId) void load() }, [userId, load])
 
+  // Kind counts are over EVERY asset in every group — the strip is a census of
+  // the whole library, not of one film.
+  const allAssets = useMemo(() => (groups || []).flatMap((g) => g.assets), [groups])
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: assets?.length || 0 }
-    for (const a of assets || []) c[a.kind] = (c[a.kind] || 0) + 1
+    const c: Record<string, number> = { all: allAssets.length }
+    for (const a of allAssets) c[a.kind] = (c[a.kind] || 0) + 1
     return c
-  }, [assets])
+  }, [allAssets])
 
-  // A filter that would return nothing is a dead end, so it is not offered —
-  // the first version's rule, kept.
+  // A filter that would return nothing is a dead end, so it is not offered.
   const options = useMemo<FilterOption<Kind>[]>(
     () => KINDS
       .filter((k) => k.key === 'all' || counts[k.key])
@@ -134,20 +138,27 @@ export default function AssetsPage() {
 
   // A filter can survive the disappearance of the thing it filtered (a refresh
   // that returns fewer kinds). Fall back to All rather than showing an empty
-  // grid under a pill that no longer exists.
+  // page under a pill that no longer exists.
   const active: Kind = options.some((o) => o.key === kind) ? kind : 'all'
 
-  const shown = useMemo(
-    () => (assets || []).filter((a) => active === 'all' || a.kind === active),
-    [assets, active],
+  // Apply the active filter WITHIN each group, and drop a group that has nothing
+  // of the selected kind — a header with no tiles beneath is a dead row.
+  const shownGroups = useMemo(
+    () => (groups || [])
+      .map((g) => ({ group: g, assets: active === 'all' ? g.assets : g.assets.filter((a) => a.kind === active) }))
+      .filter((x) => x.assets.length > 0),
+    [groups, active],
+  )
+  const shownCount = useMemo(
+    () => shownGroups.reduce((n, x) => n + x.assets.length, 0),
+    [shownGroups],
   )
 
   let body: React.ReactNode
   if (loading) {
     // The shared loader, sized as a region inside a page that already has
     // chrome — never `fit="screen"`, which would claim a viewport this page has
-    // already spent on a rail and a heading. The ground is left at its default
-    // (#F1F1EF), which is now this surface's ground too.
+    // already spent on a rail and a heading.
     body = <FilmoLoader fit="block" />
   } else if (!user || authError) {
     // No redirect. Someone who typed this URL gets the door, not a bounce.
@@ -172,9 +183,9 @@ export default function AssetsPage() {
         <button className="lib-gatebtn" onClick={() => void load()}>Try again</button>
       </div>
     )
-  } else if (assets == null) {
+  } else if (groups == null) {
     body = <FilmoLoader fit="block" />
-  } else if (assets.length === 0) {
+  } else if (groups.length === 0) {
     body = (
       <div className="lib-empty">
         <b>Nothing captured yet.</b>
@@ -196,13 +207,15 @@ export default function AssetsPage() {
         />
         <div className="lib-toolbar">
           <span className="lib-count">
-            {shown.length} {shown.length === 1 ? 'asset' : 'assets'}
+            {shownCount} {shownCount === 1 ? 'asset' : 'assets'} ·{' '}
+            {shownGroups.length} {shownGroups.length === 1 ? 'filmo' : 'filmos'}
           </span>
           <button className="lib-refresh" onClick={() => void load()}>Refresh</button>
         </div>
-        <ul className="lib-grid">
-          {shown.map((a) => <AssetTile key={a.id} asset={a} />)}
-        </ul>
+
+        {shownGroups.map(({ group, assets }) => (
+          <AssetGroupSection key={group.runId} group={group} assets={assets} />
+        ))}
       </>
     )
   }
@@ -215,7 +228,8 @@ export default function AssetsPage() {
         <>
           Everything Filmo took from your site, or made from it — the pages it
           read, the marks it captured, the footage it recorded, and every scene
-          it cut. Nothing in a filmo comes from anywhere else.
+          it cut. Grouped under the filmo that produced it; nothing here comes
+          from anywhere else.
         </>
       }
       context="/assets"
