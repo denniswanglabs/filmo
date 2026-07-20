@@ -1,10 +1,11 @@
 'use client'
 // ── THE OVERVIEW'S RAIL ─────────────────────────────────────────────────────
 // ⚠ TWIN: `runs/[id]/Workspace.tsx`. These two render the same rail and MUST
-// show the same entries in the same order. They already drifted once — this
-// file carried only Overview and New filmo while the studio also had Filmos
-// and Assets, so the same product had two different navigations depending on
-// which page you happened to be standing on, and Dennis found it immediately.
+// show the SAME ENTRIES IN THE SAME ORDER: New filmo, Overview, Filmos, Assets.
+// They already drifted once — this file carried only Overview and New filmo
+// while the studio also had Filmos and Assets, so the same product had two
+// different navigations depending on which page you happened to be standing on,
+// and Dennis found it immediately.
 //
 // The reasoning that produced the drift was that a rail names the places
 // inside a surface, so different surfaces get different rails. That is wrong
@@ -13,24 +14,35 @@
 // changes what is highlighted, never what exists.
 //
 // The two files legitimately differ in ONE way and it is not the entry list:
-// inside the studio, New filmo, Filmos and Film are SURFACES of the run you are
-// already standing in (tabs — pressing one never leaves your film), while here
-// there is no run to stay in, so the same entries are ROUTES: /new and /videos.
-// Film is the exception that proves the rule — it names THIS run, and off a run
-// there is no run for it to name, so it has no counterpart here. Same labels,
-// same icons, same order; different mechanics. If you add an entry, add it in
-// both.
+// inside the studio, New filmo is a SURFACE of the run you are already standing
+// in (a tab — pressing it never leaves your film), while here there is no run to
+// stay in, so it is a ROUTE, /new. Same label, same icon, same order; different
+// mechanic. If you add an entry, add it in both.
 //
-// ── THE ONE ENTRY THAT CANNOT DRIFT (2026-07-19) ────────────────────────────
+// ── FOUR ENTRIES NOW, NOT FIVE-PLUS (2026-07-20) ────────────────────────────
+// There used to be more here. A separate Film tab named THE current run (studio
+// only), and a separate live-film entry sat at the foot of BOTH rails naming the
+// runs happening in the background. Three slots — Film, Filmos, live-film — were
+// three answers to one question, "your films", free to disagree; and the studio
+// spent a whole rail row on a Film button the run did not need (Dennis,
+// 2026-07-20: a current run "doesn't need a designated film button, it can be
+// integrated into the filmo button"). So Filmos ABSORBED both. It is the library
+// door AND the live indicator: it pulses while a film is filming, counts when two
+// are, shows a ready mark until a delivered film is opened, and inside the studio
+// it is the lit entry standing in for the film you are watching. The Film tab and
+// the sibling live-film slot are gone from both rails.
+//
+// ── THE ONE ENTRY THAT CANNOT DRIFT ─────────────────────────────────────────
 // "Add it in both" is the rule above, and it is a rule enforced by whoever
 // remembers it — which is exactly how this rail drifted the first time, and how
 // the Overview glyph ended up drawn from two different SVG paths that looked
-// identical and had already diverged in source. The live-film entry at the foot
-// of this rail is therefore not added in both. It is WRITTEN ONCE, in
-// components/rail/LiveFilmEntry, and imported here and by Workspace, so there
-// is no second copy that could disagree. Anything stateful added to this rail
-// from now on should go the same way: the twin contract is far easier to keep
-// when there is only one thing to keep.
+// identical and had already diverged in source. The Filmos entry, now that it
+// carries state, motion and four visual conditions, is therefore not added in
+// both. It is WRITTEN ONCE, in components/rail/FilmosEntry, and imported here and
+// by Workspace with only presentation flags differing, so there is no second copy
+// that could disagree. Anything stateful added to this rail from now on should go
+// the same way: the twin contract is far easier to keep when there is only one
+// thing to keep.
 //
 // ── NEW FILMO: A ROUTE HERE, A TAB IN THE STUDIO (2026-07-19) ───────────────
 // This entry used to link to `/?new=1` — the marketing landing, which then lays
@@ -64,10 +76,10 @@
 //     the four-pane dashboard grid (the glyph Ploy uses for its own Overview,
 //     and the one this rail was already spending on the wrong entry).
 //   · FILMOS wore that grid. A grid says "dashboard", not "the films I made", so
-//     the library of films now wears film. It gets the STRIP rather than the
-//     Film tab's play-in-rect, because in the studio both entries stand in the
-//     same rail: the play button means "watch THIS one", the strip means "the
-//     body of work". Same visual language, two different claims, no collision.
+//     the library of films wears a FILM STRIP — the body of work. It once had to
+//     avoid the Film tab's play-in-rect, but that tab is gone (Filmos absorbed
+//     it), so the strip stands alone; the live state rides as a small badge on it
+//     rather than as a competing glyph, which is why the silhouette never changes.
 //   · ASSETS wore a stacked diamond — the layers glyph, which claims nothing in
 //     particular. Assets here are captures, marks, stills and recordings, i.e.
 //     pictures, so it wears a stack of pictures.
@@ -80,16 +92,17 @@ import Link from 'next/link'
 // shown (deliberately not on the stats strip: what you have left to spend is a
 // different kind of number from what you have made), and it owns sign-out.
 import AccountMenu from '../../runs/[id]/AccountMenu'
-// ── THE FILM THAT IS HAPPENING ──────────────────────────────────────────────
+// ── THE FILMOS ENTRY, LIBRARY AND LIVE INDICATOR IN ONE ─────────────────────
 // IMPORTED, NOT COPIED — and this is the entry where that matters most. Every
 // other entry on this rail is a static glyph and a href, so a drift between the
 // twins is visible the moment someone looks at both. This one carries state,
 // motion and four visual conditions; two copies of it would agree on the day
 // they were written and quietly diverge on the first fix to either. It lives in
-// components/rail/LiveFilmEntry and Workspace imports the SAME file.
-// It takes only `getToken` — which this rail already had — and fetches its own
+// components/rail/FilmosEntry and Workspace imports the SAME file — the two rails
+// pass only presentation flags (`lit`, and the studio's accent `bar`).
+// It takes `getToken` — which this rail already had — and fetches its own live
 // state, so no page that renders this rail needed a new prop for it.
-import LiveFilmEntry from '../rail/LiveFilmEntry'
+import FilmosEntry from '../rail/FilmosEntry'
 
 // The canonical mark. Same path as Workspace's FilmoMark and the Wordmark —
 // copied rather than imported because Workspace's copy is a private function in
@@ -138,9 +151,15 @@ export default function OverviewRail({ current = 'overview', getToken, onFeedbac
 
   return (
     <nav className="ovrail" aria-label="Filmo">
-      <div className="ovrail-brand" title="Filmo">
+      {/* THE MARK IS THE WAY HOME. Clicking it leaves for the landing at `/` —
+          which stays the landing for signed-in visitors by standing rule, so
+          this is a genuine exit, not a loop. Matches the /login lockup's pattern
+          (Dennis, 2026-07-20). Keeps its size and colour; gains the standard
+          focus ring, because a chrome-less mark that is now a link must still be
+          findable by a keyboard. */}
+      <Link className="ovrail-brand" href="/" aria-label="Back to the Filmo landing page">
         <FilmoMark />
-      </div>
+      </Link>
 
       {/* The composer, as a place — `/new` is this rail beside the SAME
           NewFilmComposer the studio mounts (never a second copy of it: two
@@ -168,20 +187,14 @@ export default function OverviewRail({ current = 'overview', getToken, onFeedbac
         <i>Overview</i>
       </Link>
 
-      {/* Every filmo this account has finished. Inside the studio this is a
-          TAB (you stay in the run you are watching); from here there is no run
-          to stay in, so it is the standalone library route. Same label, same
-          icon, same place in the order — see the TWIN note at the top.
-          The glyph is a FILM STRIP: the body of work. Its sibling in the studio,
-          the Film tab, keeps the play-in-rect — that one means "watch this one",
-          and the two must not wear the same picture while they share a rail. */}
-      <Link {...at('filmos')} href="/videos" title="Filmos you've made">
-        <svg viewBox="0 0 24 24" aria-hidden>
-          <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
-          <path d="M7.5 5v14M16.5 5v14M3 12h4.5M16.5 12H21" stroke="currentColor" strokeWidth="2" fill="none" />
-        </svg>
-        <i>Filmos</i>
-      </Link>
+      {/* Every filmo this account has, live or finished — the library door AND
+          the live indicator, folded into one (see FilmosEntry). It links to
+          /videos, wears the FILM STRIP, pulses while a film is filming, counts
+          when several are, and shows a ready mark until a delivered film is
+          opened. `lit` when the reader is on /videos; off-run it takes no accent
+          bar, only the darker ink — so `bar` is omitted here. Same label, same
+          icon, same place in the order as the studio's — see the TWIN note. */}
+      <FilmosEntry lit={current === 'filmos'} getToken={getToken} />
 
       {/* The raw material: captures, marks, recordings, stills. A route in both
           rails — it spans every run, so it never belonged to one.
@@ -198,22 +211,11 @@ export default function OverviewRail({ current = 'overview', getToken, onFeedbac
         <i>Assets</i>
       </Link>
 
-      {/* ── AND LAST, THE FILM THAT IS RUNNING RIGHT NOW ────────────────────
-          Off a run, the product used to have no way to say "a film is in the
-          studio" — the Film tab lives inside /runs/[id], so walking to
-          Overview, Filmos or Assets made the running film invisible, and the
-          single most important thing happening in the product was the one thing
-          the navigation could not show.
-          IT SITS LAST DELIBERATELY. This is the only entry that comes and goes,
-          and every position except the end would push the entries below it down
-          the moment a film started — a rail that reshuffles itself while you
-          are reaching for it. At the end, it grows into the flexible space
-          above the account circle: nothing above it moves, and the account
-          circle stays pinned to the foot where it always is.
-          It renders NOTHING when there is no film to speak for, which is why
-          this is a bare mount with no wrapper and no reserved height. */}
-      <LiveFilmEntry getToken={getToken} />
-
+      {/* The live-film indicator used to sit here, last, as its own entry that
+          came and went. It is gone: its states fold INTO the Filmos entry above
+          (pulse, count, ready mark), so a running film is shown where the library
+          is rather than in a slot of its own — and the rail no longer reshuffles
+          itself the moment a film starts, because nothing here appears or leaves. */}
       <div className="ovrail-space" />
 
       <AccountMenu getToken={getToken} onFeedback={onFeedback} />
@@ -223,8 +225,12 @@ export default function OverviewRail({ current = 'overview', getToken, onFeedbac
           align-items:center; gap:18px; padding:16px 0;
           border-right:1px solid #E6E6E3; }
         .ovrail-brand { width:40px; height:40px; display:flex;
-          align-items:center; justify-content:center; }
+          align-items:center; justify-content:center; text-decoration:none;
+          border-radius:10px; }
         .ovrail-brand svg { width:34px; height:34px; display:block; }
+        /* The mark is a link now; chrome-less is a look, not a licence. */
+        .ovrail-brand:focus-visible { outline:2px solid #3B82F6;
+          outline-offset:4px; }
         .ovrail-ic { display:flex; flex-direction:column; align-items:center;
           gap:4px; color:#8A8A86; background:none; border:none; cursor:pointer;
           text-decoration:none; font:inherit; }

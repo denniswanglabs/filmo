@@ -14,23 +14,19 @@ import Link from 'next/link'
 // prop on the page, and keeps this file's poll — which owns arrival state —
 // untouched.
 import { useParams } from 'next/navigation'
-import { getAgentRun, listMyRuns, sendDirectorMessage, type AgentEvent } from '../../actions'
-// ONE status chip for the whole product: the Filmos tiles wear the same chip as
-// the /videos cards, so a status can never mean two different things in two
-// places (STATUS_STYLES/STATUS_LABELS stay the single source of truth).
-import { StatusChip } from '../../components/Brand'
-import FilmoLoader from '../../components/FilmoLoader'
+import { getAgentRun, sendDirectorMessage, type AgentEvent } from '../../actions'
 import NewFilmComposer from './NewFilmComposer'
 import FeedbackModal from './FeedbackModal'
 import AccountMenu from './AccountMenu'
 import RunMark from './RunMark'
-// ── THE FILM THAT IS HAPPENING, WHEN IT IS NOT THIS ONE ─────────────────────
+// ── THE FILMOS ENTRY — LIBRARY DOOR AND LIVE-FILM INDICATOR IN ONE ──────────
 // The SAME file OverviewRail imports — not a copy that agrees with it today.
 // The twin note below is the reason: every other entry on this rail is a glyph
 // and a handler, and a drift shows up the moment someone looks at both files,
 // but this entry carries state, motion and four visual conditions and would
-// diverge the first time either copy was fixed. One file, two rails.
-import LiveFilmEntry from '../../components/rail/LiveFilmEntry'
+// diverge the first time either copy was fixed. One file, two rails; here it is
+// given the studio's accent bar and the id of the run being viewed.
+import FilmosEntry from '../../components/rail/FilmosEntry'
 
 const VERBS: Record<string, string> = {
   read: 'Scouting', decide: 'Framing', film: 'Rolling',
@@ -40,6 +36,49 @@ function md(text: string) {
   // Ploy-grammar light markdown: **bold leads**, keep everything else plain.
   const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
   return esc.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+}
+
+// ── THE REPLY THAT TYPES ITSELF OUT ─────────────────────────────────────────
+// Dennis: "when the agent is replying a request in the chat, i want you to give
+// the text just like claude does, token by token … right now the text just comes
+// out all of a sudden, and sometimes i don't know if its because it's lagging or
+// the system is stuck, or i just need to wait." The transport cannot honestly
+// stream — a director's reply arrives as one whole chat.director row on the 1.5s
+// poll, there is no socket — so this does the honest version of the feeling: when
+// a NEW prose row lands, the thread reveals it word by word instead of snapping in
+// whole. It is the FEEL of streaming over a batched wire, not a claim to have one.
+//
+// Word by word, not character by character, because words are the unit `md`
+// already renders and a word cadence reads as "being written" without the
+// theatrics of a per-letter typewriter. WORDS is how many appear per tick and
+// TICK_MS how often: at 3 words / 70ms a typical director reply (~40-90 words)
+// finishes in ~0.9-2.1s, which is the "fast enough to not feel like waiting, slow
+// enough to read as arriving" window. A click completes it at once, and
+// prefers-reduced-motion skips it entirely (both handled in the workspace).
+const REVEAL_WORDS = 3
+const REVEAL_TICK_MS = 70
+
+// A prose reply, split into the words the reveal hands out one chunk at a time —
+// each carrying whether it sits inside a **bold** run, so the emphasis is right
+// from the first frame rather than snapping in when the markers finally close.
+// (Rendering the raw substring would show a dangling "**" mid-reveal; parsing to
+// word tokens with a bold flag avoids that and lets React escape the text for us.)
+type ProseTok = { text: string; bold: boolean }
+function tokenizeProse(raw: string): ProseTok[] {
+  const out: ProseTok[] = []
+  const add = (s: string, bold: boolean) => {
+    for (const w of s.split(/\s+/)) if (w) out.push({ text: w, bold })
+  }
+  const re = /\*\*(.+?)\*\*/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(raw))) {
+    add(raw.slice(last, m.index), false)
+    add(m[1], true)
+    last = m.index + m[0].length
+  }
+  add(raw.slice(last), false)
+  return out
 }
 
 // A KIND THIS SET DOESN'T KNOW RENDERS AS NOTHING. The thread is allow-listed,
@@ -61,37 +100,11 @@ const THREAD_KINDS = new Set([
 // receipts reads as a log; a thread of nothing but prose hides the work.
 const PROSE_KINDS = new Set(['chat.director', 'say.step'])
 
-// ── A LIBRARY ROW MUST DISCRIMINATE ─────────────────────────────────────────
-// Presence of a label is not the same as usefulness of a label. Thirteen of a
-// user's fourteen filmos can be the same brand, and a bucket-per-day stamp
-// ("Updated today") collapses every one of them onto the same two strings —
-// the row renders and is still unfindable. Every field a Filmos tile carries is
-// therefore chosen to VARY between neighbouring rows: a precise age, the
-// pipeline that made it, its measured length, its status. `relativeAge` is the
-// same clock the /videos cards use, so one filmo reads the same in both places.
-function relativeAge(ts: number): string {
-  const mins = Math.round((Date.now() - ts * 1000) / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.round(hrs / 24)
-  if (days < 7) return `${days}d ago`
-  return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-// Same words the /videos cards use for the two pipelines.
-const filmModeLabel = (mode: string) =>
-  mode === 'walkrec' ? 'Agent tour' : 'Brand explainer'
-
-// The filmo's own measured length, read off the tile's metadata load — never a
-// guess. Unknown/streaming durations return '' and the row simply omits the
-// field rather than printing a made-up number.
-function runtime(secs: number | undefined): string {
-  if (!secs || !isFinite(secs) || secs <= 0) return ''
-  const s = Math.round(secs)
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
-}
+// The in-studio library tile once lived here, with its own row-discriminating
+// helpers (relativeAge / filmModeLabel / runtime). The studio no longer carries
+// a library surface of its own — "all filmos" is the /videos route now, reached
+// by the rail's Filmos entry and the film canvas's "All filmos" back link — so
+// those helpers moved with it and are the library agent's (see app/videos).
 
 // ── FILMO'S OWN MARK ────────────────────────────────────────────────────────
 // The canonical path lives here ONCE so no surface can drift into an
@@ -144,8 +157,8 @@ function FilmVideo({ src, poster, role, controls, videoRef, onTimeUpdate, onLoad
 type LocalMsg = { ts: number; kind: 'user' | 'dir'; text: string }
 
 // ⚠ TWIN: `components/overview/OverviewRail.tsx` renders this same rail on the
-// Overview. Same entries, same order, same labels and icons — they drifted
-// once already (this file had Filmos and Assets, that one didn't, so the
+// Overview. SAME ENTRIES, SAME ORDER: New filmo, Overview, Filmos, Assets — they
+// drifted once already (this file had Filmos and Assets, that one didn't, so the
 // product had two navigations depending on where you stood). The rail is the
 // PRODUCT's navigation, not the page's: where you are changes what is
 // highlighted, never what exists. Add an entry here, add it there.
@@ -154,33 +167,39 @@ type LocalMsg = { ts: number; kind: 'user' | 'dir'; text: string }
 // because a glyph can drift without anything failing: Overview's house was drawn
 // from a different path in each file for months and both files looked correct on
 // their own. One entry, one picture, in both files — check the other side before
-// touching any svg on this rail. (2026-07-19: Overview took the four-pane
-// dashboard grid, Filmos took a film strip, Assets took a stack of pictures; the
-// Film tab keeps the play-in-rect, which is why Filmos could not have it.)
+// touching any svg on this rail. (Overview wears the four-pane dashboard grid,
+// Filmos a film strip, Assets a stack of pictures; the Film tab that once wore a
+// play-in-rect is gone — see below.)
+//
+// ── THE FILM TAB IS GONE; FILMOS ABSORBED IT (2026-07-20) ───────────────────
+// This rail used to carry a standalone Film tab for the run you were standing in,
+// AND a sibling live-film slot for the runs going in the background. That is two
+// slots plus the Filmos library entry — three answers to "your films" (Dennis:
+// a current run "doesn't need a designated film button, it can be integrated into
+// the filmo button, with a back button to review all the films"). So the Filmos
+// entry now carries the current film: inside the studio it is the LIT entry, and
+// FilmosEntry folds the live states (pulse / count / ready) onto it. The film you
+// are watching is the studio's default surface; "all filmos" is the /videos route,
+// reached by that rail entry and by the "All filmos" back link on the film canvas.
 //
 // ── THE ROOMS OF THIS PAGE, AS OPPOSED TO THE ROUTES OFF IT ─────────────────
-// A `Surface` is a room the rail can walk you into WITHOUT leaving this page:
-// the component renders every one of them itself, so a surface can never
-// quietly become a link out of the studio. It used to: `Builds` was
-// <a href="/">, which walked the user out of the app they were working in and
-// dropped them on the marketing landing, mid-film. A studio surface is a value,
-// not a URL, and the type is what enforces it.
-//   'film'   the run this workspace is about.
-//   'builds' the library — every filmo this account has finished. Labelled
-//            "Filmos"; the VALUE stays `builds` because it crosses a wire
-//            (the feedback sheet reports `surface=` verbatim).
+// A `Surface` is a room the rail (or the canvas) can walk you into WITHOUT
+// leaving this page: the component renders each one itself, so a surface can
+// never quietly become a link out of the studio. There are two now:
+//   'film'   the run this workspace is about — the studio's default surface.
 //   'new'    the composer. Takes the whole stage: the rail is fixed furniture,
 //            the room you're standing in is what changes.
-// Overview and Assets are deliberately NOT here: they are real routes, they
-// belong to the whole account rather than to this run, and the rail renders
-// them as anchors so the distinction survives contact with a user — a link
-// shows its destination, opens in a new tab, and never lights the rail's
-// you-are-here marker, which only a Surface can.
-// Feedback is not here either, for a different reason: it is an ACT, not a
-// place. It opens over whatever you were looking at and gives it back when
-// you're done, and it now hangs off the account circle at the foot of the rail
-// with the other things that belong to a person rather than to a filmo.
-type Surface = 'film' | 'builds' | 'new'
+// The library used to be a third surface ('builds'). It is not any more — "review
+// all the films" is the /videos route, so the studio delegates the whole library
+// to it rather than carrying a lesser copy. Overview, Assets and Filmos are all
+// routes for the same reason: they belong to the account rather than to this run,
+// and the rail renders them as links, so a click's cost (stay vs leave) is honest.
+// Feedback is not here either: it is an ACT, not a place. It opens over whatever
+// you were looking at and gives it back, hanging off the account circle with the
+// other things that belong to a person rather than to a filmo. The value still
+// crosses a wire (the feedback sheet reports `surface=` verbatim), so it stays a
+// small closed set.
+type Surface = 'film' | 'new'
 
 function reduce(evts: AgentEvent[]) {
   const S = {
@@ -295,17 +314,6 @@ function WorkspaceRun({ runKey, getToken }: {
   // showing and hands that view back untouched when it closes, so reporting a
   // broken screen never costs you the screen you were reporting.
   const [fbOpen, setFbOpen] = useState(false)
-  // The filmos this account has already produced — the library behind the
-  // Filmos tab. Loaded once, lazily, when the tab is first opened. Every field
-  // here is one the row renders; a library row that carries only the brand is
-  // unfindable once the same brand has been filmed a dozen times.
-  const [library, setLibrary] = useState<{
-    id: string; brand: string; url: string; ts: number; status: string; mode: string
-  }[] | null>(null)
-  // Measured film lengths, keyed by run id — read off each tile's own metadata
-  // load (the tiles already fetch it to paint a frame), so the most
-  // discriminating field on the row costs no extra request and no server field.
-  const [durations, setDurations] = useState<Record<string, number>>({})
   const [openWork, setOpenWork] = useState<Record<number, boolean>>({})
   const [pending, setPending] = useState(false)
   // ── UNKNOWN IS NOT "STARTING" ──────────────────────────────────────────────
@@ -327,12 +335,45 @@ function WorkspaceRun({ runKey, getToken }: {
   const dirBoxRef = useRef<HTMLTextAreaElement>(null)
   const [playT, setPlayT] = useState(0)
   const evtsRef = useRef<AgentEvent[]>([])
+  // ── ASK 1: THE REPLY REVEALS ITSELF ─────────────────────────────────────
+  // `revealDone` is the set of prose ids whose text is fully on screen; `reveal`
+  // is the one item mid-animation — its id, how many words are showing, and the
+  // word tokens captured when it STARTED, so a poll landing mid-reveal cannot
+  // shift the text under it. History is seeded into `revealDone` the instant the
+  // run hydrates, so a reload renders the whole thread complete and never replays
+  // it; only rows that arrive AFTER that first read animate.
+  const [revealDone, setRevealDone] = useState<Set<string>>(() => new Set())
+  const [reveal, setReveal] = useState<{ id: string; n: number; toks: ProseTok[] } | null>(null)
+  const revealSeeded = useRef(false)
+  const revealRef = useRef(reveal)
+  revealRef.current = reveal
+  // Read once in an effect below; a ref so the reveal effects can consult it
+  // without re-subscribing. Reduced motion means the reply lands whole.
+  const reduceMotion = useRef(false)
+  // ── ASK 1: HONEST WAITING STATES ────────────────────────────────────────
+  // `pendingSince` times the director turn so the copy can escalate honestly:
+  // "reading your note" while the reply is being worked, then, once the wait has
+  // outlasted what a healthy turn takes, the honest read of a single-worker studio
+  // — "still queued, the studio is busy". Time is the only signal reused here
+  // (the wire returns no per-turn claim state, and inventing one is out of scope),
+  // so the copy stays truthful without pretending to know more than it does.
+  const [pendingSince, setPendingSince] = useState(0)
   // FULL-SCREEN SURFACE CONTRACT: the page template wraps content in a
   // framer-motion fade with a transform — a transformed ancestor hijacks
   // position:fixed and inherits its opacity. The workspace therefore
   // PORTALS to document.body, outside any page-transition wrapper.
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
+
+  // Whether the reader asked for no motion. Kept in a ref (read by the reveal
+  // driver) and refreshed if they change the OS setting mid-session.
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    reduceMotion.current = mq.matches
+    const on = () => { reduceMotion.current = mq.matches }
+    mq.addEventListener?.('change', on)
+    return () => mq.removeEventListener?.('change', on)
+  }, [])
 
   const S = reduce(evts)
 
@@ -382,28 +423,6 @@ function WorkspaceRun({ runKey, getToken }: {
     return () => { stop = true }
   }, [runKey, getToken])
 
-  useEffect(() => {
-    if (tab !== 'builds' || library !== null) return
-    let stop = false
-    ;(async () => {
-      try {
-        const res = await listMyRuns((await getToken()) || '')
-        if (stop || 'authError' in res) return
-        setLibrary(res.runs
-          .filter((r) => r.final_url)
-          .map((r) => ({
-            id: r.id,
-            brand: r.brand || r.company_url || 'Launch filmo',
-            url: r.final_url as string,
-            ts: Date.parse(r.created_at) / 1000,
-            status: r.status,
-            mode: r.film_mode || '',
-          })))
-      } catch { /* transient */ }
-    })()
-    return () => { stop = true }
-  }, [tab, library, getToken])
-
   // Live viewport probe (~1s): the frame URL 404s via the proxy when stale.
   useEffect(() => {
     let stop = false
@@ -434,10 +453,12 @@ function WorkspaceRun({ runKey, getToken }: {
   // composer surface unmounts the rail entirely: on the way back the thread is
   // a fresh element scrolled to the top, and without a re-pin the user returns
   // to the beginning of a conversation they had already read to the end.
+  // `reveal?.n` keeps the tail pinned as words appear, so a reply typing itself
+  // out never scrolls its own newest line off the bottom of the thread.
   useEffect(() => {
     const el = threadRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [evts.length, localMsgs.length, tab])
+  }, [evts.length, localMsgs.length, tab, reveal?.n])
 
   // ── THE BOX GROWS WITH THE NOTE, TO A CEILING ──────────────────────────────
   // A director's note is a sentence or three, not a URL — so the box is a
@@ -467,6 +488,8 @@ function WorkspaceRun({ runKey, getToken }: {
     setInput('')
     setLocalMsgs((m) => [...m, { ts: Date.now() / 1000, kind: 'user', text }])
     setPending(true)
+    // Start the wait clock, so the waiting copy escalates from "reading" honestly.
+    setPendingSince(Date.now())
     const res = await sendDirectorMessage(runKey, text, (await getToken()) || '')
     if ('error' in res) {
       // A FAILED SEND SPEAKS. An out-of-credits/expired-session refusal carries its
@@ -485,16 +508,19 @@ function WorkspaceRun({ runKey, getToken }: {
   }, [input, pending, runKey, getToken])
 
   // Merge thread items chronologically; server chat events replace local echoes.
-  const items: Array<
-    | { ts: number; type: 'user' | 'dir'; text: string }
+  // Prose rows carry a stable ID so the reveal can track which have been shown:
+  // server rows key off their seq, the local failure echoes off their timestamp.
+  type ThreadItem =
+    | { ts: number; type: 'user'; text: string }
+    | { ts: number; type: 'dir'; text: string; id: string }
     | { ts: number; type: 'work'; e: AgentEvent }
-  > = []
+  const items: ThreadItem[] = []
   let sawDirectorReply = false
   for (const e of evts) {
     if (!THREAD_KINDS.has(e.kind)) continue
     if (e.kind === 'chat.user') items.push({ ts: e.ts, type: 'user', text: e.title })
     else if (PROSE_KINDS.has(e.kind)) {
-      items.push({ ts: e.ts, type: 'dir', text: e.title })
+      items.push({ ts: e.ts, type: 'dir', text: e.title, id: `d${e.seq}` })
       if (e.kind === 'chat.director') sawDirectorReply = true
     } else items.push({ ts: e.ts, type: 'work', e })
   }
@@ -506,9 +532,68 @@ function WorkspaceRun({ runKey, getToken }: {
     const dupe = evts.some((e) =>
       (e.kind === 'chat.user' || e.kind === 'chat.director')
       && e.title === m.text && Math.abs(e.ts - m.ts) < 60)
-    if (!dupe) items.push({ ts: m.ts, type: m.kind, text: m.text })
+    if (!dupe) {
+      if (m.kind === 'dir') items.push({ ts: m.ts, type: 'dir', text: m.text, id: `l${m.ts}` })
+      else items.push({ ts: m.ts, type: 'user', text: m.text })
+    }
   }
   items.sort((a, b) => a.ts - b.ts)
+
+  // ── ASK 1: SEED HISTORY, THEN ANIMATE ONLY WHAT ARRIVES NEXT ─────────────
+  // The order matters and is the whole trick: the first successful poll returns
+  // the WHOLE thread at once, and every prose row in it is history that must
+  // render complete. So on the hydration pass this seeds `revealDone` with every
+  // prose id present and returns WITHOUT animating anything — a reload can never
+  // replay the conversation. Every later pass drives: the first prose id that is
+  // not yet done is one that landed live, and it is revealed a few words at a
+  // time, one row at a time. Reduced motion marks new rows done at once.
+  const proseIds = items
+    .filter((it): it is Extract<ThreadItem, { type: 'dir' }> => it.type === 'dir')
+    .map((it) => it.id)
+  useEffect(() => {
+    if (!hydrated) return
+    if (!revealSeeded.current) {
+      revealSeeded.current = true
+      setRevealDone(new Set(proseIds))
+      return
+    }
+    if (reveal) return
+    const next = proseIds.find((id) => !revealDone.has(id))
+    if (!next) return
+    if (reduceMotion.current) {
+      setRevealDone((s) => { const n = new Set(s); proseIds.forEach((id) => n.add(id)); return n })
+      return
+    }
+    const item = items.find((it) => it.type === 'dir' && it.id === next)
+    const toks = item && item.type === 'dir' ? tokenizeProse(item.text) : []
+    if (!toks.length) { setRevealDone((s) => new Set(s).add(next)); return }
+    setReveal({ id: next, n: Math.min(REVEAL_WORDS, toks.length), toks })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, proseIds.join('|'), revealDone, reveal])
+
+  // Advance the active reveal a few words per tick, then retire it so the driver
+  // above picks the next. The tokens were captured when it started, so nothing a
+  // poll does can shift the text mid-reveal.
+  useEffect(() => {
+    if (!reveal) return
+    if (reveal.n >= reveal.toks.length) {
+      setRevealDone((s) => new Set(s).add(reveal.id))
+      setReveal(null)
+      return
+    }
+    const t = setTimeout(() => setReveal((r) =>
+      r ? { ...r, n: Math.min(r.n + REVEAL_WORDS, r.toks.length) } : r), REVEAL_TICK_MS)
+    return () => clearTimeout(t)
+  }, [reveal])
+
+  // A click anywhere in the thread completes the current reply at once — the
+  // impatient path, and the same end-state prefers-reduced-motion gets for free.
+  const finishReveal = useCallback(() => {
+    const r = revealRef.current
+    if (!r) return
+    setRevealDone((s) => new Set(s).add(r.id))
+    setReveal(null)
+  }, [])
 
   // MOTION MEANS WORK: the mark moves only while the studio is actually
   // doing something. A terminal run row ends it even if the terminal EVENT
@@ -528,6 +613,25 @@ function WorkspaceRun({ runKey, getToken }: {
   const verb = VERBS[S.phase] || 'Working'
   const elapsed = Math.round((Date.now() - phaseStart.current) / 1000)
 
+  // ── ASK 1: WHAT THE THREAD SAYS WHILE IT WAITS ─────────────────────────────
+  // Distinct honest states, so "lagging", "queued" and "stuck" stop looking alike.
+  // For a director turn (pending): "reading your note" while a healthy reply is
+  // still plausibly on its way, then — once the wait outlasts that — the honest
+  // read of a busy single-worker studio, "still queued, the studio is busy".
+  // Time is the only signal: the wire returns no per-turn claim state, so rather
+  // than assert "queued" as fact before 45s the copy stays with "reading" (the
+  // most likely truth) and escalates only when the wait is genuinely long.
+  const waitSecs = pendingSince ? (Date.now() - pendingSince) / 1000 : 0
+  const directorWaitCopy = waitSecs >= 45
+    ? 'Still queued — the studio is busy'
+    : 'Director is reading your note'
+  // A fresh build that has not emitted yet is not "Scouting" — it is in line. Echo
+  // the queue truth the server already returned (queueAhead) rather than a phase
+  // verb it has not earned.
+  const buildQueueCopy = queueAhead == null ? 'Warming up'
+    : queueAhead === 0 ? 'Up next at the studio'
+      : `In line — ${queueAhead} ahead`
+
   // ── ABSENCE MUST NOT PRODUCE A URL ─────────────────────────────────────────
   // `${liveUrl}&t=${tick}` on an empty liveUrl yields the RELATIVE reference
   // `&t=0`, which the browser resolves against /runs/ — and the app answers
@@ -542,54 +646,7 @@ function WorkspaceRun({ runKey, getToken }: {
   let screen: React.ReactNode = null
   let pill = ''
   const lastPage = S.pages[S.pages.length - 1]
-  if (tab === 'builds') {
-    screen = library === null ? (
-      // `.wk-screen` is a flex box that already sizes and centres this, and its
-      // ground is #FAFAF8 rather than the shell's #F1F1EF — so the loader takes
-      // that ground and claims no height of its own.
-      <FilmoLoader ground="#FAFAF8" fit="auto" size="compact" />
-    ) : library.length === 0 ? (
-      <div className="wk-text">
-        <div className="big">No finished filmos yet</div>
-        <div className="small">Every filmo you produce lands here.</div>
-      </div>
-    ) : (
-      <div className="wk-library">
-        {library.map((f) => (
-          <a key={f.id} className="wk-filmcard" href={`/runs/${f.id}`}>
-            <div className="prev">
-              {/* No still is in hand for a library row: the beat frames live
-                  in each run's own event stream, and the list read returns run
-                  rows only. The #t=2 fallback covers it. */}
-              <FilmVideo src={f.url} poster="" role="tile"
-                onLoadedMetadata={(ev) => {
-                  const d = (ev.target as HTMLVideoElement).duration
-                  setDurations((m) => (m[f.id] === d ? m : { ...m, [f.id]: d }))
-                }} />
-            </div>
-            <div className="meta">
-              <div className="head">
-                <div className="name" title={f.brand}>{f.brand}</div>
-                <StatusChip status={f.status} />
-              </div>
-              {/* The discriminating line: which pipeline made it, how long it
-                  runs, and how long ago — three fields that differ between two
-                  filmos of the same brand made on the same day. Unknown length
-                  drops out of the line rather than printing a placeholder. */}
-              <div className="sub">
-                {[filmModeLabel(f.mode), runtime(durations[f.id]), relativeAge(f.ts)]
-                  .filter(Boolean).join(' · ')}
-              </div>
-              <div className="open">Open filmo</div>
-            </div>
-          </a>
-        ))}
-      </div>
-    )
-    pill = library
-      ? `${library.length} filmo${library.length === 1 ? '' : 's'} produced`
-      : 'filmos'
-  } else if (!hydrated) {
+  if (!hydrated) {
     // Nothing is known about this run yet: a neutral placeholder, no phase, no
     // copy to read, no timer — and no motion, because on this surface motion
     // means work and no work is known to be happening.
@@ -732,23 +789,29 @@ function WorkspaceRun({ runKey, getToken }: {
             FilmoMark rather than run state, nothing run-derived can reach it.
             The mark appears here exactly once; the run's own brand lives in
             the run header below, beside the filmo's title. */}
-        <div className="wk-brand" title="Filmo">
+        {/* THE MARK IS THE WAY HOME. It links to the landing at `/` — which
+            stays the landing for signed-in visitors by standing rule, so this is
+            a genuine exit, not a loop. Matches the /login lockup (Dennis,
+            2026-07-20). Keeps its size and colour; gains the standard focus ring,
+            because a chrome-less mark that is now a link must still be findable
+            by a keyboard. */}
+        <Link className="wk-brand" href="/" aria-label="Back to the Filmo landing page">
           <FilmoMark />
-        </div>
+        </Link>
         {/* Making a filmo is the primary act, so it sits directly under the
             mark where the hand already is — the position Ploy gives its own
             new-thread button. */}
-        {/* ── STILL A TAB, DELIBERATELY (2026-07-19) ──────────────────────────
-            OverviewRail's copy of this entry now points at the route `/new`,
-            because a rail on /overview or /assets has no run to keep you in and
-            the composer needed somewhere to live. HERE it stays a SURFACE, and
-            the reason is the one already written into the Surface type above:
-            you are standing in a run. `setTab('new')` swaps the stage and leaves
-            the run polling underneath, so coming back to Film shows the film
-            where it actually is now; `<Link href="/new">` would tear this
-            workspace down to show the same composer. Same entry, same label,
-            same glyph, same position — different mechanic, which is exactly the
-            difference the TWIN note licenses (Filmos has had it all along). */}
+        {/* ── STILL A TAB, DELIBERATELY ──────────────────────────────────────
+            OverviewRail's copy of this entry points at the route `/new`, because
+            a rail on /overview or /assets has no run to keep you in and the
+            composer needed somewhere to live. HERE it stays a SURFACE, for the
+            reason written into the Surface type above: you are standing in a run.
+            `setTab('new')` swaps the stage and leaves the run polling underneath,
+            so coming back to the film shows it where it actually is now; a
+            `<Link href="/new">` would tear this workspace down to show the same
+            composer. Same entry, same label, same glyph, same position as the
+            Overview's — different mechanic, which is exactly the difference the
+            TWIN note licenses (Filmos carries the same split). */}
         <button className={'wk-ic' + (tab === 'new' ? ' on' : '')}
           aria-current={tab === 'new' ? 'true' : undefined}
           onClick={() => setTab('new')} title="Start a new filmo">
@@ -764,23 +827,17 @@ function WorkspaceRun({ runKey, getToken }: {
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="3" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
           <i>Overview</i>
         </Link>
-        {/* ONE NAME PER THING. `Builds` and `Films` were two rail entries for
-            one idea — the work this account has produced — and they disagreed
-            about what it was: Builds left the app for the marketing landing,
-            Films showed the library that actually answers the question. The
-            surviving entry is the library, and it now wears the product's own
-            word for what it holds: Filmos.
-            ── AND IT WEARS FILM. The four-pane grid it used to carry is a
-            DASHBOARD glyph — it has gone to Overview, where that is the claim.
-            A library of films gets a film strip. Not the play-in-rect: the Film
-            tab two rows down already owns that, and "watch this one" and "every
-            one I've made" cannot be the same picture in the same rail. */}
-        <button className={'wk-ic' + (tab === 'builds' ? ' on' : '')}
-          aria-current={tab === 'builds' ? 'true' : undefined}
-          onClick={() => setTab('builds')} title="Filmos you've made">
-          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M7.5 5v14M16.5 5v14M3 12h4.5M16.5 12H21" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
-          <i>Filmos</i>
-        </button>
+        {/* Every filmo this account has, live or finished — the library door AND
+            the current film, folded into one (see FilmosEntry). Inside the studio
+            it is the LIT entry: the film you are watching IS a filmo and this is
+            where it lives now that the Film tab is gone. It links to /videos
+            ("all filmos"), wears the FILM STRIP, and folds the live states onto
+            it — pulse while filming, a count when several run, a ready mark until
+            a delivered film is opened. `bar` draws the studio's accent bar when
+            lit; `currentRunId` includes this run in the live decoration and
+            acknowledges it when it lands. Same label, same icon, same place in
+            the order as the Overview's — see the TWIN note. */}
+        <FilmosEntry lit={tab === 'film'} bar getToken={getToken} currentRunId={hereRunId} />
         {/* The raw material, already built at /assets: captures, marks,
             recordings, stills. Also a route — it spans every run.
             All four of those things are PICTURES, so the glyph is a stack of
@@ -791,25 +848,12 @@ function WorkspaceRun({ runKey, getToken }: {
           <svg viewBox="0 0 24 24"><path d="M17 20.5H5.5A2 2 0 0 1 3.5 18.5V7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/><rect x="7" y="3.5" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none"/><circle cx="11.5" cy="8" r="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="m8 15.5 3.5-3.5 2 2 2.5-2.5 4 4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
           <i>Assets</i>
         </Link>
-        <button className={'wk-ic' + (tab === 'film' ? ' on' : '')}
-          aria-current={tab === 'film' ? 'true' : undefined}
-          onClick={() => setTab('film')} title="This film">
-          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>
-          <i>Film</i>
-        </button>
-        {/* ── ANOTHER FILM, RUNNING BEHIND THIS ONE ─────────────────────────
-            The same entry OverviewRail carries, from the same file. Here it is
-            given the run you are standing in, and it DROPS that run from
-            itself: the Film tab directly above already speaks for this film, and
-            two entries for one film is the twin-drift problem in miniature —
-            two things claiming one truth, free to disagree. A DIFFERENT run
-            going in the background is exactly what this rail could not say
-            before, so that one still appears, beside the Film tab rather than
-            instead of it.
-            It sits last for the same reason it does on the Overview: it is the
-            only entry that comes and goes, and anywhere but the end it would
-            shove the entries below it down the moment a film started. */}
-        <LiveFilmEntry getToken={getToken} currentRunId={hereRunId} />
+        {/* The Film tab and the sibling live-film slot used to sit here. Both
+            are gone: the Filmos entry above IS the current film now (lit, and
+            carrying its live pulse), and a run going in the background shows on
+            that same entry rather than in a slot of its own. Nothing appears or
+            leaves here any more, so the rail no longer reshuffles the instant a
+            film starts. */}
         <div className="wk-railspace" />
         {/* Bottom of the rail, below the fold of the work: who you are, what
             you have left, and the two acts that belong to a person rather than
@@ -844,13 +888,41 @@ function WorkspaceRun({ runKey, getToken }: {
             </div>
           </div>
         </div>
-        <div className="wk-thread" ref={threadRef}>
+        {/* A click anywhere in the thread finishes a reply mid-reveal at once —
+            the impatient path. It does not preventDefault, so a click meant for a
+            work row's chevron still opens it. */}
+        <div className="wk-thread" ref={threadRef} onClick={finishReveal}>
           {items.map((it, i) => {
-            if (it.type !== 'work') {
-              return it.type === 'user'
-                ? <div key={i} className={'t-user' + (pending && i === items.length - 1 ? ' dim' : '')}>{it.text}</div>
-                : <div key={i} className="t-dir"
-                    dangerouslySetInnerHTML={{ __html: md(it.text) }} />
+            if (it.type === 'user') {
+              return <div key={i} className={'t-user' + (pending && i === items.length - 1 ? ' dim' : '')}>{it.text}</div>
+            }
+            if (it.type === 'dir') {
+              // The reply mid-reveal: the first `reveal.n` words only, each with
+              // its bold flag so emphasis is right from the first frame, plus a
+              // caret. The visible words are aria-hidden and the full text sits in
+              // an sr-only node, so assistive tech reads the message once, settled.
+              if (reveal && reveal.id === it.id) {
+                const shown = reveal.toks.slice(0, reveal.n)
+                return (
+                  <div key={i} className="t-dir t-dir-live">
+                    <span aria-hidden="true">
+                      {shown.map((tk, j) => (
+                        <span key={j}>{j ? ' ' : ''}{tk.bold ? <b>{tk.text}</b> : tk.text}</span>
+                      ))}
+                      <span className="t-caret" />
+                    </span>
+                    <span className="wk-sr">{it.text.replace(/\*\*/g, '')}</span>
+                  </div>
+                )
+              }
+              // A NEW reply waiting behind the one animating: hold its place empty,
+              // in arrival order, until the driver reaches it. History and finished
+              // reveals render complete, exactly as before.
+              if (revealSeeded.current && !revealDone.has(it.id)) {
+                return <div key={i} className="t-dir t-dir-hold" aria-hidden="true" />
+              }
+              return <div key={i} className="t-dir"
+                dangerouslySetInnerHTML={{ __html: md(it.text) }} />
             }
             const e = it.e
             const thumb = e.artifact_url && !e.artifact_url.includes('.mp4')
@@ -881,10 +953,24 @@ function WorkspaceRun({ runKey, getToken }: {
               </div>
             )
           })}
-          {working || pending ? (
+          {pending ? (
+            // A director turn is in flight. The copy is the honest waiting state
+            // (reading / queued / still-queued); the blob keeps morphing and the
+            // ellipsis keeps its rhythm, so the thread reads as ALIVE and waiting
+            // rather than lagging or stuck — no spinner.
             <div className="t-verb">
               <span className="wk-tailblob" />
-              {pending ? 'Thinking…' : `${verb}… ${elapsed}s`}
+              <span>{directorWaitCopy}</span>
+              <span className="wk-ellip" aria-hidden><i /><i /><i /></span>
+            </div>
+          ) : working ? (
+            <div className="t-verb">
+              <span className="wk-tailblob" />
+              {evts.length === 0 ? (
+                // Queued build, nothing emitted yet — the queue truth, not a verb.
+                <><span>{buildQueueCopy}</span>
+                  <span className="wk-ellip" aria-hidden><i /><i /><i /></span></>
+              ) : `${verb}… ${elapsed}s`}
             </div>
           ) : items.length ? (
             /* NO WORK, NO MARK. The blob is the studio's activity indicator —
@@ -941,13 +1027,20 @@ function WorkspaceRun({ runKey, getToken }: {
         <div className="wk-canvas">
           <div className="wk-chrome">
             <div className="dots"><i /><i /><i /></div>
-            {/* The same two rooms the rail offers, named the same way — a tab
-                that disagreed with the rail entry pointing at it would be two
-                names for one place all over again. */}
-            <div className="wk-tabs">
-              <button className={tab === 'film' ? 'on' : ''} onClick={() => setTab('film')}>Film</button>
-              <button className={tab === 'builds' ? 'on' : ''} onClick={() => setTab('builds')}>Filmos</button>
-            </div>
+            {/* ── THE WAY BACK TO ALL FILMOS ──────────────────────────────────
+                A Film tab and a Filmos tab used to sit here, switching the canvas
+                between this film and the in-studio library. That library is the
+                /videos route now, so what the film surface needs instead is a
+                clear way back to the whole collection: an arrow and a label,
+                top-left of the browser chrome where a back control belongs,
+                leaving for /videos (Dennis: "a back button to review all the
+                films that have been made"). It is a real link — it shows its
+                destination and leaves the studio, which is honest about the cost
+                of the click. */}
+            <Link className="wk-allfilmos" href="/videos" title="All your filmos">
+              <svg viewBox="0 0 24 24" aria-hidden><path d="M14 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              All filmos
+            </Link>
             <div className="wk-urlpill" title={S.site}>{host || '…'}</div>
             {pill ? <div className="wk-statuschip">{pill}</div> : null}
             {liveFresh && working ? <div className="rec" /> : null}
@@ -985,8 +1078,10 @@ function WorkspaceRun({ runKey, getToken }: {
         /* Filmo's mark sits plain on the ground — the same presentation the
            boot screen and the landing use. No tile, and no customer logo. */
         .wk-brand { width:40px; height:40px; display:flex; align-items:center;
-          justify-content:center; }
+          justify-content:center; text-decoration:none; border-radius:10px; }
         .wk-brand svg { width:34px; height:34px; display:block; }
+        /* The mark is a link now; chrome-less is a look, not a licence. */
+        .wk-brand:focus-visible { outline:2px solid #3B82F6; outline-offset:4px; }
         .wk-ic { display:flex; flex-direction:column; align-items:center; gap:4px;
           color:#8A8A86; background:none; border:none; cursor:pointer;
           text-decoration:none; font:inherit; position:relative; }
@@ -1033,12 +1128,17 @@ function WorkspaceRun({ runKey, getToken }: {
            NB: this whole block is a template literal — never use backticks in
            these comments, they terminate the string and the type error lands
            somewhere else entirely. */
-        .wk-tabs { display:flex; gap:2px; background:#F1F1EF; border-radius:8px;
-          padding:2px; }
-        .wk-tabs button { border:none; background:none; font:12px Inter,sans-serif;
-          padding:4px 12px; border-radius:6px; color:#8A8A86; cursor:pointer; }
-        .wk-tabs button.on { background:#fff; color:#1B1B1A;
-          box-shadow:0 1px 2px rgba(0,0,0,0.06); }
+        /* The back-to-all-filmos control, in the browser chrome's top-left. It
+           reads as a quiet back button — an arrow, a label, the rail's own greys
+           — never a primary action competing with the film below it. */
+        .wk-allfilmos { display:inline-flex; align-items:center; gap:5px;
+          border:none; background:none; padding:4px 8px 4px 4px;
+          border-radius:8px; font:12px Inter,sans-serif; color:#8A8A86;
+          cursor:pointer; text-decoration:none; white-space:nowrap; }
+        .wk-allfilmos svg { width:16px; height:16px; }
+        .wk-allfilmos:hover { color:#1B1B1A; background:#F5F5F3; }
+        .wk-allfilmos:focus-visible { outline:2px solid #3B82F6;
+          outline-offset:2px; }
         .t-verb.rest { color:#B6B6B2; }
         .t-user.dim { opacity:0.45; }
         .t-chev { border:none; background:none; padding:2px; cursor:pointer;
@@ -1096,6 +1196,37 @@ function WorkspaceRun({ runKey, getToken }: {
         .t-user { background:#fff; border:1px solid #E6E6E3; border-radius:12px;
           padding:10px 14px; font-size:13.5px; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
         .t-dir { font-size:13.5px; line-height:1.55; }
+        /* ── ASK 1: THE REPLY TYPING ITSELF OUT ──────────────────────────────
+           The live reply and its blinking caret. Revealing word by word is the
+           parent's job; here it only styles the cursor and hides the animation
+           from assistive tech (the full text rides in .wk-sr). A held row is a
+           reply queued behind the one animating — it reserves and shows nothing
+           until its turn. No backticks anywhere in this block: it is a template
+           literal and one would terminate it (see the tailblob note). */
+        .t-dir-live { cursor:default; }
+        .t-dir-hold { min-height:0; }
+        .t-caret { display:inline-block; width:2px; height:1.05em; margin-left:1px;
+          vertical-align:-2px; background:#3B82F6; border-radius:1px;
+          animation:wkcaret 1s steps(1,end) infinite; }
+        @keyframes wkcaret { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+        /* Screen-reader-only: present for assistive tech, invisible on screen. */
+        .wk-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+          overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+        /* The waiting ellipsis — three dots keeping a rhythm, so a wait reads as
+           alive rather than frozen. The mark's grammar, not a spinner. */
+        .wk-ellip { display:inline-flex; gap:3px; align-items:center; }
+        .wk-ellip i { width:3px; height:3px; border-radius:2px;
+          background:currentColor; opacity:.3; animation:wkellip 1.3s infinite; }
+        .wk-ellip i:nth-child(2) { animation-delay:.18s; }
+        .wk-ellip i:nth-child(3) { animation-delay:.36s; }
+        @keyframes wkellip { 0%,64%,100%{opacity:.25} 32%{opacity:.9} }
+        /* Asked for no motion: the caret and ellipsis hold still. The reply lands
+           whole (the parent skips the reveal), so nothing here needs to move to
+           be understood. */
+        @media (prefers-reduced-motion:reduce) {
+          .t-caret { animation:none; opacity:0; }
+          .wk-ellip i { animation:none; opacity:.5; }
+        }
         .t-work { color:#8A8A86; font-size:12.5px; display:flex; gap:8px;
           align-items:flex-start; }
         .t-work b { color:#6E6E6A; font-weight:600; }
@@ -1166,43 +1297,10 @@ function WorkspaceRun({ runKey, getToken }: {
           background:#0B0B09;
           border:1px solid #E6E6E3; background:#fff; }
         .wk-grid .beat img { width:100%; height:100%; object-fit:contain; }
-        /* A ROW IS SIZED BY ITS CONTENT; THE LIST SCROLLS, ROWS NEVER SHRINK.
-           This grid has a definite height (100% of the canvas), and auto rows
-           in a definite-height grid are free to compress below their content —
-           which they did: rows collapsed from 331px to 187px, so every card's
-           label block was pushed past the card's own overflow:hidden edge and
-           clipped. The labels were in the DOM, laid out, visibility:visible,
-           and invisible on screen — a measurement of the markup said the row
-           was fine while the screen showed a black rectangle. max-content
-           takes the squeeze away at its source: rows take the height their
-           content needs, and the overflow becomes what it should always have
-           been, a scroll. */
-        .wk-library { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
-          gap:18px; width:100%; height:100%; padding:22px; overflow-y:auto;
-          align-content:start; grid-auto-rows:max-content; }
-        .wk-filmcard { display:flex; flex-direction:column; border-radius:14px;
-          overflow:hidden; background:#fff; border:1px solid #E6E6E3;
-          text-decoration:none; color:inherit; transition:border-color .15s; }
-        .wk-filmcard:hover { border-color:#C9C9C4; }
-        /* Neither half of a tile may be squeezed out by the other: the frame
-           keeps its ratio and the labels keep their height, whatever the grid
-           row does. A row that renders its picture but not its name is the
-           same failure as a row with no name at all. */
-        .wk-filmcard .prev { aspect-ratio:16/9; background:#0B0B09;
-          flex:0 0 auto; }
-        .wk-filmcard .prev video { width:100%; height:100%; object-fit:cover;
-          display:block; }
-        .wk-filmcard .meta { padding:14px 16px 16px; flex:0 0 auto; }
-        .wk-filmcard .head { display:flex; align-items:flex-start;
-          justify-content:space-between; gap:10px; }
-        .wk-filmcard .name { font-size:15px; font-weight:650; color:#1B1B1A;
-          min-width:0; white-space:nowrap; overflow:hidden;
-          text-overflow:ellipsis; }
-        .wk-filmcard .sub { font-size:12.5px; color:#8A8A86; margin-top:3px; }
-        .wk-filmcard .open { margin-top:12px; text-align:center; font-size:13px;
-          padding:7px 0; border:1px solid #E6E6E3; border-radius:99px;
-          color:#1B1B1A; }
-        .wk-filmcard:hover .open { background:#F5F5F3; }
+        /* The in-studio library grid (.wk-library / .wk-filmcard) lived here. It
+           is gone with the 'builds' surface — "all filmos" is the /videos route
+           now, styled by the library agent, so the studio no longer carries a
+           second copy of a film grid to keep in step with it. */
         .wk-liveprobe { position:absolute; width:1px; height:1px;
           opacity:0; pointer-events:none; }
         .wk-betachip { display:inline-block; vertical-align:3px;
