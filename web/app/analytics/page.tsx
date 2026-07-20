@@ -138,12 +138,29 @@ function tokenUsdFor(row: AnalyticsRunRow): number {
   return est * READ_BRIEF_GROSS_UP
 }
 
-// Real per-video COGS in CENTS: ElevenLabs (chars × rate) + Nemotron token cost. Only
-// delivered videos incur production cost — a queued/failed run that never rendered cost ~nothing.
+// Real per-video COGS in CENTS: ElevenLabs (chars × rate) + Nemotron token cost.
+//
+// HONESTY RULES (2026-07-20 audit — the old shape costed every non-delivered run at 0):
+//   · The VO line applies only to a DELIVERED run that actually synthesized VO — and
+//     walkrec never does (music-only by design), so walkrec films carry no VO cost
+//     instead of a fabricated ~450-character voiceover.
+//   · The TOKEN line is real spend the moment the planner ran, delivered or not: a
+//     FAILED run whose recorded planner_usage.cost exists still paid OpenRouter for
+//     it, so it is costed at that recorded spend rather than pretended free.
+//   · A queued/running/failed run with NO recorded spend costs 0 — genuinely nothing
+//     recorded, not an estimate. (Estimates stay reserved for delivered runs, where
+//     we know the planner ran even when its usage went unrecorded.)
 function cogsCentsFor(row: AnalyticsRunRow): number {
-  if (!DELIVERED.has(row.status)) return 0
-  const elevenUsd = (voCharsFor(row) / 1000) * ELEVENLABS_USD_PER_1K_CHARS
-  return (elevenUsd + tokenUsdFor(row)) * 100
+  const voUsd =
+    DELIVERED.has(row.status) && row.film_mode !== 'walkrec'
+      ? (voCharsFor(row) / 1000) * ELEVENLABS_USD_PER_1K_CHARS
+      : 0
+  const tokenUsd = DELIVERED.has(row.status)
+    ? tokenUsdFor(row)
+    : row.planner_cost_usd != null && row.planner_cost_usd >= 0
+      ? row.planner_cost_usd * READ_BRIEF_GROSS_UP
+      : 0
+  return (voUsd + tokenUsd) * 100
 }
 
 type Loaded = { authorized: boolean; rows: AnalyticsRunRow[] }
@@ -194,6 +211,11 @@ export default function AnalyticsPage() {
 
     const delivered = rows.filter((r) => DELIVERED.has(r.status))
     const deliveredCount = delivered.length
+    // Terminal = the run's story is over (shipped or failed). Everything else is
+    // IN FLIGHT — work merely waiting is not a failure and must not read as one.
+    const failedCount = rows.filter((r) => r.status === 'failed').length
+    const terminalCount = deliveredCount + failedCount
+    const inFlightCount = rows.length - terminalCount
 
     // Avg price across PRICED runs only (price_cents != null) so unpriced/queued runs
     // don't drag the average to zero.
@@ -202,9 +224,17 @@ export default function AnalyticsPage() {
       ? Math.round(priced.reduce((a, r) => a + (r.price_cents || 0), 0) / priced.length)
       : null
 
-    // Avg margin = profit / revenue across the whole book (a single blended margin is
-    // more honest than averaging per-run margins, esp. with COGS mostly 0 today).
-    const avgMargin = revenue > 0 ? profit / revenue : null
+    // MARGIN IS SPLIT BY WHAT WAS CHARGED, never blended across free and paid. A
+    // blended profit/revenue over a book that is mostly free runs answers no real
+    // question: the free tier's COGS has no revenue to stand against, and the paid
+    // runs' margin gets diluted by costs they didn't incur. So: paid margin = the
+    // margin of the runs Stripe actually charged (price_cents > 0), and the free
+    // tier's spend is reported as its own number, plainly.
+    const paidRuns = rows.filter((r) => (r.price_cents || 0) > 0)
+    const paidRevenue = paidRuns.reduce((a, r) => a + (r.price_cents || 0), 0)
+    const paidCogs = paidRuns.reduce((a, r) => a + cogsCentsFor(r), 0)
+    const paidMargin = paidRevenue > 0 ? (paidRevenue - paidCogs) / paidRevenue : null
+    const freeCogs = cogs - paidCogs
 
     // Counts by status.
     const byStatus: Record<string, number> = {}
@@ -240,9 +270,14 @@ export default function AnalyticsPage() {
       cogs,
       profit,
       deliveredCount,
+      failedCount,
+      terminalCount,
+      inFlightCount,
       total: rows.length,
       avgPrice,
-      avgMargin,
+      paidMargin,
+      paidCount: paidRuns.length,
+      freeCogs,
       byStatus,
       byProducer,
       producerTagged,
@@ -321,17 +356,37 @@ export default function AnalyticsPage() {
           spend per run (550B runs cost more than free 120B); fixed infra not included.
         </p>
 
-        {/* Secondary metrics */}
+        {/* Secondary metrics. Margin is PAID-ONLY (free runs have no revenue to
+            stand a margin on — their spend shows plainly instead), and success
+            rate is over TERMINAL runs only: a queued film is work in flight,
+            not a failure, and must never drag this number while it waits. */}
         <div className="an-sub">
           <Small label="Avg price" value={formatCents(m.avgPrice)} />
           <Small
-            label="Avg margin"
-            value={m.avgMargin == null ? '--' : `${Math.round(m.avgMargin * 100)}%`}
+            label="Paid margin"
+            value={m.paidMargin == null ? '--' : `${Math.round(m.paidMargin * 100)}%`}
+            sub={
+              m.paidMargin == null
+                ? 'no paid runs yet'
+                : `${m.paidCount} paid; free tier spent ${formatCentsPrecise(m.freeCogs)}`
+            }
           />
-          <Small label="Total runs" value={`${m.total}`} />
+          <Small
+            label="Total runs"
+            value={`${m.total}`}
+            sub={m.inFlightCount > 0 ? `${m.inFlightCount} in flight` : undefined}
+          />
           <Small
             label="Success rate"
-            value={m.total ? `${Math.round((m.deliveredCount / m.total) * 100)}%` : '--'}
+            value={
+              m.terminalCount
+                ? `${Math.round((m.deliveredCount / m.terminalCount) * 100)}%`
+                : '--'
+            }
+            sub={
+              `${m.deliveredCount} delivered, ${m.failedCount} failed` +
+              (m.inFlightCount > 0 ? `; ${m.inFlightCount} in flight` : '')
+            }
           />
         </div>
 
@@ -409,7 +464,11 @@ export default function AnalyticsPage() {
                       </td>
                       <td className="r num nowrap">{formatCents(r.price_cents)}</td>
                       <td className="r num nowrap an-dim">
-                        {DELIVERED.has(r.status) ? formatCentsPrecise(rowCogs) : '--'}
+                        {/* A failed run that recorded planner spend really cost that —
+                            show it. '--' is reserved for runs with nothing recorded. */}
+                        {DELIVERED.has(r.status) || rowCogs > 0
+                          ? formatCentsPrecise(rowCogs)
+                          : '--'}
                       </td>
                       <td
                         className={
@@ -446,13 +505,18 @@ export default function AnalyticsPage() {
         <p className="an-method">
           Revenue reflects Stripe <b>test-mode</b> checkouts. COGS per delivered video =
           ElevenLabs voiceover ({ELEVENLABS_USD_PER_1K_CHARS.toFixed(2)} $/1k chars, the main
-          driver) + <b>Nemotron token cost</b>. The token line is the <b>actual</b> OpenRouter
-          spend recorded per run (planner <code>usage.cost</code>, grossed up{' '}
-          {READ_BRIEF_GROSS_UP}× for the un-logged Conversion Read + design-brief calls); when a
-          run didn&rsquo;t record it, it&rsquo;s estimated from the run&rsquo;s brain rate (550B{' '}
-          <code>ultra-paid</code> ≈ $0.0075/video; free 120B <code>super-free</code> ≈ $0). VO
-          length is exact when the render duration was stored, else inferred at ~
-          {VO_CHARS_PER_SECOND} chars/sec. Profit = price − COGS.
+          driver; walkrec films are music-only and carry no VO line) + <b>Nemotron token
+          cost</b>. The token line is the <b>actual</b> OpenRouter spend recorded per run
+          (planner <code>usage.cost</code>, grossed up {READ_BRIEF_GROSS_UP}× for the un-logged
+          Conversion Read + design-brief calls); when a delivered run didn&rsquo;t record it,
+          it&rsquo;s estimated from the run&rsquo;s brain rate (550B <code>ultra-paid</code> ≈
+          $0.0075/video; free 120B <code>super-free</code> ≈ $0). Non-delivered runs are costed
+          at their <b>recorded</b> spend only — a failed run that paid for its plan shows that
+          cost; a run that recorded nothing shows nothing. VO length is exact when the render
+          duration was stored, else inferred at ~{VO_CHARS_PER_SECOND} chars/sec. Profit =
+          price − COGS. Margin is computed over <b>paid runs only</b>; success rate over{' '}
+          <b>terminal</b> runs (delivered / delivered+failed), with queued or running work
+          counted as in flight, not failure.
         </p>
       </>
     )
@@ -546,6 +610,8 @@ export default function AnalyticsPage() {
         .an-small-value { margin-top:4px; font-size:18px; font-weight:650;
           letter-spacing:-.015em; color:#1B1B1A;
           font-variant-numeric:tabular-nums; }
+        .an-small-sub { margin-top:2px; font-size:11.5px; line-height:1.45;
+          color:#8A8A86; font-variant-numeric:tabular-nums; }
 
         .an-section { margin-top:32px; }
         .an-h2 { margin:0 0 12px; font-size:12px; font-weight:600;
@@ -690,11 +756,12 @@ function Figure({
   )
 }
 
-function Small({ label, value }: { label: string; value: string }) {
+function Small({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="an-small">
       <div className="an-small-label">{label}</div>
       <div className="an-small-value">{value}</div>
+      {sub ? <div className="an-small-sub">{sub}</div> : null}
     </div>
   )
 }

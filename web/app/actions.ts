@@ -730,6 +730,9 @@ export interface AnalyticsRunRow {
    *  (e.g. 0.0047 for a 550B plan). null when not recorded (older/free runs). The page uses
    *  this ACTUAL when present; otherwise it estimates from the brain + storyboard size. */
   planner_cost_usd: number | null
+  /** runs.film_mode: 'walkrec' ships music-only BY DESIGN (no ElevenLabs VO ever ran),
+   *  so the page must not cost a voiceover onto it. null/'classic' = the VO pipeline. */
+  film_mode: string | null
 }
 
 export interface AnalyticsPayload {
@@ -754,7 +757,7 @@ export async function readAnalytics(
   const { data, error } = await db.database
     .from('runs')
     .select(
-      'id, created_at, brand, company_url, status, price_cents, cogs_cents, final_url, brain, props, selection',
+      'id, created_at, brand, company_url, status, price_cents, cogs_cents, final_url, brain, props, selection, film_mode',
     )
     .order('created_at', { ascending: false })
   if (error) return { authorized: true, rows: [] }
@@ -801,6 +804,7 @@ export async function readAnalytics(
       vo_seconds: voSeconds,
       brain: typeof row.brain === 'string' && row.brain ? row.brain : null,
       planner_cost_usd: plannerCostUsd,
+      film_mode: typeof row.film_mode === 'string' && row.film_mode ? row.film_mode : null,
     }
   })
   return { authorized: true, rows }
