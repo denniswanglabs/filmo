@@ -25,12 +25,17 @@ export function AuthGate({
   onClose,
   onSignedIn,
   onBeforeRedirect,
+  notice,
 }: {
   open: boolean
   onClose: () => void
   onSignedIn: (user: AuthUser) => void
   /** Called right before a redirecting provider (Google) navigates away. */
   onBeforeRedirect: () => void
+  /** Honest failure line shown above the subtitle — e.g. when an OAuth return
+   *  produced no session. The gate must never reopen SILENTLY after a failed
+   *  sign-in; naming the failure is what separates "broken" from "try again". */
+  notice?: string
 }) {
   const { signInWithGoogle } = useAuth()
   const [showEmail, setShowEmail] = useState(false)
@@ -147,6 +152,14 @@ export function AuthGate({
         <h2 id="authgate-title" className="text-center text-lg font-semibold text-ink">
           Sign in to start your build
         </h2>
+        {notice ? (
+          <p
+            role="alert"
+            className="mx-auto mt-2 max-w-[19rem] rounded-lg bg-red-50 px-3 py-2 text-center text-xs leading-relaxed text-red-700"
+          >
+            {notice}
+          </p>
+        ) : null}
         <p className="mx-auto mt-1.5 max-w-[19rem] text-center text-sm text-slate-500">
           Your prompt is ready. Sign in and Filmo picks up right where you left off.
         </p>

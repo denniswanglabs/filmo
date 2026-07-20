@@ -22,6 +22,11 @@ interface AuthState {
   signOut: () => Promise<void>
   /** Redirect to Google. The browser leaves the page and returns to `redirectTo`. */
   signInWithGoogle: (redirectTo?: string) => Promise<void>
+  /** True when THIS page load is an OAuth return that ended with no session — the code
+   *  exchange failed or never ran. Surfaces let the reader retry with honest words
+   *  instead of a silently signed-out landing (2026-07-20 outage: the SDK swallows
+   *  exchange errors at console.debug, so nothing else will ever say it). */
+  oauthReturnFailed: boolean
 }
 
 const AuthContext = createContext<AuthState>({
@@ -31,6 +36,7 @@ const AuthContext = createContext<AuthState>({
   getToken: async () => null,
   signOut: async () => {},
   signInWithGoogle: async () => {},
+  oauthReturnFailed: false,
 })
 
 // Read the current access token from the InsForge client. The SDK exposes it on the
@@ -85,6 +91,7 @@ async function persistAfterResolve(user: AuthUser | null): Promise<void> {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [oauthReturnFailed, setOauthReturnFailed] = useState(false)
 
   const refresh = useCallback(async (): Promise<AuthUser | null> => {
     // Mint a fresh session (body-mode refresh) BEFORE getCurrentUser: with an expired token
@@ -158,6 +165,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           /* exchange failures are non-fatal; we fall through to getCurrentUser */
         }
       }
+      // A FAILED EXCHANGE MUST NOT BE SILENT (2026-07-20, production sign-in outage).
+      // The SDK's detectAuthCallback swallows exchange errors at console.debug and the
+      // page then renders an ordinary signed-out landing — the user cannot tell a broken
+      // sign-in from never having signed in, and the report we get is "it threw me back
+      // to the landing page." So on an OAuth return, re-run the exchange check ourselves:
+      // the SDK's exchangeOAuthCode returns {error} (never throws) and is idempotent-safe
+      // here because a SUCCESSFUL exchange already consumed the code — this call only
+      // produces a result when the constructor's attempt failed, in which case the code
+      // is gone from the URL but its failure reason is what we want. We detect the
+      // failure by outcome instead: OAUTH_RETURN and no session after the wait means the
+      // exchange did not produce one. Say so, loudly, with whatever the SDK knows.
+      if (OAUTH_RETURN) {
+        const tm = (
+          insforge.auth as unknown as {
+            tokenManager?: { getAccessToken?: () => string | null }
+          }
+        ).tokenManager
+        const gotSession = !!tm?.getAccessToken?.()
+        if (!gotSession) {
+          console.error(
+            '[filmo-auth] OAuth return produced no session — the code exchange failed ' +
+              'or never ran. Check the Verbose console for the SDK’s ' +
+              '"OAuth code exchange failed" line; common causes: PKCE verifier missing ' +
+              '(storage cleared mid-flow), the code consumed twice, or the exchange POST ' +
+              'blocked by an extension.',
+          )
+          setOauthReturnFailed(true)
+        }
+      }
       // Resolve the session WITH RETRY. getCurrentUser hits InsForge over the network,
       // and InsForge has intermittent multi-second timeouts — a single failed call would
       // FALSE-LOGOUT a signed-in user (e.g. right after returning from Stripe checkout,
@@ -220,6 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         getToken,
         signOut,
         signInWithGoogle,
+        oauthReturnFailed,
       }}
     >
       {children}

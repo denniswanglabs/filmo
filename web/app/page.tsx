@@ -121,7 +121,7 @@ function clearBootStamp() {
 
 export default function Home() {
   const router = useRouter()
-  const { user, loading, getToken } = useAuth()
+  const { user, loading, getToken, oauthReturnFailed } = useAuth()
 
   const [view, setView] = useState<View>('landing')
   const [booting, setBooting] = useState(false)
@@ -134,6 +134,17 @@ export default function Home() {
   // up on unmount. Leaving it set would hide the landing on a later client
   // navigation back to `/`.
   useEffect(() => clearBootStamp, [])
+
+  // A FAILED OAUTH RETURN REOPENS THE GATE, NAMED (2026-07-20 outage). Google
+  // bounced the reader back here and the exchange produced no session; without
+  // this, they land on an ordinary signed-out landing with no sign anything
+  // went wrong — "it threw me back to the landing page" — and their next click
+  // reopens the gate as if the first attempt never happened. The gate reopens
+  // ITSELF instead, wearing the failure, so retry is one click and the reader
+  // knows the product saw it too.
+  useEffect(() => {
+    if (oauthReturnFailed && !loading && !user) setGateOpen(true)
+  }, [oauthReturnFailed, loading, user])
 
   const showLanding = useCallback(() => {
     clearBootStamp()
@@ -356,6 +367,11 @@ export default function Home() {
 
       <AuthGate
         open={gateOpen}
+        notice={
+          oauthReturnFailed && !user
+            ? 'That sign-in didn’t complete — nothing was saved. Try again.'
+            : undefined
+        }
         onClose={() => setGateOpen(false)}
         // Nothing to stash: this door has no composer. Deliberately does NOT
         // clear an existing stash either — a URL typed in the studio and
