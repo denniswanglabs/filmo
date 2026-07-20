@@ -151,9 +151,12 @@ export function AuthGate({
           Your prompt is ready. Sign in and Filmo picks up right where you left off.
         </p>
         <p className="mx-auto mt-3 max-w-[19rem] rounded-lg bg-amber/[0.07] px-3 py-2 text-center text-xs leading-relaxed text-slate-600">
-          Filmo is in <span className="font-semibold text-ink">beta</span> — each account gets{' '}
-          <span className="font-semibold text-ink">3 free videos a day</span> during launch week
-          (through Jul 21).
+          {/* Free with no end date, and no film count — a count is a promise the
+              cap can't keep, since an edit spends from the same allowance. State
+              the allowance itself and let it be exactly true. */}
+          Filmo is <span className="font-semibold text-ink">free while it&rsquo;s in beta</span> —
+          each account gets <span className="font-semibold text-ink">3,000 credits a day</span>,
+          refreshed every morning.
         </p>
 
         {/* Google — the hero */}

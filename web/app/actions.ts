@@ -200,18 +200,15 @@ export async function createBuild(input: {
   // (never the client) and the admin count bypasses RLS, so it can't be gamed. The owner
   // is exempt. We RETURN a structured { limit } (not throw) so the UI shows the friendly
   // message inline rather than the opaque "Server Components render" server-action error.
-  // The free allowance runs for LAUNCH WEEK only — through end of Tue Jul 21 2026,
-  // US Central (one week from the 2026-07-14 Discord launch). After that, non-owner
-  // builds pause with a friendly message. Bump this one date to extend the window.
-  const BETA_FREE_WINDOW_ENDS = Date.parse('2026-07-22T06:00:00Z')
+  // FREE INDEFINITELY; THE CREDIT CAP IS THE ONLY LIMIT (Dennis, 2026-07-19).
+  // There was a hard date here — builds paused for every non-owner after
+  // 2026-07-22 — which is a time bomb, not a policy: nothing would look wrong
+  // until the morning the product silently stopped accepting work. The daily
+  // and lifetime caps below already protect the model budget, continuously and
+  // without a cliff, so the date bought nothing that the caps don't. Do not
+  // reintroduce a wall-clock expiry; if the free tier ever ends, that is a
+  // deliberate product decision that ships with its own messaging.
   if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
-    if (Date.now() >= BETA_FREE_WINDOW_ENDS) {
-      return {
-        limit: true as const,
-        message:
-          'Filmo’s free launch week has ended, so new builds are paused for now. Thanks for trying it!',
-      }
-    }
     // CREDITS (beta): costs and caps are the constants above — never restate
     // them here, or the comment rots the moment they move. Balance is the SUM
     // of an append-only ledger (spends negative; failed builds refunded by the
