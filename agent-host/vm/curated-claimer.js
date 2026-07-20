@@ -1790,17 +1790,48 @@ const RUN_DEADLINE_MS = Number(process.env.RUN_DEADLINE_MS || 40 * 60 * 1000) //
 // cannot drift apart.
 const MIN_ATTEMPT_MS = Number(process.env.MIN_ATTEMPT_MS || Math.round(RENDER_TIMEOUT_MS * 0.6)) // 15 min
 
-// Elapsed customer wait for a run, or null when it cannot be established (a failed
-// read, a missing row, an unparseable timestamp). NEVER guesses: an unknown age
-// must not be treated as "expired", or a transient InsForge blip would start
-// failing healthy runs.
-async function runElapsedMs(runId) {
-  if (!runId) return null
-  const { data: run } = await ifCall('runs.select(deadline)',
-    () => db.database.from('runs').select('created_at').eq('id', runId).maybeSingle())
-  const createdMs = run && run.created_at ? Date.parse(run.created_at) : NaN
+// Elapsed customer wait for THIS REQUEST, or null when it cannot be established.
+// The clock is the JOB's created_at, not the run's (2026-07-20, found live): a
+// director edit is a fresh request against a run that may be hours old — anchoring
+// on runs.created_at made every edit on a film older than 40 minutes dead on
+// arrival at claim ("run deadline exceeded (77.1min > 40min)" against a delivered
+// film whose customer had waited seconds). For BUILD jobs the two anchors are the
+// same instant (the job row is inserted in the same createBuild transaction as the
+// run row), so build semantics are unchanged: the deadline still bounds the total
+// wait ACROSS attempts, because retries reuse the same job row. NEVER guesses: an
+// unknown age must not be treated as "expired", or a transient InsForge blip
+// would start failing healthy requests.
+async function jobElapsedMs(job) {
+  let createdMs = job && job.created_at ? Date.parse(job.created_at) : NaN
+  if (!Number.isFinite(createdMs) && job && job.id) {
+    const { data: row } = await ifCall('jobs.select(deadline)',
+      () => db.database.from('jobs').select('created_at').eq('id', job.id).maybeSingle())
+    createdMs = row && row.created_at ? Date.parse(row.created_at) : NaN
+  }
   if (!Number.isFinite(createdMs)) return null
   return Math.max(0, Date.now() - createdMs)
+}
+
+// Append to the walkrec thread. The claimer's `emit` writes run_events, which the
+// CLASSIC surfaces read; walkrec threads read agent_events — two disjoint tables
+// (every classic run writes only run_events, every walkrec run only agent_events).
+// A customer-facing truth written to the wrong table is a truth the customer never
+// sees: the deadline message below went to run_events while the walkrec thread
+// showed "Thinking…" forever. Single-writer per run while the job is claimed, so
+// max(seq)+1 is race-safe here.
+async function emitAgentEvent(runId, kind, title) {
+  if (!runId) return
+  try {
+    const { data: last } = await ifCall('agent_events.maxseq',
+      () => db.database.from('agent_events').select('seq').eq('run_id', runId)
+        .order('seq', { ascending: false }).limit(1).maybeSingle())
+    const seq = ((last && last.seq) || 0) + 1
+    const { error } = await ifCall('agent_events.insert(deadline)',
+      () => db.database.from('agent_events').insert([{
+        run_id: runId, seq, ts: Date.now() / 1000, kind, title, detail: '',
+      }]))
+    if (error) log('  ! emitAgentEvent', JSON.stringify(error))
+  } catch (e) { log('  ! emitAgentEvent', String(e && e.message || e)) }
 }
 
 // Terminal + refunded, with the reason the customer's clock ran out. Mirrors the
@@ -1821,14 +1852,33 @@ async function failExpiredRun(job, elapsedMs, where) {
     : `run deadline exceeded (${mins}min > ${limitMin}min across ${job.attempts || '?'} attempt(s))`
   log(`  !! ${detail} — job ${job.id} [${where}]; failing + refunding`)
   try {
-    if (job.run_id) await setRun(job.run_id, { status: 'failed', phase: 'run_deadline' })
+    const isEdit = job.type === 'director'
+    // AN EXPIRED REQUEST NEVER DESTROYS A DELIVERED FILM (2026-07-20, found live):
+    // this used to set the RUN failed unconditionally, so an edit refused at claim
+    // flipped a delivered run to status='failed' — the film existed, played, and the
+    // row called it dead. Only a BUILD that expired may fail its run, and even then
+    // never one that already delivered (a stale retry claimed after delivery must
+    // not un-deliver it).
+    if (job.run_id && !isEdit) {
+      const { data: run } = await ifCall('runs.select(deadline-guard)',
+        () => db.database.from('runs').select('status').eq('id', job.run_id).maybeSingle())
+      if (!run || run.status !== 'delivered') {
+        await setRun(job.run_id, { status: 'failed', phase: 'run_deadline' })
+      }
+    }
     await setJob(job.id, { status: 'failed', error: detail })
     await refundCredits(job.run_id)
     if (job.run_id) {
-      await emit(job.run_id, tooLate
-        ? `This build was interrupted and there was not enough of its ${limitMin}-minute limit left to start again, so it was stopped rather than left running. Your credits have been refunded.`
-        : `This build passed its ${limitMin}-minute limit and was stopped. Your credits have been refunded.`,
-      'filmo', 'error')
+      const customerLine = isEdit
+        ? 'That edit could not start — the request waited too long in the queue. Nothing in your film was changed. Send it again and it will go straight through.'
+        : tooLate
+          ? `This build was interrupted and there was not enough of its ${limitMin}-minute limit left to start again, so it was stopped rather than left running. Your credits have been refunded.`
+          : `This build passed its ${limitMin}-minute limit and was stopped. Your credits have been refunded.`
+      // Both tables, always: classic surfaces read run_events, walkrec threads read
+      // agent_events, and each ignores the other's table. An edit refusal answers in
+      // the director's own voice; a build failure is a run.error the thread renders.
+      await emit(job.run_id, customerLine, 'filmo', 'error')
+      await emitAgentEvent(job.run_id, isEdit ? 'chat.director' : 'run.error', customerLine)
     }
   } catch (e) { log('  deadline-mark failed', String(e && e.message || e)) }
 }
@@ -1838,10 +1888,10 @@ async function failExpiredRun(job, elapsedMs, where) {
 // abandoned processJob (if any) keeps running in the background but cannot pin the
 // poll loop — the next claim proceeds. NEVER throws.
 async function runJobBounded(job) {
-  // The run's remaining budget bounds this attempt. An unknown age (null) falls
-  // back to the per-job ceiling alone — the pre-existing behaviour — rather than
-  // failing a run we could not measure.
-  const elapsedMs = await runElapsedMs(job.run_id)
+  // THIS REQUEST's remaining budget bounds this attempt. An unknown age (null)
+  // falls back to the per-job ceiling alone — the pre-existing behaviour — rather
+  // than failing a request we could not measure.
+  const elapsedMs = await jobElapsedMs(job)
   let attemptMs = JOB_WALLCLOCK_MS
   if (elapsedMs !== null) {
     const remainingMs = RUN_DEADLINE_MS - elapsedMs
