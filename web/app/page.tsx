@@ -22,8 +22,8 @@ import {
    resolves to one of three things and renders exactly one of them:
 
      signed out ................ the landing
-     signed in, has films ...... their most recent film, in the studio
-     signed in, no films ....... the studio's own "New film" surface, in place
+     signed in ................. their Overview (`/overview`)
+     signed in, with `?new=1` .. the studio's own "New filmo" surface, in place
 
    Three things about that are load-bearing enough to state out loud:
 
@@ -36,12 +36,16 @@ import {
       people who had already hit it. There is no way to make that mistake from
       here, and that is deliberate.
 
-   2. THE ZERO-FILM ACCOUNT IS RENDERED, NOT SENT. The studio has no route of
-      its own — it is `runs/[id]` with a walkrec run — so a brand-new signup
-      has no id to be sent to. Redirecting them anywhere would either invent an
-      id (greeting a first-time user with "This run could not be found") or
-      bounce them back here forever. So `/` becomes the empty studio for that
-      account. An account with nothing in it cannot loop if nothing moves.
+   2. THE DESTINATION IS A ROUTE THAT EXISTS FOR AN EMPTY ACCOUNT. This used to
+      send a signed-in visitor to their most recent run, and that is precisely
+      why a brand-new signup could not be sent anywhere: the studio has no route
+      of its own — it is `runs/[id]` — so redirecting an account with no runs
+      would either invent an id (greeting a first-time user with "This run could
+      not be found") or bounce them back here forever. `/overview` is the route
+      that was missing. It renders zeroes and an invitation for an account with
+      nothing in it, and it never redirects anyone anywhere, so there is nothing
+      for an empty account to loop against. `?new=1` still lands on the composer
+      here, which is what "Build" means from everywhere else in the app.
 
    3. THE REDIRECT IS GATED ON A SERVER-VERIFIED SESSION, NOT ON `user`.
       `lib/auth.tsx` paints `user` optimistically from localStorage and drops
@@ -209,8 +213,13 @@ export default function Home() {
     } catch {
       /* fall through — listMyRuns treats an empty token as unauthenticated */
     }
-    let runs: Array<{ id: string; film_mode?: string | null }> = []
     try {
+      // The list itself is no longer what decides the destination — /overview
+      // is the destination for every signed-in visitor, empty account or not.
+      // This call stays because its ANSWER is what makes the redirect safe:
+      // `listMyRuns` runs verifyUser on the server, so it is the only thing on
+      // this page that can tell a live session from an optimistically-painted
+      // dead one.
       const res = await listMyRuns(token || '')
       // THE DEFINITIVE ANSWER. verifyUser ran on the server; a rejection here
       // means the optimistically-painted session is genuinely dead, so the
@@ -219,19 +228,14 @@ export default function Home() {
         showLanding()
         return
       }
-      runs = res.runs
     } catch {
       // Network/server blip. Fail OPEN to the landing rather than stranding
       // them on a cover that never lifts; "Enter the studio" retries.
       showLanding()
       return
     }
-    if (!fresh && runs.length) {
-      // The studio proper is a walkrec run, so prefer the most recent one of
-      // those; otherwise the most recent film of any kind is still their work.
-      // `listMyRuns` already orders newest-first.
-      const target = runs.find((r) => r.film_mode === 'walkrec') ?? runs[0]
-      router.replace(`/runs/${target.id}`)
+    if (!fresh) {
+      router.replace('/overview')
       return
     }
     clearBootStamp()
@@ -267,19 +271,26 @@ export default function Home() {
         clearPendingBuild()
       }
 
-      // 2. The escape hatch, and everyone we have no reason to think is signed in.
-      if (landing || !user) {
-        showLanding()
-        // `?new=1` is someone who pressed a Build/Start button elsewhere in the
-        // app. Signed out, the honest next step is the sign-in gate over the
-        // landing rather than dropping them at the top of a marketing page with
-        // no sign that their click did anything.
-        if (fresh && !user && !landing) setGateOpen(true)
-        return
-      }
-
-      // 3. Optimistically signed in — worth asking the server about.
-      await enterStudio()
+      // 2. EVERYONE GETS THE LANDING. `/` is the front door, not a router
+      //    (Dennis, 2026-07-19: "no signed in still go through the landing
+      //    page"). It used to bounce a signed-in visitor straight into the
+      //    studio, which meant the one person who most needed to see the front
+      //    door — the person who owns it — was the only one who never did. A
+      //    landing nobody on the team ever looks at is a landing that rots.
+      //    Entering the studio is now something you DO, via the CTA below,
+      //    rather than something that happens to you.
+      //
+      //    This also deletes the entire redirect: no auth-shaped navigation
+      //    fires on load at all, so there is no ordering hazard against the
+      //    OAuth exchange above, no flash-then-bounce, and nothing for a stale
+      //    optimistic session to get wrong. The only auto-navigation left is
+      //    step 1, which is a URL the user typed and would otherwise lose.
+      showLanding()
+      // `?new=1` is someone who pressed a Build/Start button elsewhere in the
+      // app. Signed out, the honest next step is the sign-in gate over the
+      // landing rather than dropping them at the top of a marketing page with
+      // no sign that their click did anything.
+      if (fresh && !user && !landing) setGateOpen(true)
     })()
   }, [loading, user, runBuild, enterStudio, showLanding])
 

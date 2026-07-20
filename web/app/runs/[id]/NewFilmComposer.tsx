@@ -1,5 +1,5 @@
 'use client'
-// The studio's own composer — the "New film" surface on the icon rail. Ported
+// The studio's own composer — the "New filmo" surface on the icon rail. Ported
 // from the approved prototype (`landing-lab/studio.html`, `.empty` / `.composer`):
 // one question set high on the stage, one line of explanation, and a single
 // large input parked at the bottom rather than centred under the question.
@@ -37,7 +37,7 @@ const BUILD_DEFAULTS = { brain: 'ultra-paid', mode: 'mock' as const, payMode: 'a
 // visitor has expressed no preference and the server picks. It is wrong here.
 //
 // This screen is the walkrec studio: the rail, the thread, the beat board and
-// the director all belong to that pipeline. A non-owner pressing "New film"
+// the director all belong to that pipeline. A non-owner pressing "New filmo"
 // inside it would get a classic run — which renders a completely different
 // page — so the button would navigate you out of the room you were standing
 // in, with nothing on screen explaining why.
@@ -143,7 +143,7 @@ export default function NewFilmComposer({ getToken }: {
       // scary error, and keep the URL so signing in doesn't cost it.
       setBusy(false)
       stash(target)
-      setNote({ text: 'Your session expired — sign in again to start the film.', bad: true })
+      setNote({ text: 'Your session expired — sign in again to start the filmo.', bad: true })
       setGateOpen(true)
     }
   }, [url, getToken, router])
@@ -184,13 +184,13 @@ export default function NewFilmComposer({ getToken }: {
         />
         <div className="nf-row">
           <span className={'nf-hint' + (note?.bad ? ' bad' : '')} role="status">
-            {busy ? 'Starting the film…' : note?.text || ''}
+            {busy ? 'Starting the filmo…' : note?.text || ''}
           </span>
           <button
             type="submit"
             className="nf-send"
             disabled={!canSend}
-            aria-label={busy ? 'Starting the film' : 'Start the film'}
+            aria-label={busy ? 'Starting the filmo' : 'Start the filmo'}
           >
             &#8593;
           </button>

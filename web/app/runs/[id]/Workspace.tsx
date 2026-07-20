@@ -6,13 +6,15 @@
 // same event contract, agent_events + storage instead of localhost.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import Link from 'next/link'
 import { getAgentRun, listMyRuns, sendDirectorMessage, type AgentEvent } from '../../actions'
-// ONE status chip for the whole product: the Builds tiles wear the same chip as
+// ONE status chip for the whole product: the Filmos tiles wear the same chip as
 // the /videos cards, so a status can never mean two different things in two
 // places (STATUS_STYLES/STATUS_LABELS stay the single source of truth).
 import { StatusChip } from '../../components/Brand'
 import NewFilmComposer from './NewFilmComposer'
 import FeedbackModal from './FeedbackModal'
+import AccountMenu from './AccountMenu'
 
 const VERBS: Record<string, string> = {
   read: 'Scouting', decide: 'Framing', film: 'Rolling',
@@ -45,12 +47,12 @@ const PROSE_KINDS = new Set(['chat.director', 'say.step'])
 
 // ── A LIBRARY ROW MUST DISCRIMINATE ─────────────────────────────────────────
 // Presence of a label is not the same as usefulness of a label. Thirteen of a
-// user's fourteen films can be the same brand, and a bucket-per-day stamp
+// user's fourteen filmos can be the same brand, and a bucket-per-day stamp
 // ("Updated today") collapses every one of them onto the same two strings —
-// the row renders and is still unfindable. Every field a Builds tile carries is
+// the row renders and is still unfindable. Every field a Filmos tile carries is
 // therefore chosen to VARY between neighbouring rows: a precise age, the
 // pipeline that made it, its measured length, its status. `relativeAge` is the
-// same clock the /videos cards use, so one film reads the same in both places.
+// same clock the /videos cards use, so one filmo reads the same in both places.
 function relativeAge(ts: number): string {
   const mins = Math.round((Date.now() - ts * 1000) / 60000)
   if (mins < 1) return 'just now'
@@ -66,7 +68,7 @@ function relativeAge(ts: number): string {
 const filmModeLabel = (mode: string) =>
   mode === 'walkrec' ? 'Agent tour' : 'Brand explainer'
 
-// The film's own measured length, read off the tile's metadata load — never a
+// The filmo's own measured length, read off the tile's metadata load — never a
 // guess. Unknown/streaming durations return '' and the row simply omits the
 // field rather than printing a made-up number.
 function runtime(secs: number | undefined): string {
@@ -125,18 +127,28 @@ function FilmVideo({ src, poster, role, controls, videoRef, onTimeUpdate, onLoad
 
 type LocalMsg = { ts: number; kind: 'user' | 'dir'; text: string }
 
-// ── THE RAIL SWITCHES SURFACES; IT DOES NOT LEAVE ───────────────────────────
-// Every destination on the icon rail is one of these, and they are all rendered
-// by this component — so no rail entry can be a link out of the studio. It used
-// to have one: `Builds` was <a href="/">, which walked the user out of the app
-// they were working in and dropped them on the marketing landing, mid-film.
-// A studio surface is now a value, not a URL, and the type is what enforces it.
+// ── THE ROOMS OF THIS PAGE, AS OPPOSED TO THE ROUTES OFF IT ─────────────────
+// A `Surface` is a room the rail can walk you into WITHOUT leaving this page:
+// the component renders every one of them itself, so a surface can never
+// quietly become a link out of the studio. It used to: `Builds` was
+// <a href="/">, which walked the user out of the app they were working in and
+// dropped them on the marketing landing, mid-film. A studio surface is a value,
+// not a URL, and the type is what enforces it.
 //   'film'   the run this workspace is about.
-//   'builds' the library — every film this account has finished.
+//   'builds' the library — every filmo this account has finished. Labelled
+//            "Filmos"; the VALUE stays `builds` because it crosses a wire
+//            (the feedback sheet reports `surface=` verbatim).
 //   'new'    the composer. Takes the whole stage: the rail is fixed furniture,
 //            the room you're standing in is what changes.
-// Feedback is deliberately NOT here. It is an ACT, not a place — it opens over
-// whatever you were looking at and gives it back when you're done.
+// Overview and Assets are deliberately NOT here: they are real routes, they
+// belong to the whole account rather than to this run, and the rail renders
+// them as anchors so the distinction survives contact with a user — a link
+// shows its destination, opens in a new tab, and never lights the rail's
+// you-are-here marker, which only a Surface can.
+// Feedback is not here either, for a different reason: it is an ACT, not a
+// place. It opens over whatever you were looking at and gives it back when
+// you're done, and it now hangs off the account circle at the foot of the rail
+// with the other things that belong to a person rather than to a filmo.
 type Surface = 'film' | 'builds' | 'new'
 
 function reduce(evts: AgentEvent[]) {
@@ -244,8 +256,8 @@ function WorkspaceRun({ runKey, getToken }: {
   // showing and hands that view back untouched when it closes, so reporting a
   // broken screen never costs you the screen you were reporting.
   const [fbOpen, setFbOpen] = useState(false)
-  // The films this account has already produced — the library behind the
-  // Builds tab. Loaded once, lazily, when the tab is first opened. Every field
+  // The filmos this account has already produced — the library behind the
+  // Filmos tab. Loaded once, lazily, when the tab is first opened. Every field
   // here is one the row renders; a library row that carries only the brand is
   // unfindable once the same brand has been filmed a dozen times.
   const [library, setLibrary] = useState<{
@@ -339,7 +351,7 @@ function WorkspaceRun({ runKey, getToken }: {
           .filter((r) => r.final_url)
           .map((r) => ({
             id: r.id,
-            brand: r.brand || r.company_url || 'Launch film',
+            brand: r.brand || r.company_url || 'Launch filmo',
             url: r.final_url as string,
             ts: Date.parse(r.created_at) / 1000,
             status: r.status,
@@ -441,8 +453,8 @@ function WorkspaceRun({ runKey, getToken }: {
   const host = (S.site || '').replace(/^https?:\/\//, '').split('/')[0]
   const brandTitle = host
     ? host.split('.')[0].charAt(0).toUpperCase()
-      + host.split('.')[0].slice(1) + ' launch film'
-    : 'Launch film'
+      + host.split('.')[0].slice(1) + ' launch filmo'
+    : 'Launch filmo'
   const verb = VERBS[S.phase] || 'Working'
   const elapsed = Math.round((Date.now() - phaseStart.current) / 1000)
 
@@ -462,11 +474,11 @@ function WorkspaceRun({ runKey, getToken }: {
   const lastPage = S.pages[S.pages.length - 1]
   if (tab === 'builds') {
     screen = library === null ? (
-      <div className="wk-text"><div className="big">Loading your films…</div></div>
+      <div className="wk-text"><div className="big">Loading your filmos…</div></div>
     ) : library.length === 0 ? (
       <div className="wk-text">
-        <div className="big">No finished films yet</div>
-        <div className="small">Every film you produce lands here.</div>
+        <div className="big">No finished filmos yet</div>
+        <div className="small">Every filmo you produce lands here.</div>
       </div>
     ) : (
       <div className="wk-library">
@@ -489,19 +501,21 @@ function WorkspaceRun({ runKey, getToken }: {
               </div>
               {/* The discriminating line: which pipeline made it, how long it
                   runs, and how long ago — three fields that differ between two
-                  films of the same brand made on the same day. Unknown length
+                  filmos of the same brand made on the same day. Unknown length
                   drops out of the line rather than printing a placeholder. */}
               <div className="sub">
                 {[filmModeLabel(f.mode), runtime(durations[f.id]), relativeAge(f.ts)]
                   .filter(Boolean).join(' · ')}
               </div>
-              <div className="open">Open film</div>
+              <div className="open">Open filmo</div>
             </div>
           </a>
         ))}
       </div>
     )
-    pill = library ? `${library.length} film${library.length === 1 ? '' : 's'} produced` : 'films'
+    pill = library
+      ? `${library.length} filmo${library.length === 1 ? '' : 's'} produced`
+      : 'filmos'
   } else if (!hydrated) {
     // Nothing is known about this run yet: a neutral placeholder, no phase, no
     // copy to read, no timer — and no motion, because on this surface motion
@@ -561,7 +575,7 @@ function WorkspaceRun({ runKey, getToken }: {
       </div>
     ) : (
       <div className="wk-text">
-        <div className="big">Printing the film</div>
+        <div className="big">Printing the filmo</div>
         <div className="small">The beat board fills in as scenes land.</div>
       </div>
     )
@@ -606,7 +620,7 @@ function WorkspaceRun({ runKey, getToken }: {
       screen = <div className="wk-text"><div className="big">{S.status === 'failed' ? 'The run failed.' : 'Finished.'}</div></div>
     }
     pill = S.film
-      ? `film · ${S.rejected ? 'review rejected'
+      ? `filmo · ${S.rejected ? 'review rejected'
         : S.review.length ? 'review passed' : 'final'}`
       : ''
   }
@@ -619,48 +633,81 @@ function WorkspaceRun({ runKey, getToken }: {
   if (!mounted) return null
   return createPortal(
     <div className="wk-root">
+      {/* ── ONE RAIL, TWO KINDS OF ENTRY, TOLD APART ──────────────────────────
+          Filmo's global navigation. It carries both in-page SURFACES (New
+          filmo / Filmos / Film — rooms this component renders itself) and
+          ROUTES off the page (Overview / Assets — pages that belong to the
+          account rather than to this run), and a rail that renders the two
+          identically is lying about what a click will cost you: one keeps your
+          run polling underneath, the other tears this workspace down.
+          They are told apart by the two cheapest honest signals there are:
+            · ELEMENT — a route is a real <a>, so it shows its destination in
+              the status bar, opens in a new tab on cmd-click, and is offered
+              to a screen reader as a link. A surface is a <button>, because
+              nothing is being navigated to.
+            · MARKER — the accent bar at the rail's edge means YOU ARE STANDING
+              HERE. Only a surface can light it (`tab` is the only thing that
+              can be current on this page), so its absence beside Overview and
+              Assets is itself the tell.
+          No third invention on top of that. */}
       <div className="wk-iconrail">
         {/* ── PRODUCT CHROME WEARS THE PRODUCT'S MARK ────────────────────────
-            This rail is Filmo's own global navigation (Builds / Film / Films),
-            and the slot above it is the conventional "whose app is this"
-            position. It used to hold the CUSTOMER's logo, which badged Filmo
-            as whoever it happened to be filming. Whatever brand a run is
+            The slot at the head of the rail is the conventional "whose app is
+            this" position. It used to hold the CUSTOMER's logo, which badged
+            Filmo as whoever it happened to be filming. Whatever brand a run is
             about, this is always Filmo — and because the mark comes from
             FilmoMark rather than run state, nothing run-derived can reach it.
             The mark appears here exactly once; the run's own brand lives in
-            the run header below, beside the film's title. */}
+            the run header below, beside the filmo's title. */}
         <div className="wk-brand" title="Filmo">
           <FilmoMark />
         </div>
-        {/* Making a film is the primary act, so it sits directly under the
+        {/* Making a filmo is the primary act, so it sits directly under the
             mark where the hand already is — the position Ploy gives its own
             new-thread button. */}
-        <button className={'wk-ic' + (tab === 'new' ? ' on' : '')} onClick={() => setTab('new')} title="Start a new film">
+        <button className={'wk-ic' + (tab === 'new' ? ' on' : '')}
+          aria-current={tab === 'new' ? 'true' : undefined}
+          onClick={() => setTab('new')} title="Start a new filmo">
           <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
-          <i>New film</i>
+          <i>New filmo</i>
         </button>
+        {/* The signed-in home. A route, not a room — it is about the account,
+            not about this run, so it cannot be a tab on a page that is. */}
+        <Link className="wk-ic" href="/overview" title="Your studio overview">
+          <svg viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/><path d="M5.75 9.5V20h12.5V9.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <i>Overview</i>
+        </Link>
         {/* ONE NAME PER THING. `Builds` and `Films` were two rail entries for
             one idea — the work this account has produced — and they disagreed
             about what it was: Builds left the app for the marketing landing,
             Films showed the library that actually answers the question. The
-            library keeps its grid (it is still a wall of finished films) and
-            takes the name; the link, and the second entry, are gone. */}
-        <button className={'wk-ic' + (tab === 'builds' ? ' on' : '')} onClick={() => setTab('builds')} title="Films you've made">
+            surviving entry is the library, and it now wears the product's own
+            word for what it holds: Filmos. */}
+        <button className={'wk-ic' + (tab === 'builds' ? ' on' : '')}
+          aria-current={tab === 'builds' ? 'true' : undefined}
+          onClick={() => setTab('builds')} title="Filmos you've made">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="3" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/><rect x="13" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>
-          <i>Builds</i>
+          <i>Filmos</i>
         </button>
-        <button className={'wk-ic' + (tab === 'film' ? ' on' : '')} onClick={() => setTab('film')} title="This film">
+        {/* The raw material, already built at /assets: captures, marks,
+            recordings, stills. Also a route — it spans every run. */}
+        <Link className="wk-ic" href="/assets" title="Everything captured and made for your filmos">
+          <svg viewBox="0 0 24 24"><path d="M12 3.5 3.5 8l8.5 4.5L20.5 8 12 3.5Z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <i>Assets</i>
+        </Link>
+        <button className={'wk-ic' + (tab === 'film' ? ' on' : '')}
+          aria-current={tab === 'film' ? 'true' : undefined}
+          onClick={() => setTab('film')} title="This film">
           <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>
           <i>Film</i>
         </button>
         <div className="wk-railspace" />
-        {/* Bottom of the rail, below the fold of the work: reaching a human is
-            always available and never in the way. Not a surface — it opens
-            over the room and gives it back. */}
-        <button className="wk-ic" onClick={() => setFbOpen(true)} title="Send feedback">
-          <svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M3.5 7l8.5 6 8.5-6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          <i>Feedback</i>
-        </button>
+        {/* Bottom of the rail, below the fold of the work: who you are, what
+            you have left, and the two acts that belong to a person rather than
+            to a filmo — reaching a human, and leaving. Always available, never
+            in the way. Feedback is still not a surface: it opens over the room
+            and gives it back. */}
+        <AccountMenu getToken={getToken} onFeedback={() => setFbOpen(true)} />
       </div>
       {/* ── THE ROOM CHANGES, THE RAIL DOESN'T ────────────────────────────
           Starting a film is not a different page, it is this room in its empty
@@ -754,9 +801,12 @@ function WorkspaceRun({ runKey, getToken }: {
         <div className="wk-canvas">
           <div className="wk-chrome">
             <div className="dots"><i /><i /><i /></div>
+            {/* The same two rooms the rail offers, named the same way — a tab
+                that disagreed with the rail entry pointing at it would be two
+                names for one place all over again. */}
             <div className="wk-tabs">
               <button className={tab === 'film' ? 'on' : ''} onClick={() => setTab('film')}>Film</button>
-              <button className={tab === 'builds' ? 'on' : ''} onClick={() => setTab('builds')}>Builds</button>
+              <button className={tab === 'builds' ? 'on' : ''} onClick={() => setTab('builds')}>Filmos</button>
             </div>
             <div className="wk-urlpill" title={S.site}>{host || '…'}</div>
             {pill ? <div className="wk-statuschip">{pill}</div> : null}
@@ -786,8 +836,12 @@ function WorkspaceRun({ runKey, getToken }: {
       <style>{`
         .wk-root { position:fixed; inset:0; display:flex; background:#F1F1EF;
           color:#1B1B1A; font:14px/1.5 Inter,-apple-system,sans-serif; z-index:50; }
+        /* position:relative so the account card at the foot has something to
+           hang off; nothing here clips, so the card is free to overhang the
+           rail's 72px into the stage beside it. */
         .wk-iconrail { flex:0 0 72px; display:flex; flex-direction:column;
-          align-items:center; gap:18px; padding:16px 0; border-right:1px solid #E6E6E3; }
+          align-items:center; gap:18px; padding:16px 0; border-right:1px solid #E6E6E3;
+          position:relative; }
         /* Filmo's mark sits plain on the ground — the same presentation the
            boot screen and the landing use. No tile, and no customer logo. */
         .wk-brand { width:40px; height:40px; display:flex; align-items:center;
@@ -795,12 +849,27 @@ function WorkspaceRun({ runKey, getToken }: {
         .wk-brand svg { width:34px; height:34px; display:block; }
         .wk-ic { display:flex; flex-direction:column; align-items:center; gap:4px;
           color:#8A8A86; background:none; border:none; cursor:pointer;
-          text-decoration:none; font:inherit; }
+          text-decoration:none; font:inherit; position:relative; }
         .wk-ic svg { width:22px; height:22px; }
-        .wk-ic i { font-style:normal; font-size:10px; }
+        .wk-ic i { font-style:normal; font-size:10px; text-align:center; }
         .wk-ic.on, .wk-ic:hover { color:#1B1B1A; }
-        /* Pushes Feedback to the foot of the rail: always reachable, never in
-           the way of the work above it. */
+        /* ── YOU ARE STANDING HERE ────────────────────────────────────────────
+           The rail's only structural distinction between a room and a route.
+           It is pinned to the RAIL's edge rather than the item's own box,
+           because rail items are as wide as their labels ("New filmo" is wider
+           than "Film") and a marker offset from the item would sit at a
+           different x on every row. Items are centre-aligned in a 72px rail
+           with a 1px right border, so the rail's left edge is exactly 35.5px
+           left of any item's centre — hence the calc. Only the .on class gets
+           it, and only a Surface can be .on, so an anchor can never grow one.
+           NB: no backticks in these comments — this block is a template
+           literal and one would terminate it (see the note under wk-tailblob;
+           this comment cost a typecheck to relearn). */
+        .wk-ic.on::before { content:''; position:absolute; left:calc(50% - 35.5px);
+          top:50%; transform:translateY(-50%); width:3px; height:26px;
+          border-radius:0 3px 3px 0; background:#3B82F6; }
+        /* Pins the account circle to the foot of the rail: always reachable,
+           never in the way of the work above it. */
         .wk-railspace { flex:1 1 auto; }
         /* ── FOCUS MUST BE SEEN ──────────────────────────────────────────────
            Every control on this surface is deliberately chrome-less — no

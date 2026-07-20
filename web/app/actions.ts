@@ -1,5 +1,6 @@
 'use server'
 import { adminClient, verifyUser } from '../lib/insforge'
+import { isDelivered } from '../lib/types'
 import type { Run, RunEvent } from '../lib/types'
 
 // The product owner — the ONLY account allowed to read the business-wide analytics
@@ -1011,4 +1012,557 @@ export async function sendFeedback(input: {
     await db.database.from('feedback').update({ notified: true }).eq('id', row.id)
   }
   return { ok: true as const, notified }
+}
+
+// ═══════════════════════ OVERVIEW — the signed-in home ═══════════════════════
+//
+// THE GOVERNING RULE OF EVERYTHING BELOW: every number on the strip and every
+// claim on a card is a COUNT OF ROWS THAT EXIST. Nothing here is estimated,
+// extrapolated, or inferred from a live look at a customer's site.
+//
+// That rule is not fastidiousness. A card that says "your pricing page changed"
+// without having checked is the same defect as a reviewer that passes a film it
+// never watched — it just wears a nicer coat. So: if a fact cannot be derived
+// from a row we already hold, the card that would have carried it is not
+// rendered, and the strip drops the half of a stat it cannot measure rather
+// than filling it in. Fewer, true things.
+//
+// Two reads, both owner-scoped through `verifyUser` like every other action in
+// this file. The admin client bypasses RLS, so `.eq('user_id', me.id)` IS the
+// security boundary (same rule as listMyRuns / listAssets):
+//   getOverviewStats → the thin strip along the top
+//   getSuggestions   → the "For you" cards
+//
+// Credits are deliberately absent from both: they live in the account circle
+// (AccountMenu → getCredits), and a number that means "what you have left to
+// spend" does not belong in a row of numbers that mean "what you have made".
+
+// How far back the Overview looks. Both reads are bounded so a heavy account
+// can never turn the home page into a full-table scan. Today the largest
+// account holds ~100 runs, so this window is the entire history for everyone;
+// if that stops being true the stats become a floor rather than a total, which
+// is why the window is stated here rather than buried in a query.
+const OVERVIEW_RUN_LIMIT = 400
+// `agent_events` are fetched in batches of run ids because a `.in()` carrying
+// 400 uuids is a query string nobody should build. 100 ids ≈ 3.8KB of query
+// string — comfortably inside every URL limit, and chosen to cover the largest
+// real account in ONE round trip rather than two: this read is on the home
+// page's critical path and each extra trip to Singapore costs a visible beat.
+const OVERVIEW_ID_BATCH = 100
+const OVERVIEW_EVENTS_PER_BATCH = 1500
+
+interface OverviewRunRow {
+  id: string
+  brand: string | null
+  company_url: string | null
+  status: string
+  film_mode: string | null
+  created_at: string
+  final_url: string | null
+  /** `props.total_frames` / `props.fps`, pulled as jsonb sub-paths so the whole
+   *  (large) props blob never crosses the wire. Null when the run stored no
+   *  frame count — see `measuredSeconds`. */
+  total_frames: number | null
+  fps: number | null
+}
+
+interface OverviewEventRow {
+  run_id: string
+  seq: number
+  kind: string
+  title: string
+  detail: string
+  artifact_url: string
+}
+
+/** Every run this user owns, newest first. `.eq('user_id')` is the boundary. */
+async function overviewRuns(
+  db: ReturnType<typeof adminClient>,
+  userId: string,
+): Promise<OverviewRunRow[]> {
+  const { data } = await db.database
+    .from('runs')
+    .select(
+      'id, brand, company_url, status, film_mode, created_at, final_url,'
+      + ' total_frames:props->total_frames, fps:props->fps',
+    )
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(OVERVIEW_RUN_LIMIT)
+  // The SDK types a select carrying an ALIASED jsonb sub-path
+  // (`total_frames:props->total_frames`) as GenericStringError[], because its
+  // generated row types only know real columns. The rows are real; the type is
+  // the one thing that isn't, so it goes through `unknown` and every field is
+  // narrowed by hand below.
+  const rows = (data as unknown as Record<string, unknown>[]) ?? []
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && isFinite(v) ? v : null
+  return rows.map((r) => ({
+    id: String(r.id),
+    brand: (r.brand as string | null) ?? null,
+    company_url: (r.company_url as string | null) ?? null,
+    status: String(r.status ?? ''),
+    film_mode: (r.film_mode as string | null) ?? null,
+    created_at: String(r.created_at ?? ''),
+    final_url: (r.final_url as string | null) ?? null,
+    total_frames: num(r.total_frames),
+    fps: num(r.fps),
+  }))
+}
+
+/** The named event kinds for these runs, in seq order, batched by run id. */
+async function overviewEvents(
+  db: ReturnType<typeof adminClient>,
+  runIds: string[],
+  kinds: string[],
+): Promise<OverviewEventRow[]> {
+  const out: OverviewEventRow[] = []
+  for (let i = 0; i < runIds.length; i += OVERVIEW_ID_BATCH) {
+    const batch = runIds.slice(i, i + OVERVIEW_ID_BATCH)
+    if (!batch.length) continue
+    const { data } = await db.database
+      .from('agent_events')
+      .select('run_id, seq, kind, title, detail, artifact_url')
+      .in('run_id', batch)
+      .in('kind', kinds)
+      .order('seq', { ascending: true })
+      .limit(OVERVIEW_EVENTS_PER_BATCH)
+    for (const e of ((data as OverviewEventRow[]) ?? [])) out.push(e)
+  }
+  return out
+}
+
+/** Group events by run, each list ordered by seq (the order the studio wrote them). */
+function eventsByRun(events: OverviewEventRow[]): Map<string, OverviewEventRow[]> {
+  const m = new Map<string, OverviewEventRow[]>()
+  for (const e of events) {
+    const list = m.get(e.run_id)
+    if (list) list.push(e)
+    else m.set(e.run_id, [e])
+  }
+  for (const list of m.values()) list.sort((a, b) => a.seq - b.seq)
+  return m
+}
+
+// ── MEASURED, NEVER ESTIMATED ───────────────────────────────────────────────
+// A film's length is stored in exactly two places, and both are written FROM
+// THE RENDERED ARTIFACT rather than from the plan:
+//   walkrec → the run's LAST `assemble.film` event, whose detail the pipeline
+//             stamps off the finished file ("53.1s"). Last, not first: a
+//             director re-cut emits a second one, and the newest is the film
+//             that actually shipped.
+//   classic → props.total_frames / props.fps, the frames actually rendered.
+// There is no `duration` column, and no third source. A delivered run carrying
+// neither is UNMEASURED: it contributes zero seconds and is excluded from
+// `filmSecondsMeasuredOf`, so the strip can say how many films it measured
+// instead of quietly under-reporting a total it presents as complete.
+const FILM_SECONDS_RE = /^\s*([0-9]+(?:\.[0-9]+)?)\s*s\s*$/
+
+function measuredSeconds(run: OverviewRunRow, events: OverviewEventRow[]): number | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].kind !== 'assemble.film') continue
+    const m = FILM_SECONDS_RE.exec(events[i].detail || '')
+    if (m) return parseFloat(m[1])
+    break
+  }
+  const { total_frames: frames, fps } = run
+  if (frames && fps && fps > 0 && frames > 0) return frames / fps
+  return null
+}
+
+export interface OverviewStats {
+  /** Runs that shipped a film (isDelivered — the app's shared definition). */
+  filmos: number
+  /** Sum of the MEASURED lengths of those films, in seconds. */
+  filmSeconds: number
+  /** How many of `filmos` had a stored length. When it is below `filmos` the
+   *  strip says so, because "51 minutes" over 88 films of which 86 were
+   *  measured is a different sentence from "51 minutes". */
+  filmSecondsMeasuredOf: number
+  /** Distinct pages Filmo read, counted once per (run, page): the same page
+   *  read twice inside one run is one page, read twice across two filmos is
+   *  two. Only the agent pipeline records reads, so a library of classic-only
+   *  films honestly reports zero. */
+  pagesRead: number
+  /** Recordings KEPT (`film.shot`) — the library's own definition of a
+   *  recording (ASSET_OF_KIND maps film.shot → 'recording'), so this number and
+   *  the Recordings filter on /assets can never disagree. */
+  recordings: number
+  /** Everything in the assets library, counted the way the library counts it. */
+  assets: number
+}
+
+export type OverviewStatsResult = { authError: true } | { stats: OverviewStats }
+
+// The assets library shows the 40 most recent runs (listAssets), so the strip
+// counts exactly that window. A strip reading 250 over a library holding 96
+// would be a number the user has no way to check — and a number nobody can
+// check is indistinguishable from one that is wrong.
+const ASSET_RUN_WINDOW = 40
+
+export async function getOverviewStats(
+  accessToken: string | null | undefined,
+): Promise<OverviewStatsResult> {
+  const me = await verifyUser(accessToken)
+  if (!me) return { authError: true }
+  const db = adminClient()
+  const runs = await overviewRuns(db, me.id)
+  const empty: OverviewStats = {
+    filmos: 0, filmSeconds: 0, filmSecondsMeasuredOf: 0,
+    pagesRead: 0, recordings: 0, assets: 0,
+  }
+  if (!runs.length) return { stats: empty }
+
+  // ASSET_OF_KIND is the library's definition of what counts as an asset;
+  // re-deriving it here is how the two surfaces would drift apart.
+  const assetKinds = Object.keys(ASSET_OF_KIND)
+  const kinds = Array.from(new Set([...assetKinds, 'assemble.film']))
+  const events = await overviewEvents(db, runs.map((r) => r.id), kinds)
+  const byRun = eventsByRun(events)
+
+  const assetWindow = new Set(runs.slice(0, ASSET_RUN_WINDOW).map((r) => r.id))
+  const pages = new Set<string>()
+  let filmos = 0
+  let filmSeconds = 0
+  let measured = 0
+  let recordings = 0
+  // One film per run that has a delivery receipt — listAssets' `film` row.
+  let assets = runs.filter((r) => assetWindow.has(r.id) && r.final_url).length
+
+  for (const r of runs) {
+    const es = byRun.get(r.id) ?? []
+    if (isDelivered(r.status)) {
+      filmos++
+      const secs = measuredSeconds(r, es)
+      if (secs != null) { filmSeconds += secs; measured++ }
+    }
+    for (const e of es) {
+      if (e.kind === 'read.page') pages.add(`${r.id}\n${e.title}`)
+      if (e.kind === 'film.shot') recordings++
+      // ASSET_OF_KIND — not merely "has an artifact". `assemble.film` is
+      // fetched here for the length above and carries an artifact of its own,
+      // and counting it would put 17 things on the strip that the library does
+      // not hold. The kind map is the definition; membership in it is the test.
+      if (assetWindow.has(r.id) && e.artifact_url && ASSET_OF_KIND[e.kind]) assets++
+    }
+  }
+
+  return {
+    stats: {
+      filmos,
+      filmSeconds: Math.round(filmSeconds),
+      filmSecondsMeasuredOf: measured,
+      pagesRead: pages.size,
+      recordings,
+      assets,
+    },
+  }
+}
+
+// ─────────────────────────── "For you" — the cards ───────────────────────────
+// Five card kinds, each derived from rows this account owns. At most one card
+// per kind (the strongest instance) and never two cards proposing the same
+// action, so the column reads as five different reasons rather than the same
+// site five times. Everything a card asserts is in the query above it.
+
+export type SuggestionAction =
+  | { type: 'build'; url: string; label: string }
+  | { type: 'open'; runId: string; label: string }
+
+export type SuggestionKind =
+  | 'in-flight'
+  | 'unfilmed-page'
+  | 'no-notes'
+  | 'stranded-failure'
+  | 'most-filmed'
+
+export interface Suggestion {
+  id: string
+  kind: SuggestionKind
+  title: string
+  /** One sentence of plain explanation. Never carries a date — see `at`. */
+  detail: string
+  /** The rows it came from, in the user's words ("5 pages read, 2 kept"). */
+  evidence: string
+  /** ISO timestamp of the row the card is about, or '' when it isn't about one
+   *  moment. Dates are NOT baked into the copy: a date formatted on the server
+   *  is the server's day, not the reader's, and a card that is off by one is a
+   *  card that is wrong. The client formats this in the reader's own zone. */
+  at: string
+  action: SuggestionAction
+}
+
+export type SuggestionsResult = { authError: true } | { suggestions: Suggestion[] }
+
+const SUGGESTION_CAP = 5
+
+/** Bare host, lowercased, `www.` dropped — the identity of a site across runs. */
+function siteHost(url: string | null | undefined): string {
+  const raw = (url || '').trim()
+  if (!raw) return ''
+  try {
+    return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+      .hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+// A site worth proposing has to be a site. The runs table also holds the
+// pipeline's own SSRF self-tests and reserved addresses (169.254.169.254,
+// *.example) — real rows, but proposing "film 169.254.169.254 again" is how a
+// grounded card still ends up looking stupid.
+function isProposableHost(host: string): boolean {
+  if (!host || !host.includes('.')) return false
+  if (/^[0-9.]+$/.test(host)) return false // bare IPv4
+  if (/(^|\.)(example|invalid|test|local|localhost)$/.test(host)) return false
+  return true
+}
+
+/** Scheme+host lowercased, trailing slash dropped — so two spellings of one
+ *  page do not read as two pages. */
+function normalizePageUrl(raw: string): string {
+  const t = (raw || '').trim()
+  if (!t) return ''
+  try {
+    const u = new URL(t)
+    u.hash = ''
+    const path = u.pathname.replace(/\/+$/, '')
+    return `${u.protocol}//${u.host.toLowerCase()}${path}${u.search}`
+  } catch {
+    return ''
+  }
+}
+
+/** The page a `read.page` event is about. Titles are either an absolute URL
+ *  ("Read https://insforge.dev") or a site-relative path ("Read /pricing"). */
+function readPageUrl(title: string, companyUrl: string | null): string {
+  const m = (title || '').replace(/^Read\s+/i, '').trim()
+  if (!m) return ''
+  if (/^https?:\/\//i.test(m)) return normalizePageUrl(m)
+  if (!companyUrl) return ''
+  try {
+    return normalizePageUrl(new URL(m, companyUrl).toString())
+  } catch {
+    return ''
+  }
+}
+
+/** The page a `film.recording` event is about: its detail reads "Gliding
+ *  through <url>", which is the ONLY place a recording states its page. */
+function recordingPageUrl(detail: string): string {
+  const m = /https?:\/\/\S+/.exec(detail || '')
+  return m ? normalizePageUrl(m[0]) : ''
+}
+
+/** The pages that produced a KEPT recording, or null when the run's events do
+ *  not support the question. The pipeline emits `film.recording` (the attempt,
+ *  carrying the page) and then either `film.shot` (kept) or `decide.guard`
+ *  (dropped) for that same stop, so a kept shot's page is its nearest preceding
+ *  recording. If any kept shot has no resolvable page ahead of it, the pairing
+ *  is incomplete and we return null rather than a set with holes in it — a
+ *  missing page here would show up as a confident "you never filmed this" about
+ *  a page that is in the film. */
+function keptPages(events: OverviewEventRow[]): Set<string> | null {
+  const kept = new Set<string>()
+  let pending = ''
+  for (const e of events) {
+    if (e.kind === 'film.recording') {
+      pending = recordingPageUrl(e.detail)
+    } else if (e.kind === 'film.shot') {
+      if (!pending) return null
+      kept.add(pending)
+    }
+  }
+  return kept
+}
+
+const listPhrase = (items: string[]): string =>
+  items.length <= 1 ? (items[0] || '')
+    : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+
+/** The path a reader recognises: "/pricing", or "the homepage" for the root. */
+function pageLabel(pageUrl: string): string {
+  try {
+    const p = new URL(pageUrl).pathname.replace(/\/+$/, '')
+    return p ? p : 'the homepage'
+  } catch {
+    return pageUrl
+  }
+}
+
+export async function getSuggestions(
+  accessToken: string | null | undefined,
+): Promise<SuggestionsResult> {
+  const me = await verifyUser(accessToken)
+  if (!me) return { authError: true }
+  const db = adminClient()
+  const runs = await overviewRuns(db, me.id)
+  if (!runs.length) return { suggestions: [] }
+
+  const events = await overviewEvents(db, runs.map((r) => r.id),
+    ['read.page', 'film.recording', 'film.shot', 'chat.user'])
+  const byRun = eventsByRun(events)
+  const nameOf = (r: OverviewRunRow) =>
+    siteHost(r.company_url) || r.brand || 'this site'
+
+  const out: Suggestion[] = []
+  // Two cards must never propose the same click. A site that is at once the
+  // most-filmed, the one with a stranded failure and the one with unfilmed
+  // pages would otherwise fill the whole column with one URL.
+  const claimed = new Set<string>()
+  /** Adds the card unless something already proposes that exact click.
+   *  Returns whether it landed, so a kind with several candidates can move on
+   *  to its next-best one rather than dropping out of the column entirely. */
+  const push = (s: Suggestion): boolean => {
+    const key = s.action.type === 'build' ? `b:${normalizePageUrl(s.action.url)}`
+      : `o:${s.action.runId}`
+    if (claimed.has(key)) return false
+    claimed.add(key)
+    out.push(s)
+    return true
+  }
+
+  // 1 ─ IN FLIGHT. Derived from: runs.status ∈ {queued, running}. The most
+  //     useful thing on the page when it applies, because it is the only card
+  //     about work that is happening rather than work that has finished.
+  const flying = runs.find((r) => r.status === 'queued' || r.status === 'running')
+  if (flying) {
+    push({
+      id: `in-flight-${flying.id}`,
+      kind: 'in-flight',
+      title: `${nameOf(flying)} is in the studio`,
+      detail: flying.status === 'running'
+        ? 'Filmo is working on this one now — the workspace shows what it is doing as it does it.'
+        : 'This one is queued. It starts as soon as the studio finishes what is in front of it.',
+      evidence: `run ${flying.status}`,
+      at: flying.created_at,
+      action: { type: 'open', runId: flying.id, label: 'Open the workspace' },
+    })
+  }
+
+  // 2 ─ READ BUT NEVER FILMED. Derived from: `read.page` rows for a DELIVERED
+  //     run, minus the pages behind that run's kept `film.shot` rows. Both
+  //     halves are rows; the subtraction is the whole claim. Runs whose events
+  //     cannot answer the question (no recordings at all, or a kept shot with
+  //     no page ahead of it) are skipped rather than guessed at.
+  for (const r of runs) {
+    if (!isDelivered(r.status)) continue
+    const es = byRun.get(r.id) ?? []
+    const kept = keptPages(es)
+    if (!kept || kept.size === 0) continue
+    const read: string[] = []
+    for (const e of es) {
+      if (e.kind !== 'read.page') continue
+      const u = readPageUrl(e.title, r.company_url)
+      if (u && !read.includes(u)) read.push(u)
+    }
+    const unfilmed = read.filter((u) => !kept.has(u))
+    if (!unfilmed.length) continue
+    const labels = unfilmed.slice(0, 3).map(pageLabel)
+    push({
+      id: `unfilmed-${r.id}`,
+      kind: 'unfilmed-page',
+      title: unfilmed.length === 1
+        ? `One page of ${nameOf(r)} never made the film`
+        : `${unfilmed.length} pages of ${nameOf(r)} never made the film`,
+      // Says what happened and what the button does — never what the next film
+      // will contain. Whether a new run keeps a recording of that page is the
+      // recorder's call at the time, and this card does not get to promise it.
+      detail: `Filmo read ${listPhrase(labels)}${unfilmed.length > labels.length ? ' and more' : ''}`
+        + `, and kept no recording from ${unfilmed.length === 1 ? 'it' : 'them'}.`
+        + ` Point a filmo straight at ${labels[0]} to make it the page the film opens on.`,
+      evidence: `${read.length} pages read · ${kept.size} recordings kept`,
+      at: r.created_at,
+      action: { type: 'build', url: unfilmed[0], label: 'Film that page' },
+    })
+    break
+  }
+
+  // 3 ─ SHIPPED WITHOUT A NOTE. Derived from: a delivered walkrec run with
+  //     zero `chat.user` rows — nobody ever told the director to change
+  //     anything. Restricted to walkrec because that is the only pipeline with
+  //     a director to talk to.
+  const unnoted = runs.find((r) =>
+    r.film_mode === 'walkrec' && isDelivered(r.status)
+    && !(byRun.get(r.id) ?? []).some((e) => e.kind === 'chat.user'))
+  if (unnoted) {
+    push({
+      id: `no-notes-${unnoted.id}`,
+      kind: 'no-notes',
+      title: `You shipped ${nameOf(unnoted)} without a note`,
+      detail: 'This filmo went out exactly as the director cut it. Open it and'
+        + ' say what you would change — a note re-cuts the film.',
+      evidence: 'delivered, no director notes',
+      at: unnoted.created_at,
+      action: { type: 'open', runId: unnoted.id, label: 'Open and give a note' },
+    })
+  }
+
+  // 4 ─ A FAILURE NOTHING FOLLOWED. Derived from: a run with status 'failed'
+  //     for which no delivered run of the same host exists with a LATER
+  //     created_at. Both sides are row comparisons; nothing is inferred about
+  //     why it failed.
+  const stranded = runs.find((r) => {
+    if (r.status !== 'failed') return false
+    const host = siteHost(r.company_url)
+    if (!isProposableHost(host)) return false
+    return !runs.some((o) =>
+      isDelivered(o.status) && siteHost(o.company_url) === host
+      && o.created_at > r.created_at)
+  })
+  if (stranded && stranded.company_url) {
+    push({
+      id: `stranded-${stranded.id}`,
+      kind: 'stranded-failure',
+      title: `${nameOf(stranded)} never finished`,
+      detail: `That build failed, and no filmo of ${nameOf(stranded)} has landed since.`
+        + ' Most failures are a bad moment rather than a bad site — run it again.',
+      evidence: 'run failed',
+      at: stranded.created_at,
+      action: { type: 'build', url: stranded.company_url, label: 'Try it again' },
+    })
+  }
+
+  // 5 ─ THE SITE YOU COME BACK TO. Derived from: a count of delivered runs
+  //     grouped by host. Says only how many times it was filmed and when the
+  //     newest cut is — never that the site has changed, which would need a
+  //     crawl we have not done.
+  const tally = new Map<string, { count: number; newest: OverviewRunRow }>()
+  for (const r of runs) {
+    if (!isDelivered(r.status)) continue
+    const host = siteHost(r.company_url)
+    if (!isProposableHost(host)) continue
+    const cur = tally.get(host)
+    // runs is newest-first, so the first row seen for a host IS its newest.
+    if (cur) cur.count++
+    else tally.set(host, { count: 1, newest: r })
+  }
+  // Most-filmed first, then the next one down. The top site is often already
+  // spoken for by an earlier card (a stranded failure on the same host), and
+  // dropping the whole kind because its FIRST candidate was taken would spend
+  // a slot on nothing.
+  const ranked = Array.from(tally.entries())
+    .filter(([, v]) => v.count >= 2)
+    .sort((a, b) => b[1].count - a[1].count)
+  for (const [host, v] of ranked) {
+    if (!v.newest.company_url) continue
+    const landed = push({
+      id: `most-filmed-${host}`,
+      kind: 'most-filmed',
+      title: `You've filmed ${host} ${v.count} times`,
+      // NO SUPERLATIVE. This card falls through to the next-ranked site when
+      // the top one is already claimed above, so "the site you come back to
+      // most" would be false exactly when the fallback fires. The count in the
+      // title is the fact; the sentence only has to be true of any repeat.
+      detail: 'You keep coming back to this one. Every filmo is cut from'
+        + ' whatever the site says on the day it is read.',
+      evidence: `newest of ${v.count} delivered filmos`,
+      at: v.newest.created_at,
+      action: { type: 'build', url: v.newest.company_url, label: 'Film it again' },
+    })
+    if (landed) break
+  }
+
+  return { suggestions: out.slice(0, SUGGESTION_CAP) }
 }
