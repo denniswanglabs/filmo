@@ -51,7 +51,7 @@ import FilmoMark from './landing2/FilmoMark'
 export const GROUND_STUDIO = '#F1F1EF'
 /** The landing's night — PloyLanding pins the body to this. */
 export const GROUND_NIGHT = '#0A0A0B'
-/** The white chrome: /how-it-works, /inside, and the editor's own canvas. */
+/** The white chrome: the editor's own canvas and its wrapper states. */
 export const GROUND_LIGHT = '#FFFFFF'
 
 export type FilmoLoaderProps = {
