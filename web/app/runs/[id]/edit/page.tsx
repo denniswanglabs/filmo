@@ -4,11 +4,23 @@
 // ported @remotion/player live-preview editor wired to those props. Inspector edits
 // mutate props state -> the <Player> re-renders live; Save writes props_edited via
 // the saveEditedProps server action. (Export/rerender + VO/music editing = Phase 3.)
+//
+// ── THE CHROME (2026-07-20) ──────────────────────────────────────────────────
+// The editor itself is untouched — it draws its own full-bleed, scoped chrome
+// (`.ws-editor-root`, white canvas). What changed is everything AROUND it: the
+// sign-in and not-found states used to wear `TopBar` (the old white marketing
+// header); they now wear the app's rail on the editor's own white ground, so
+// arriving here is branded loader → editor, and even the error states belong
+// to the same product as the rest of the app. Nothing lights on the rail — the
+// editor is not one of its entries (same `current="none"` honesty as
+// /analytics and the run page).
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useAuth } from '../../../../lib/auth'
-import { TopBar } from '../../../components/Brand'
+import OverviewRail from '../../../components/overview/OverviewRail'
+import FeedbackModal from '../FeedbackModal'
 import FilmoLoader, { GROUND_LIGHT } from '../../../components/FilmoLoader'
 import { saveEditedProps, requestReRender, getRunForViewer } from '../../../actions'
 import { isDelivered, type Run } from '../../../../lib/types'
@@ -23,8 +35,12 @@ export default function EditRunPage() {
   const router = useRouter()
   const { user, loading, getToken } = useAuth()
 
+  const [mounted, setMounted] = useState(false)
+  const [fbOpen, setFbOpen] = useState(false)
   const [run, setRun] = useState<Run | null>(null)
   const [notFound, setNotFound] = useState(false)
+
+  useEffect(() => setMounted(true), [])
 
   useEffect(() => {
     if (loading || !user || !runId) return
@@ -127,79 +143,130 @@ export default function EditRunPage() {
     router.push(runId ? `/runs/${runId}` : '/')
   }, [router, runId])
 
-  // Auth resolving — a continuation of this route's loading.tsx, same pixels.
-  if (loading) {
+  // Auth resolving (or no document yet to portal the chrome into) — a
+  // continuation of this route's loading.tsx, same pixels.
+  if (loading || !mounted) {
     return <FilmoLoader ground={GROUND_LIGHT} />
-  }
-
-  if (!user) {
-    return (
-      <>
-        <TopBar />
-        <main className="mx-auto max-w-3xl px-5 pb-24 pt-8">
-          <p className="mt-10 text-slate-500">Please sign in to edit this video.</p>
-        </main>
-      </>
-    )
   }
 
   // Signed in, nothing wrong, the run row just isn't here yet — hold the boot
   // screen rather than dropping to chrome + "Loading run…" in grey. Same
   // treatment (and same reasoning) as the run route this editor hangs off.
-  if (!run && !notFound) {
+  if (user && !run && !notFound) {
     return <FilmoLoader ground={GROUND_LIGHT} />
   }
 
-  // Not-found / no-props states keep the standard Filmo chrome — an error you
-  // have to navigate away from needs a nav bar to navigate with.
-  if (notFound || !run || !editorProps) {
+  // Props loaded — mount the live editor (its own full-bleed chrome, scoped theme).
+  if (user && run && !notFound && editorProps) {
     return (
-      <>
-        <TopBar />
-        <main className="mx-auto max-w-3xl px-5 pb-24 pt-8">
-          <Link href={runId ? `/runs/${runId}` : '/'} className="text-sm text-slate-400 transition hover:text-ink">
-            ← Back to build
-          </Link>
-          {notFound ? (
-            <p className="mt-10 text-slate-500">This run could not be found.</p>
-          ) : !run ? (
-            // Unreachable (the early return above owns this condition); kept
-            // because it narrows `run` for the branch below, and a loader is
-            // what it should show if it ever did paint.
-            <FilmoLoader ground={GROUND_LIGHT} fit="block" />
-          ) : (
-            <div className="mt-5">
-              <h1 className="text-2xl font-semibold tracking-tight text-ink">
-                Editor — {run.brand || run.company_url}
-              </h1>
-              <p className="mt-1 text-slate-500">{run.goal || 'Brand video'}</p>
-              <div className="mt-6 rounded-2xl border border-[#E6EAF0] bg-[#F8FAFF] px-5 py-8">
-                <p className="text-sm font-semibold uppercase tracking-wide text-amber">Nothing to edit yet</p>
-                <p className="mt-2 text-ink">
-                  No render props are saved for this run yet. New builds persist them
-                  automatically, then the live editor opens here.
-                </p>
-              </div>
-            </div>
-          )}
-        </main>
-      </>
+      <Editor
+        runId={run.id}
+        initialProps={editorProps}
+        brand={run.brand || run.company_url}
+        goal={run.goal || undefined}
+        assetBaseUrl={assetBaseUrl}
+        musicAssetName={run.run_key ? `music-${run.run_key}.mp3` : undefined}
+        downloadUrl={isDelivered(run.status) && run.final_url ? `/api/runs/${run.id}/download` : undefined}
+        onSave={handleSave}
+        onExport={handleExport}
+        onBack={handleBack}
+      />
     )
   }
 
-  // Props loaded — mount the live editor (its own full-bleed chrome, scoped theme).
-  return (
-    <Editor
-      runId={run.id}
-      initialProps={editorProps}
-      brand={run.brand || run.company_url}
-      goal={run.goal || undefined}
-      assetBaseUrl={assetBaseUrl}
-      musicAssetName={run.run_key ? `music-${run.run_key}.mp3` : undefined}
-      downloadUrl={isDelivered(run.status) && run.final_url ? `/api/runs/${run.id}/download` : undefined}
-      onSave={handleSave}
-      onExport={handleExport}
-      onBack={handleBack}
-    />
+  // ── THE STATES AROUND THE EDITOR ────────────────────────────────────────────
+  // Sign-in, not-found and nothing-to-edit keep real chrome — an error you have
+  // to navigate away from needs navigation to leave with, and that is the rail
+  // now. Ground is the editor's own white so the route's loader, these states
+  // and the editor itself are one surface.
+  let body: React.ReactNode
+  if (!user) {
+    body = (
+      <div className="ed-gate">
+        <b>Please sign in to edit this video.</b>
+        <Link href="/login" className="ed-gatebtn">
+          Sign in
+        </Link>
+      </div>
+    )
+  } else if (notFound) {
+    body = (
+      <div className="ed-gate">
+        <b>This run could not be found.</b>
+        <Link href={runId ? `/runs/${runId}` : '/videos'} className="ed-gatebtn">
+          Back to the build
+        </Link>
+      </div>
+    )
+  } else if (run) {
+    body = (
+      <div>
+        <h1 className="ed-h1">Editor — {run.brand || run.company_url}</h1>
+        <p className="ed-sub">{run.goal || 'Brand video'}</p>
+        <div className="ed-empty">
+          <b>Nothing to edit yet</b>
+          <span>
+            No render props are saved for this run yet. New builds persist them
+            automatically, then the live editor opens here.
+          </span>
+          <Link href={runId ? `/runs/${runId}` : '/videos'} className="ed-gatebtn">
+            Back to the build
+          </Link>
+        </div>
+      </div>
+    )
+  } else {
+    // Unreachable (the early returns above own every other combination); kept
+    // because a loader is what this must show if it ever did paint.
+    body = <FilmoLoader ground={GROUND_LIGHT} fit="block" />
+  }
+
+  return createPortal(
+    <div className="ed-root">
+      <OverviewRail current="none" getToken={getToken} onFeedback={() => setFbOpen(true)} />
+
+      <main className="ed-stage">
+        <div className="ed-inner">{body}</div>
+      </main>
+
+      <FeedbackModal
+        open={fbOpen}
+        onClose={() => setFbOpen(false)}
+        getToken={getToken}
+        context={runId ? `/runs/${runId}/edit` : '/runs'}
+      />
+
+      <style>{`
+        /* The editor's canvas is white (.ws-editor-root --bg:#FFFFFF); these
+           wrapper states share it so loader → state → editor never flashes. */
+        .ed-root { position:fixed; inset:0; display:flex; background:#FFFFFF;
+          color:#1B1B1A; font:14px/1.5 Inter,-apple-system,sans-serif; z-index:50; }
+        .ed-stage { flex:1 1 0; min-width:0; min-height:0; overflow-y:auto;
+          overflow-x:hidden; }
+        .ed-inner { max-width:768px; margin:0 auto; padding:38px 24px 64px; }
+
+        .ed-h1 { margin:0; font-size:24px; font-weight:600;
+          letter-spacing:-.02em; color:#1B1B1A; }
+        .ed-sub { margin:5px 0 0; font-size:14px; color:#8A8A86; }
+
+        .ed-gate, .ed-empty { background:#fff; border:1px solid #E6E6E3;
+          border-radius:14px; padding:26px; display:flex; flex-direction:column;
+          gap:8px; align-items:flex-start; max-width:520px; }
+        .ed-gate { margin-top:24px; }
+        .ed-empty { margin-top:22px; }
+        .ed-gate b, .ed-empty b { font-size:15px; font-weight:650; color:#1B1B1A; }
+        .ed-gate span, .ed-empty span { font-size:13.5px; line-height:1.55;
+          color:#6E6E6A; }
+        .ed-gatebtn { margin-top:8px; display:inline-flex; align-items:center;
+          justify-content:center; border:1px solid #1B1B1A; background:#1B1B1A;
+          color:#fff; border-radius:99px; padding:9px 20px;
+          font:13px/1 Inter,-apple-system,sans-serif; text-decoration:none; }
+        .ed-gatebtn:hover { background:#000; border-color:#000; }
+        .ed-gatebtn:focus-visible { outline:2px solid #3B82F6; outline-offset:3px; }
+
+        @media (max-width:760px) { .ed-inner { padding:26px 16px 48px; } }
+      `}</style>
+    </div>,
+    document.body,
   )
 }
