@@ -70,7 +70,38 @@ export default function FeedbackModal({ open, onClose, context, getToken }: {
       // Signed-out senders are welcome — the action takes a null token and
       // files the note anonymously. An expired session is not a reason to
       // refuse to hear that something is broken.
-      const res = await sendFeedback({ message, accessToken: await getToken(), context })
+      // ── DELIVER FROM THE BROWSER, STORE ON THE SERVER ───────────────────
+      // Web3Forms refuses server-side calls on the free tier and its access
+      // key is public by design (it can only mail the address it was issued
+      // for), so the delivery attempt belongs here. Storage still happens
+      // server-side and still happens FIRST in effect — a failed or blocked
+      // delivery never costs anyone their note.
+      //
+      // ⚠ Web3Forms answers HTTP 200 on failure (`{"success": false}`), so
+      // `res.ok` alone would let us tell the server an email went out that
+      // never did. Only `success === true` counts as delivered.
+      let clientNotified = false
+      const key = process.env.NEXT_PUBLIC_FEEDBACK_ACCESS_KEY
+      if (key) {
+        try {
+          const r = await fetch('https://api.web3forms.com/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              access_key: key,
+              subject: 'Filmo feedback',
+              from_name: 'Filmo',
+              message: [context ? `Context: ${context}` : '', '', message]
+                .filter(Boolean).join('\n'),
+            }),
+          })
+          const out = await r.json().catch(() => null)
+          clientNotified = r.ok && out?.success === true
+        } catch { /* delivery is best-effort; the note is still stored below */ }
+      }
+      const res = await sendFeedback({
+        message, accessToken: await getToken(), context, clientNotified,
+      })
       setNote(outcomeNote(res))
       // Only clear what the server has actually accepted. On a refusal the
       // words stay in the box so a trim-and-resend doesn't mean retyping.

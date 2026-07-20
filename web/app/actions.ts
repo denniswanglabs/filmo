@@ -992,6 +992,14 @@ export async function sendFeedback(input: {
   accessToken?: string | null
   /** Where they were standing: a run id, a route. Makes a vague note actionable. */
   context?: string
+  /** THE BROWSER ALREADY DELIVERED THIS. Web3Forms — the relay Dennis chose —
+   *  refuses server-side calls on its free tier ("Use our API in client side…
+   *  Pro plan is required"), and its access key is public BY DESIGN for exactly
+   *  that reason: it can only ever mail the address it was issued for. So the
+   *  browser posts the note and reports back here, and this only records what
+   *  actually happened. It is a claim about the past, never a request — the
+   *  server never marks a row notified on the strength of hope. */
+  clientNotified?: boolean
 }): Promise<{ ok: true; notified: boolean } | { ok: false; message: string }> {
   const message = (input.message || '').trim()
   if (!message) {
@@ -1025,14 +1033,16 @@ export async function sendFeedback(input: {
 
   // 2) NOTIFY. Best-effort, and its failure is invisible to the sender: from
   //    their side the note landed, because it did.
-  const notified = await notifyFeedback(
-    [
-      `From: ${me?.email || 'anonymous'}`,
-      input.context ? `Context: ${input.context}` : '',
-      '',
-      message,
-    ].filter(Boolean).join('\n'),
-  )
+  const notified = input.clientNotified === true
+    ? true
+    : await notifyFeedback(
+      [
+        `From: ${me?.email || 'anonymous'}`,
+        input.context ? `Context: ${input.context}` : '',
+        '',
+        message,
+      ].filter(Boolean).join('\n'),
+    )
   const row = (data as { id: string }[] | null)?.[0]
   if (notified && row?.id) {
     await db.database.from('feedback').update({ notified: true }).eq('id', row.id)
