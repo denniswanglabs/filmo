@@ -327,7 +327,24 @@ def _apply_work(run_id: str, run_dir: str, state: dict, actions,
 def handle_job(run_key: str, insforge_run_id: str, message: str,
                job_id: str = "") -> int:
     """Hosted director turn (claimer job): reply + apply, all through the
-    event bus so the workspace narrates it. Returns a process exit code."""
+    event bus so the workspace narrates it. Returns a process exit code.
+
+    EVERY exit flushes (2026-07-20, found live): the hosted sink posts on
+    background threads, and run_events' own contract says callers that end a
+    run MUST flush. The build path flushes; the QUICK-REPLY paths below
+    returned within a second of their emit, the process died, and the
+    customer's thread showed "Thinking..." forever while the director's
+    answer sat in a dead thread's buffer. A reply that is not flushed was
+    never spoken."""
+    try:
+        return _handle_job(run_key, insforge_run_id, message, job_id)
+    finally:
+        import run_events as _re_flush
+        _re_flush.flush_sinks()
+
+
+def _handle_job(run_key: str, insforge_run_id: str, message: str,
+                job_id: str = "") -> int:
     run_dir = os.path.join(HERE, "runs", run_key)
     os.makedirs(run_dir, exist_ok=True)
     if insforge_run_id:
@@ -340,8 +357,10 @@ def handle_job(run_key: str, insforge_run_id: str, message: str,
         state = _load_state(run_dir)
     except Exception:
         emit(run_dir, "chat.director",
-             "This run's working files were recycled by a redeploy — say "
-             "\u201credo the film\u201d and I'll make a fresh cut.", "")
+             "This film's working files were recycled by a redeploy, so I "
+             "can't re-cut it in place. Start a new filmo of the same URL "
+             "from New filmo — about ten minutes — and ask for this change "
+             "while it's fresh.", "")
         return 0
     try:
         reply, actions = _parse(run_dir, state, message)
