@@ -76,6 +76,18 @@ export default function NewFilmComposer({ getToken }: {
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          // Never submit on the Enter that confirms an IME candidate. With a
+          // Chinese IME even an ASCII URL is often composed (pinyin mode
+          // intercepts letters), and some engines let that confirm-Enter reach
+          // the form as an implicit submission — firing createBuild on half a
+          // URL. isComposing is the standard signal; keyCode 229 is the same
+          // fact from older WebKit. Same guard as the director box — the two
+          // chat-shaped inputs honour one contract.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.keyCode === 229)) {
+              e.preventDefault()
+            }
+          }}
           placeholder="https://your-product.com"
           aria-label="Product URL"
           autoComplete="off"

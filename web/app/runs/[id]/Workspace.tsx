@@ -322,6 +322,9 @@ function WorkspaceRun({ runKey, getToken }: {
   const lastPhase = useRef('')
   const threadRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  // The director box. A ref because auto-grow is a measurement (scrollHeight),
+  // and measurements live on the element, not in state.
+  const dirBoxRef = useRef<HTMLTextAreaElement>(null)
   const [playT, setPlayT] = useState(0)
   const evtsRef = useRef<AgentEvent[]>([])
   // FULL-SCREEN SURFACE CONTRACT: the page template wraps content in a
@@ -436,22 +439,50 @@ function WorkspaceRun({ runKey, getToken }: {
     if (el) el.scrollTop = el.scrollHeight
   }, [evts.length, localMsgs.length, tab])
 
+  // ── THE BOX GROWS WITH THE NOTE, TO A CEILING ──────────────────────────────
+  // A director's note is a sentence or three, not a URL — so the box is a
+  // textarea, and it takes the height its content needs. Height is derived from
+  // scrollHeight on every value change (typing, pasting, and the clear after a
+  // send all pass through `input`, so one effect covers them all). The ceiling
+  // matters as much as the growth: without the cap in .wk-inputbox textarea's
+  // max-height a long paste would push the thread off the screen — past it, the
+  // box itself scrolls. Height 'auto' first, so shrinking is measured from
+  // content rather than from the previous height.
+  useEffect(() => {
+    const el = dirBoxRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [input, tab])
+
   const send = useCallback(async () => {
     const text = input.trim()
-    if (!text) return
+    // NOT-ALREADY-IN-FLIGHT is a correctness guard here, not just polish: every
+    // director turn enqueues a job and (for a non-owner) charges credits, so an
+    // Enter pressed twice while the first is still going would post the same note
+    // twice and bill for it twice. `pending` is the in-flight flag; guarding on it
+    // (and listing it as a dep so this closure reads the live value) makes a second
+    // send a no-op until the first has answered or failed.
+    if (!text || pending) return
     setInput('')
     setLocalMsgs((m) => [...m, { ts: Date.now() / 1000, kind: 'user', text }])
     setPending(true)
     const res = await sendDirectorMessage(runKey, text, (await getToken()) || '')
     if ('error' in res) {
-      // An out-of-credits refusal explains itself; anything else is a blip.
+      // A FAILED SEND SPEAKS. An out-of-credits/expired-session refusal carries its
+      // own sentence; anything else gets a plain one — but the thread never just
+      // swallows the note in silence (rubric: no silent failures).
       const msg = ('message' in res && res.message)
         ? res.message
         : 'That did not go through — try again.'
       setPending(false)
       setLocalMsgs((m) => [...m, { ts: Date.now() / 1000, kind: 'dir', text: msg }])
+      // "Try again" must not mean "retype it": put the failed note back in the
+      // box — unless the reader has already started a newer one, which theirs
+      // outranks.
+      setInput((cur) => (cur ? cur : text))
     }
-  }, [input, runKey, getToken])
+  }, [input, pending, runKey, getToken])
 
   // Merge thread items chronologically; server chat events replace local echoes.
   const items: Array<
@@ -866,12 +897,43 @@ function WorkspaceRun({ runKey, getToken }: {
             </div>
           ) : null}
         </div>
+        {/* ── THE DIRECTOR BOX HONOURS THE CHAT CONTRACT ─────────────────────
+            This is a chat input, and a chat input's Enter key carries three
+            different intentions that the old one-liner collapsed into one:
+              · Enter mid-IME-COMPOSITION is "pick this candidate", never
+                "send". Dennis types Chinese; the Enter that confirms 把logo…
+                out of the candidate list reaches the page with
+                isComposing=true (keyCode 229 on older WebKit — checked too,
+                same reason the guard exists at all), and sending there posts
+                half a sentence to a director who then edits a film from it.
+                Reproduced end-to-end against a scripted InsForge before this
+                guard existed: the mid-composition Enter enqueued a real
+                director job.
+              · Shift+Enter is "newline" — the handler returns before
+                preventDefault, so the textarea's native behaviour inserts it.
+              · Plain Enter is "send", and it MUST preventDefault, or the
+                newline lands in the box after send() reads it (a blank first
+                line in the next note, from nowhere).
+            send() itself carries the other half of the contract: the
+            non-empty + not-in-flight guards, and a failure that speaks into
+            the thread and hands the note back to the box. */}
         <div className="wk-inputrow">
           <div className="wk-inputbox">
-            <input value={input} placeholder="Tell the director what to change…"
+            <textarea ref={dirBoxRef} value={input} rows={1}
+              placeholder="Tell the director what to change…"
+              aria-label="Tell the director what to change"
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') send() }} />
-            <button onClick={send} aria-label="Send">↑</button>
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.shiftKey) return
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                e.preventDefault()
+                void send()
+              }} />
+            {/* Disabled = the honest waiting state: while a note is in flight
+                the control says so, instead of arming a second identical job.
+                Empty disables it too, same as the composer's send. */}
+            <button onClick={() => void send()} aria-label="Send"
+              disabled={pending || !input.trim()}>↑</button>
           </div>
         </div>
       </div>
@@ -1045,16 +1107,32 @@ function WorkspaceRun({ runKey, getToken }: {
           animation:wkpulse 1.2s infinite; }
         @keyframes wkpulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
         .wk-inputrow { flex:0 0 auto; padding:14px 20px 18px; }
-        .wk-inputbox { display:flex; gap:8px; background:#fff;
+        /* flex-end, not stretch: the box grows upward as the note gains lines,
+           and the send control belongs beside the newest line, at the bottom —
+           the same place every chat puts it. */
+        .wk-inputbox { display:flex; gap:8px; background:#fff; align-items:flex-end;
           border:1px solid #E6E6E3; border-radius:14px; padding:10px 12px;
           box-shadow:0 1px 3px rgba(0,0,0,0.04); }
         .wk-inputbox:focus-within { border-color:#C9D9F8;
           box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 0 0 3px rgba(59,130,246,0.12); }
-        .wk-inputbox input { flex:1; border:none; outline:none;
-          font:13.5px Inter,sans-serif; background:transparent; }
+        /* The vertical padding is load-bearing twice over: 7px top and bottom
+           puts a single line dead-centre against the 34px send button, and it
+           rides inside scrollHeight so the grow effect measures it for free.
+           max-height is the ceiling the effect relies on (about six lines) —
+           past it the BOX scrolls and the thread above keeps its screen. The
+           font is written as one valid shorthand with an explicit line-height;
+           an inherit keyword inside this shorthand would drop the whole
+           declaration (see the composer's note on exactly that failure). */
+        .wk-inputbox textarea { flex:1; min-width:0; border:none; outline:none;
+          font:13.5px/1.5 Inter,sans-serif; background:transparent;
+          resize:none; padding:7px 0; margin:0; display:block;
+          max-height:136px; overflow-y:auto; color:#1B1B1A; }
+        .wk-inputbox textarea::placeholder { color:#B6B6B2; }
         .wk-inputbox button { border:none; background:#1B1B1A; color:#fff;
-          width:34px; height:34px; border-radius:17px; cursor:pointer;
-          font-size:15px; }
+          width:34px; height:34px; flex:0 0 auto; border-radius:17px;
+          cursor:pointer; font-size:15px; }
+        /* The honest waiting state: a send that cannot fire says so. */
+        .wk-inputbox button:disabled { opacity:.35; cursor:default; }
         .wk-inputbox button:focus-visible { outline:2px solid #3B82F6;
           outline-offset:3px; }
         .wk-canvaswrap { flex:1 1 0; min-width:0; min-height:0; display:flex;
