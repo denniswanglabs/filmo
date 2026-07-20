@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '../../lib/auth'
 import { TopBar } from '../components/Brand'
+import FilmoLoader, { GROUND_LIGHT } from '../components/FilmoLoader'
 import { pairDeveloper } from '../actions'
 import { FEATURED_RUN_ID } from '../../lib/featured-run'
 
@@ -202,7 +203,7 @@ function InsideInner() {
 export default function InsidePage() {
   // useSearchParams() requires a Suspense boundary under the App Router.
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>}>
+    <Suspense fallback={<FilmoLoader ground={GROUND_LIGHT} />}>
       <InsideInner />
     </Suspense>
   )

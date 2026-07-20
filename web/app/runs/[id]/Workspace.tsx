@@ -12,6 +12,7 @@ import { getAgentRun, listMyRuns, sendDirectorMessage, type AgentEvent } from '.
 // the /videos cards, so a status can never mean two different things in two
 // places (STATUS_STYLES/STATUS_LABELS stay the single source of truth).
 import { StatusChip } from '../../components/Brand'
+import FilmoLoader from '../../components/FilmoLoader'
 import NewFilmComposer from './NewFilmComposer'
 import FeedbackModal from './FeedbackModal'
 import AccountMenu from './AccountMenu'
@@ -481,7 +482,10 @@ function WorkspaceRun({ runKey, getToken }: {
   const lastPage = S.pages[S.pages.length - 1]
   if (tab === 'builds') {
     screen = library === null ? (
-      <div className="wk-text"><div className="big">Loading your filmos…</div></div>
+      // `.wk-screen` is a flex box that already sizes and centres this, and its
+      // ground is #FAFAF8 rather than the shell's #F1F1EF — so the loader takes
+      // that ground and claims no height of its own.
+      <FilmoLoader ground="#FAFAF8" fit="auto" size="compact" />
     ) : library.length === 0 ? (
       <div className="wk-text">
         <div className="big">No finished filmos yet</div>

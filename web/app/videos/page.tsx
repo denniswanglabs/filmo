@@ -1,193 +1,249 @@
 'use client'
-// /videos — the signed-in user's own builds, given a roomy full-page home.
-// This is the SAME list that used to live under the home composer: identical
-// `runs` columns + ordering + run-card rendering. The read is now SERVER-SIDE
-// (listMyRuns admin action, owner-scoped) instead of the browser anon/RLS client,
-// so a stale/expired session token (e.g. after a Stripe-payment redirect) no longer
-// returns a misleading EMPTY list — it surfaces the sign-in gate instead (same fix
-// as the run page). Signed-out / auth-error visitors get a sign-in prompt, never data.
-import { useEffect, useState, useCallback } from 'react'
+// ═══════════════════════ /videos — THE FILMO LIBRARY ═════════════════════════
+//
+// Every filmo this account has started, newest first.
+//
+// ── WHAT CHANGED, AND WHAT DELIBERATELY DID NOT (2026-07-19) ────────────────
+// Like /assets, this page wore the old blue landing chrome — FloatingNav,
+// SiteFooter, LandingBackdrop — while the rail that leads here had already
+// moved to the studio ground. The rail lists Filmos and Assets one line apart,
+// so one rebuilt sibling and one un-rebuilt sibling is a difference the reader
+// meets in a single click. Both now render inside the same LibraryShell, which
+// is what makes "they match" a fact about the code rather than a thing somebody
+// has to remember.
+//
+// The landing components are NOT deleted — /how-it-works still ships them. This
+// file just stopped importing them.
+//
+// KEPT, because it was right:
+//   · THE READ IS SERVER-SIDE AND OWNER-SCOPED (listMyRuns). The browser's
+//     anon/RLS client used to do it, and a stale token — e.g. after a Stripe
+//     redirect — came back as an EMPTY list, so the page cheerfully reported
+//     "No builds yet" to someone with a dozen films. An authError now routes to
+//     the sign-in gate. Never a false-empty library.
+//   · SEARCH over brand + address.
+//   · A REFRESH, and a transient blip leaving the list alone.
+//
+// FIXED rather than kept: that last rule was written as `catch { return }`,
+// which is right for a refresh of a list already on screen and wrong for the
+// FIRST read — there is nothing to leave alone, so the page sat on "Loading
+// runs…" forever with nothing coming. The two cases are now distinguished in
+// `loadRuns`, and only the second one surfaces a retry.
+//
+// ADDED, for the reason the studio's own library has the shape it does: A
+// LIBRARY MUST DISCRIMINATE. Thirteen filmos of one brand, all made today, are
+// unfindable however well each card renders — so there is a status strip beside
+// the search, and every card carries the four fields that vary between
+// neighbours (see FilmoCard).
+//
+// The route stays /videos. It is a URL people may already hold, and renaming a
+// path to match a noun breaks links to buy nothing.
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
 import { listMyRuns } from '../actions'
-import { StatusChip } from '../components/Brand'
-import FloatingNav from '../components/landing/FloatingNav'
-import SiteFooter from '../components/landing/SiteFooter'
-import LandingBackdrop from '../components/landing/LandingBackdrop'
-import { type Run } from '../../lib/types'
+import { isDelivered, type Run } from '../../lib/types'
+import FilmoLoader from '../components/FilmoLoader'
+import LibraryShell from '../components/library/LibraryShell'
+import FilterStrip, { type FilterOption } from '../components/library/FilterStrip'
+import FilmoCard from '../components/library/FilmoCard'
 
+// The three states a reader actually sorts by — not the five the database
+// stores. `completed_with_warnings` is a delivered film with isolated scene
+// failures: it HAS a final cut, so it belongs with the delivered ones, and
+// `isDelivered` (shared with the run page and the editor) is what says so
+// rather than a fifth opinion written here.
+type Bucket = 'all' | 'delivered' | 'inflight' | 'failed'
 
-// Runs of the SAME site look identical without a timestamp — eight
-// "insforge.dev / A 30-second brand explainer" rows are unfindable. Every row
-// carries when it was made (and which pipeline made it).
-function relativeTime(iso: string): string {
-  const then = Date.parse(iso)
-  if (!then) return ''
-  const mins = Math.round((Date.now() - then) / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.round(hrs / 24)
-  if (days < 7) return `${days}d ago`
-  return new Date(then).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function bucketOf(r: Run): Exclude<Bucket, 'all'> {
+  if (isDelivered(r.status)) return 'delivered'
+  if (r.status === 'failed') return 'failed'
+  return 'inflight'
 }
+
+const BUCKETS: { key: Bucket; label: string; hint?: string }[] = [
+  { key: 'all', label: 'All filmos' },
+  { key: 'delivered', label: 'Delivered', hint: 'Finished cuts you can watch and download' },
+  { key: 'inflight', label: 'In flight', hint: 'Queued at the studio, or being made right now' },
+  { key: 'failed', label: 'Failed', hint: 'Builds that stopped before a cut' },
+]
 
 export default function VideosPage() {
   const { user, loading, getToken } = useAuth()
-
-  // Recents — same shape + list as before. `authError` mirrors the run page's re-auth
-  // branch: a stale token routes to the sign-in gate rather than a false-empty list.
   const [runs, setRuns] = useState<Run[] | null>(null)
   const [authError, setAuthError] = useState(false)
+  const [readFailed, setReadFailed] = useState(false)
   const [q, setQ] = useState('')
-  const shown = (runs || []).filter((r) => {
-    const t = q.trim().toLowerCase()
-    if (!t) return true
-    return `${r.brand || ''} ${r.company_url || ''}`.toLowerCase().includes(t)
-  })
+  const [bucket, setBucket] = useState<Bucket>('all')
 
   const loadRuns = useCallback(async () => {
-    // AUTHORITATIVE list read SERVER-SIDE (admin client, owner-scoped) via listMyRuns,
-    // so it never depends on browser-token freshness. Pass the access token (getToken
-    // falls back to the durable localStorage copy); verifyUser re-validates server-side.
-    // A thrown server-action error (network/timeout) is a transient blip — leave the last
-    // state and let a manual Refresh retry; never blank the list on a hiccup.
+    setReadFailed(false)
+    // AUTHORITATIVE list read SERVER-SIDE (admin client, owner-scoped) via
+    // listMyRuns, so it never depends on browser-token freshness. getToken
+    // falls back to the durable localStorage copy; verifyUser re-validates
+    // server-side.
     const accessToken = await getToken()
     let res
     try {
       res = await listMyRuns(accessToken)
     } catch {
+      // Blip. KEEP a list that is already on screen — blanking a good library
+      // on a hiccup is worse than a slightly stale one, and Refresh is right
+      // there. With nothing on screen there is nothing to preserve, and a
+      // silent return would be a loader that never resolves.
+      setRuns((prev) => { if (prev == null) setReadFailed(true); return prev })
       return
     }
-    // Expired/invalid token → sign-in gate (NOT a false-empty list). Same fix as the run
-    // page: a stale post-payment token now prompts sign-in instead of lying "No builds yet".
-    if ('authError' in res) {
-      setAuthError(true)
-      return
-    }
+    if ('authError' in res) { setAuthError(true); return }
     setAuthError(false)
     setRuns(res.runs)
   }, [getToken])
 
-  useEffect(() => {
-    if (user) void loadRuns()
-  }, [user, loadRuns])
+  useEffect(() => { if (user) void loadRuns() }, [user, loadRuns])
+
+  // Search first, then status — so the count on each status pill says what
+  // pressing it would actually yield from where the reader is standing, rather
+  // than a total from before they started typing.
+  const searched = useMemo(() => {
+    const t = q.trim().toLowerCase()
+    if (!t) return runs || []
+    return (runs || []).filter((r) =>
+      `${r.brand || ''} ${r.company_url || ''}`.toLowerCase().includes(t))
+  }, [runs, q])
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: searched.length }
+    for (const r of searched) {
+      const b = bucketOf(r)
+      c[b] = (c[b] || 0) + 1
+    }
+    return c
+  }, [searched])
+
+  const options = useMemo<FilterOption<Bucket>[]>(
+    () => BUCKETS
+      .filter((b) => b.key === 'all' || counts[b.key])
+      .map((b) => ({ ...b, count: counts[b.key] || 0 })),
+    [counts],
+  )
+
+  // Typing can dissolve the bucket that is selected. Fall back to All rather
+  // than showing an empty grid under a pill that is no longer on the strip.
+  const active: Bucket = options.some((o) => o.key === bucket) ? bucket : 'all'
+
+  const shown = useMemo(
+    () => (active === 'all' ? searched : searched.filter((r) => bucketOf(r) === active)),
+    [searched, active],
+  )
+
+  let body: React.ReactNode
+  if (loading) {
+    // The shared loader, sized as a region inside a page that already has
+    // chrome — never `fit="screen"`, which would claim a viewport this page has
+    // already spent on a rail and a heading.
+    body = <FilmoLoader fit="block" />
+  } else if (!user || authError) {
+    // Signed out, OR a stale/expired session token. A sign-in prompt only — no
+    // data is queried and none is exposed.
+    body = (
+      <div className="lib-gate">
+        <b>Sign in to see your filmos</b>
+        <span>
+          Your filmos live in your account. Sign in to pick up where you left off.
+        </span>
+        <Link className="lib-gatebtn" href="/login">Sign in</Link>
+      </div>
+    )
+  } else if (readFailed) {
+    body = (
+      <div className="lib-gate">
+        <b>That didn&rsquo;t load</b>
+        <span>
+          The studio couldn&rsquo;t be reached just now. Nothing is lost — your
+          filmos are where you left them.
+        </span>
+        <button className="lib-gatebtn" onClick={() => void loadRuns()}>Try again</button>
+      </div>
+    )
+  } else if (runs == null) {
+    body = <FilmoLoader fit="block" />
+  } else if (runs.length === 0) {
+    body = (
+      <div className="lib-empty">
+        <b>Nothing filmed yet.</b>
+        <span>
+          Give Filmo a product address and it reads the site the way a first-time
+          visitor would, records the pages that carry the argument, and cuts a
+          film from what it actually found. Your filmos collect here.
+        </span>
+        <Link className="lib-emptycta" href="/?new=1">New filmo</Link>
+      </div>
+    )
+  } else {
+    body = (
+      <>
+        <FilterStrip
+          options={options}
+          value={active}
+          onChange={setBucket}
+          ariaLabel="Filter filmos by status"
+        />
+        <div className="lib-toolbar">
+          <input
+            className="lib-search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by brand or address…"
+            aria-label="Search your filmos"
+          />
+          <span className="lib-count">
+            {shown.length} {shown.length === 1 ? 'filmo' : 'filmos'}
+          </span>
+          <button className="lib-refresh" onClick={() => void loadRuns()}>Refresh</button>
+        </div>
+
+        {/* A search that matches nothing is not an empty library, and a blank
+            grid under a filled search box reads as a broken page. Name what
+            found nothing, say how many there are in all, and offer the way
+            back. */}
+        {shown.length === 0 ? (
+          <div className="lib-empty">
+            <b>Nothing matches that search.</b>
+            <span>
+              Search reads the brand and the address a filmo was made from. You
+              have {runs.length} filmo{runs.length === 1 ? '' : 's'} in all.
+            </span>
+            <button
+              className="lib-emptycta"
+              onClick={() => { setQ(''); setBucket('all') }}
+            >
+              Clear search
+            </button>
+          </div>
+        ) : (
+          <ul className="lib-grid lg">
+            {shown.map((r) => <FilmoCard key={r.id} run={r} />)}
+          </ul>
+        )}
+      </>
+    )
+  }
 
   return (
-    <div className="landing-dark min-h-screen">
-      <LandingBackdrop />
-      <div className="relative z-[1]">
-        <FloatingNav />
-
-        {/* Page header — clears the floating nav, mirrors /how-it-works. */}
-        <header className="relative overflow-hidden">
-          <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
-          <div className="relative z-10 mx-auto max-w-3xl px-5 pb-8 pt-28 text-center sm:pt-36">
-            <span className="eyebrow">Your Filmos</span>
-            <h1 className="section-title mt-4 sm:text-5xl sm:leading-[1.08]">
-              Your filmos.
-            </h1>
-            <p className="section-lede mx-auto max-w-xl text-lg">
-              Every build you&apos;ve started with Filmo, newest first. Open one to watch, edit, or
-              download the finished cut.
-            </p>
-          </div>
-        </header>
-
-        <main className="relative z-10 mx-auto max-w-3xl px-5 pb-20 pt-2">
-          {/* Auth resolving — neutral placeholder, never flash the signed-out prompt. */}
-          {loading ? (
-            <p className="text-center text-sm text-[#5A6472]">Loading…</p>
-          ) : !user || authError ? (
-            // Signed out OR a stale/expired session token (authError from the server read)
-            // → sign-in prompt only. No data is queried or exposed. The authError branch is
-            // the post-payment fix: a logged-out tab prompts sign-in, never a false-empty list.
-            <div className="mx-auto max-w-md rounded-2xl border border-[#D4E2FB] bg-white/95 px-6 py-12 text-center shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] backdrop-blur-sm">
-              <p className="text-lg font-semibold text-[#0E1320]">Please sign in to view your filmos</p>
-              <p className="mx-auto mt-2 max-w-xs text-sm text-[#5A6472]">
-                Your filmos live in your account. Sign in to pick up where you left off.
-              </p>
-              <Link
-                href="/login"
-                className="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-amber px-6 py-2.5 text-base font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90"
-              >
-                Sign in
-              </Link>
-            </div>
-          ) : (
-            // Signed in → the relocated recents list (identical query + cards).
-            <section>
-              <div className="mb-4">
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search films…"
-                  className="w-full rounded-xl border border-[#D4E2FB] bg-white px-4 py-2.5 text-sm text-[#0E1320] outline-none transition placeholder:text-[#8A94A6] focus:border-[#B9D2F8]"
-                />
-              </div>
-              <div className="mb-3 flex items-center justify-between">
-                <span className="eyebrow">Recents</span>
-                <button
-                  onClick={() => void loadRuns()}
-                  className="text-sm text-[#5A6472] transition hover:text-[#0E1320]"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              {runs == null ? (
-                <p className="text-sm text-[#5A6472]">Loading runs…</p>
-              ) : runs.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-[#D4E2FB] px-5 py-10 text-center text-sm text-[#5A6472]">
-                  No builds yet. Your first one will show up here.
-                </div>
-              ) : (
-                <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {shown.map((r) => (
-                    <li key={r.id}>
-                      <Link
-                        href={`/runs/${r.id}`}
-                        className="group block overflow-hidden rounded-2xl border border-[#D4E2FB] bg-white transition hover:border-[#B9D2F8]"
-                      >
-                        <div className="aspect-video w-full bg-[#0E1320]">
-                          {r.final_url ? (
-                            <video
-                              src={`${r.final_url}#t=2`}
-                              preload="metadata"
-                              muted
-                              playsInline
-                              className="h-full w-full object-cover"
-                            />
-                          ) : null}
-                        </div>
-                        <div className="px-5 py-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <p className="truncate text-base font-semibold text-[#0E1320]">
-                              {r.brand || r.company_url}
-                            </p>
-                            <StatusChip status={r.status} />
-                          </div>
-                          <p className="mt-1 truncate text-sm text-[#5A6472]">
-                            {r.film_mode === 'walkrec' ? 'Agent tour' : 'Brand explainer'}
-                            {' · '}
-                            {relativeTime(r.created_at)}
-                          </p>
-                          <span className="mt-4 block rounded-full border border-[#D4E2FB] py-2 text-center text-sm text-[#0E1320] transition group-hover:bg-[#F5F8FF]">
-                            Open film
-                          </span>
-                        </div>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-        </main>
-
-        <SiteFooter />
-      </div>
-    </div>
+    <LibraryShell
+      current="filmos"
+      title="Filmos"
+      lede={
+        <>
+          Every filmo you&rsquo;ve made, newest first — what Filmo opened,
+          recorded and cut. Open one to watch it, edit it, or download the
+          finished film.
+        </>
+      }
+      context="/videos"
+      getToken={getToken}
+    >
+      {body}
+    </LibraryShell>
   )
 }

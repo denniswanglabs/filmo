@@ -17,6 +17,15 @@
 // in (tabs, so you never leave your film), while here they are routes. Same
 // labels, same icons, same order; different mechanics. If you add an entry,
 // add it in both.
+//
+// ── WHICH ENTRY IS LIT IS A PROP (2026-07-19) ───────────────────────────────
+// This rail used to hardcode `on` + aria-current on Overview, because Overview
+// was the only route that rendered it. /videos and /assets now render it too,
+// and a rail that always claims you are on the Overview is worse than no
+// marker at all — it is a wrong answer to "where am I". `current` therefore
+// selects the lit entry and nothing else: the entry LIST and its ORDER are
+// untouched and must stay that way (see the TWIN note above). It defaults to
+// 'overview' so the Overview's own call site keeps working unchanged.
 import Link from 'next/link'
 // ONE account circle for the whole product. It is the only place credits are
 // shown (deliberately not on the stats strip: what you have left to spend is a
@@ -36,12 +45,34 @@ function FilmoMark() {
   )
 }
 
-export default function OverviewRail({ getToken, onFeedback }: {
+/** The routes this rail can light. Not the entry list — `new` is an action,
+ *  and no route ever lights it. */
+// 'none' is a real member, not an oversight. Some surfaces render this rail
+// WITHOUT being one of its entries — /analytics is owner-only and deliberately
+// has no rail item, but it is still an app surface and still needs the
+// navigation beside it. Without 'none' such a page must either light a lie
+// (omitting `current` defaults to 'overview', so the rail claims you are
+// somewhere you are not) or cast its way out of the type, which is what
+// /analytics was doing: `'analytics' as unknown as RailEntry`. A type that
+// forces callers to lie is the bug, not the caller.
+export type RailEntry = 'overview' | 'filmos' | 'assets' | 'none'
+
+export default function OverviewRail({ current = 'overview', getToken, onFeedback }: {
+  /** The route the reader is standing on. Decides which entry is lit and which
+   *  one carries aria-current; changes nothing else. */
+  current?: RailEntry
   getToken: () => Promise<string | null>
   /** Opens the feedback sheet, which the page owns — the rail is the way in,
    *  not the surface. */
   onFeedback: () => void
 }) {
+  // One expression, used three times, so an entry can never be lit without
+  // also announcing itself to a screen reader (or the reverse).
+  const at = (e: RailEntry) => ({
+    className: 'ovrail-ic' + (current === e ? ' on' : ''),
+    'aria-current': current === e ? ('page' as const) : undefined,
+  })
+
   return (
     <nav className="ovrail" aria-label="Filmo">
       <div className="ovrail-brand" title="Filmo">
@@ -61,7 +92,7 @@ export default function OverviewRail({ getToken, onFeedback }: {
         <i>New filmo</i>
       </Link>
 
-      <Link className="ovrail-ic on" href="/overview" aria-current="page" title="Overview">
+      <Link {...at('overview')} href="/overview" title="Overview">
         <svg viewBox="0 0 24 24" aria-hidden>
           <path d="M3.5 10.4 12 3.8l8.5 6.6V19a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19z"
             stroke="currentColor" strokeWidth="2" fill="none"
@@ -76,7 +107,7 @@ export default function OverviewRail({ getToken, onFeedback }: {
           TAB (you stay in the run you are watching); from here there is no run
           to stay in, so it is the standalone library route. Same label, same
           icon, same place in the order — see the TWIN note at the top. */}
-      <Link className="ovrail-ic" href="/videos" title="Filmos you've made">
+      <Link {...at('filmos')} href="/videos" title="Filmos you've made">
         <svg viewBox="0 0 24 24" aria-hidden>
           <rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
           <rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
@@ -88,7 +119,7 @@ export default function OverviewRail({ getToken, onFeedback }: {
 
       {/* The raw material: captures, marks, recordings, stills. A route in both
           rails — it spans every run, so it never belonged to one. */}
-      <Link className="ovrail-ic" href="/assets" title="Everything captured and made for your filmos">
+      <Link {...at('assets')} href="/assets" title="Everything captured and made for your filmos">
         <svg viewBox="0 0 24 24" aria-hidden>
           <path d="M12 3.5 3.5 8l8.5 4.5L20.5 8 12 3.5Z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round" />
           <path d="m3.5 12.5 8.5 4.5 8.5-4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />

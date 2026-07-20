@@ -45,6 +45,7 @@ import OverviewRail from '../components/overview/OverviewRail'
 import StatStrip from '../components/overview/StatStrip'
 import SuggestionCards from '../components/overview/SuggestionCards'
 import RecentFilmos from '../components/overview/RecentFilmos'
+import FilmoLoader, { GROUND_STUDIO } from '../components/FilmoLoader'
 
 // The operator account. Four other copies of this string exist (actions.ts,
 // Brand.tsx, FloatingNav.tsx, AccountMenu.tsx) and only the SERVER's is a
@@ -126,14 +127,22 @@ export default function OverviewPage() {
 
   useEffect(() => { if (user) void load() }, [user, load])
 
-  if (!mounted) return null
+  // Pre-mount there is no document.body to portal into, so this branch is
+  // unavoidable — but it used to render NOTHING, which meant the server sent an
+  // empty document for /overview and the route's loading.tsx handed over to a
+  // blank page. It hands over to the same boot screen instead, on the same
+  // ground, so the wait is continuous. (Server and first client render agree
+  // here — `mounted` is false in both — so there is no hydration mismatch.)
+  if (!mounted) return <FilmoLoader ground={GROUND_STUDIO} />
+
+
 
   const name = user ? displayName(user) : ''
   const hasWork = (runs?.length ?? 0) > 0
 
   let body: React.ReactNode
   if (loading) {
-    body = <p className="ov-quiet">Loading…</p>
+    body = <FilmoLoader ground={GROUND_STUDIO} fit="block" />
   } else if (!user || authError) {
     // No redirect. A signed-out visitor who typed this URL gets the door, not a
     // bounce — and an account with nothing in it can never loop if nothing moves.

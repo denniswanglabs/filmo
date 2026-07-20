@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '../../../lib/auth'
 import { TopBar, StatusChip } from '../../components/Brand'
+import FilmoLoader, { GROUND_LIGHT } from '../../components/FilmoLoader'
 import { isDeveloper, readInsideRun } from '../../actions'
 import { formatCents, formatMargin } from '../../../lib/types'
 import {
@@ -129,8 +130,9 @@ export default function InsideRunPage() {
     }
   }, [loading, user, router, load, getToken])
 
+  // Auth resolving, or the developer-mode check is still in flight.
   if (loading || gate === 'checking') {
-    return <div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>
+    return <FilmoLoader ground={GROUND_LIGHT} />
   }
   if (gate === 'denied') {
     return (
@@ -154,7 +156,7 @@ export default function InsideRunPage() {
         {notFound ? (
           <p className="mt-10 text-slate-500">This run could not be found.</p>
         ) : !view ? (
-          <p className="mt-10 text-slate-400">Loading the inside view…</p>
+          <FilmoLoader ground={GROUND_LIGHT} fit="block" />
         ) : (
           <div className="mt-5 space-y-8">
             {/* Header */}

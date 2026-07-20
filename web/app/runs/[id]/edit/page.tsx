@@ -9,6 +9,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '../../../../lib/auth'
 import { TopBar } from '../../../components/Brand'
+import FilmoLoader, { GROUND_LIGHT } from '../../../components/FilmoLoader'
 import { saveEditedProps, requestReRender, getRunForViewer } from '../../../actions'
 import { isDelivered, type Run } from '../../../../lib/types'
 import { Editor } from './_editor/Editor'
@@ -126,8 +127,9 @@ export default function EditRunPage() {
     router.push(runId ? `/runs/${runId}` : '/')
   }, [router, runId])
 
+  // Auth resolving — a continuation of this route's loading.tsx, same pixels.
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>
+    return <FilmoLoader ground={GROUND_LIGHT} />
   }
 
   if (!user) {
@@ -141,7 +143,15 @@ export default function EditRunPage() {
     )
   }
 
-  // Not-found / still-loading / no-props states keep the standard Filmo chrome.
+  // Signed in, nothing wrong, the run row just isn't here yet — hold the boot
+  // screen rather than dropping to chrome + "Loading run…" in grey. Same
+  // treatment (and same reasoning) as the run route this editor hangs off.
+  if (!run && !notFound) {
+    return <FilmoLoader ground={GROUND_LIGHT} />
+  }
+
+  // Not-found / no-props states keep the standard Filmo chrome — an error you
+  // have to navigate away from needs a nav bar to navigate with.
   if (notFound || !run || !editorProps) {
     return (
       <>
@@ -153,7 +163,10 @@ export default function EditRunPage() {
           {notFound ? (
             <p className="mt-10 text-slate-500">This run could not be found.</p>
           ) : !run ? (
-            <p className="mt-10 text-slate-400">Loading run…</p>
+            // Unreachable (the early return above owns this condition); kept
+            // because it narrows `run` for the branch below, and a loader is
+            // what it should show if it ever did paint.
+            <FilmoLoader ground={GROUND_LIGHT} fit="block" />
           ) : (
             <div className="mt-5">
               <h1 className="text-2xl font-semibold tracking-tight text-ink">

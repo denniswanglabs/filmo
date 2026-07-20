@@ -1,8 +1,54 @@
 'use client'
+// ═══════════════════ /analytics — THE BUSINESS, ON THE STUDIO GROUND ═════════
+//
+// This page used to wear the old white chrome: `TopBar` from components/Brand,
+// reading "Analytics · Dennis · Sign out" over a white page, with amber buttons
+// and a "← Back to Filmo" link doing the work a navigation should do. It now
+// wears the same shell as the Overview — studio ground, white cards, #E6E6E3
+// hairlines, the rail — because a signed-in surface that looks like a different
+// product depending on which link you pressed is the bug, not the chrome.
+//
+// WHAT DID NOT CHANGE, DELIBERATELY. Every number, and the model behind it. The
+// COGS constants, `voCharsFor` / `tokenUsdFor` / `cogsCentsFor`, the `metrics`
+// memo and the branch order below are the code that was here before, moved
+// rather than rewritten. This was a rebuild of the chrome and the layout; if a
+// figure reads differently it is a bug in this rewrite, not a new opinion about
+// the business.
+//
+// FOUR THINGS ABOUT IT ARE LOAD-BEARING.
+//
+// 1. THE OWNER GATE IS UNTOUCHED, AND IT IS STILL NOT THE BOUNDARY. `OWNER_EMAIL`
+//    below decides what to RENDER. The boundary is server-side in `readAnalytics`
+//    (verifyUser → owner check → admin client), so a tampered client gets
+//    `authorized:false` and zero rows. Both gates are kept: the client one so a
+//    non-owner never even issues the read, the server one because it is the only
+//    one that counts.
+//
+// 2. THE RAIL LIGHTS NOTHING HERE. Analytics is owner-only and therefore not one
+//    of the rail's entries — the rail is EVERY user's navigation (see the TWIN
+//    note at the top of OverviewRail). `current="none"` is passed explicitly:
+//    omitting it defaults to 'overview', and the rail would then claim you are
+//    standing somewhere you are not.
+//
+// 3. IT IS A FIXED SHELL, PORTALLED. `app/template.tsx` wraps every route in a
+//    framer-motion div, and a position:fixed child of a TRANSFORMED ancestor is
+//    positioned against that ancestor rather than the viewport. Rendering into
+//    document.body is what makes `inset:0` mean the screen — same reason, same
+//    shape as overview/page.tsx and LibraryShell. The body then never scrolls,
+//    at 1440 or at 390; the stage does, and the one genuinely wide thing on the
+//    page (the per-video table) scrolls inside its own box.
+//
+// 4. WHOEVER RENDERS THE RAIL OWNS THE FEEDBACK SHEET. The rail's account circle
+//    is the way IN to feedback; the sheet has to belong to a surface that
+//    outlives the click, and on this route that surface is this file.
 import { useEffect, useState, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
-import { TopBar, StatusChip } from '../components/Brand'
+import { StatusChip } from '../components/Brand'
+import FilmoLoader, { GROUND_STUDIO } from '../components/FilmoLoader'
+import OverviewRail from '../components/overview/OverviewRail'
+import FeedbackModal from '../runs/[id]/FeedbackModal'
 import { readAnalytics, type AnalyticsRunRow } from '../actions'
 import { formatCents, formatCentsPrecise } from '../../lib/types'
 
@@ -11,6 +57,18 @@ import { formatCents, formatCentsPrecise } from '../../lib/types'
 // check happens there after verifying the token). This client gate is the UX skin;
 // even a tampered client gets `authorized: false` + zero rows from the server.
 const OWNER_EMAIL = 'denniswanglabs@gmail.com'
+
+// ── THE RAIL LIGHTS NOTHING ON THIS ROUTE ───────────────────────────────────
+// `current` selects which rail entry is lit. Analytics is not an entry and must
+// never become one, so none of them may light. The rail lights an entry by
+// `current === entry`, so a value outside the union lights none and sets no
+// aria-current — the honest answer to "where am I" on a route the rail does not
+// name. Leaving the prop OFF would default it to 'overview', and the rail would
+// then claim you were standing somewhere you are not, which is the exact failure
+// the `current` prop was added to fix.
+//
+// `RailEntry` now carries a real 'none' member, so the page declares what it
+// means instead of casting around a type that could not say it.
 
 // Delivered-ish = the run shipped a video (mirrors lib/types DELIVERED_STATUSES).
 const DELIVERED = new Set(['delivered', 'completed_with_warnings'])
@@ -92,8 +150,12 @@ type Loaded = { authorized: boolean; rows: AnalyticsRunRow[] }
 
 export default function AnalyticsPage() {
   const { user, loading, getToken } = useAuth()
+  const [mounted, setMounted] = useState(false)
   const [data, setData] = useState<Loaded | null>(null)
   const [fetched, setFetched] = useState(false)
+  const [fbOpen, setFbOpen] = useState(false)
+
+  useEffect(() => setMounted(true), [])
 
   // Client-side owner check — purely for the UX (deciding whether to even call the
   // server / what to render). NOT a security boundary.
@@ -188,176 +250,143 @@ export default function AnalyticsPage() {
     }
   }, [data])
 
-  // ── Render states ──
+  // The portal has nowhere to go until there is a document. `app/analytics/loading.tsx`
+  // covers the gap before this paints.
+  if (!mounted) return null
+
+  // ── WHAT GOES IN THE STAGE ────────────────────────────────────────────────
+  // The branch ORDER here is the one this page has always used, kept exactly:
+  // resolving → the owner whose session died → everyone else who may not look →
+  // the dashboard. The shell (rail, ground, feedback sheet) sits OUTSIDE the
+  // branch, so a denied visitor still gets the product's navigation rather than
+  // a bare page — the same call the Overview makes for its own sign-in gate.
+  let body: React.ReactNode
+
   if (loading || !fetched) {
-    return (
-      <>
-        <TopBar />
-        <div className="flex min-h-[60vh] items-center justify-center text-slate-400">
-          Loading…
-        </div>
-      </>
+    // Never a bare "Loading…". `fit="block"` fills the stage rather than the
+    // viewport, because the rail beside it is already on screen and correct.
+    body = <FilmoLoader ground={GROUND_STUDIO} fit="block" label="Loading analytics" />
+  } else if (clientIsOwner && data && !data.authorized) {
+    // The OWNER with an expired session lands here: the client recognizes the owner
+    // email (optimistic restore) but the server returned authorized:false because
+    // verifyUser couldn't verify the stale token. Show a re-auth prompt — not a flat
+    // "not authorized" — so the operator can actually recover instead of being confused.
+    body = (
+      <div className="an-gate">
+        <b>Your session expired</b>
+        <span>Sign in again to view your analytics.</span>
+        <Link className="an-gatebtn" href="/login">Sign in again</Link>
+      </div>
     )
-  }
-
-  // The OWNER with an expired session lands here too: the client recognizes the owner
-  // email (optimistic restore) but the server returned authorized:false because
-  // verifyUser couldn't verify the stale token. Show a re-auth prompt — not a flat
-  // "not authorized" — so the operator can actually recover instead of being confused.
-  if (clientIsOwner && data && !data.authorized) {
-    return (
-      <>
-        <TopBar />
-        <main className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center px-5 text-center">
-          <h1 className="text-xl font-semibold text-ink">Your session expired</h1>
-          <p className="mt-2 text-sm text-slate-500">Sign in again to view your analytics.</p>
-          <Link
-            href="/login"
-            className="mt-6 inline-flex items-center justify-center rounded-lg bg-[#3B82F6] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2f6fe0]"
-          >
-            Sign in again
-          </Link>
-        </main>
-      </>
+  } else if (!user || !clientIsOwner || (data && !data.authorized)) {
+    // Not authorized: either no session, not the owner client-side, or the server
+    // refused. A clean, data-free denial — no numbers ever rendered.
+    body = (
+      <div className="an-gate">
+        <span className="an-gateicon" aria-hidden>
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </span>
+        <b>Not authorized</b>
+        <span>This dashboard is restricted to the Filmo operator account.</span>
+        {/* `/` and not `/overview`: this branch also catches a SIGNED-OUT
+            visitor, and the Overview would hand them a second gate. The home
+            route already sends a signed-in reader on to their overview, so one
+            destination is correct for everybody who can land here. */}
+        <Link className="an-gatebtn" href="/">Back to Filmo</Link>
+      </div>
     )
-  }
-
-  // Not authorized: either no session, not the owner client-side, or the server
-  // refused. A clean, data-free denial — no numbers ever rendered.
-  if (!user || !clientIsOwner || (data && !data.authorized)) {
-    return (
+  } else {
+    const m = metrics
+    body = (
       <>
-        <TopBar />
-        <main className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center px-5 text-center">
-          <div className="grid h-12 w-12 place-items-center rounded-full border border-black/10 bg-white text-slate-400">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </div>
-          <h1 className="mt-5 text-xl font-semibold text-ink">Not authorized</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            This dashboard is restricted to the Filmo operator account.
-          </p>
-          <Link
-            href="/"
-            className="mt-6 inline-flex items-center justify-center rounded-lg bg-amber px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
-          >
-            Back to Filmo
-          </Link>
-        </main>
-      </>
-    )
-  }
-
-  const m = metrics
-
-  return (
-    <>
-      <TopBar />
-      <main className="mx-auto max-w-5xl px-5 pb-24 pt-8">
-        <Link href="/" className="text-sm text-slate-400 transition hover:text-ink">
-          ← Back to Filmo
-        </Link>
-
-        <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-ink">Analytics</h1>
-            <p className="mt-1 text-slate-500">The whole business, end to end.</p>
-          </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber/30 bg-amber-soft px-2.5 py-1 text-xs font-medium text-amber">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber" />
-            Stripe test-mode
-          </span>
+        {/* The four headline figures. One hairline grid rather than four floating
+            cards — the same shape the Overview's stat strip uses, for the same
+            reason: these are one readout, not four unrelated ones. */}
+        <div className="an-strip">
+          <Figure label="Total revenue" value={formatCents(m.revenue)} />
+          <Figure label="Total COGS" value={formatCentsPrecise(m.cogs)} />
+          <Figure label="Total profit" value={formatCentsPrecise(m.profit)} negative={m.profit < 0} />
+          <Figure
+            label="Videos delivered"
+            value={`${m.deliveredCount}`}
+            sub={`of ${m.total} runs`}
+          />
         </div>
 
-        {/* Top cards — revenue / COGS / profit / delivered */}
-        <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <BigStat label="Total revenue" value={formatCents(m.revenue)} accent="blue" />
-          <BigStat label="Total COGS" value={formatCentsPrecise(m.cogs)} />
-          <BigStat label="Total profit" value={formatCentsPrecise(m.profit)} accent="green" />
-          <BigStat label="Videos delivered" value={`${m.deliveredCount}`} sub={`of ${m.total} runs`} />
-        </div>
-
-        <p className="mt-2.5 text-xs leading-relaxed text-slate-400">
+        <p className="an-note">
           COGS = real per-video voice (ElevenLabs) + Nemotron token cost — actual OpenRouter
           spend per run (550B runs cost more than free 120B); fixed infra not included.
         </p>
 
         {/* Secondary metrics */}
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SmallStat label="Avg price" value={formatCents(m.avgPrice)} />
-          <SmallStat
+        <div className="an-sub">
+          <Small label="Avg price" value={formatCents(m.avgPrice)} />
+          <Small
             label="Avg margin"
             value={m.avgMargin == null ? '--' : `${Math.round(m.avgMargin * 100)}%`}
           />
-          <SmallStat label="Total runs" value={`${m.total}`} />
-          <SmallStat
+          <Small label="Total runs" value={`${m.total}`} />
+          <Small
             label="Success rate"
             value={m.total ? `${Math.round((m.deliveredCount / m.total) * 100)}%` : '--'}
           />
         </div>
 
         {/* Revenue over time — lightweight inline-SVG cumulative chart */}
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
-            Cumulative revenue
-          </h2>
+        <section className="an-section">
+          <h2 className="an-h2">Cumulative revenue</h2>
           <RevenueChart series={m.series} />
         </section>
 
         {/* Status + producer split */}
-        <div className="mt-8 grid gap-3 sm:grid-cols-2">
-          <BreakdownCard title="Runs by status">
+        <div className="an-split">
+          <Breakdown title="Runs by status">
             {Object.entries(m.byStatus)
               .sort((a, b) => b[1] - a[1])
               .map(([status, count]) => (
-                <div key={status} className="flex items-center justify-between py-1.5">
+                <div className="an-row" key={status}>
                   <StatusChip status={status} />
-                  <span className="text-sm font-semibold text-ink">{count}</span>
+                  <span className="an-rowval">{count}</span>
                 </div>
               ))}
-          </BreakdownCard>
+          </Breakdown>
 
           {m.producerTagged > 0 ? (
-            <BreakdownCard
-              title="Producer split"
-              note={`${m.producerTagged} of ${m.total} runs tagged`}
-            >
+            <Breakdown title="Producer split" note={`${m.producerTagged} of ${m.total} runs tagged`}>
               {Object.entries(m.byProducer)
                 .sort((a, b) => b[1] - a[1])
                 .map(([producer, count]) => (
-                  <div key={producer} className="flex items-center justify-between py-1.5">
-                    <span className="font-mono text-xs text-slate-600">{producer}</span>
-                    <span className="text-sm font-semibold text-ink">{count}</span>
+                  <div className="an-row" key={producer}>
+                    <span className="an-mono">{producer}</span>
+                    <span className="an-rowval">{count}</span>
                   </div>
                 ))}
-            </BreakdownCard>
+            </Breakdown>
           ) : (
-            <BreakdownCard title="Producer split">
-              <p className="py-2 text-sm text-slate-400">
-                No runs tagged with a producer yet.
-              </p>
-            </BreakdownCard>
+            <Breakdown title="Producer split">
+              <p className="an-quiet">No runs tagged with a producer yet.</p>
+            </Breakdown>
           )}
         </div>
 
-        {/* Per-video table */}
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
-            Per-video
-          </h2>
-          <div className="overflow-x-auto rounded-2xl border border-black/5 bg-white">
-            <table className="w-full min-w-[680px] text-sm">
+        {/* Per-video table. The ONE genuinely wide thing on the page, so it
+            scrolls inside its own box — the body never scrolls sideways. */}
+        <section className="an-section">
+          <h2 className="an-h2">Per-video</h2>
+          <div className="an-tablewrap">
+            <table className="an-table">
               <thead>
-                <tr className="border-b border-black/5 text-left text-xs uppercase tracking-wide text-slate-400">
-                  <th className="px-4 py-3 font-medium">Date</th>
-                  <th className="px-4 py-3 font-medium">Brand</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 text-right font-medium">Price</th>
-                  <th className="px-4 py-3 text-right font-medium">COGS</th>
-                  <th className="px-4 py-3 text-right font-medium">Profit</th>
-                  <th className="px-4 py-3 font-medium">Video</th>
+                <tr>
+                  <th>Date</th>
+                  <th>Brand</th>
+                  <th>Status</th>
+                  <th className="r">Price</th>
+                  <th className="r">COGS</th>
+                  <th className="r">Profit</th>
+                  <th>Video</th>
                 </tr>
               </thead>
               <tbody>
@@ -365,42 +394,45 @@ export default function AnalyticsPage() {
                   const rowCogs = cogsCentsFor(r)
                   const profit = (r.price_cents || 0) - rowCogs
                   return (
-                    <tr key={r.id} className="border-b border-black/[0.04] last:border-0">
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">
+                    <tr key={r.id}>
+                      <td className="an-dim nowrap">
                         {new Date(r.created_at).toLocaleDateString([], {
                           month: 'short',
                           day: 'numeric',
                         })}
                       </td>
-                      <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-ink">
-                        <Link href={`/runs/${r.id}`} className="transition hover:text-amber">
-                          {r.brand || r.company_url}
-                        </Link>
+                      <td className="an-brand">
+                        <Link href={`/runs/${r.id}`}>{r.brand || r.company_url}</Link>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td>
                         <StatusChip status={r.status} />
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-ink">
-                        {formatCents(r.price_cents)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-slate-500">
+                      <td className="r num nowrap">{formatCents(r.price_cents)}</td>
+                      <td className="r num nowrap an-dim">
                         {DELIVERED.has(r.status) ? formatCentsPrecise(rowCogs) : '--'}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums font-medium text-nemo">
+                      <td
+                        className={
+                          'r num nowrap an-profit' +
+                          (r.price_cents != null && profit < 0 ? ' bad' : '')
+                        }
+                      >
                         {r.price_cents == null ? '--' : formatCentsPrecise(profit)}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td>
                         {r.final_url ? (
-                          <a
-                            href={r.final_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs font-medium text-amber transition hover:underline"
-                          >
-                            View ↗
+                          <a className="an-view" href={r.final_url} target="_blank" rel="noreferrer">
+                            View
+                            <svg viewBox="0 0 24 24" aria-hidden>
+                              <path d="M14 5h5v5M19 5l-8 8" stroke="currentColor" strokeWidth="2"
+                                fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d="M18 14.5V18a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 18V8a1.5 1.5 0 0 1 1.5-1.5H10"
+                                stroke="currentColor" strokeWidth="2" fill="none"
+                                strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
                           </a>
                         ) : (
-                          <span className="text-xs text-slate-300">—</span>
+                          <span className="an-none">—</span>
                         )}
                       </td>
                     </tr>
@@ -411,56 +443,263 @@ export default function AnalyticsPage() {
           </div>
         </section>
 
-        <p className="mt-5 text-xs leading-relaxed text-slate-400">
-          Revenue reflects Stripe <span className="font-medium">test-mode</span> checkouts. COGS
-          per delivered video = ElevenLabs voiceover ({ELEVENLABS_USD_PER_1K_CHARS.toFixed(2)}
-          {' '}$/1k chars, the main driver) + <span className="font-medium">Nemotron token cost</span>.
-          The token line is the <span className="font-medium">actual</span> OpenRouter spend
-          recorded per run (planner <span className="font-mono">usage.cost</span>, grossed up
-          {' '}{READ_BRIEF_GROSS_UP}× for the un-logged Conversion Read + design-brief calls);
-          when a run didn&apos;t record it, it&apos;s estimated from the run&apos;s brain rate
-          (550B <span className="font-mono">ultra-paid</span> ≈ $0.0075/video; free 120B
-          {' '}<span className="font-mono">super-free</span> ≈ $0). VO length is exact when the
-          render duration was stored, else inferred at ~{VO_CHARS_PER_SECOND} chars/sec.
-          Profit = price − COGS.
+        <p className="an-method">
+          Revenue reflects Stripe <b>test-mode</b> checkouts. COGS per delivered video =
+          ElevenLabs voiceover ({ELEVENLABS_USD_PER_1K_CHARS.toFixed(2)} $/1k chars, the main
+          driver) + <b>Nemotron token cost</b>. The token line is the <b>actual</b> OpenRouter
+          spend recorded per run (planner <code>usage.cost</code>, grossed up{' '}
+          {READ_BRIEF_GROSS_UP}× for the un-logged Conversion Read + design-brief calls); when a
+          run didn&rsquo;t record it, it&rsquo;s estimated from the run&rsquo;s brain rate (550B{' '}
+          <code>ultra-paid</code> ≈ $0.0075/video; free 120B <code>super-free</code> ≈ $0). VO
+          length is exact when the render duration was stored, else inferred at ~
+          {VO_CHARS_PER_SECOND} chars/sec. Profit = price − COGS.
         </p>
+      </>
+    )
+  }
+
+  return createPortal(
+    <div className="an-root">
+      <OverviewRail
+        current="none"
+        getToken={getToken}
+        onFeedback={() => setFbOpen(true)}
+      />
+
+      <main className="an-stage">
+        <div className="an-inner">
+          <header className="an-head">
+            <div className="an-headrow">
+              <h1 className="an-title">Analytics</h1>
+              <span className="an-testmode">
+                <i aria-hidden />
+                Stripe test-mode
+              </span>
+            </div>
+            <p className="an-lede">
+              Every run this account has made, priced and costed. The revenue is what Stripe
+              actually took; the cost of each video is recomputed here from what that run
+              really spent, never read off a stored total.
+            </p>
+          </header>
+          {body}
+        </div>
       </main>
-    </>
+
+      <FeedbackModal
+        open={fbOpen}
+        onClose={() => setFbOpen(false)}
+        getToken={getToken}
+        context="/analytics"
+      />
+
+      <style>{`
+        .an-root { position:fixed; inset:0; display:flex; background:#F1F1EF;
+          color:#1B1B1A; font:14px/1.5 Inter,-apple-system,sans-serif; z-index:50; }
+        /* The stage scrolls, the shell does not — so the BODY never scrolls in
+           either direction, at 1440 or at 390. */
+        .an-stage { flex:1 1 0; min-width:0; min-height:0; overflow-y:auto;
+          overflow-x:hidden; }
+        .an-inner { max-width:1120px; margin:0 auto; padding:38px 32px 56px; }
+
+        .an-head { margin-bottom:26px; }
+        .an-headrow { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+        .an-title { margin:0; font-size:32px; font-weight:600;
+          letter-spacing:-.025em; line-height:1.15; color:#1B1B1A; }
+        .an-lede { margin:9px 0 0; max-width:62ch; font-size:14.5px;
+          line-height:1.55; color:#8A8A86; }
+        /* Test-mode is a fact about every number below it, so it sits beside the
+           title rather than in a footnote nobody scrolls to. */
+        .an-testmode { display:inline-flex; align-items:center; gap:6px;
+          background:#EAF1FF; border:1px solid #C9D9F8; border-radius:99px;
+          padding:4px 11px; font-size:12px; font-weight:600; color:#1D4ED8; }
+        .an-testmode i { width:6px; height:6px; border-radius:50%;
+          background:#3B82F6; }
+
+        /* ── THE HEADLINE FIGURES ────────────────────────────────────────────
+           One hairline grid, the Overview's stat-strip shape: 1px gaps over a
+           #E6E6E3 field, so the separators ARE the background and no cell owns
+           a border that can disagree with its neighbour's. */
+        .an-strip { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr));
+          gap:1px; background:#E6E6E3; border:1px solid #E6E6E3;
+          border-radius:14px; overflow:hidden; }
+        .an-cell { background:#fff; padding:16px 18px; min-width:0; }
+        .an-cell-label { font-size:12px; font-weight:600; letter-spacing:.06em;
+          text-transform:uppercase; color:#8A8A86; }
+        .an-cell-value { margin-top:6px; font-size:26px; font-weight:650;
+          letter-spacing:-.02em; line-height:1.1; color:#1B1B1A;
+          font-variant-numeric:tabular-nums; }
+        /* Money that has gone the wrong way is the one figure allowed a colour.
+           #DC2626 is the app's existing "bad" ink (SuggestionCards .ovsug-note). */
+        .an-cell-value.bad { color:#DC2626; }
+        .an-cell-sub { margin-top:2px; font-size:12.5px; color:#8A8A86; }
+
+        .an-note { margin:10px 0 0; font-size:12px; line-height:1.55;
+          color:#B6B6B2; max-width:78ch; }
+
+        .an-sub { margin-top:14px; display:grid;
+          grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+        .an-small { background:#fff; border:1px solid #E6E6E3; border-radius:12px;
+          padding:12px 14px; min-width:0; }
+        .an-small-label { font-size:11.5px; font-weight:600; letter-spacing:.06em;
+          text-transform:uppercase; color:#8A8A86; }
+        .an-small-value { margin-top:4px; font-size:18px; font-weight:650;
+          letter-spacing:-.015em; color:#1B1B1A;
+          font-variant-numeric:tabular-nums; }
+
+        .an-section { margin-top:32px; }
+        .an-h2 { margin:0 0 12px; font-size:12px; font-weight:600;
+          letter-spacing:.08em; text-transform:uppercase; color:#8A8A86; }
+
+        /* ── THE CHART ───────────────────────────────────────────────────────── */
+        .an-chart { background:#fff; border:1px solid #E6E6E3; border-radius:14px;
+          padding:16px; }
+        .an-charthead { display:flex; align-items:baseline;
+          justify-content:space-between; gap:12px; margin-bottom:6px;
+          flex-wrap:wrap; }
+        .an-charttotal { font-size:26px; font-weight:650; letter-spacing:-.02em;
+          color:#1B1B1A; font-variant-numeric:tabular-nums; }
+        .an-chartrange { font-size:12.5px; color:#8A8A86;
+          font-variant-numeric:tabular-nums; }
+        .an-chart svg { display:block; width:100%; height:176px; }
+        .an-chartempty { background:#fff; border:1px dashed #DDDDD9;
+          border-radius:14px; padding:34px 22px; text-align:center;
+          font-size:13.5px; color:#8A8A86; }
+
+        /* ── BREAKDOWNS ──────────────────────────────────────────────────────── */
+        .an-split { margin-top:32px; display:grid;
+          grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+        .an-card { background:#fff; border:1px solid #E6E6E3; border-radius:14px;
+          padding:16px 18px; min-width:0; }
+        .an-cardhead { display:flex; align-items:baseline;
+          justify-content:space-between; gap:10px; margin-bottom:6px; }
+        .an-cardhead h3 { margin:0; font-size:14.5px; font-weight:650;
+          color:#1B1B1A; }
+        .an-cardnote { font-size:12px; color:#8A8A86; }
+        .an-row { display:flex; align-items:center; justify-content:space-between;
+          gap:12px; padding:7px 0; border-top:1px solid #F1F1EF; }
+        .an-row:first-child { border-top:0; }
+        .an-rowval { font-size:14px; font-weight:650; color:#1B1B1A;
+          font-variant-numeric:tabular-nums; }
+        .an-mono { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+          color:#6E6E6A; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; min-width:0; }
+        .an-quiet { margin:0; padding:7px 0; font-size:13.5px; color:#8A8A86; }
+
+        /* ── THE PER-VIDEO TABLE ─────────────────────────────────────────────
+           overflow-x:auto here and a min-width on the table itself: seven
+           columns cannot fit a 390px screen, and the choice is between the BOX
+           scrolling and the BODY scrolling. It is always the box. */
+        .an-tablewrap { background:#fff; border:1px solid #E6E6E3;
+          border-radius:14px; overflow-x:auto; }
+        .an-table { width:100%; min-width:680px; border-collapse:collapse;
+          font-size:13.5px; }
+        .an-table th { text-align:left; padding:11px 16px; font-size:11.5px;
+          font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+          color:#8A8A86; border-bottom:1px solid #E6E6E3; white-space:nowrap; }
+        .an-table td { padding:10px 16px; border-bottom:1px solid #F1F1EF;
+          vertical-align:middle; }
+        .an-table tr:last-child td { border-bottom:0; }
+        .an-table .r { text-align:right; }
+        .an-table .num { font-variant-numeric:tabular-nums; }
+        .an-table .nowrap { white-space:nowrap; }
+        .an-dim { color:#8A8A86; }
+        .an-brand { max-width:200px; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; font-weight:600; }
+        .an-brand a { color:#1B1B1A; text-decoration:none; border-radius:4px; }
+        .an-brand a:hover { color:#3B82F6; }
+        .an-brand a:focus-visible { outline:2px solid #3B82F6; outline-offset:2px;
+          color:#3B82F6; }
+        .an-profit { font-weight:600; color:#1B1B1A; }
+        .an-profit.bad { color:#DC2626; }
+        .an-view { display:inline-flex; align-items:center; gap:5px;
+          font-size:12.5px; font-weight:600; color:#3B82F6; text-decoration:none;
+          border-radius:4px; white-space:nowrap; }
+        .an-view svg { width:13px; height:13px; }
+        .an-view:hover { text-decoration:underline; }
+        .an-view:focus-visible { outline:2px solid #3B82F6; outline-offset:2px; }
+        .an-none { color:#B6B6B2; }
+
+        .an-method { margin:18px 0 0; font-size:12px; line-height:1.6;
+          color:#B6B6B2; max-width:86ch; }
+        .an-method b { font-weight:650; color:#8A8A86; }
+        .an-method code { font:11.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+          color:#8A8A86; }
+
+        /* ── THE GATES ───────────────────────────────────────────────────────
+           Signed out, not the owner, and the owner's dead session all land
+           here. None of them is an empty dashboard and none may be dressed as
+           one — no figure is ever rendered on these branches. */
+        .an-gate { background:#fff; border:1px solid #E6E6E3; border-radius:14px;
+          padding:26px; display:flex; flex-direction:column; gap:7px;
+          align-items:flex-start; max-width:520px; }
+        .an-gate b { font-size:16px; font-weight:650; }
+        .an-gate span { font-size:13.5px; line-height:1.55; color:#6E6E6A; }
+        .an-gateicon { display:grid; place-items:center; width:44px; height:44px;
+          border-radius:50%; background:#F1F1EF; color:#8A8A86; margin-bottom:6px; }
+        .an-gateicon svg { width:22px; height:22px; }
+        .an-gatebtn { margin-top:10px; display:inline-flex; align-items:center;
+          justify-content:center; border:1px solid #1B1B1A; background:#1B1B1A;
+          color:#fff; border-radius:99px; padding:9px 20px;
+          font:13px/1 Inter,-apple-system,sans-serif; cursor:pointer;
+          text-decoration:none; }
+        .an-gatebtn:hover { background:#000; border-color:#000; }
+        .an-gatebtn:focus-visible { outline:2px solid #3B82F6; outline-offset:3px; }
+
+        /* ── NARROW ──────────────────────────────────────────────────────────
+           Four columns of currency cannot be read at 390px, so they stack.
+           Nothing is dropped and nothing shrinks below reading size. */
+        @media (max-width:980px) {
+          .an-strip { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+          .an-split { grid-template-columns:minmax(0, 1fr); } }
+        @media (max-width:760px) {
+          .an-inner { padding:26px 18px 44px; }
+          .an-title { font-size:26px; }
+          .an-lede { font-size:13.5px; }
+          .an-sub { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+        @media (max-width:620px) {
+          .an-strip { grid-template-columns:minmax(0, 1fr); }
+          .an-cell { padding:13px 16px; }
+          .an-cell-value { font-size:22px; }
+          .an-charttotal { font-size:22px; } }
+      `}</style>
+    </div>,
+    document.body,
   )
 }
 
-function BigStat({
+// A headline figure. Every value carries the same ink; only a NEGATIVE profit is
+// allowed a colour, because it is the one figure whose sign changes what it means.
+function Figure({
   label,
   value,
   sub,
-  accent,
+  negative,
 }: {
   label: string
   value: string
   sub?: string
-  accent?: 'blue' | 'green'
+  negative?: boolean
 }) {
-  const valueColor =
-    accent === 'blue' ? 'text-amber' : accent === 'green' ? 'text-nemo' : 'text-ink'
   return (
-    <div className="rounded-2xl border border-black/5 bg-white px-4 py-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`mt-1.5 text-2xl font-semibold tracking-tight ${valueColor}`}>{value}</p>
-      {sub ? <p className="mt-0.5 text-xs text-slate-400">{sub}</p> : null}
+    <div className="an-cell">
+      <div className="an-cell-label">{label}</div>
+      <div className={'an-cell-value' + (negative ? ' bad' : '')}>{value}</div>
+      {sub ? <div className="an-cell-sub">{sub}</div> : null}
     </div>
   )
 }
 
-function SmallStat({ label, value }: { label: string; value: string }) {
+function Small({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-black/5 bg-white px-3.5 py-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-ink">{value}</p>
+    <div className="an-small">
+      <div className="an-small-label">{label}</div>
+      <div className="an-small-value">{value}</div>
     </div>
   )
 }
 
-function BreakdownCard({
+function Breakdown({
   title,
   note,
   children,
@@ -470,12 +709,12 @@ function BreakdownCard({
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-2xl border border-black/5 bg-white px-4 py-4">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h3 className="text-sm font-semibold text-ink">{title}</h3>
-        {note ? <span className="text-xs text-slate-400">{note}</span> : null}
+    <div className="an-card">
+      <div className="an-cardhead">
+        <h3>{title}</h3>
+        {note ? <span className="an-cardnote">{note}</span> : null}
       </div>
-      <div className="divide-y divide-black/[0.04]">{children}</div>
+      {children}
     </div>
   )
 }
@@ -489,11 +728,7 @@ function RevenueChart({
   series: { day: string; dayRevenue: number; cumulative: number }[]
 }) {
   if (series.length < 2) {
-    return (
-      <div className="rounded-2xl border border-black/5 bg-white px-4 py-10 text-center text-sm text-slate-400">
-        Not enough dated revenue yet to chart.
-      </div>
-    )
+    return <div className="an-chartempty">Not enough dated revenue yet to chart.</div>
   }
 
   const W = 720
@@ -514,23 +749,21 @@ function RevenueChart({
   const last = series[n - 1]
 
   return (
-    <div className="rounded-2xl border border-black/5 bg-white p-4">
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-2xl font-semibold tracking-tight text-amber">
-          {formatCents(last.cumulative)}
-        </span>
-        <span className="text-xs text-slate-400">
+    <div className="an-chart">
+      <div className="an-charthead">
+        <span className="an-charttotal">{formatCents(last.cumulative)}</span>
+        <span className="an-chartrange">
           {series[0].day} → {last.day}
         </span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-44 w-full" preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
         <defs>
-          <linearGradient id="rev-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.18" />
+          <linearGradient id="an-rev-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.16" />
             <stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path d={areaPath} fill="url(#rev-fill)" />
+        <path d={areaPath} fill="url(#an-rev-fill)" />
         <polyline
           points={linePts}
           fill="none"

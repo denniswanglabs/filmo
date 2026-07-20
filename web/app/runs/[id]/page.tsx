@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import { useAuth } from '../../../lib/auth'
 import { getRunForViewer } from '../../actions'
 import Workspace from './Workspace'
+import FilmoLoader, { GROUND_LIGHT } from '../../components/FilmoLoader'
 import { TopBar, StatusChip } from '../../components/Brand'
 import BuildProgress, { feedVisible } from '../../components/BuildProgress'
 import SceneFilmstrip from '../../components/SceneFilmstrip'
@@ -139,8 +140,11 @@ export default function RunPage() {
     return () => clearInterval(t)
   }, [loading, user, runId, poll])
 
+  // Auth is still resolving: hold the boot screen the route's loading.tsx just
+  // put up. Identical pixels, so this is a continuation rather than a second
+  // loading state — `useAuth` starts `loading: true`, so this DOES paint.
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-slate-400">Loading…</div>
+    return <FilmoLoader />
   }
 
   // Logged-out gate. The run fetch is RLS-scoped to the signed-in owner, so when
@@ -167,6 +171,21 @@ export default function RunPage() {
         </main>
       </>
     )
+  }
+
+  // ── THE WAIT DENNIS SCREENSHOTTED ──────────────────────────────────────────
+  // Signed in, nothing has gone wrong, and the first poll has not answered yet.
+  // This used to drop to the app chrome with "Loading run…" in grey under the
+  // nav bar, which reads as a page that broke rather than one that is working.
+  // Hold the boot screen instead: the route's loading.tsx, this branch and the
+  // auth branch above all render the same pixels, so the whole wait — click to
+  // content — is ONE screen that dissolves into the run.
+  //
+  // The three failure branches below deliberately keep the chrome: an error you
+  // have to navigate away from needs a nav bar to navigate with. Only the
+  // healthy wait is covered.
+  if (!run && !notFound && !authFailed && !loadFailed) {
+    return <FilmoLoader />
   }
 
   // Walkrec beta: those runs get the director workspace, not the classic page.
@@ -217,7 +236,11 @@ export default function RunPage() {
             </div>
           </div>
         ) : !run ? (
-          <p className="mt-10 text-slate-400">Loading run…</p>
+          // Belt and braces: the early return above already covers this exact
+          // condition, so this should never paint. It stays because it is what
+          // narrows `run` to non-null for the branch below, and if it ever DOES
+          // paint it must still be the loader rather than grey text.
+          <FilmoLoader ground={GROUND_LIGHT} fit="block" />
         ) : (
           <div className="mt-5">
             {/* Header */}

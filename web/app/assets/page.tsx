@@ -1,25 +1,51 @@
 'use client'
-// /assets — everything Filmo has taken from your site or made from it.
+// ═══════════════════════ /assets — THE PROVENANCE LEDGER ═════════════════════
 //
-// This is the provenance ledger made browsable. The product's whole claim is
-// that nothing in a film is invented: every line comes from a page it read,
-// every mark is one the site actually serves, every second of motion is real
-// footage. That claim is only checkable if you can SEE the raw material, so
-// this page shows it — captures, brand marks, recordings, scene stills, and
-// the finished films — read server-side and owner-scoped (same gate as
-// /videos: a stale token prompts sign-in, never a false-empty library).
+// Everything Filmo has taken from a customer's site or made from it, browsable.
+//
+// The product's whole claim is that nothing in a film is invented: every line
+// comes from a page it read, every mark is one the site actually serves, every
+// second of motion is real footage. A claim like that is worth exactly as much
+// as it is CHECKABLE — so this page shows the raw material itself, and every
+// tile walks back to the run that produced it.
+//
+// ── WHAT CHANGED, AND WHAT DELIBERATELY DID NOT (2026-07-19) ────────────────
+// The page was wearing the old blue landing chrome — FloatingNav, SiteFooter,
+// LandingBackdrop — which is the marketing shell, not the product's. It now
+// wears the studio ground and the product's rail, like the Overview and like
+// its sibling /videos. Those landing components are NOT deleted; /how-it-works
+// still ships them. This file just stopped importing them.
+//
+// Three behaviours from the first version were kept because they were right:
+//   · FILTERING BY KIND, and each filter saying what the kind IS — the library
+//     doubles as an explanation of what the agent actually collects.
+//   · EVERY TILE LINKS TO ITS RUN. Provenance is the point (see AssetTile).
+//   · A STALE TOKEN PROMPTS SIGN-IN, never a false-empty library.
+//
+// One thing was fixed rather than kept: the old read swallowed a thrown server
+// action whole (`catch { return }`), which on a FIRST load left the page saying
+// "Loading assets…" forever with nothing on the way. A failed read is not an
+// empty account and it is not a loading one — see `load` below.
+//
+// The route stays /assets. It is a URL people may already hold, and renaming a
+// path to match a noun breaks links to buy nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
 import { listAssets, type AssetKind, type AssetRow } from '../actions'
-import FloatingNav from '../components/landing/FloatingNav'
-import SiteFooter from '../components/landing/SiteFooter'
-import LandingBackdrop from '../components/landing/LandingBackdrop'
+import FilmoLoader from '../components/FilmoLoader'
+import LibraryShell from '../components/library/LibraryShell'
+import FilterStrip, { type FilterOption } from '../components/library/FilterStrip'
+import AssetTile from '../components/library/AssetTile'
+
+type Kind = AssetKind | 'all'
 
 // Type names are the user's words for the thing, not the pipeline's event
-// kinds — "Page capture", not "read.page".
-const KINDS: { key: AssetKind | 'all'; label: string; hint: string }[] = [
-  { key: 'all', label: 'All assets', hint: '' },
+// kinds — "Page capture", not "read.page". Preserved verbatim from the first
+// version of this page, hints included: naming what each kind IS is what makes
+// the strip an explanation rather than a set of switches.
+const KINDS: { key: Kind; label: string; hint?: string }[] = [
+  { key: 'all', label: 'All assets' },
   { key: 'film', label: 'Films', hint: 'The finished cut' },
   { key: 'recording', label: 'Recordings', hint: 'Real screen footage' },
   { key: 'capture', label: 'Page captures', hint: 'Pages Filmo read' },
@@ -27,31 +53,30 @@ const KINDS: { key: AssetKind | 'all'; label: string; hint: string }[] = [
   { key: 'mark', label: 'Brand marks', hint: 'Logos from the site' },
 ]
 
-function when(ts: number): string {
-  const mins = Math.round((Date.now() - ts * 1000) / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.round(hrs / 24)
-  if (days < 7) return `${days}d ago`
-  return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
 export default function AssetsPage() {
   const { user, loading, getToken } = useAuth()
   const [assets, setAssets] = useState<AssetRow[] | null>(null)
   const [authError, setAuthError] = useState(false)
-  const [kind, setKind] = useState<AssetKind | 'all'>('all')
+  // A read that FAILED is not an account that is empty, and it is not one that
+  // is still loading either. Only set when there is nothing already on screen.
+  const [readFailed, setReadFailed] = useState(false)
+  const [kind, setKind] = useState<Kind>('all')
 
   const load = useCallback(async () => {
+    setReadFailed(false)
     const token = await getToken()
     let res
     try {
       res = await listAssets(token)
     } catch {
+      // A thrown server action is a network/timeout blip. If a library is
+      // already on screen, KEEP it — blanking a good list on a hiccup is worse
+      // than a stale one, and Refresh is right there. If there is nothing on
+      // screen, say so, because the alternative is a spinner that never ends.
+      setAssets((prev) => { if (prev == null) setReadFailed(true); return prev })
       return
     }
+    // Expired/invalid token → the sign-in gate, never a false-empty library.
     if ('authError' in res) { setAuthError(true); return }
     setAuthError(false)
     setAssets(res.assets)
@@ -65,140 +90,105 @@ export default function AssetsPage() {
     return c
   }, [assets])
 
-  const shown = useMemo(
-    () => (assets || []).filter((a) => kind === 'all' || a.kind === kind),
-    [assets, kind],
+  // A filter that would return nothing is a dead end, so it is not offered —
+  // the first version's rule, kept.
+  const options = useMemo<FilterOption<Kind>[]>(
+    () => KINDS
+      .filter((k) => k.key === 'all' || counts[k.key])
+      .map((k) => ({ ...k, count: counts[k.key] || 0 })),
+    [counts],
   )
 
-  return (
-    <div className="landing-dark min-h-screen">
-      <LandingBackdrop />
-      <div className="relative z-[1]">
-        <FloatingNav />
+  // A filter can survive the disappearance of the thing it filtered (a refresh
+  // that returns fewer kinds). Fall back to All rather than showing an empty
+  // grid under a pill that no longer exists.
+  const active: Kind = options.some((o) => o.key === kind) ? kind : 'all'
 
-        <header className="relative overflow-hidden">
-          <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
-          <div className="relative z-10 mx-auto max-w-3xl px-5 pb-8 pt-28 text-center sm:pt-36">
-            <span className="eyebrow">Assets</span>
-            <h1 className="section-title mt-4 sm:text-5xl sm:leading-[1.08]">
-              Everything Filmo took from your site.
-            </h1>
-            <p className="section-lede mx-auto max-w-xl text-lg">
-              The raw material behind your films — the pages it read, the marks it
-              captured, the footage it recorded, and every scene it cut. Nothing in a
-              film comes from anywhere else.
-            </p>
-          </div>
-        </header>
+  const shown = useMemo(
+    () => (assets || []).filter((a) => active === 'all' || a.kind === active),
+    [assets, active],
+  )
 
-        <main className="relative z-10 mx-auto max-w-5xl px-5 pb-20 pt-2">
-          {loading ? (
-            <p className="text-center text-sm text-[#5A6472]">Loading…</p>
-          ) : !user || authError ? (
-            <div className="mx-auto max-w-md rounded-2xl border border-[#D4E2FB] bg-white/95 px-6 py-12 text-center shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] backdrop-blur-sm">
-              <p className="text-lg font-semibold text-[#0E1320]">Please sign in to view your assets</p>
-              <p className="mx-auto mt-2 max-w-xs text-sm text-[#5A6472]">
-                Your assets live in your account, alongside the films made from them.
-              </p>
-              <Link
-                href="/login"
-                className="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-amber px-6 py-2.5 text-base font-semibold text-white shadow-[0_8px_24px_-10px_rgba(59,130,246,0.6)] transition hover:opacity-90"
-              >
-                Sign in
-              </Link>
-            </div>
-          ) : assets == null ? (
-            <p className="text-center text-sm text-[#5A6472]">Loading assets…</p>
-          ) : assets.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-[#D4E2FB] px-5 py-10 text-center text-sm text-[#5A6472]">
-              Nothing here yet. Build a film and everything Filmo reads, captures, and
-              records will collect here.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-              {/* Type rail — each filter says what the type IS, so the library
-                  doubles as an explanation of what the agent collects. */}
-              <nav className="flex shrink-0 gap-2 overflow-x-auto sm:w-52 sm:flex-col sm:overflow-visible">
-                {KINDS.filter((k) => k.key === 'all' || counts[k.key]).map((k) => (
-                  <button
-                    key={k.key}
-                    onClick={() => setKind(k.key)}
-                    className={`flex items-center justify-between gap-3 whitespace-nowrap rounded-xl px-3 py-2 text-left transition ${
-                      kind === k.key
-                        ? 'bg-white text-[#0E1320] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
-                        : 'text-[#5A6472] hover:bg-white/60'
-                    }`}
-                  >
-                    <span className="flex flex-col">
-                      <span className="text-sm font-medium">{k.label}</span>
-                      {k.hint && kind === k.key ? (
-                        <span className="text-xs text-[#8A94A6]">{k.hint}</span>
-                      ) : null}
-                    </span>
-                    <span className="text-xs tabular-nums text-[#8A94A6]">
-                      {counts[k.key] || 0}
-                    </span>
-                  </button>
-                ))}
-              </nav>
-
-              <section className="min-w-0 flex-1">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="eyebrow">
-                    {shown.length} {shown.length === 1 ? 'asset' : 'assets'}
-                  </span>
-                  <button
-                    onClick={() => void load()}
-                    className="text-sm text-[#5A6472] transition hover:text-[#0E1320]"
-                  >
-                    Refresh
-                  </button>
-                </div>
-                <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {shown.map((a) => (
-                    <li key={a.id}>
-                      <Link
-                        href={`/runs/${a.runId}`}
-                        className="group block overflow-hidden rounded-xl border border-[#D4E2FB] bg-white transition hover:border-[#B9D2F8]"
-                      >
-                        <div className="flex aspect-video items-center justify-center overflow-hidden bg-[#0E1320]">
-                          {a.video ? (
-                            <video
-                              src={`${a.url}#t=2`}
-                              preload="metadata"
-                              muted
-                              playsInline
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            // Marks are small and often transparent — they sit ON
-                            // the dark tile rather than filling it.
-                            <img
-                              src={a.url}
-                              alt=""
-                              className={a.kind === 'mark'
-                                ? 'max-h-[60%] max-w-[70%] object-contain'
-                                : 'h-full w-full object-cover'}
-                            />
-                          )}
-                        </div>
-                        <div className="px-3 py-2">
-                          <p className="truncate text-sm font-medium text-[#0E1320]">{a.name}</p>
-                          <p className="truncate text-xs text-[#8A94A6]">
-                            {a.brand} · {when(a.ts)}
-                          </p>
-                        </div>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            </div>
-          )}
-        </main>
-
-        <SiteFooter />
+  let body: React.ReactNode
+  if (loading) {
+    // The shared loader, sized as a region inside a page that already has
+    // chrome — never `fit="screen"`, which would claim a viewport this page has
+    // already spent on a rail and a heading. The ground is left at its default
+    // (#F1F1EF), which is now this surface's ground too.
+    body = <FilmoLoader fit="block" />
+  } else if (!user || authError) {
+    // No redirect. Someone who typed this URL gets the door, not a bounce.
+    body = (
+      <div className="lib-gate">
+        <b>Sign in to see your assets</b>
+        <span>
+          Everything Filmo captured for you lives in your account, alongside the
+          filmos made from it.
+        </span>
+        <Link className="lib-gatebtn" href="/login">Sign in</Link>
       </div>
-    </div>
+    )
+  } else if (readFailed) {
+    body = (
+      <div className="lib-gate">
+        <b>That didn&rsquo;t load</b>
+        <span>
+          The studio couldn&rsquo;t be reached just now. Nothing is lost — every
+          asset is where you left it.
+        </span>
+        <button className="lib-gatebtn" onClick={() => void load()}>Try again</button>
+      </div>
+    )
+  } else if (assets == null) {
+    body = <FilmoLoader fit="block" />
+  } else if (assets.length === 0) {
+    body = (
+      <div className="lib-empty">
+        <b>Nothing captured yet.</b>
+        <span>
+          Make a filmo and everything Filmo reads, records and cuts on the way
+          collects here — the pages, the marks, the footage, every scene.
+        </span>
+        <Link className="lib-emptycta" href="/?new=1">New filmo</Link>
+      </div>
+    )
+  } else {
+    body = (
+      <>
+        <FilterStrip
+          options={options}
+          value={active}
+          onChange={setKind}
+          ariaLabel="Filter assets by kind"
+        />
+        <div className="lib-toolbar">
+          <span className="lib-count">
+            {shown.length} {shown.length === 1 ? 'asset' : 'assets'}
+          </span>
+          <button className="lib-refresh" onClick={() => void load()}>Refresh</button>
+        </div>
+        <ul className="lib-grid">
+          {shown.map((a) => <AssetTile key={a.id} asset={a} />)}
+        </ul>
+      </>
+    )
+  }
+
+  return (
+    <LibraryShell
+      current="assets"
+      title="Assets"
+      lede={
+        <>
+          Everything Filmo took from your site, or made from it — the pages it
+          read, the marks it captured, the footage it recorded, and every scene
+          it cut. Nothing in a filmo comes from anywhere else.
+        </>
+      }
+      context="/assets"
+      getToken={getToken}
+    >
+      {body}
+    </LibraryShell>
   )
 }
