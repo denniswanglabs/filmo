@@ -84,9 +84,9 @@ export default function VideosPage() {
         <header className="relative overflow-hidden">
           <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
           <div className="relative z-10 mx-auto max-w-3xl px-5 pb-8 pt-28 text-center sm:pt-36">
-            <span className="eyebrow">Your Videos</span>
+            <span className="eyebrow">Your Filmos</span>
             <h1 className="section-title mt-4 sm:text-5xl sm:leading-[1.08]">
-              Your launch videos.
+              Your filmos.
             </h1>
             <p className="section-lede mx-auto max-w-xl text-lg">
               Every build you&apos;ve started with Filmo, newest first. Open one to watch, edit, or
@@ -104,9 +104,9 @@ export default function VideosPage() {
             // → sign-in prompt only. No data is queried or exposed. The authError branch is
             // the post-payment fix: a logged-out tab prompts sign-in, never a false-empty list.
             <div className="mx-auto max-w-md rounded-2xl border border-[#D4E2FB] bg-white/95 px-6 py-12 text-center shadow-[0_30px_80px_-30px_rgba(30,58,120,0.22)] ring-1 ring-inset ring-[#EAF1FF] backdrop-blur-sm">
-              <p className="text-lg font-semibold text-[#0E1320]">Please sign in to view your videos</p>
+              <p className="text-lg font-semibold text-[#0E1320]">Please sign in to view your filmos</p>
               <p className="mx-auto mt-2 max-w-xs text-sm text-[#5A6472]">
-                Your launch videos live in your account. Sign in to pick up where you left off.
+                Your filmos live in your account. Sign in to pick up where you left off.
               </p>
               <Link
                 href="/login"

@@ -1,15 +1,22 @@
 'use client'
 // ── THE OVERVIEW'S RAIL ─────────────────────────────────────────────────────
-// The studio (`runs/[id]/Workspace.tsx`) owns its own rail and always has; this
-// is deliberately NOT a second copy of it. A rail's entries name the places
-// inside a surface, and the Overview has different places than a film does — so
-// what the two share is the FURNITURE (72px, the mark on the ground, 22px
-// icons, a 10px label, the account circle at the foot) rather than a list of
-// destinations that would then have to be kept identical in two files forever.
+// ⚠ TWIN: `runs/[id]/Workspace.tsx`. These two render the same rail and MUST
+// show the same entries in the same order. They already drifted once — this
+// file carried only Overview and New filmo while the studio also had Filmos
+// and Assets, so the same product had two different navigations depending on
+// which page you happened to be standing on, and Dennis found it immediately.
 //
-// Two entries only, both of which are true from anywhere: where you are, and
-// the one act that starts everything. Anything else — a film, the library —
-// is reached from the page's own content, where the thing itself is.
+// The reasoning that produced the drift was that a rail names the places
+// inside a surface, so different surfaces get different rails. That is wrong
+// for THIS rail: it is the product's navigation, not the page's — the same
+// argument Ploy's rail makes by being identical everywhere. Where you are
+// changes what is highlighted, never what exists.
+//
+// The two files legitimately differ in ONE way and it is not the entry list:
+// inside the studio, Filmos and Film are surfaces of the run you are already
+// in (tabs, so you never leave your film), while here they are routes. Same
+// labels, same icons, same order; different mechanics. If you add an entry,
+// add it in both.
 import Link from 'next/link'
 // ONE account circle for the whole product. It is the only place credits are
 // shown (deliberately not on the stats strip: what you have left to spend is a
@@ -41,17 +48,6 @@ export default function OverviewRail({ getToken, onFeedback }: {
         <FilmoMark />
       </div>
 
-      <Link className="ovrail-ic on" href="/overview" aria-current="page" title="Overview">
-        <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M3.5 10.4 12 3.8l8.5 6.6V19a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19z"
-            stroke="currentColor" strokeWidth="2" fill="none"
-            strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M9.5 20.5v-6h5v6" stroke="currentColor" strokeWidth="2" fill="none"
-            strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <i>Overview</i>
-      </Link>
-
       {/* `?new=1` is the product's existing word for "go straight to the
           composer" (see the note on readIntent in app/page.tsx). Using it means
           the Overview does not need a composer of its own — two composers that
@@ -63,6 +59,41 @@ export default function OverviewRail({ getToken, onFeedback }: {
             strokeLinecap="round" />
         </svg>
         <i>New filmo</i>
+      </Link>
+
+      <Link className="ovrail-ic on" href="/overview" aria-current="page" title="Overview">
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M3.5 10.4 12 3.8l8.5 6.6V19a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19z"
+            stroke="currentColor" strokeWidth="2" fill="none"
+            strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9.5 20.5v-6h5v6" stroke="currentColor" strokeWidth="2" fill="none"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <i>Overview</i>
+      </Link>
+
+      {/* Every filmo this account has finished. Inside the studio this is a
+          TAB (you stay in the run you are watching); from here there is no run
+          to stay in, so it is the standalone library route. Same label, same
+          icon, same place in the order — see the TWIN note at the top. */}
+      <Link className="ovrail-ic" href="/videos" title="Filmos you've made">
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <rect x="3" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
+          <rect x="13" y="4" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
+          <rect x="3" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
+          <rect x="13" y="13" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
+        </svg>
+        <i>Filmos</i>
+      </Link>
+
+      {/* The raw material: captures, marks, recordings, stills. A route in both
+          rails — it spans every run, so it never belonged to one. */}
+      <Link className="ovrail-ic" href="/assets" title="Everything captured and made for your filmos">
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M12 3.5 3.5 8l8.5 4.5L20.5 8 12 3.5Z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round" />
+          <path d="m3.5 12.5 8.5 4.5 8.5-4.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <i>Assets</i>
       </Link>
 
       <div className="ovrail-space" />

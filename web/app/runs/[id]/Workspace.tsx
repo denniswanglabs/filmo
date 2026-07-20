@@ -127,6 +127,13 @@ function FilmVideo({ src, poster, role, controls, videoRef, onTimeUpdate, onLoad
 
 type LocalMsg = { ts: number; kind: 'user' | 'dir'; text: string }
 
+// ⚠ TWIN: `components/overview/OverviewRail.tsx` renders this same rail on the
+// Overview. Same entries, same order, same labels and icons — they drifted
+// once already (this file had Filmos and Assets, that one didn't, so the
+// product had two navigations depending on where you stood). The rail is the
+// PRODUCT's navigation, not the page's: where you are changes what is
+// highlighted, never what exists. Add an entry here, add it there.
+//
 // ── THE ROOMS OF THIS PAGE, AS OPPOSED TO THE ROUTES OFF IT ─────────────────
 // A `Surface` is a room the rail can walk you into WITHOUT leaving this page:
 // the component renders every one of them itself, so a surface can never
