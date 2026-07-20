@@ -172,12 +172,39 @@ def charge_credits(run_dir: str, amount: int, reason: str) -> bool:
         return False
 
 
+def _walkrec_plan_patch(run_dir: str) -> dict:
+    """The forensic write-through (2026-07-20 audit): walkrec runs used to
+    deliver with runs.plan / props / selection ALL NULL — the claimer's walkrec
+    verdict sets only {status, phase}, and this shipper only PATCHed final_url —
+    which left a delivered film unexplainable from the DB (the overnight film
+    forensics were blind). The tour plan (stops + brand ctx, ~4KB, written by
+    proto_walkrec next to the render) IS the film's plan, so it ships WITH the
+    delivery, in the same PATCH.
+
+    props / selection stay untouched on purpose: runs.props gates the CLASSIC
+    editor and the rerender enqueue in the web app (truthy props would unlock a
+    classic editor on a walkrec film), and walkrec records no planner_usage for
+    selection. Best-effort: a missing/oversized/unreadable plan ships final_url
+    alone, exactly as before."""
+    p = os.path.join(run_dir, "stops.json")
+    try:
+        if os.path.exists(p) and os.path.getsize(p) <= 256 * 1024:
+            with open(p) as f:
+                plan = json.load(f)
+            if isinstance(plan, dict) and plan:
+                return {"plan": plan}
+    except Exception as e:
+        print(f"[ship] plan write-through skipped: {e}", file=sys.stderr)
+    return {}
+
+
 def ship_final(run_dir: str, run_key: str, film_path: str) -> str:
     """Deliver a walkrec film: copy to runs/<key>/final.mp4, upload via the
     strategy flow (no gateway cap), PATCH runs.final_url with a fresh ?v=
-    cache-buster. ONE contract for both the build and director paths — the
-    director's re-render used to update only the canvas artifact, leaving
-    final_url serving the pre-edit cut. Returns the URL ('' off-hosted)."""
+    cache-buster (+ the tour plan — see _walkrec_plan_patch). ONE contract for
+    both the build and director paths — the director's re-render used to update
+    only the canvas artifact, leaving final_url serving the pre-edit cut.
+    Returns the URL ('' off-hosted)."""
     rid = _hosted_run_id(run_dir)
     if not rid:
         return ""
@@ -194,8 +221,10 @@ def ship_final(run_dir: str, run_key: str, film_path: str) -> str:
         return ""
     url = f"{url}?v={int(time.time())}"
     try:
+        patch = {"final_url": url}
+        patch.update(_walkrec_plan_patch(run_dir))
         _if_req_retry("PATCH", f"/api/database/records/runs?id=eq.{rid}",
-                      json.dumps({"final_url": url}).encode(),
+                      json.dumps(patch).encode(),
                       "application/json")
     except Exception as e:
         print(f"[ship!] final_url patch failed: {e}", file=sys.stderr)
