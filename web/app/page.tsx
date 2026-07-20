@@ -7,7 +7,7 @@ import { AuthGate } from './components/AuthGate'
 import PloyLanding from './components/landing2/PloyLanding'
 import BootScreen from './components/landing2/BootScreen'
 import StudioEntry from './components/landing2/StudioEntry'
-import { BUILD_DEFAULTS } from './components/StartFilm'
+import { BUILD_DEFAULTS, BUILD_UNAVAILABLE } from './components/StartFilm'
 import {
   clearPendingBuild,
   isValidBuildUrl,
@@ -188,11 +188,38 @@ export default function Home() {
           mode: BUILD_DEFAULTS.mode,
           payMode: p.requirePay ? 'human' : 'auto',
         })
-        // The beta cap answers with a structured { limit } rather than a run. It
-        // is a real answer, not a broken session — say it and stop.
+        // createBuild classifies its own failures now (mirrors the composing
+        // doors' useStartFilm in components/StartFilm.tsx), so this resume path
+        // reads the SAME four shapes rather than treating every non-run as a run.
+
+        // authError — the server VERIFIED the token and rejected it (a real
+        // 401/403, not a brownout). The one case that earns the sign-in sheet:
+        // keep the URL for the round-trip and open the gate.
+        if ('authError' in res) {
+          writePendingBuild(p)
+          setBooting(false)
+          setNotice('Sign in again to start the film — your link is saved.')
+          setGateOpen(true)
+          setView('studio-entry')
+          clearBootStamp()
+          return
+        }
+        // limit — the credit cap or the short-window throttle. A real answer, not
+        // a broken session — say it and stop.
         if ('limit' in res) {
           setNotice(res.message)
           setBooting(false)
+          setView('studio-entry')
+          clearBootStamp()
+          return
+        }
+        // unavailable — the backend blinked and nothing was started. The session
+        // is fine, so this must NOT raise the sign-in gate: say the retryable line
+        // and keep the URL stashed so a second attempt is one tap.
+        if ('unavailable' in res) {
+          writePendingBuild(p)
+          setBooting(false)
+          setNotice(BUILD_UNAVAILABLE)
           setView('studio-entry')
           clearBootStamp()
           return
@@ -201,15 +228,15 @@ export default function Home() {
         // until the run page is ready, so the wait reads as one beat.
         router.push(`/runs/${res.runId}`)
       } catch {
-        // A thrown server action is OPAQUE in production (the "Server Components
-        // render … digest" 500), so its real message is unreadable. The dominant
-        // cause is a stale token — the UI looks signed in because the session was
-        // restored optimistically, but the server's verifyUser rejected it. Put
-        // the URL back so signing in a second time doesn't cost it.
+        // createBuild now returns every failure it can SEE, so the only throw that
+        // reaches here is the server action's own transport failing — the backend
+        // blinking, not an auth verdict. This used to say "your session expired"
+        // and raise the gate on exactly that hiccup; it must not. Nothing was
+        // started, so keep the URL and offer a retry — never a sign-in gate over a
+        // still-valid session.
         writePendingBuild(p)
         setBooting(false)
-        setNotice('Your session expired — sign in again to start the film.')
-        setGateOpen(true)
+        setNotice(BUILD_UNAVAILABLE)
         setView('studio-entry')
         clearBootStamp()
       }

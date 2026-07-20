@@ -161,176 +161,230 @@ export async function createBuild(input: {
   // must pay (test card 4242) before the build proceeds. Only the payment becomes
   // real — the render stays $0 mock.
   payMode?: 'auto' | 'human'
-}): Promise<{ runId: string; runKey: string } | { limit: true; message: string }> {
-  // Identity comes from the verified token, NEVER from the client. The owner of the
-  // build is whoever the token belongs to.
-  const me = await verifyUser(input.accessToken)
-  // The operator defaults to the walkrec pipeline (Dennis 2026-07-19: "I want
-  // to use the new one"): a plain submit with no explicit mode upgrades to
-  // walkrec for the owner account only — public beta users keep classic
-  // unless they carry the ?look=walkrec flag. /?look=classic stays an
-  // explicit escape (the client sends it through as-is).
-  let look = input.look
-  if (me && (me.email || '').toLowerCase() === OWNER_EMAIL && !look) {
-    look = 'walkrec'
-  }
-  if (!me) throw new Error('Please sign in to start a build.')
+}): Promise<
+  | { runId: string; runKey: string }
+  | { limit: true; message: string }
+  | { unavailable: true; message: string }
+  | { authError: true }
+> {
+  // ── THE ACTION BOUNDARY ─────────────────────────────────────────────────────
+  // Every failure this function can SEE is classified into ONE of four honest
+  // shapes, and none of them is an opaque throw. The reason is the build-start
+  // invariant, stated in components/StartFilm.tsx and enforced here at its source:
+  // a signed-in reader is NEVER told to sign in because the backend blinked. So the
+  // only failure that yields the sign-in door is the auth VERDICT (verifyUser
+  // returns null — a real 401/403); every OTHER failure — a timeout, an InsForge
+  // brownout, a retried-then-failed insert, an unexpected error — is caught by the
+  // boundary at the bottom and returned as { unavailable }, retryable, never auth.
+  // (A thrown server action is also the production "Server Components render …
+  // digest" 500 on the client, so returning instead of throwing hands the caller a
+  // clean, legible answer rather than an opaque error it has to guess at.)
+  try {
+    // Identity comes from the verified token, NEVER from the client. The owner of the
+    // build is whoever the token belongs to.
+    const me = await verifyUser(input.accessToken)
+    // The operator defaults to the walkrec pipeline (Dennis 2026-07-19: "I want
+    // to use the new one"): a plain submit with no explicit mode upgrades to
+    // walkrec for the owner account only — public beta users keep classic
+    // unless they carry the ?look=walkrec flag. /?look=classic stays an
+    // explicit escape (the client sends it through as-is).
+    let look = input.look
+    if (me && (me.email || '').toLowerCase() === OWNER_EMAIL && !look) {
+      look = 'walkrec'
+    }
+    // A NULL from verifyUser is a VERDICT, not a blip: it returns null ONLY on a
+    // genuine 401/403 (or an absent/garbage token) and THROWS on an unreachable
+    // auth service (see lib/insforge — that throw is caught below as { unavailable }).
+    // So !me is the one failure that has truly earned the sign-in door — return it
+    // as a distinct, structured refusal the client gates on WITHOUT reading an
+    // opaque throw, and which is unmistakably NOT the transient-blip path.
+    if (!me) return { authError: true as const }
 
-  // Validate the URL is a real http(s) address (defense-in-depth; the worker also
-  // SSRF-guards the fetch, but reject obvious garbage before we enqueue + spend).
-  const rawUrl = (input.url || '').trim()
-  if (!/^https?:\/\/[^\s]+\.[^\s]+/i.test(rawUrl)) throw new Error('Enter a valid website URL.')
+    // Validate the URL is a real http(s) address (defense-in-depth; the worker also
+    // SSRF-guards the fetch, but reject obvious garbage before we enqueue + spend).
+    const rawUrl = (input.url || '').trim()
+    if (!/^https?:\/\/[^\s]+\.[^\s]+/i.test(rawUrl)) throw new Error('Enter a valid website URL.')
 
-  const db = adminClient()
+    const db = adminClient()
 
-  // ── THE TWO GATES RUN CONCURRENTLY ──────────────────────────────────────────
-  // Nothing stands between the caller and a run id except identity and these two
-  // gates, and every one of them is a round trip to InsForge in Singapore
-  // (~310ms warm, ~1.4s on a cold connection — measured). They used to run one
-  // after the other for no reason other than the order they were written in:
-  // the rate-limit read and the credit read take the same already-verified
-  // user id, touch different tables, and neither one's answer changes the
-  // other's question. Run together they cost ONE trip instead of two, which is
-  // a third off everything that happens before the run row exists.
-  //
-  // They must both still finish BEFORE the insert. A gate evaluated after the
-  // row is written is not a gate — it is a report on a build that already
-  // started — so no amount of "move the slow part later" applies to these two.
-  // (The reason this is only a third and not the whole wait, and why the UI
-  // therefore cannot be allowed to wait on it at all, is written up in
-  // components/StartFilm.tsx.)
-  const windowStart = new Date(Date.now() - 10 * 60_000).toISOString()
-  const isOwner = (me.email || '').toLowerCase() === OWNER_EMAIL
-  const [recentRes, bal] = await Promise.all([
-    db.database
-      .from('runs')
-      .select('id')
-      .eq('user_id', me.id)
-      .gte('created_at', windowStart),
-    // The owner is exempt from the credit cap, so their balance is never read.
-    isOwner ? Promise.resolve(null) : creditBalances(db, me.id),
-  ])
+    // ── THE TWO GATES RUN CONCURRENTLY ──────────────────────────────────────────
+    // Nothing stands between the caller and a run id except identity and these two
+    // gates, and every one of them is a round trip to InsForge in Singapore
+    // (~310ms warm, ~1.4s on a cold connection — measured). They used to run one
+    // after the other for no reason other than the order they were written in:
+    // the rate-limit read and the credit read take the same already-verified
+    // user id, touch different tables, and neither one's answer changes the
+    // other's question. Run together they cost ONE trip instead of two, which is
+    // a third off everything that happens before the run row exists.
+    //
+    // They must both still finish BEFORE the insert. A gate evaluated after the
+    // row is written is not a gate — it is a report on a build that already
+    // started — so no amount of "move the slow part later" applies to these two.
+    // (The reason this is only a third and not the whole wait, and why the UI
+    // therefore cannot be allowed to wait on it at all, is written up in
+    // components/StartFilm.tsx.)
+    const windowStart = new Date(Date.now() - 10 * 60_000).toISOString()
+    const isOwner = (me.email || '').toLowerCase() === OWNER_EMAIL
+    const [recentRes, bal] = await Promise.all([
+      db.database
+        .from('runs')
+        .select('id')
+        .eq('user_id', me.id)
+        .gte('created_at', windowStart),
+      // The owner is exempt from the credit cap, so their balance is never read.
+      isOwner ? Promise.resolve(null) : creditBalances(db, me.id),
+    ])
 
-  // Rate limit: cap builds per user per window so a scripted loop can't drain the
-  // Nemotron/render budget. Time-based + status-agnostic (stuck rows never wedge it).
-  const recent = recentRes.data as { id: string }[] | null
-  if (recent && recent.length >= 10) {
-    throw new Error('Too many builds in a short window — give it a minute and try again.')
-  }
-
-  // Beta cap: every account EXCEPT the owner gets N videos per rolling 24h DAY while
-  // Filmo is in beta — protects the Nemotron/ElevenLabs budget from a stranger draining
-  // it, while letting people come back tomorrow. Identity is the server-verified token
-  // (never the client) and the admin count bypasses RLS, so it can't be gamed. The owner
-  // is exempt. We RETURN a structured { limit } (not throw) so the UI shows the friendly
-  // message inline rather than the opaque "Server Components render" server-action error.
-  // FREE INDEFINITELY; THE CREDIT CAP IS THE ONLY LIMIT (Dennis, 2026-07-19).
-  // There was a hard date here — builds paused for every non-owner after
-  // 2026-07-22 — which is a time bomb, not a policy: nothing would look wrong
-  // until the morning the product silently stopped accepting work. The daily
-  // and lifetime caps below already protect the model budget, continuously and
-  // without a cliff, so the date bought nothing that the caps don't. Do not
-  // reintroduce a wall-clock expiry; if the free tier ever ends, that is a
-  // deliberate product decision that ships with its own messaging.
-  if (bal) {
-    // CREDITS (beta): costs and caps are the constants above — never restate
-    // them here, or the comment rots the moment they move. Balance is the SUM
-    // of an append-only ledger (spends negative; failed builds refunded by the
-    // worker), so failed attempts do not consume the allowance. Server-side,
-    // admin client — can't be gamed. `bal` is null for exactly one reason: the
-    // owner is exempt, so the read above was never issued.
-    if (bal.dailyUsed + VIDEO_CREDIT_COST > DAILY_CREDIT_CAP) {
+    // Rate limit: cap builds per user per window so a scripted loop can't drain the
+    // Nemotron/render budget. Time-based + status-agnostic (stuck rows never wedge it).
+    // A throttle is not a broken session, so it RETURNS a structured { limit } (the
+    // same channel as the credit caps) rather than throwing: the client says the
+    // "give it a minute" line inline and — critically — never raises a sign-in gate
+    // over it, which the opaque throw used to make it do.
+    const recent = recentRes.data as { id: string }[] | null
+    if (recent && recent.length >= 10) {
       return {
         limit: true as const,
-        message: `You've used today's ${DAILY_CREDIT_CAP.toLocaleString()} credits. They refresh tomorrow morning — see you then.`,
+        message: 'Too many builds in a short window — give it a minute and try again.',
       }
     }
-    if (bal.lifetimeUsed + VIDEO_CREDIT_COST > LIFETIME_CREDIT_CAP) {
-      return {
-        limit: true as const,
-        message: `You've reached the beta's ${LIFETIME_CREDIT_CAP}-credit allowance. Paid credits are coming — thanks for filming with us!`,
+
+    // Beta cap: every account EXCEPT the owner gets N videos per rolling 24h DAY while
+    // Filmo is in beta — protects the Nemotron/ElevenLabs budget from a stranger draining
+    // it, while letting people come back tomorrow. Identity is the server-verified token
+    // (never the client) and the admin count bypasses RLS, so it can't be gamed. The owner
+    // is exempt. We RETURN a structured { limit } (not throw) so the UI shows the friendly
+    // message inline rather than the opaque "Server Components render" server-action error.
+    // FREE INDEFINITELY; THE CREDIT CAP IS THE ONLY LIMIT (Dennis, 2026-07-19).
+    // There was a hard date here — builds paused for every non-owner after
+    // 2026-07-22 — which is a time bomb, not a policy: nothing would look wrong
+    // until the morning the product silently stopped accepting work. The daily
+    // and lifetime caps below already protect the model budget, continuously and
+    // without a cliff, so the date bought nothing that the caps don't. Do not
+    // reintroduce a wall-clock expiry; if the free tier ever ends, that is a
+    // deliberate product decision that ships with its own messaging.
+    if (bal) {
+      // CREDITS (beta): costs and caps are the constants above — never restate
+      // them here, or the comment rots the moment they move. Balance is the SUM
+      // of an append-only ledger (spends negative; failed builds refunded by the
+      // worker), so failed attempts do not consume the allowance. Server-side,
+      // admin client — can't be gamed. `bal` is null for exactly one reason: the
+      // owner is exempt, so the read above was never issued.
+      if (bal.dailyUsed + VIDEO_CREDIT_COST > DAILY_CREDIT_CAP) {
+        return {
+          limit: true as const,
+          message: `You've used today's ${DAILY_CREDIT_CAP.toLocaleString()} credits. They refresh tomorrow morning — see you then.`,
+        }
+      }
+      if (bal.lifetimeUsed + VIDEO_CREDIT_COST > LIFETIME_CREDIT_CAP) {
+        return {
+          limit: true as const,
+          message: `You've reached the beta's ${LIFETIME_CREDIT_CAP}-credit allowance. Paid credits are coming — thanks for filming with us!`,
+        }
       }
     }
-  }
 
-  // Whitelist every client-supplied param (never forward raw — the worker trusts these).
-  // Single coherent tier: every video is produced the same way. `quality` is pinned to
-  // 'standard' (kept only to satisfy the existing runs/jobs schema + worker param contract).
-  const quality = 'standard' as const
-  const brain = input.brain && ALLOWED_BRAINS.has(input.brain) ? input.brain : 'super-free'
-  const lookFinal: 'classic' | 'engineered-night' | 'walkrec' =
-    look === 'walkrec' ? 'walkrec'
-    : look === 'engineered-night' ? 'engineered-night' : 'classic'
-  const mode: 'mock' | 'real' = input.mode === 'real' ? 'real' : 'mock'
-  let payMode: 'auto' | 'human' = input.payMode === 'human' ? 'human' : 'auto'
+    // Whitelist every client-supplied param (never forward raw — the worker trusts these).
+    // Single coherent tier: every video is produced the same way. `quality` is pinned to
+    // 'standard' (kept only to satisfy the existing runs/jobs schema + worker param contract).
+    const quality = 'standard' as const
+    const brain = input.brain && ALLOWED_BRAINS.has(input.brain) ? input.brain : 'super-free'
+    const lookFinal: 'classic' | 'engineered-night' | 'walkrec' =
+      look === 'walkrec' ? 'walkrec'
+      : look === 'engineered-night' ? 'engineered-night' : 'classic'
+    const mode: 'mock' | 'real' = input.mode === 'real' ? 'real' : 'mock'
+    let payMode: 'auto' | 'human' = input.payMode === 'human' ? 'human' : 'auto'
 
-  // COST GUARD: 'real' mode spends real third-party COGS (Higgsfield/ElevenLabs). Never
-  // let it run for free — force a real (test) Stripe checkout unless the caller is an
-  // operator/developer account. Demo/normal users always run $0 mock anyway.
-  if (mode === 'real' && payMode !== 'human') {
-    const dev = await isDeveloperId(me.id)
-    if (!dev) payMode = 'human'
-  }
+    // COST GUARD: 'real' mode spends real third-party COGS (Higgsfield/ElevenLabs). Never
+    // let it run for free — force a real (test) Stripe checkout unless the caller is an
+    // operator/developer account. Demo/normal users always run $0 mock anyway.
+    if (mode === 'real' && payMode !== 'human') {
+      const dev = await isDeveloperId(me.id)
+      if (!dev) payMode = 'human'
+    }
 
-  const runKey = `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-  const brand = rawUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-  const goal = input.goal || 'A 30-second brand explainer'
+    const runKey = `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const brand = rawUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+    const goal = input.goal || 'A 30-second brand explainer'
 
-  // Both enqueue inserts retry on a transient InsForge error so a one-off blip
-  // doesn't surface as a failed build (see withRetry).
-  const { data: runs, error: runErr } = await withRetry(() =>
-    db.database
-      .from('runs')
-      .insert([{
-        user_id: me.id, run_key: runKey, brand, company_url: rawUrl,
-        goal, emphasis: input.emphasis || null, quality, brain, mode, status: 'queued',
-        // Walkrec beta: free (price 0), narrated via agent_events, Sonnet-planned.
-        film_mode: lookFinal === 'walkrec' ? 'walkrec' : 'classic',
-        ...(lookFinal === 'walkrec' ? { price_cents: 0 } : {}),
-      }])
-      .select(),
-  )
-  if (runErr) throw new Error('runs.insert: ' + JSON.stringify(runErr))
-  const runId = runs![0].id
+    // ── THE WRITE ORDER IS AN INVARIANT: runs → jobs → charge, all awaited ───────
+    // Both enqueue inserts retry on a transient InsForge error so a one-off blip
+    // doesn't surface as a failed build (see withRetry). A retried-then-failed
+    // insert throws, and that throw is the boundary's job: the caller gets
+    // { unavailable } (retryable) and, because the run row is written FIRST and the
+    // charge LAST, a failure here means nothing the reader would be billed for.
+    const { data: runs, error: runErr } = await withRetry(() =>
+      db.database
+        .from('runs')
+        .insert([{
+          user_id: me.id, run_key: runKey, brand, company_url: rawUrl,
+          goal, emphasis: input.emphasis || null, quality, brain, mode, status: 'queued',
+          // Walkrec beta: free (price 0), narrated via agent_events, Sonnet-planned.
+          film_mode: lookFinal === 'walkrec' ? 'walkrec' : 'classic',
+          ...(lookFinal === 'walkrec' ? { price_cents: 0 } : {}),
+        }])
+        .select(),
+    )
+    if (runErr) throw new Error('runs.insert: ' + JSON.stringify(runErr))
+    const runId = runs![0].id
 
-  const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, look: lookFinal, pay_mode: payMode, run_key: runKey, duration: 30 }
-  const { error: jobErr } = await withRetry(() =>
-    db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }]),
-  )
-  if (jobErr) throw new Error('jobs.insert: ' + JSON.stringify(jobErr))
+    const params = { company_url: rawUrl, goal, emphasis: input.emphasis || '', quality, brain, mode, look: lookFinal, pay_mode: payMode, run_key: runKey, duration: 30 }
+    const { error: jobErr } = await withRetry(() =>
+      db.database.from('jobs').insert([{ run_id: runId, status: 'queued', params }]),
+    )
+    if (jobErr) throw new Error('jobs.insert: ' + JSON.stringify(jobErr))
 
-  // Charge the video at creation (owner exempt). The worker refunds this row
-  // if the build fails, so failed attempts never consume the allowance. The
-  // partial unique index (run_id, reason) makes the charge idempotent.
-  //
-  // STAYS AFTER THE JOBS INSERT, AND STAYS AWAITED. Both are tempting to move:
-  // running it concurrently with the enqueue would save a round trip, and
-  // firing it off unawaited would save one more. Neither is safe. The order is
-  // an invariant — a jobs.insert failure throws above, so a reader is never
-  // charged for a build that was never enqueued — and a serverless function may
-  // be killed the moment it responds, so an unawaited write is a write that
-  // sometimes does not happen. Charging "sometimes" is the same as not charging.
-  // The wait these two cost is paid behind the arrival cover, not in front of
-  // the reader (components/StartFilm.tsx).
-  if (!isOwner) {
-    // The charge is the DATA BEHIND THE CAP: creditBalances sums this table, so a
-    // charge that silently fails makes the daily/lifetime caps fiction for that
-    // build. The build itself must still proceed (the run is already enqueued —
-    // failing the caller here would charge them a confusing error instead of a
-    // film), but the failure can never be invisible: log it with enough identity
-    // to reconcile the ledger by hand.
-    const { error: chargeErr } = await withRetry(() => db.database.from('credit_ledger').insert([{
-      user_id: me.id, delta: -VIDEO_CREDIT_COST, reason: 'video', run_id: runId,
-    }]))
-    if (chargeErr) {
-      console.error(
-        `[credits] video charge FAILED for run ${runId} (user ${me.id}): ` +
-        `${JSON.stringify(chargeErr)} — ledger is now missing a -${VIDEO_CREDIT_COST} spend row`,
-      )
+    // Charge the video at creation (owner exempt). The worker refunds this row
+    // if the build fails, so failed attempts never consume the allowance. The
+    // partial unique index (run_id, reason) makes the charge idempotent.
+    //
+    // STAYS AFTER THE JOBS INSERT, AND STAYS AWAITED. Both are tempting to move:
+    // running it concurrently with the enqueue would save a round trip, and
+    // firing it off unawaited would save one more. Neither is safe. The order is
+    // an invariant — a jobs.insert failure throws above, so a reader is never
+    // charged for a build that was never enqueued — and a serverless function may
+    // be killed the moment it responds, so an unawaited write is a write that
+    // sometimes does not happen. Charging "sometimes" is the same as not charging.
+    // The wait these two cost is paid behind the arrival cover, not in front of
+    // the reader (components/StartFilm.tsx).
+    if (!isOwner) {
+      // The charge is the DATA BEHIND THE CAP: creditBalances sums this table, so a
+      // charge that silently fails makes the daily/lifetime caps fiction for that
+      // build. The build itself must still proceed (the run is already enqueued —
+      // failing the caller here would charge them a confusing error instead of a
+      // film), but the failure can never be invisible: log it with enough identity
+      // to reconcile the ledger by hand. It does NOT throw — the build is real, so
+      // it must not be reported to the reader as unavailable.
+      const { error: chargeErr } = await withRetry(() => db.database.from('credit_ledger').insert([{
+        user_id: me.id, delta: -VIDEO_CREDIT_COST, reason: 'video', run_id: runId,
+      }]))
+      if (chargeErr) {
+        console.error(
+          `[credits] video charge FAILED for run ${runId} (user ${me.id}): ` +
+          `${JSON.stringify(chargeErr)} — ledger is now missing a -${VIDEO_CREDIT_COST} spend row`,
+        )
+      }
+    }
+
+    return { runId, runKey }
+  } catch (err) {
+    // THE BOUNDARY. Everything the function could SEE that is not the auth verdict
+    // or a cap above funnels here: verifyUser throwing on an unreachable auth
+    // service, a retried-then-failed runs/jobs insert, an unexpected error. NONE of
+    // them becomes an auth signal — that is the whole point. They become one
+    // structured { unavailable }: retryable, and (because the run row is the LAST
+    // thing gated, written only after identity and both caps) genuinely "nothing was
+    // started". The real reason is logged here for the operator; the client owns the
+    // one honest sentence it shows the reader (components/StartFilm.tsx).
+    console.error(
+      '[createBuild] unavailable —',
+      err instanceof Error ? err.message : String(err),
+    )
+    return {
+      unavailable: true as const,
+      message: 'The build service is briefly unavailable — nothing was started.',
     }
   }
-
-  return { runId, runKey }
 }
 
 // ─────────────────────── Editor: Export → re-render job ───────────────────────

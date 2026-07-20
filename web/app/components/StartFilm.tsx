@@ -118,14 +118,29 @@ export function normalizeUrl(raw: string): string {
 }
 
 // ── THE SENTENCES, ALSO ONCE ────────────────────────────────────────────────
-// Two genuinely different conditions, and the difference matters to the reader:
-// one is "you are not signed in", the other is "you looked signed in and the
-// server disagreed". They used to be worded four slightly different ways across
-// three files, which is how a product ends up sounding like four people.
+// THREE genuinely different conditions, and the difference matters to the reader:
+//   • "you are not signed in"            (no token at all)
+//   • "you looked signed in and the      (a token the SERVER verified and
+//      server disagreed"                  rejected — a real 401/403)
+//   • "the backend blinked; nothing      (a timeout / InsForge brownout /
+//      started, try again"                unexpected 500 between click and run)
+// They used to be worded several slightly different ways across three files, and
+// — worse — the third collapsed into the second: a transient backend hiccup told
+// a still-signed-in reader their session had expired and put the sign-in sheet in
+// front of them. That is the defect this file now exists (also) to kill.
 export const NEEDS_SIGN_IN =
   'Sign in to start filming — your link is saved.'
 export const SESSION_REJECTED =
   'Your session expired — sign in again to start the filmo.'
+// THE INVARIANT, IN ONE SENTENCE. The session is fine — so this must never read
+// as "signed out" and never raise a gate. NOTHING was started, and that is not a
+// hope: the run row is written LAST, after identity and both gates, so a failure
+// anywhere before it leaves nothing half-made. The URL never leaves the box, so
+// the retry is a single keystroke. createBuild classifies the server-visible
+// failures into { unavailable } and the hook's catch classifies the one it can't
+// see (the server action's own transport failing) the same way — both land here.
+export const BUILD_UNAVAILABLE =
+  "That didn't go through — nothing was started. Try again."
 export const BAD_URL = 'Enter a valid website URL.'
 
 /**
@@ -160,10 +175,18 @@ export function stashPendingFilm(rawUrl: string): void {
 /** Why `startFilm` could not start a film. The door decides what to DO about
  *  it; the wording is already decided here. */
 export type FilmStartRefusal = {
-  /** 'sign-in'  the reader has to authenticate — doors with a gate open it.
-   *  'limit'    a real, structured answer from the server (the credit cap).
-   *  'invalid'  the URL was never going to work. */
-  kind: 'sign-in' | 'limit' | 'invalid'
+  /** 'sign-in'      the reader has to authenticate — doors with a gate open it.
+   *  'limit'        a real, structured answer from the server (a cap): the credit
+   *                 allowance, or the short-window build throttle.
+   *  'unavailable'  the backend blinked and nothing was started. Retryable words,
+   *                 the URL is kept, and NO door opens a sign-in gate over it — a
+   *                 still-valid session is never sent to sign in because of a blip.
+   *  'invalid'      the URL was never going to work.
+   *
+   *  A door's ONLY branch is `kind === 'sign-in'` → open the gate; every other
+   *  kind is just a sentence it shows. So a door needs no change to honour a new
+   *  kind — 'unavailable' shows its words and, correctly, never gates. */
+  kind: 'sign-in' | 'limit' | 'unavailable' | 'invalid'
   message: string
   /** The normalized URL, for a door that wants to say it back. */
   url: string
@@ -278,12 +301,42 @@ export function useStartFilm({
 
         const res = await createBuild({ accessToken, url, look, ...BUILD_DEFAULTS })
 
-        // The credit cap answers with a structured { limit } rather than a run.
-        // It is a real answer, not a broken session — say it and stop, and do
-        // NOT re-open a sign-in gate over it.
+        // createBuild answers with a DISCRIMINATED refusal rather than throwing,
+        // because a thrown server action is the opaque "Server Components render …
+        // digest" 500 on the client — its real reason is unreadable here, so the
+        // classification has to arrive as a value. Three shapes, three honest doors.
+
+        // authError — the server VERIFIED the token and rejected it: a real 401/403,
+        // NOT a brownout (verifyUser returns null only on a genuine rejection and
+        // THROWS on an unreachable auth service — see lib/insforge). This is the one
+        // failure that has actually earned the sign-in sheet, so it opens the gate,
+        // keeps the URL for after the Google round-trip, and says the same "expired"
+        // sentence as before. It is the ONLY non-'sign-in'-token path that gates.
+        if ('authError' in res) {
+          setStarting(false)
+          stash()
+          onRefused({ kind: 'sign-in', message: SESSION_REJECTED, url })
+          return
+        }
+
+        // limit — a cap the server chose to report (the credit allowance, or the
+        // short-window build throttle). A real answer, not a broken session: say it
+        // and stop, and do NOT open a sign-in gate over it.
         if ('limit' in res) {
           setStarting(false)
           onRefused({ kind: 'limit', message: res.message, url })
+          return
+        }
+
+        // unavailable — the backend blinked (timeout / InsForge unreachable /
+        // unexpected 500) and NOTHING was started. The session is fine, so the one
+        // thing this must never do is send a signed-in reader to sign in again.
+        // Lower the cover onto retryable words with the URL still in the box; there
+        // is no round-trip to survive, so — unlike the two gate paths — it does not
+        // stash.
+        if ('unavailable' in res) {
+          setStarting(false)
+          onRefused({ kind: 'unavailable', message: BUILD_UNAVAILABLE, url })
           return
         }
 
@@ -293,19 +346,19 @@ export function useStartFilm({
         // one screen from the click to the studio rather than three.
         router.push(`/runs/${res.runId}`)
       } catch {
-        // A thrown server action is OPAQUE here (the digest 500), so its real
-        // message is unreadable. The dominant cause is a stale token: the UI
-        // still looks signed in because the session was restored optimistically,
-        // but the server's verifyUser rejected it. Offer the fix instead of the
-        // scary error, and keep the URL so signing in doesn't cost it.
-        //
-        // THIS IS ALSO THE "IT FAILED AFTER THE SCREEN CHANGED" PATH, and the
-        // reason the cover is lowered on the line below rather than left up:
-        // a cover that outlives its build is a spinner that never ends, which
-        // is a worse lie than the frozen composer this file replaced.
+        // THE LAST UNKNOWN. createBuild now classifies every failure it can SEE into
+        // one of the shapes above, so the only throw that still reaches here is the
+        // one it cannot return through: the server action's own transport failing —
+        // the browser never reached Vercel, or Vercel died mid-call — which IS,
+        // definitionally, the backend blinking. So the conservative reading of an
+        // unknown throw is 'unavailable', NEVER 'sign-in': a valid session must not
+        // be told to re-authenticate because the wire hiccuped. This used to say
+        // "your session expired" and raise the gate on exactly this hiccup — the
+        // mislabel this fix removes. Nothing was started, so the cover is lowered
+        // (a cover that outlives its build is a spinner that never ends), the words
+        // are the same retryable ones, and the URL stays in the box for one-key retry.
         setStarting(false)
-        stash()
-        onRefused({ kind: 'sign-in', message: SESSION_REJECTED, url })
+        onRefused({ kind: 'unavailable', message: BUILD_UNAVAILABLE, url })
       }
     },
     [getToken, onRefused, router],
