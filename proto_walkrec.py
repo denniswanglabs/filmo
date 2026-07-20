@@ -1932,7 +1932,17 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
 
     ctx = {"theme": theme, "name": name, "host": host, "tagline": tagline,
            "logo_rel": logo_rel, "site_bg": site_bg, "accent": pal["accent"]}
-    out, beats, film_s = _assemble_and_render(run_id, run_dir, pub, stops, ctx)
+    # TIER 2 — REVIEW THE PLAN BEFORE PAYING FOR PIXELS. Six of the eight checks
+    # read stops/beats, not frames, and were complete before the render yet ran
+    # after it — so a data finding bought a ~262s re-render instead of a free
+    # re-plan, and the round budget spent on re-renders (REVIEWER-FINDINGS §7).
+    # They run here now, looping cheaply at the plan level; the film is rendered
+    # ONCE, from a plan already repaired. Only beat-visible and title-match —
+    # the two that need the rendered stills — are left for the post-render pass,
+    # so the 2-round budget buys what only pixels can catch.
+    beats, t_f, props_path, out = _review_plan(run_id, run_dir, pub, stops, ctx)
+    out, beats, film_s = _render_planned(run_dir, props_path, out, beats, t_f,
+                                         stops, ctx)
     out, beats, film_s, unresolved = _review_and_fix(
         run_id, run_dir, pub, stops, ctx, beats, film_s, brain=brain)
     # The one long message the thread earns: what it is, what's in it, and
@@ -1958,13 +1968,14 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     return out
 
 
-def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
-    """Assembly tail: motif assignment -> world layout -> props -> render ->
-    per-beat design stills. Split from build_tour_film so the REVIEWER can
-    re-run it with adjusted stops (auto-apply).
-    Returns (film, beats_meta, film_seconds) — the length MEASURED off the
-    rendered artifact, so every downstream number is authored from the film
-    rather than reconstructed from the plan."""
+def _plan_beats(run_id, run_dir, pub, stops, ctx):
+    """Assemble a cut into beats/elements/props WITHOUT rendering it: motif
+    assignment -> world layout -> stops.json + props. The pixel-free half of
+    the old _assemble_and_render, split out (Tier 2) so the reviewer can lint
+    the PLAN — the six data checks over stops/beats — before a render is paid
+    for. A finding here costs a free re-plan; only beat-visible and title-match,
+    which need the rendered stills, are left for the post-render pass.
+    Returns (beats_meta, total_frames, props_path, out_path) — no film yet."""
     theme = ctx["theme"]; name = ctx["name"]; host = ctx["host"]
     tagline = ctx["tagline"]; logo_rel = ctx["logo_rel"]
     site_bg = ctx["site_bg"]
@@ -2160,6 +2171,20 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
         json.dump(props, f, indent=2)
     run_dir = os.path.abspath(run_dir)
     out = os.path.join(run_dir, "film-tour.mp4")
+    return beats, t_f, props_path, out
+
+
+def _render_planned(run_dir, props_path, out, beats, t_f, stops, ctx):
+    """Render an already-planned cut and read its truths off the artifact.
+
+    The pixel-free half (_plan_beats) is done; this is the ~262s render half,
+    split out so the Tier-2 build path can render EXACTLY ONCE, after the data
+    lints have reviewed and repaired the plan. Measures the length off the
+    rendered file (never estimated) and extracts one design still per beat at
+    beat_start + 84f for the post-render pixel checks.
+    Returns (film, beats_meta, film_seconds)."""
+    site_bg = ctx["site_bg"]
+    run_dir = os.path.abspath(run_dir)
     emit(run_dir, "assemble.render",
          f"Rendering the film — {t_f / FPS:.1f}s, {len(stops)} beats",
          f"Plus the branded open and the closing card. "
@@ -2205,6 +2230,17 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
     return out, beats, film_s
 
 
+def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
+    """Plan a cut and render it in one call — (film, beats_meta, film_seconds).
+    The director's re-render path and the post-render pixel recut both need a
+    plan AND a film, so this composes _plan_beats + _render_planned for them.
+    The Tier-2 build path instead calls the two separately, with the plan-stage
+    review in between, so a data finding costs a re-plan rather than a
+    re-render."""
+    beats, t_f, props_path, out = _plan_beats(run_id, run_dir, pub, stops, ctx)
+    return _render_planned(run_dir, props_path, out, beats, t_f, stops, ctx)
+
+
 # ---- THE REVIEW CONTRACT --------------------------------------------------
 # A gate that cannot fail is not a gate, and a pass may only assert what was
 # actually evaluated. Both halves failed together on insforge.dev 2026-07-19:
@@ -2230,11 +2266,19 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
 # name            claim the film may make when the check passes        blocking
 _CHECKS = (
     ("beat-content", "every beat carries something real from your pages", True),
-    # beat-visible ships NON-blocking for now: its 6.0 floor rests on an n=6
-    # calibration (see _INK_FLOOR), and a false block denies a customer a film.
-    # A blank beat still gets cut in round 1 via its _CUT fix and still reaches
-    # the handover as a named finding — flip to True once the floor has seen
-    # more than six real beats.
+    # beat-visible STAYS NON-blocking — decided on the full corpus, not left
+    # open (2026-07-20, n=102 text beats across 24 films; see _INK_FLOOR).
+    # When this check fires it is wrong 2 times in 3: the sub-floor population
+    # was 3 beats, of which 2 settle healthy (4.54->8.35, 4.59->8.04) and 1 is
+    # genuinely blank (4.66 at every sample point). The blank one sits BETWEEN
+    # the two false positives at the sample offset, so no floor value can
+    # separate blank from dim here — and moving the still later trades 2 false
+    # positives for up to 13 new ones (the beat-end region reads the exit fade
+    # on 13/102 beats). All three sub-floor beats are context-cards on a light
+    # world; the fix for that class is upstream contrast, not this gate.
+    # Non-blocking already cuts a genuinely blank beat in round 1 via its _CUT
+    # fix; blocking would only add refuse-delivery on an alarm with 1-in-3
+    # precision. Revisit only if the still-sampling itself changes.
     ("beat-visible", "every beat is actually legible on screen", False),
     ("ticked-items", "nothing wears a green check that isn't a benefit", True),
     ("treatment-fit", "each treatment has the material it needs", False),
@@ -2268,6 +2312,18 @@ def _finding_title(f: dict) -> str:
 # controls — a flat #FAFAFA field reads 0.00, and a #FBFBFB block on white (the
 # white-on-white failure itself) reads 1.02. The populations are a factor of ten
 # apart; the floor sits between them, biased LOW so a marginal beat passes.
+#
+# RE-CALIBRATED 2026-07-20 (daylight) on the full corpus: 102 text beats across
+# 24 films, sampled at the production offset (beat start + 84f = 2.8s) AND at
+# beat end. The offset sample sits on the settled plateau for ~99% of beats
+# (entrances finish by ~2.0s), so the "mid-entrance sample" worry is real but
+# rare; median offset std 13.9, dark-world minimum 10.1. What the floor cannot
+# do is separate BLANK from DIM: every sub-floor reading (3/102) is a
+# context-cards beat on a light world, where the settled plateau itself is only
+# ~8 — the genuinely blank one (4.66) reads between the two that settle healthy
+# (4.54, 4.59). Hence beat-visible stays non-blocking (see _CHECKS) and the
+# floor stays at 6.0: raising it starts eating request-table/chip-sweep on
+# light worlds (6.6-7.8), lowering it passes the one true blank.
 _INK_FLOOR = 6.0
 _MIN_BEATS_AFTER_CUT = 3
 
@@ -2275,7 +2331,14 @@ _MIN_BEATS_AFTER_CUT = 3
 def _cut_allowed(stops, i, pending) -> bool:
     """May beat `i` be cut, given the cuts already proposed this round? A lint
     that cuts past these floors has replaced one dishonest film with an empty
-    one: a film needs beats, and a tour needs at least one real recording."""
+    one: a film needs beats, and a tour needs at least one real recording.
+
+    `pending` is ONE set per review round, shared by every lint that can
+    propose _CUT — capacity is a property of the FILM, so per-lint sets let
+    two honest lints jointly cut past the floor (and treatment-fit, with no
+    consult at all, took a 4-beat cut to 1 on 2026-07-20). _apply_fixes
+    re-checks the same floors over the round's whole cut set, so nothing
+    that skips this consult can pop past them either."""
     remaining = [j for j in range(len(stops)) if j != i and j not in pending]
     if len(remaining) < _MIN_BEATS_AFTER_CUT:
         return False
@@ -2299,7 +2362,7 @@ def _frame_ink(still: str):
     return (sum((x - mean) ** 2 for x in b) / 256.0) ** 0.5
 
 
-def _lint_blank(stops, beats):
+def _lint_blank(stops, beats, pending=None):
     """BEAT-VISIBLE: the pixel half of beat-content, measured on the RENDERED
     artifact so it cannot be satisfied by intent. Every other data check reads
     the plan, so a beat whose material renders white-on-white — or whose ticked
@@ -2312,7 +2375,8 @@ def _lint_blank(stops, beats):
     sized to nothing, an entrance that never ran, a font that never loaded.
 
     Returns (ran, findings) — `ran` only when a still was read for EVERY beat."""
-    out, looked, pending = [], 0, set()
+    out, looked = [], 0
+    pending = set() if pending is None else pending
     for b in beats:
         ink = _frame_ink(b.get("still") or "")
         if ink is None:
@@ -2365,11 +2429,12 @@ def _lint_ticks(stops):
     return out
 
 
-def _lint_treatment_fit(stops):
+def _lint_treatment_fit(stops, pending=None):
     """TREATMENT-FIT: each treatment's material floor, re-checked on the final
     beat plan. Floors count only material the treatment will actually SHOW —
     a check-list's floor counts tickable rows, not raw harvested lines."""
     findings = []
+    pending = set() if pending is None else pending
     for i, s in enumerate(stops):
         if s.get("seg"):
             continue
@@ -2385,23 +2450,32 @@ def _lint_treatment_fit(stops):
         # for check-list, but land on whatever unspent treatment holds here.
         fallback = _pick_repair(stops, i, "check-list" if len(ticks) >= 2
                                 else "")
+        issues = []
         if motif == "chip-sweep" and len(s.get("chips") or []) < 6:
-            findings.append(_finding(i, s.get("title", ""),
-                                     "chip-sweep below material floor",
-                                     fallback))
+            issues.append(("chip-sweep below material floor", fallback))
         if motif == "quote-card" and not s.get("quotes"):
-            findings.append(_finding(
-                i, s.get("title", ""), "quote-card without a harvested quote",
-                "people-wall" if sum(1 for d in details if "@" in d) >= 2
-                else fallback))
+            issues.append(("quote-card without a harvested quote",
+                           "people-wall" if sum(1 for d in details
+                                                if "@" in d) >= 2
+                           else fallback))
         if motif == "logo-wall" and sum(
                 1 for e in (s.get("entities") or []) if e) < 4:
-            findings.append(_finding(i, s.get("title", ""),
-                                     "logo wall below 4 partners", fallback))
+            issues.append(("logo wall below 4 partners", fallback))
         if motif in _TICKED_MOTIFS and len(ticks) < 2 and motif != "price-card":
-            findings.append(_finding(i, s.get("title", ""),
-                                     "check-list below two real benefits",
-                                     fallback))
+            issues.append(("check-list below two real benefits", fallback))
+        # THE BOTTOM RUNG IS STILL A CUT, so it consults the floors like
+        # every other lint's cut (same shared `pending` — see _cut_allowed).
+        # Unguarded, three starved beats in one round took a 4-beat film to
+        # a single beat (2026-07-20). A refused cut degrades to fix=None:
+        # the finding ships as a disclosure instead of shrinking the film.
+        if any(fix == _CUT for _, fix in issues):
+            if _cut_allowed(stops, i, pending):
+                pending.add(i)
+            else:
+                issues = [(issue, None if fix == _CUT else fix)
+                          for issue, fix in issues]
+        for issue, fix in issues:
+            findings.append(_finding(i, s.get("title", ""), issue, fix))
     return findings
 
 
@@ -2418,7 +2492,7 @@ def _title_words(t: str):
             if w not in _STOPWORDS and len(w) > 2]
 
 
-def _lint_redundancy(stops):
+def _lint_redundancy(stops, pending=None):
     """NO-REDUNDANCY: two beats making one point, in one visual form.
 
     The critic sees these and says so — "Beat 2: Near-duplicate of beat 0's
@@ -2432,7 +2506,8 @@ def _lint_redundancy(stops):
     close on the same claim or are near-identical throughout. The LATER beat
     goes and the film runs one beat shorter — a shorter honest film beats a
     padded one, and dropping a beat cannot invent copy."""
-    out, pending = [], set()
+    out = []
+    pending = set() if pending is None else pending
     seen = []
     for i, s in enumerate(stops):
         motif = "recording" if s.get("seg") else (s.get("motif") or "")
@@ -2682,10 +2757,39 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
     return ran, actions, objections
 
 
+def _data_results(stops, beats, film_s, pending=None):
+    """The six DATA lints — pure code over stops/beats, no frames, no model.
+    All of them are complete before any render exists, which is why the
+    plan-stage review (Tier 2) can run them for free; the post-render pass
+    runs the same table again so every claim in the handover is a verdict
+    over the FINAL cut, not a memory of the plan that preceded it.
+
+    `pending` is the round's shared cut budget (see _cut_allowed) — every
+    lint below that can propose _CUT draws from the same set."""
+    pending = set() if pending is None else pending
+    return {
+        "beat-content": (True, _lint_content(stops)),
+        "ticked-items": (True, _lint_ticks(stops)),
+        "treatment-fit": (True, _lint_treatment_fit(stops, pending)),
+        "no-repeat-run": (True, _lint_repeats(stops)),
+        "no-redundancy": (True, _lint_redundancy(stops, pending)),
+        "pacing": (True, _lint_pacing(beats, film_s)),
+    }
+
+
+def _checks_from(results):
+    """Order lint results into the reviewer's check records, in _CHECKS order.
+    Covers only the checks present in `results` — the plan-stage pass has no
+    pixel results and must not fabricate rows for checks that did not run."""
+    return [{"name": name, "claim": claim, "blocking": blocking,
+             "ran": results[name][0], "findings": results[name][1]}
+            for name, claim, blocking in _CHECKS if name in results]
+
+
 def _run_checks(run_dir, stops, beats, film_s, brain="sonnet5"):
-    """Every named check, run over the CURRENT cut. Returns (checks, actions)
-    where each check is {name, claim, blocking, ran, findings}. The reviewer
-    may say nothing this list does not support."""
+    """Every named check, run over the CURRENT rendered cut. Returns
+    (checks, actions) where each check is {name, claim, blocking, ran,
+    findings}. The reviewer may say nothing this list does not support."""
     critic_ran, actions, objections = _critic_review(run_dir, stops, beats,
                                                      brain=brain)
     # NO-OP GUARD: a swap to the treatment the beat already carries changes
@@ -2695,23 +2799,12 @@ def _run_checks(run_dir, stops, beats, film_s, brain="sonnet5"):
                if not (a["action"] == "swap_treatment"
                        and a["beat"] < len(stops)
                        and stops[a["beat"]].get("motif") == a["to"])]
-    blank_ran, blank_findings = _lint_blank(stops, beats)
-    results = {
-        "beat-content": (True, _lint_content(stops)),
-        "beat-visible": (blank_ran, blank_findings),
-        "ticked-items": (True, _lint_ticks(stops)),
-        "treatment-fit": (True, _lint_treatment_fit(stops)),
-        "no-repeat-run": (True, _lint_repeats(stops)),
-        "no-redundancy": (True, _lint_redundancy(stops)),
-        "pacing": (True, _lint_pacing(beats, film_s)),
-        _CRITIC_CHECK: (critic_ran, objections if critic_ran else []),
-    }
-    checks = []
-    for name, claim, blocking in _CHECKS:
-        ran, findings = results[name]
-        checks.append({"name": name, "claim": claim, "blocking": blocking,
-                       "ran": ran, "findings": findings})
-    return checks, actions
+    pending = set()
+    blank_ran, blank_findings = _lint_blank(stops, beats, pending)
+    results = _data_results(stops, beats, film_s, pending)
+    results["beat-visible"] = (blank_ran, blank_findings)
+    results[_CRITIC_CHECK] = (critic_ran, objections if critic_ran else [])
+    return _checks_from(results), actions
 
 
 def _review_claim(checks) -> str:
@@ -2739,6 +2832,148 @@ def _review_claim(checks) -> str:
                  "not claiming " + missed[0]["claim"] + " — only what I "
                  "could check on the cut itself.")
     return body
+
+
+def _apply_fixes(stops, lint_fixes, actions):
+    """Apply a round's repairs to `stops`, in place — swaps first, drops last
+    (descending, so indices stay true). ONE apply semantics for both review
+    passes: the plan-stage loop and the post-render recut repair a cut the
+    same way or their films drift apart.
+
+    A fix of _CUT is the ladder's bottom rung reached from review: there is
+    no treatment left for this beat, so it leaves the film with the critic's
+    drops rather than being locked to a drawing.
+
+    THE FLOORS BIND HERE, over the round's whole cut set at once. Each lint
+    consults _cut_allowed as it proposes, but this is the only function that
+    pops beats, so it is the one place no cut source — a lint fix, a critic
+    drop, a lint yet to be written — can shrink the film past the floors
+    (treatment-fit proposed unguarded and a 4-beat cut fell to 1 beat,
+    2026-07-20). Lint cuts are granted first: they are honesty repairs the
+    floors already vetted, so the critic's drops compete for what remains.
+    A refused lint cut degrades in place to fix=None — the disclosure the
+    caller reports — and a refused drop is simply not taken."""
+    pending, refused = set(), set()
+    for f in lint_fixes:
+        if f["fix"] != _CUT or f["beat"] in pending:
+            continue
+        if (f["beat"] not in refused
+                and _cut_allowed(stops, f["beat"], pending)):
+            pending.add(f["beat"])
+        else:
+            refused.add(f["beat"])
+            f["fix"] = None
+    for a in actions:
+        if (a["action"] == "drop" and a["beat"] not in pending
+                and _cut_allowed(stops, a["beat"], pending)):
+            pending.add(a["beat"])
+    for f in lint_fixes:
+        if f["fix"] == _CUT or f["fix"] is None:
+            continue
+        stops[f["beat"]]["motif"] = f["fix"]
+        stops[f["beat"]]["motif_locked"] = True
+    for a in actions:
+        if a["action"] == "swap_treatment":
+            stops[a["beat"]]["motif"] = a["to"]
+            stops[a["beat"]]["motif_locked"] = True
+    for i in sorted(pending, reverse=True):
+        stops.pop(i)
+
+
+_PLAN_ROUNDS = 2   # the first plan plus ONE re-plan; a re-plan is free, but
+                   # the budget still ends — anything a re-plan could not
+                   # clear rides to the post-render pass rather than looping
+
+
+def _review_plan(run_id, run_dir, pub, stops, ctx):
+    """TIER 2 — the plan-stage review: the six data lints, run BEFORE any
+    render is paid for. Every one of them reads stops/beats and nothing else,
+    yet they used to run after a ~262s Remotion render — so a data finding
+    bought a re-render instead of a free re-plan, 5 of 9 builds rendered the
+    film twice, and a film shipped with adjacent duplicate treatments because
+    round 2 found them with no round left (REVIEWER-FINDINGS, 2026-07-20).
+
+    Loops _plan_beats -> lints -> _apply_fixes until the plan is clean or the
+    budget ends, then returns the LAST plan for the single render. Pacing is
+    linted against the planned t_f/FPS here (Remotion renders frame-exactly;
+    the post-render pass re-checks it against the measured length). No model
+    call, no frame, no render happens in this function — and the thread
+    narrates it as reviewing the PLAN: "watched it back" stays earned by
+    frames only, in the pass that has them.
+
+    A blocking finding that survives the budget refuses the build HERE,
+    before the render: the post-render pass re-runs the same lint on the same
+    stops and would refuse anyway — the customer gets the same honest refusal
+    262s sooner. Returns (beats, t_f, props_path, out)."""
+    beats, t_f, props_path, out = _plan_beats(run_id, run_dir, pub, stops, ctx)
+    checks = []
+    for rnd in range(1, _PLAN_ROUNDS + 1):
+        checks = _checks_from(_data_results(stops, beats, t_f / FPS))
+        emit(run_dir, "review.start",
+             "Reviewing the cut plan before rendering"
+             + (f" (round {rnd})" if rnd > 1 else ""),
+             f"{len(beats)} beats against {len(checks)} structural checks "
+             "that read the plan; the frame-by-frame look comes after the "
+             "render" + ("; re-checking the repaired plan." if rnd > 1
+                         else "."))
+        for c in checks:
+            for f in c["findings"]:
+                emit(run_dir, "review.lint", _finding_title(f),
+                     f"Check {c['name']}. "
+                     + ("Fix: cut the beat." if f["fix"] == _CUT
+                        else f"Fix: swap to {f['fix']}." if f["fix"]
+                        else "No automatic fix."))
+        lint_fixes = [f for c in checks for f in c["findings"] if f["fix"]]
+        if not lint_fixes:
+            break
+        if rnd >= _PLAN_ROUNDS:
+            # AN UNAPPLIED FIX IS NOT A FIX (same rule as the render pass):
+            # the budget is spent, so say so — the post-render review re-runs
+            # these lints and can still take the repair, at re-render cost.
+            emit(run_dir, "review.note",
+                 f"{len(lint_fixes)} fix"
+                 f"{'es' if len(lint_fixes) != 1 else ''} found with no "
+                 "plan round left to apply",
+                 "The plan budget is one re-plan. The film review after the "
+                 "render can still take these, at the cost of a re-render.")
+            break
+        _n = len(lint_fixes)
+        _say(run_dir,
+             f"{_n} thing{'s' if _n != 1 else ''} bothered me in the plan, "
+             f"so I'm fixing {'them' if _n != 1 else 'it'} before I print "
+             "a single frame — cheaper to repair a plan than a film.")
+        emit(run_dir, "review.apply",
+             f"Applying {_n} adjustment{'s' if _n != 1 else ''} to the plan",
+             "Re-planning the cut — nothing has been rendered yet.")
+        _apply_fixes(stops, lint_fixes, [])
+        beats, t_f, props_path, out = _plan_beats(run_id, run_dir, pub,
+                                                  stops, ctx)
+    blocking = [c for c in checks if c["blocking"] and c["findings"]]
+    if blocking:
+        # REFUSE BEFORE THE RENDER. Same contract as the render pass — a beat
+        # with nothing to show is a claim the film would make on the
+        # customer's behalf — but caught while it is still a plan, so the
+        # refusal does not cost a render first.
+        detail = "; ".join(f"{c['name']} ({len(c['findings'])})"
+                           for c in checks if c["findings"])
+        emit(run_dir, "review.reject",
+             "Plan review did not pass — refusing before the render", detail)
+        _say(run_dir,
+             "I'm not rendering this: " + blocking[0]["findings"][0]["issue"]
+             + ". That's a claim the film would be making for you that I "
+             "can't stand behind, and re-planning didn't clear it.")
+        raise RuntimeError(
+            "walkrec plan review rejected the cut: "
+            + "; ".join(f"{c['name']}: {c['findings'][0]['issue']}"
+                        for c in blocking))
+    open_findings = [f for c in checks for f in c["findings"]]
+    emit(run_dir, "review.note",
+         "Plan review " + ("clean" if not open_findings
+                           else f"done — {len(open_findings)} finding"
+                                f"{'s' if len(open_findings) != 1 else ''} "
+                                "left for the film review"),
+         "Rendering once; the frame-by-frame look comes next.")
+    return beats, t_f, props_path, out
 
 
 def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats, film_s,
@@ -2799,23 +3034,7 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats, film_s,
              f"{_n} thing{'s' if _n != 1 else ''} bothered me on the way "
              f"through, so I'm fixing {'them' if _n != 1 else 'it'} before you "
              "see it — then re-cutting.")
-        # A fix of _CUT is the ladder's bottom rung reached from review: there
-        # is no treatment left for this beat, so it leaves the film with the
-        # critic's drops rather than being locked to a drawing.
-        drop_idx = sorted({a["beat"] for a in actions if a["action"] == "drop"}
-                          | {f["beat"] for f in lint_fixes if f["fix"] == _CUT},
-                          reverse=True)
-        for f in lint_fixes:
-            if f["fix"] == _CUT:
-                continue
-            stops[f["beat"]]["motif"] = f["fix"]
-            stops[f["beat"]]["motif_locked"] = True
-        for a in actions:
-            if a["action"] == "swap_treatment":
-                stops[a["beat"]]["motif"] = a["to"]
-                stops[a["beat"]]["motif_locked"] = True
-        for i in drop_idx:
-            stops.pop(i)
+        _apply_fixes(stops, lint_fixes, actions)
         # Keep the pre-review cut for comparison. It is a debugging artifact,
         # not a contract — losing it must never cost the run its film.
         prereview = os.path.join(run_dir, "film-tour-prereview.mp4")
