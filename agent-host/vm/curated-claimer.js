@@ -124,6 +124,27 @@ const db = createAdminClient({ baseUrl: BASE_URL, apiKey: API_KEY })
 const log = (...a) => console.log(new Date().toISOString(), ...a)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// ── Job children, tracked so a drain can END the work before releasing the claim ──
+// Only children that PROCESS A JOB are tracked (build_runner, the rerender, the
+// director turn). The claim contract is about them: `abandonDrain` must be able to
+// prove no build of run X is still running in THIS container at the instant the job
+// row goes back to 'queued' and becomes claimable by another one. Short, idempotent
+// helpers (ffmpeg thumbnails, gate.py, the heal CLI) are deliberately NOT tracked —
+// they hold no claim, so killing them buys nothing.
+const LIVE_JOB_CHILDREN = new Set()
+function trackJobChild(child) {
+  LIVE_JOB_CHILDREN.add(child)
+  child.on('close', () => LIVE_JOB_CHILDREN.delete(child))
+  return child
+}
+function killJobChildren(why) {
+  const n = LIVE_JOB_CHILDREN.size
+  for (const c of LIVE_JOB_CHILDREN) { try { c.kill('SIGKILL') } catch {} }
+  LIVE_JOB_CHILDREN.clear()
+  if (n) log(`  ${why}: SIGKILLed ${n} in-flight job child(ren)`)
+  return n
+}
+
 // ── InsForge resilience: bounded fast-timeout + retry around EVERY InsForge call ──
 // A single blocked InsForge call (a 30s gateway timeout on runs.update, or a hung
 // storage upload) must NEVER freeze the single-threaded worker — that wedge cost us
@@ -1132,7 +1153,7 @@ function runRender(absPropsPath, outPath) {
     }
     const args = ['render', 'src/index.ts', 'Timeline', outPath,
       '--codec=h264', '--concurrency=50%', `--props=${absPropsPath}`]
-    const child = spawn('remotion', args, { cwd: STUDIO_DIR, env })
+    const child = trackJobChild(spawn('remotion', args, { cwd: STUDIO_DIR, env }))
     child.on('error', (e) => { log('  ! remotion spawn', String(e)); resolve(1) })
     child.stdout.on('data', (d) => { try { process.stdout.write(`  [rmx] ${d}`) } catch {} })
     child.stderr.on('data', (d) => { try { process.stderr.write(`  [rmx!] ${d}`) } catch {} })
@@ -1207,7 +1228,7 @@ async function processDirectorJob(job) {
   }
   log(`director job ${job.id} -> run ${runKey}`)
   const code = await new Promise((resolve) => {
-    const child = spawn(PYTHON_BIN,
+    const child = trackJobChild(spawn(PYTHON_BIN,
       [join(PIPELINE_DIR, 'director_job.py'),
        '--run-key', String(runKey),
        '--run-id', String(job.run_id || ''),
@@ -1215,7 +1236,7 @@ async function processDirectorJob(job) {
        // a retried job charges once.
        '--job-id', String(job.id || ''),
        '--message', String(p.message || '')],
-      { cwd: PIPELINE_DIR, env: process.env })
+      { cwd: PIPELINE_DIR, env: process.env }))
     child.stdout.on('data', (d) => { try { process.stdout.write(`  [dir] ${d}`) } catch {} })
     child.stderr.on('data', (d) => { try { process.stderr.write(`  [dir!] ${d}`) } catch {} })
     child.on('error', () => resolve(1))
@@ -1463,7 +1484,7 @@ async function processJob(job) {
   // NOT create a SECOND checkout, so we simulate-resolve it (zero double-charge).
   if ((p.mode || 'mock') === 'mock' && (p.pay_mode !== 'human' || paidViaGate)) env.PRODUCER_SIMULATE_PAID = '1'
 
-  const child = spawn(PYTHON_BIN, args, { cwd: PIPELINE_DIR, env })
+  const child = trackJobChild(spawn(PYTHON_BIN, args, { cwd: PIPELINE_DIR, env }))
   child.on('error', (e) => log(`  ! spawn error ${runKey}`, String(e)))
   child.stdout.on('data', (d) => { try { process.stdout.write(`  [py] ${d}`) } catch {} })
   child.stderr.on('data', (d) => { try { process.stderr.write(`  [py!] ${d}`) } catch {} })
@@ -1605,24 +1626,66 @@ async function enqueueTestJob(companyUrl = 'https://stripe.com') {
 // that ignores its kill, etc.) the daemon ALWAYS returns to polling. Set above both
 // inner ceilings so it only fires on a true wedge, never on a healthy long render.
 const JOB_WALLCLOCK_MS = Number(process.env.JOB_WALLCLOCK_MS || 30 * 60 * 1000) // 30 min
-// DEPLOY-SAFE CLAIMS (3x observed 2026-07-19): Railway sends SIGTERM before
-// swapping containers, and a dying container can claim a job in its final
-// seconds — orphaning it for STALE_CLAIM_MS. On SIGTERM, release THIS
-// worker's in-flight claims back to 'queued' so the next container picks
-// them up immediately.
-// The release runs inside an UNDEFINED grace period — RAILWAY_DEPLOYMENT_DRAINING_SECONDS
-// is unset, so Railway's default of 0 promises nothing. It currently wins the
-// race in practice, but two DEFAULT-bounded InsForge calls are ~87s worst case
-// (10s x4 + backoff, twice), which no grace period guarantees. So the shutdown
-// path bounds ITSELF: tight per-call bounds plus a hard SIGTERM_RELEASE_MS
-// deadline on the whole handler. The exit is then deterministic — we either
-// released or we gave up, but we always exit promptly rather than on luck.
+// ── DRAIN, DON'T DISCARD (2026-07-19) ──────────────────────────────────────
+// MEASURED: of 9 delivered walkrec runs, 3 restarted from scratch mid-build and
+// re-did work that was already done — 768s, 756s and 223s of recordings, page
+// reads and renders, thrown away and paid for twice. jobs.attempts=2 on exactly
+// those three (claim_next_job increments per claim), and each re-claim matches a
+// Railway deployment going active to the second (n3avq 20:08:17, fu0ha 20:52:48,
+// voice 22:20:52 — deploys created 20:01:58, 20:50:08, 22:18:15). 21 deploys
+// landed on 2026-07-19 alone, one every ~20min, against builds that take ~18min.
+// The collision is not bad luck; it is the schedule.
+//
+// The mechanism was THIS handler: it returned the in-flight job to 'queued' on
+// SIGTERM, the next container claimed it, and build_runner.py started over on a
+// fresh filesystem. That was the right call while the alternative was orphaning
+// the claim for STALE_CLAIM_MS — but it treats a deploy as a reason to redo the
+// work rather than a reason to finish it.
+//
+// NOW: SIGTERM stops us CLAIMING, and the in-flight build runs to completion.
+// The job keeps its claim for the whole drain, so it is invisible to
+// claim_next_job (which selects `status='queued'` FOR UPDATE SKIP LOCKED) and no
+// other container can touch it. Nothing is redone because nothing is released.
+//
+// ★ A DRAIN IS ONLY SAFE IF THE PLATFORM ACTUALLY WAITS. Railway's default
+//   SIGTERM→SIGKILL budget is 0s ("it is given 0 seconds to gracefully shutdown
+//   before being forcefully stopped with a SIGKILL" — docs/deployments), and this
+//   service has it UNSET: serviceInstance.drainingSeconds = null, and no
+//   RAILWAY_DEPLOYMENT_DRAINING_SECONDS service variable. With a 0s budget a drain
+//   is not slow, it is impossible — we would be SIGKILLed still holding the claim
+//   and the run would hang until the 35-min reaper failed it. That is STRICTLY
+//   WORSE than the restart this replaces: today's customer waits ~13 extra minutes
+//   and gets a video; that customer would wait 35 and get a refund.
+//
+//   So the drain is OFF BY DEFAULT and the worker never assumes a budget it was
+//   not given. DRAIN_BUDGET_MS unset (0) reproduces the previous behaviour exactly:
+//   release the claim, exit. Setting it is a deliberate second act that asserts
+//   "the platform side has been configured AND observed to honour it."
+//
+//   Turning it on takes BOTH, in one deploy:
+//     1. railway.json  deploy.drainingSeconds = 1800   → makes Railway WAIT
+//     2. service var   DRAIN_BUDGET_MS = 1680000       → tells the worker it MAY
+//   Railway's JSON schema puts `minimum: 0` and NO maximum on drainingSeconds, so
+//   1800 is schema-valid — but nothing near it is confirmed in practice (the
+//   largest value seen in the wild is ~210s), and an undeclared server-side cap
+//   would silently put us back in the SIGKILL-holding-the-claim case. Hence: keep
+//   (2) unset until a deploy against an EMPTY QUEUE has shown a real drain in the
+//   logs. Verify by timing the gap between the `SIGTERM: DRAINING` line and the
+//   process exit; if it is cut short, Railway capped it — lower (1) and leave the
+//   drain off. The default of 0 means getting this wrong costs nothing.
 let CURRENT_CLAIMED_JOB_ID = null
 const SIGTERM_RELEASE_MS = Number(process.env.SIGTERM_RELEASE_MS || 5000)
 const SIGTERM_CALL_BOUNDS = { attempts: 2, timeoutMs: 1800 }
-let SHUTTING_DOWN = false
+let DRAINING = false
 
-async function releaseClaimOnShutdown(signal) {
+// 0 = never drain (the safe default — see above). When set, it is the worker's own
+// budget and MUST be comfortably under the platform's drainingSeconds, so that WE
+// end the drain and hand the claim back cleanly rather than being SIGKILLed
+// mid-upload holding it.
+const DRAIN_BUDGET_MS = Math.max(0, Number(process.env.DRAIN_BUDGET_MS || 0))
+const DRAIN_ENABLED = DRAIN_BUDGET_MS > 0
+
+async function releaseClaim(reason) {
   const jobId = CURRENT_CLAIMED_JOB_ID
   if (!jobId) return
   // Release ONLY a job that is still genuinely in flight — releasing a
@@ -1635,29 +1698,69 @@ async function releaseClaimOnShutdown(signal) {
   if (j && j.status === 'claimed') {
     await setJob(jobId, { status: 'queued', claimed_at: null, claimed_by: null },
       SIGTERM_CALL_BOUNDS)
-    log(`${signal}: released claim on job ${jobId}`)
+    log(`${reason}: released claim on job ${jobId}`)
   } else {
-    log(`${signal}: claim var held ${jobId} but status=${j && j.status} — not releasing`)
+    log(`${reason}: claim var held ${jobId} but status=${j && j.status} — not releasing`)
   }
 }
 
-// ONE shutdown contract for every stop signal: a claim this worker holds is
-// released before the process goes away. Railway only ever sends SIGTERM, but a
-// local Ctrl-C leaks the claim in exactly the same way — the invariant is about
-// stopping, not about which signal did it. A second signal exits immediately so
-// the process is never un-killable while the release is in flight.
-async function shutdown(signal) {
-  if (SHUTTING_DOWN) { log(`${signal}: second signal — exiting now`); process.exit(0) }
-  SHUTTING_DOWN = true
+// The drain could not finish the build in the budget Railway gave us. Hand the
+// job back so the next container retries it — today's behaviour, now confined to
+// the case where finishing was genuinely impossible.
+//
+// ★ DOUBLE-CLAIM SAFETY. This is the ONLY path in the process that writes a job
+//   back to 'queued', i.e. the only path that can make a row claimable again. The
+//   order below is the whole argument and must not be rearranged:
+//     1. kill every tracked job child   — no build of this run is running any more
+//     2. release the claim              — the row becomes claimable
+//     3. exit                           — this container can never claim again
+//   The kill precedes the release, so at the instant another container can claim
+//   run X, this container has no process working run X. There is no window in
+//   which two containers build the same run. (A bare process.exit() would NOT be
+//   enough: spawned children are reparented, not killed, and an orphaned
+//   build_runner.py would keep PATCHing runs.final_url for a run someone else had
+//   already picked up.)
+async function abandonDrain(reason) {
+  log(`drain: ${reason} — handing the job back`)
+  killJobChildren('drain-abandon')
   try {
     await Promise.race([
-      releaseClaimOnShutdown(signal)
-        .catch((e) => log(`${signal}: release failed`, String(e && e.message || e))),
-      sleep(SIGTERM_RELEASE_MS)
-        .then(() => log(`${signal}: release deadline ${SIGTERM_RELEASE_MS}ms hit — exiting`)),
+      releaseClaim('drain-abandon').catch((e) => log('drain: release failed', String(e && e.message || e))),
+      sleep(SIGTERM_RELEASE_MS).then(() => log(`drain: release deadline ${SIGTERM_RELEASE_MS}ms hit — exiting`)),
     ])
   } catch {}
   process.exit(0)
+}
+
+// ONE shutdown contract for every stop signal. Railway only ever sends SIGTERM,
+// but a local Ctrl-C stops the worker in exactly the same way — the invariant is
+// about stopping, not about which signal did it. A second signal abandons
+// immediately so the process is never un-killable while a build drains.
+function shutdown(signal) {
+  // abandonDrain exits the process itself, so it is deliberately not awaited — but
+  // an unhandled rejection on the shutdown path would lose the exit entirely.
+  const abandon = (why) => { abandonDrain(why).catch(() => { try { process.exit(0) } catch {} }) }
+  if (DRAINING) { log(`${signal}: second signal — abandoning drain now`); abandon('second signal'); return }
+  DRAINING = true
+  if (!CURRENT_CLAIMED_JOB_ID) {
+    // Nothing in flight: the common case on a deploy. Exit at once — an idle
+    // worker that lingers just burns a container for the whole drain window.
+    log(`${signal}: no job in flight — exiting immediately`)
+    process.exit(0)
+  }
+  if (!DRAIN_ENABLED) {
+    // DRAIN_BUDGET_MS unset: the platform has not promised us any time, so do
+    // exactly what this worker has always done — hand the job back at once and
+    // let the next container redo it. Wasteful, but bounded and never stranded.
+    log(`${signal}: drain disabled (DRAIN_BUDGET_MS unset) — releasing claim on job ${CURRENT_CLAIMED_JOB_ID}`)
+    abandon(`${signal} with no drain budget`)
+    return
+  }
+  log(`${signal}: DRAINING up to ${(DRAIN_BUDGET_MS / 60000).toFixed(1)}min — job ${CURRENT_CLAIMED_JOB_ID} keeps its claim and finishes; claiming no new work`)
+  // Bound the drain so WE end it, not SIGKILL. unref() so this timer alone never
+  // keeps the process alive once the build is done and the loop has exited.
+  const t = setTimeout(() => { abandon(`drain deadline ${(DRAIN_BUDGET_MS / 60000).toFixed(1)}min`) }, DRAIN_BUDGET_MS)
+  if (typeof t.unref === 'function') t.unref()
 }
 process.on('SIGTERM', () => { shutdown('SIGTERM') })
 process.on('SIGINT', () => { shutdown('SIGINT') })
@@ -1665,14 +1768,114 @@ process.on('SIGINT', () => { shutdown('SIGINT') })
 const STALE_CLAIM_MS = Number(process.env.STALE_CLAIM_MS || 35 * 60 * 1000) // a job 'claimed' longer than this by a non-current worker is a zombie
 const STALE_SWEEP_INTERVAL_MS = Number(process.env.STALE_SWEEP_INTERVAL_MS || 2 * 60 * 1000)
 
+// ── THE CUSTOMER'S CLOCK: a deadline measured from runs.created_at ──────────
+// JOB_WALLCLOCK_MS bounds ONE process in ONE container. RENDER_TIMEOUT_MS (25min)
+// bounds ONE child. NEITHER bounds what the customer actually waits, because a
+// restart resets both: run n3avq spent 30min 37s of customer wall-clock — 122% of
+// the 25-min "ceiling" — while no single process ever came close to exceeding it,
+// and `voice` reached 24:51 the same way. The two slowest builds we have are
+// precisely the two the ceiling could never have caught. That is a missing
+// contract, not a number that needs tuning.
+//
+// So the run gets ONE budget, started when the CUSTOMER started waiting, and every
+// attempt spends out of it. Attempts cannot stack: attempt N is bounded by
+// min(JOB_WALLCLOCK_MS, whatever is left of the run's budget), so a second attempt
+// inherits a shorter leash and a third usually cannot start at all. When the budget
+// is gone the run fails HONESTLY and is refunded, instead of quietly beginning
+// another 25-minute attempt the customer never agreed to wait for.
+const RUN_DEADLINE_MS = Number(process.env.RUN_DEADLINE_MS || 40 * 60 * 1000) // 40 min
+// Below this there is no point starting: a walkrec build has never finished in less
+// (the healthy single-attempt figure is ~18min), so a shorter attempt only burns
+// compute and DELAYS the honest failure. Tied to the render ceiling so the two
+// cannot drift apart.
+const MIN_ATTEMPT_MS = Number(process.env.MIN_ATTEMPT_MS || Math.round(RENDER_TIMEOUT_MS * 0.6)) // 15 min
+
+// Elapsed customer wait for a run, or null when it cannot be established (a failed
+// read, a missing row, an unparseable timestamp). NEVER guesses: an unknown age
+// must not be treated as "expired", or a transient InsForge blip would start
+// failing healthy runs.
+async function runElapsedMs(runId) {
+  if (!runId) return null
+  const { data: run } = await ifCall('runs.select(deadline)',
+    () => db.database.from('runs').select('created_at').eq('id', runId).maybeSingle())
+  const createdMs = run && run.created_at ? Date.parse(run.created_at) : NaN
+  if (!Number.isFinite(createdMs)) return null
+  return Math.max(0, Date.now() - createdMs)
+}
+
+// Terminal + refunded, with the reason the customer's clock ran out. Mirrors the
+// existing failure paths exactly (setRun -> setJob -> refundCredits) so the money
+// path is the SAME path: refundCredits only mirrors negative credit_ledger rows
+// that actually exist for this run and skips reasons already settled, so a run
+// that was never charged is never refunded, and a double call cannot double-refund.
+async function failExpiredRun(job, elapsedMs, where) {
+  const limitMin = (RUN_DEADLINE_MS / 60000) | 0
+  const mins = (elapsedMs / 60000).toFixed(1)
+  const leftMin = Math.max(0, (RUN_DEADLINE_MS - elapsedMs) / 60000).toFixed(1)
+  // Say what actually happened. 'retry too late' has NOT blown the deadline yet —
+  // it is a retry that cannot finish before it would, and reporting that as
+  // "exceeded" would be a lie in the job row and in the customer's own feed.
+  const tooLate = where === 'retry too late'
+  const detail = tooLate
+    ? `retry abandoned at ${mins}min: only ${leftMin}min left of the ${limitMin}min limit, below the ${(MIN_ATTEMPT_MS / 60000) | 0}min a build needs`
+    : `run deadline exceeded (${mins}min > ${limitMin}min across ${job.attempts || '?'} attempt(s))`
+  log(`  !! ${detail} — job ${job.id} [${where}]; failing + refunding`)
+  try {
+    if (job.run_id) await setRun(job.run_id, { status: 'failed', phase: 'run_deadline' })
+    await setJob(job.id, { status: 'failed', error: detail })
+    await refundCredits(job.run_id)
+    if (job.run_id) {
+      await emit(job.run_id, tooLate
+        ? `This build was interrupted and there was not enough of its ${limitMin}-minute limit left to start again, so it was stopped rather than left running. Your credits have been refunded.`
+        : `This build passed its ${limitMin}-minute limit and was stopped. Your credits have been refunded.`,
+      'filmo', 'error')
+    }
+  } catch (e) { log('  deadline-mark failed', String(e && e.message || e)) }
+}
+
 // Run processJob bounded by the wall-clock ceiling. processJob still owns its own
 // child kill + per-call ifCall bounds; this only guarantees the LOOP unblocks. The
 // abandoned processJob (if any) keeps running in the background but cannot pin the
 // poll loop — the next claim proceeds. NEVER throws.
 async function runJobBounded(job) {
+  // The run's remaining budget bounds this attempt. An unknown age (null) falls
+  // back to the per-job ceiling alone — the pre-existing behaviour — rather than
+  // failing a run we could not measure.
+  const elapsedMs = await runElapsedMs(job.run_id)
+  let attemptMs = JOB_WALLCLOCK_MS
+  if (elapsedMs !== null) {
+    const remainingMs = RUN_DEADLINE_MS - elapsedMs
+    if (remainingMs <= 0) {
+      await failExpiredRun(job, elapsedMs, 'claim')
+      if (CURRENT_CLAIMED_JOB_ID === job.id) CURRENT_CLAIMED_JOB_ID = null
+      return
+    }
+    if (remainingMs < MIN_ATTEMPT_MS && (job.attempts || 0) > 1) {
+      // A RETRY with less budget than a build has ever needed. Starting it would
+      // spend the remainder and still fail — fail now, while the refund is prompt.
+      await failExpiredRun(job, elapsedMs, 'retry too late')
+      if (CURRENT_CLAIMED_JOB_ID === job.id) CURRENT_CLAIMED_JOB_ID = null
+      return
+    }
+    attemptMs = Math.min(JOB_WALLCLOCK_MS, remainingMs)
+    if ((job.attempts || 0) > 1) {
+      log(`  attempt ${job.attempts} of run ${job.run_id}: ${(elapsedMs / 60000).toFixed(1)}min already spent, ${(attemptMs / 60000).toFixed(1)}min of budget left`)
+    }
+  }
+  const deadlineBound = attemptMs < JOB_WALLCLOCK_MS
   let timer
   const guard = new Promise((resolve) => {
     timer = setTimeout(async () => {
+      if (deadlineBound) {
+        // End the build BEFORE marking the run refunded. The wedge path below
+        // deliberately lets a stuck processJob run on detached, but this path has
+        // just returned the customer's money — a detached build that later flipped
+        // the run to 'delivered' would leave it both refunded and delivered.
+        killJobChildren('run-deadline')
+        await failExpiredRun(job, (elapsedMs || 0) + attemptMs, 'in-flight')
+        resolve('deadline')
+        return
+      }
       log(`  !! job wall-clock guard fired after ${(JOB_WALLCLOCK_MS / 60000) | 0}min (job ${job.id}); marking wedged + freeing the queue`)
       // CRITICAL: never leave the run a permanent zombie. Mark it terminal so the UI
       // stops spinning and claim_next_job/the reaper won't re-touch it. Best-effort.
@@ -1682,7 +1885,7 @@ async function runJobBounded(job) {
         await refundCredits(job.run_id)
       } catch (e) { log('  wedge-mark failed', String(e && e.message || e)) }
       resolve('wallclock')
-    }, JOB_WALLCLOCK_MS)
+    }, attemptMs)
   })
   try {
     await Promise.race([
@@ -1774,8 +1977,20 @@ async function main() {
   log(`  mode: ${CLAIMER_MODE}${CLAIMER_MODE === 'hermes' ? ` (conduct via ${HERMES_SANDBOX}/${HERMES_SKILL}, fallback=direct)` : ' (deterministic build_runner)'}`)
   log(`  producer: ${CLAIMER_MODE === 'hermes' ? HERMES_PRODUCER : PRODUCER}`)
   log(`  resilience: InsForge calls bounded ${IF_TIMEOUT_MS}ms x${IF_ATTEMPTS}; job wall-clock ${(JOB_WALLCLOCK_MS / 60000) | 0}min`)
+  // Print the two new contracts at boot — this line is how an operator confirms,
+  // from the deploy logs alone, whether the drain is actually armed in this container.
+  log(`  shutdown: ${DRAIN_ENABLED
+    ? `DRAIN up to ${(DRAIN_BUDGET_MS / 60000).toFixed(1)}min (in-flight build finishes; no new claims)`
+    : 'RELEASE claim immediately (drain OFF — set DRAIN_BUDGET_MS once railway.json deploy.drainingSeconds is verified)'}`)
+  log(`  run deadline: ${(RUN_DEADLINE_MS / 60000) | 0}min from runs.created_at across ALL attempts (min attempt ${(MIN_ATTEMPT_MS / 60000) | 0}min)`)
   let lastSweepMs = 0
   for (;;) {
+    // DRAIN GATE. Sits ABOVE claim_next_job because the claim is the only thing
+    // that can create new work: a draining worker that still claimed would hold a
+    // brand-new job for the rest of the drain and then hand it back untouched. Once
+    // the in-flight build returns here, this worker's job is done — exit and let
+    // the new container own the queue.
+    if (DRAINING) { log('drain: in-flight work finished — exiting'); process.exit(0) }
     // Reaper pass (throttled): fail any job stuck 'claimed' by a dead worker so a
     // worker death/restart can never strand a run forever.
     const nowMs = Date.now()
@@ -1789,6 +2004,13 @@ async function main() {
     else job = data
 
     if (job && job.id) {
+      // REGISTER THE CLAIM HERE, not inside processJob. Between the RPC returning
+      // and processJob's first statement there is an `await` (the deadline read in
+      // runJobBounded); a SIGTERM landing in that window used to see no job in
+      // flight and exit, leaving the row 'claimed' with nobody working it — the
+      // exact orphan the shutdown handler exists to prevent. This assignment is
+      // synchronous with the RPC resolving, so the window is zero.
+      CURRENT_CLAIMED_JOB_ID = job.id
       await runJobBounded(job)
     } else {
       log('poll: queue empty')
