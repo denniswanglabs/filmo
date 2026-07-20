@@ -125,7 +125,13 @@ export default function OverviewPage() {
     }
   }, [getToken])
 
-  useEffect(() => { if (user) void load() }, [user, load])
+  // KEYED ON THE USER'S ID, NEVER THE USER OBJECT — see the full note in
+  // /videos. This page pays the most for the difference: `load` fires THREE
+  // server actions, and Next.js serializes server actions globally, so one
+  // redundant re-run costs three more queued round trips (measured: 6 actions
+  // for a single visit).
+  const userId = user?.id
+  useEffect(() => { if (userId) void load() }, [userId, load])
 
   // Pre-mount there is no document.body to portal into, so this branch is
   // unavoidable — but it used to render NOTHING, which meant the server sent an

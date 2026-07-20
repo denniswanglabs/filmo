@@ -7,6 +7,7 @@ import { AuthGate } from './components/AuthGate'
 import PloyLanding from './components/landing2/PloyLanding'
 import BootScreen from './components/landing2/BootScreen'
 import StudioEntry from './components/landing2/StudioEntry'
+import { BUILD_DEFAULTS } from './components/StartFilm'
 import {
   clearPendingBuild,
   isValidBuildUrl,
@@ -140,12 +141,24 @@ export default function Home() {
     setView('landing')
   }, [])
 
-  // Kick off a build and navigate to its run. Identity travels as the verified
-  // access token (the server derives the owner from it), never a client-set id.
-  // Every parameter is pinned to the same value the studio's own composer pins,
-  // because two doors that disagree about one of them make two different films
-  // from the same URL. `brain` especially: createBuild's fallback for an absent
-  // brain is 'super-free', so omitting it silently downgrades the paid flagship.
+  // RESUME a build that was interrupted by the Google round-trip. This is not a
+  // composer — there is no input on this page — so it does not go through
+  // `useStartFilm` (components/StartFilm.tsx) the way the three composing doors
+  // do. It does not need to: it already answers the click instantly (the boot
+  // cover goes up on the line below, before the token fetch), and it is called
+  // from the OAuth-return decision effect rather than from a button.
+  //
+  // It cannot disagree with those doors about a parameter either, which is the
+  // thing that actually matters. `stashPendingFilm` is the ONLY writer of this
+  // stash, and it writes BUILD_DEFAULTS.brain and `stickyLook() || STUDIO_LOOK`
+  // — so `p.brain` and `p.look` below ARE the shared values, arriving through
+  // sessionStorage instead of through a function call. `requirePay` is pinned
+  // false on read and write, so payMode is always the shared 'auto'. `mode` was
+  // the one value still written out twice; it is imported now, so there is no
+  // literal left here that could drift from the composer's.
+  //
+  // Identity travels as the verified access token (the server derives the owner
+  // from it), never a client-set id.
   const runBuild = useCallback(
     async (p: PendingBuild) => {
       setBooting(true)
@@ -172,7 +185,7 @@ export default function Home() {
                 : p.look === 'classic'
                   ? 'classic'
                   : undefined,
-          mode: 'mock',
+          mode: BUILD_DEFAULTS.mode,
           payMode: p.requirePay ? 'human' : 'auto',
         })
         // The beta cap answers with a structured { limit } rather than a run. It

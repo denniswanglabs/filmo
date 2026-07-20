@@ -9,40 +9,24 @@
 // timestamp formatted on the server is the server's day, not the reader's.
 import { useCallback, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { createBuild, type Suggestion, type SuggestionKind } from '../../actions'
-import { isValidBuildUrl } from '../../../lib/pending-build'
+import { type Suggestion, type SuggestionKind } from '../../actions'
+import { useStartFilm, type FilmStartRefusal } from '../StartFilm'
 
 // ── STARTING A FILMO FROM A CARD ────────────────────────────────────────────
-// A card's action button is a THIRD door into the same factory: the landing's
-// resume path (app/page.tsx → runBuild) and the studio's composer
-// (runs/[id]/NewFilmComposer.tsx → BUILD_DEFAULTS + STUDIO_LOOK) are the other
-// two. If the three disagree about a single createBuild parameter then one URL,
-// started from three places, makes three different films and none of them is
-// wrong — a defect with no visible cause and nobody to blame. Every value below
-// is therefore pinned to exactly what the composer pins, and the composer is the
-// source of truth: if it moves, this moves with it.
-//   brain   'ultra-paid'  the paid flagship. createBuild's fallback for an
-//                         absent brain is 'super-free', so omitting it would
-//                         silently downgrade the film.
-//   mode    'mock'        real Remotion cards, $0 third-party spend.
-//   payMode 'auto'        payments are dormant for the open beta.
-//   look    the sticky look, else 'walkrec' — the studio's own pipeline. A card
-//           that quietly started a classic run would land the reader in a
-//           different room than the one they pressed the button in.
-const BUILD_DEFAULTS = { brain: 'ultra-paid', mode: 'mock' as const, payMode: 'auto' as const }
-
-/** The sticky look the landing writes when someone arrives with `?look=…`.
- *  Read with the composer's exact rule — a stored 'classic' is deliberately NOT
- *  restored, because neither other door restores it and the server's default is
- *  what should decide. Mirroring the quirk is what keeps the doors identical. */
-function stickyLook(): 'walkrec' | 'engineered-night' | undefined {
-  try {
-    const saved = localStorage.getItem('filmo-look')
-    if (saved === 'walkrec' || saved === 'engineered-night') return saved
-  } catch { /* private mode — the server default decides */ }
-  return undefined
-}
+// A card's action button is a THIRD door into the same factory: the studio's
+// composer (runs/[id]/NewFilmComposer.tsx) and the landing's resume of a
+// stashed URL (app/page.tsx → runBuild) are the other two. If the three
+// disagree about a single createBuild parameter then one URL, started from
+// three places, makes three different films and none of them is wrong — a
+// defect with no visible cause and nobody to blame.
+//
+// This file used to defend against that with a copy of BUILD_DEFAULTS, a copy
+// of stickyLook(), and a comment asking the next reader to keep them in step
+// with the composer by hand. They now live in `components/StartFilm.tsx` and
+// there is nothing here to keep in step: the card contributes the URL and the
+// place to put a sentence, and `useStartFilm` does the rest — including the
+// arrival cover this door never had, which is why pressing a card used to look
+// exactly as broken as pressing send on the composer did.
 
 // The same clock the /videos cards and the studio's library use, so one filmo
 // never reads as two different ages in two places.
@@ -109,55 +93,37 @@ function Card({ s, getToken }: {
   s: Suggestion
   getToken: () => Promise<string | null>
 }) {
-  const router = useRouter()
-  const [busy, setBusy] = useState(false)
   // ONE line under the action carries everything this card has to say back, and
   // its tone says which kind of thing it is (same rule as the composer's hint).
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null)
 
+  // This surface has no sign-in gate of its own — the Overview is already a
+  // signed-in room, so a rejected session here means the whole page is about to
+  // stop working, not that this one card needs a sheet over it. So the card
+  // says the sentence and stops. The URL is stashed by `startFilm` either way,
+  // which is new: a card that met a dead session used to lose the reader's
+  // intent outright, while the composer's identical failure kept it.
+  const onRefused = useCallback((r: FilmStartRefusal) => {
+    setNote({ text: r.message, bad: true })
+  }, [])
+
+  const { startFilm, starting, cover } = useStartFilm({ getToken, onRefused })
+
   const run = useCallback(async () => {
     if (s.action.type !== 'build') return
-    const url = s.action.url
-    // createBuild THROWS on a bad URL, and a thrown server action is an opaque
-    // digest 500 in production — so the message the reader would see is no
-    // message at all. Both other doors check first; so does this one.
-    if (!isValidBuildUrl(url)) {
-      setNote({ text: 'That page no longer looks like a valid address.', bad: true })
-      return
-    }
     setNote(null)
-    setBusy(true)
-    try {
-      const accessToken = await getToken()
-      if (!accessToken) {
-        setBusy(false)
-        setNote({ text: 'Your session expired — sign in again to start it.', bad: true })
-        return
-      }
-      const res = await createBuild({
-        accessToken,
-        url,
-        look: stickyLook() || 'walkrec',
-        ...BUILD_DEFAULTS,
-      })
-      // The credit cap answers with a structured { limit } rather than a run.
-      // It is a real answer, not a broken session — say it and stop.
-      if ('limit' in res) {
-        setBusy(false)
-        setNote({ text: res.message, bad: true })
-        return
-      }
-      router.push(`/runs/${res.runId}`)
-    } catch {
-      setBusy(false)
-      setNote({ text: 'Your session expired — sign in again to start it.', bad: true })
-    }
-  }, [s.action, getToken, router])
+    await startFilm(s.action.url)
+  }, [s.action, startFilm])
 
   const age = s.at ? relativeTime(s.at) : ''
 
   return (
     <li className="ovsug-card">
+      {/* Raised on the click, before the token and before the server. Without
+          it this button changed one word of its own label and nothing else,
+          which on a three-second server call is indistinguishable from a dead
+          control. */}
+      {cover}
       <div className="ovsug-top">
         <span className="ovsug-icon" aria-hidden><KindIcon kind={s.kind} /></span>
         <div className="ovsug-body">
@@ -176,8 +142,8 @@ function Card({ s, getToken }: {
             {s.action.label}
           </Link>
         ) : (
-          <button className="ovsug-btn" onClick={() => void run()} disabled={busy}>
-            {busy ? 'Starting…' : s.action.label}
+          <button className="ovsug-btn" onClick={() => void run()} disabled={starting}>
+            {starting ? 'Starting…' : s.action.label}
           </button>
         )}
         <span className={'ovsug-note' + (note?.bad ? ' bad' : '')} role="status">

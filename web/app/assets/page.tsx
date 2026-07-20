@@ -82,7 +82,13 @@ export default function AssetsPage() {
     setAssets(res.assets)
   }, [getToken])
 
-  useEffect(() => { if (user) void load() }, [user, load])
+  // KEYED ON THE USER'S ID, NEVER THE USER OBJECT — same reason as /videos, which
+  // carries the full note. AuthProvider calls setUser twice with two freshly built
+  // objects (optimistic restore, then network reconcile), so depending on `user`
+  // re-ran this read for a person who never changed; Next.js serializes server
+  // actions, so the duplicates queued end-to-end instead of overlapping.
+  const userId = user?.id
+  useEffect(() => { if (userId) void load() }, [userId, load])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: assets?.length || 0 }

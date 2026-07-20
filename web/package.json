@@ -10,7 +10,7 @@
     "dev:next": "next dev"
   },
   "dependencies": {
-    "@insforge/sdk": "latest",
+    "@insforge/sdk": "^1.4.5",
     "@remotion/player": "^4.0.450",
     "@vercel/analytics": "^2.0.1",
     "framer-motion": "^12.42.0",

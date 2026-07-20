@@ -21,6 +21,17 @@
 // same icons, same order; different mechanics. If you add an entry, add it in
 // both.
 //
+// ── THE ONE ENTRY THAT CANNOT DRIFT (2026-07-19) ────────────────────────────
+// "Add it in both" is the rule above, and it is a rule enforced by whoever
+// remembers it — which is exactly how this rail drifted the first time, and how
+// the Overview glyph ended up drawn from two different SVG paths that looked
+// identical and had already diverged in source. The live-film entry at the foot
+// of this rail is therefore not added in both. It is WRITTEN ONCE, in
+// components/rail/LiveFilmEntry, and imported here and by Workspace, so there
+// is no second copy that could disagree. Anything stateful added to this rail
+// from now on should go the same way: the twin contract is far easier to keep
+// when there is only one thing to keep.
+//
 // ── NEW FILMO: A ROUTE HERE, A TAB IN THE STUDIO (2026-07-19) ───────────────
 // This entry used to link to `/?new=1` — the marketing landing, which then lays
 // the composer over itself. From a rail that is otherwise pure navigation that
@@ -69,6 +80,16 @@ import Link from 'next/link'
 // shown (deliberately not on the stats strip: what you have left to spend is a
 // different kind of number from what you have made), and it owns sign-out.
 import AccountMenu from '../../runs/[id]/AccountMenu'
+// ── THE FILM THAT IS HAPPENING ──────────────────────────────────────────────
+// IMPORTED, NOT COPIED — and this is the entry where that matters most. Every
+// other entry on this rail is a static glyph and a href, so a drift between the
+// twins is visible the moment someone looks at both. This one carries state,
+// motion and four visual conditions; two copies of it would agree on the day
+// they were written and quietly diverge on the first fix to either. It lives in
+// components/rail/LiveFilmEntry and Workspace imports the SAME file.
+// It takes only `getToken` — which this rail already had — and fetches its own
+// state, so no page that renders this rail needed a new prop for it.
+import LiveFilmEntry from '../rail/LiveFilmEntry'
 
 // The canonical mark. Same path as Workspace's FilmoMark and the Wordmark —
 // copied rather than imported because Workspace's copy is a private function in
@@ -176,6 +197,22 @@ export default function OverviewRail({ current = 'overview', getToken, onFeedbac
         </svg>
         <i>Assets</i>
       </Link>
+
+      {/* ── AND LAST, THE FILM THAT IS RUNNING RIGHT NOW ────────────────────
+          Off a run, the product used to have no way to say "a film is in the
+          studio" — the Film tab lives inside /runs/[id], so walking to
+          Overview, Filmos or Assets made the running film invisible, and the
+          single most important thing happening in the product was the one thing
+          the navigation could not show.
+          IT SITS LAST DELIBERATELY. This is the only entry that comes and goes,
+          and every position except the end would push the entries below it down
+          the moment a film started — a rail that reshuffles itself while you
+          are reaching for it. At the end, it grows into the flexible space
+          above the account circle: nothing above it moves, and the account
+          circle stays pinned to the foot where it always is.
+          It renders NOTHING when there is no film to speak for, which is why
+          this is a bare mount with no wrapper and no reserved height. */}
+      <LiveFilmEntry getToken={getToken} />
 
       <div className="ovrail-space" />
 

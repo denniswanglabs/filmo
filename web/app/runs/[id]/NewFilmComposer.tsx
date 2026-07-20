@@ -7,163 +7,63 @@
 // The rail is fixed furniture; only the stage changes. So this component owns
 // the stage and nothing else — it never draws chrome, and it never navigates
 // anywhere except to the run it just created.
+//
+// THIS COMPONENT IS THREE DOORS. It is mounted by `/new` (with the rail), by
+// `/?new=1` through StudioEntry (without one, for an account that has no films
+// yet), and by the studio's own rail as the `new` surface. All three therefore
+// behave identically for free — which is the entire reason it was never copied.
+//
+// ── WHAT IT NO LONGER OWNS ──────────────────────────────────────────────────
+// Starting a film. The build parameters, the sticky look, the URL
+// normalisation, the pending-build stash, the wording of every refusal, the
+// arrival cover and the navigation all moved to `components/StartFilm.tsx`,
+// which the Overview's suggestion cards call too. What is left here is the
+// stage, and the one thing a door genuinely owns: this one has a sign-in gate,
+// so it opens it.
 import { useCallback, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { createBuild } from '../../actions'
 import { AuthGate } from '../../components/AuthGate'
-import { isValidBuildUrl, writePendingBuild } from '../../../lib/pending-build'
-
-// ── TWO COMPOSERS, ONE FILM ─────────────────────────────────────────────────
-// The landing (`web/app/page.tsx`) and this screen are two doors into the same
-// factory. If they disagree about a single createBuild parameter then the same
-// URL, typed by the same person, produces two different films and neither one
-// is wrong — a defect with no visible cause and no one to blame. Every value
-// the landing pins is therefore pinned here to the SAME value, and everything
-// it leaves to the server is left to the server here too:
-//   brain    'ultra-paid'  the paid flagship (CLAUDE.md: paid Nemotron, so a
-//                          free-tier 429 can never decide a user's film). NOTE
-//                          createBuild's own fallback for an absent brain is
-//                          'super-free' — omitting it would silently downgrade.
-//   mode     'mock'        real Remotion cards, $0 third-party spend.
-//   payMode  'auto'        payments are dormant for the open beta.
-//   look     'walkrec'     see below — this is the one value the two doors
-//                          deliberately DISAGREE on, because they are doors
-//                          into different rooms.
-const BUILD_DEFAULTS = { brain: 'ultra-paid', mode: 'mock' as const, payMode: 'auto' as const }
-
-// ── A SURFACE MAKES ITS OWN KIND OF FILM ────────────────────────────────────
-// createBuild's rule is that a bare submit yields walkrec for the operator and
-// classic for everyone else. That rule is right for the LANDING, where the
-// visitor has expressed no preference and the server picks. It is wrong here.
-//
-// This screen is the walkrec studio: the rail, the thread, the beat board and
-// the director all belong to that pipeline. A non-owner pressing "New filmo"
-// inside it would get a classic run — which renders a completely different
-// page — so the button would navigate you out of the room you were standing
-// in, with nothing on screen explaining why.
-//
-// So this is not the composer overruling policy for everyone; the landing's
-// behaviour is untouched. It is a surface declaring what it produces, the same
-// way the director's re-cut job already hardcodes `look: 'walkrec'` rather than
-// re-deriving it. A sticky 'engineered-night' still wins — that is a visitor
-// asking for a specific look, which outranks the surface's default.
-const STUDIO_LOOK = 'walkrec' as const
-
-// The sticky look the landing writes when someone arrives with `?look=…`.
-// Read with the landing's exact rule — a stored 'classic' is deliberately NOT
-// restored, because the landing doesn't restore it either and the server's
-// default is what should decide. Mirroring the quirk keeps the two doors
-// identical; "fixing" it on one side is what makes them differ.
-function stickyLook(): 'walkrec' | 'engineered-night' | undefined {
-  try {
-    const saved = localStorage.getItem('filmo-look')
-    if (saved === 'walkrec' || saved === 'engineered-night') return saved
-  } catch { /* private mode — the server default decides */ }
-  return undefined
-}
-
-// ── A TYPED URL MUST SURVIVE SIGN-IN ────────────────────────────────────────
-// Signing in with Google navigates the WHOLE BROWSER away and comes back to
-// `/` — not here (AuthGate calls signInWithGoogle() with no redirectTo, which
-// resolves to origin + '/'). So this screen cannot resume its own build: the
-// landing does it, by reading the stash on mount and firing createBuild for us.
-// Stashing is therefore the ONLY thing standing between a user and losing the
-// URL they just typed to a redirect they didn't ask for.
-//
-// The key and the shape used to be duplicated here from `web/app/page.tsx`,
-// with a warning on both sides that whichever one moved first would break
-// resume silently. They now live in ONE module that both doors import
-// (`lib/pending-build.ts`), so a rename is a compile error rather than a bug
-// report. `isValidBuildUrl` comes from there for the same reason: createBuild
-// THROWS on a bad URL, and a thrown server action is an opaque "Server
-// Components render … digest" 500 in production — so the two doors must agree
-// on what a URL is, or one of them shows the user no message at all.
-
-// Typing "acme.com" is the same intent as typing "https://acme.com". Fill in
-// the scheme rather than failing a URL the user got right.
-function normalizeUrl(raw: string): string {
-  const t = (raw || '').trim()
-  if (!t) return ''
-  return /^https?:\/\//i.test(t) ? t : `https://${t}`
-}
+import {
+  useStartFilm,
+  stashPendingFilm,
+  type FilmStartRefusal,
+} from '../../components/StartFilm'
 
 export default function NewFilmComposer({ getToken }: {
   getToken: () => Promise<string | null>
 }) {
-  const router = useRouter()
   const [url, setUrl] = useState('')
-  const [busy, setBusy] = useState(false)
   // ONE line under the input carries every thing this screen has to say, and
   // its tone says which kind of thing it is. `bad` is reserved for something
   // the user must act on; progress and reassurance stay quiet.
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null)
   const [gateOpen, setGateOpen] = useState(false)
 
+  // The door's own half of the contract: say the sentence, and — because this
+  // surface HAS a sign-in gate — open it when the answer is "you need to sign
+  // in". A credit-cap refusal is a real answer rather than a broken session, so
+  // it must never re-open the gate over it.
+  const onRefused = useCallback((r: FilmStartRefusal) => {
+    setNote({ text: r.message, bad: r.kind !== 'sign-in' })
+    if (r.kind === 'sign-in') setGateOpen(true)
+  }, [])
+
+  const { startFilm, starting, cover } = useStartFilm({ getToken, onRefused })
+
   const start = useCallback(async () => {
-    const target = normalizeUrl(url)
-    if (!isValidBuildUrl(target)) {
-      setNote({ text: 'Enter a valid website URL.', bad: true })
-      return
-    }
     setNote(null)
-    setBusy(true)
-    try {
-      const accessToken = await getToken()
-      // NO TOKEN IS NOT A NO-OP. createBuild needs one and throws without it,
-      // so the honest response to a session that has quietly expired under a
-      // still-signed-in-looking UI is to ask for a sign-in — never to swallow
-      // the click and leave the user tapping a button that does nothing.
-      if (!accessToken) {
-        setBusy(false)
-        stash(target)
-        setNote({ text: 'Sign in to start filming — your link is saved.' })
-        setGateOpen(true)
-        return
-      }
-      const res = await createBuild({
-        accessToken,
-        url: target,
-        look: stickyLook() || STUDIO_LOOK,
-        ...BUILD_DEFAULTS,
-      })
-      // The beta cap answers with a structured { limit } rather than a run.
-      // It is a real answer, not a broken session — say it and stop, don't
-      // re-open the sign-in gate over it.
-      if ('limit' in res) {
-        setBusy(false)
-        setNote({ text: res.message, bad: true })
-        return
-      }
-      router.push(`/runs/${res.runId}`)
-    } catch {
-      // A thrown server action is OPAQUE here (the digest 500), so its real
-      // message is unreadable. The dominant cause is a stale token: the UI
-      // still looks signed in because the session was restored optimistically,
-      // but the server's verifyUser rejected it. Offer the fix instead of the
-      // scary error, and keep the URL so signing in doesn't cost it.
-      setBusy(false)
-      stash(target)
-      setNote({ text: 'Your session expired — sign in again to start the filmo.', bad: true })
-      setGateOpen(true)
-    }
-  }, [url, getToken, router])
+    await startFilm(url)
+  }, [url, startFilm])
 
-  function stash(target: string) {
-    writePendingBuild({
-      url: target,
-      brain: BUILD_DEFAULTS.brain,
-      look: stickyLook() || STUDIO_LOOK,
-      // Pinned false by the module on both read and write: stashes written
-      // before payments were switched off carry true and would resurrect the
-      // checkout gate on resume.
-      requirePay: false,
-    })
-  }
-
-  const canSend = url.trim().length > 3 && !busy
+  const canSend = url.trim().length > 3 && !starting
 
   return (
     <div className="nf-stage">
+      {/* Raised on the click, before the token and before the server — the
+          reader is looking at the studio's ground while everything below is
+          still in flight. Lowered again, onto this screen and its message, if
+          the film cannot be started. */}
+      {cover}
+
       <div className="nf-head">
         <h1>What&rsquo;s your product URL?</h1>
         <p>Drop it below, and let Filmo handle your product launch from here.</p>
@@ -184,13 +84,13 @@ export default function NewFilmComposer({ getToken }: {
         />
         <div className="nf-row">
           <span className={'nf-hint' + (note?.bad ? ' bad' : '')} role="status">
-            {busy ? 'Starting the filmo…' : note?.text || ''}
+            {starting ? 'Starting the filmo…' : note?.text || ''}
           </span>
           <button
             type="submit"
             className="nf-send"
             disabled={!canSend}
-            aria-label={busy ? 'Starting the filmo' : 'Start the filmo'}
+            aria-label={starting ? 'Starting the filmo' : 'Start the filmo'}
           >
             &#8593;
           </button>
@@ -199,11 +99,14 @@ export default function NewFilmComposer({ getToken }: {
 
       {/* The product's real sign-in surface, not a second copy of it. It hands
           back a fresh token on the email path (onSignedIn → start again), and
-          on the Google path it stashes first and the landing resumes. */}
+          on the Google path the URL is already stashed (StartFilm does it on
+          every refusal) and the landing resumes the build when Google returns.
+          `onBeforeRedirect` re-stashes whatever is in the box RIGHT NOW, which
+          covers the reader who edits the URL while the gate is open. */}
       <AuthGate
         open={gateOpen}
         onClose={() => setGateOpen(false)}
-        onBeforeRedirect={() => stash(normalizeUrl(url))}
+        onBeforeRedirect={() => stashPendingFilm(url)}
         onSignedIn={() => { setGateOpen(false); void start() }}
       />
 

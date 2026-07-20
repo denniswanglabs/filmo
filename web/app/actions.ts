@@ -183,14 +183,37 @@ export async function createBuild(input: {
 
   const db = adminClient()
 
+  // ── THE TWO GATES RUN CONCURRENTLY ──────────────────────────────────────────
+  // Nothing stands between the caller and a run id except identity and these two
+  // gates, and every one of them is a round trip to InsForge in Singapore
+  // (~310ms warm, ~1.4s on a cold connection — measured). They used to run one
+  // after the other for no reason other than the order they were written in:
+  // the rate-limit read and the credit read take the same already-verified
+  // user id, touch different tables, and neither one's answer changes the
+  // other's question. Run together they cost ONE trip instead of two, which is
+  // a third off everything that happens before the run row exists.
+  //
+  // They must both still finish BEFORE the insert. A gate evaluated after the
+  // row is written is not a gate — it is a report on a build that already
+  // started — so no amount of "move the slow part later" applies to these two.
+  // (The reason this is only a third and not the whole wait, and why the UI
+  // therefore cannot be allowed to wait on it at all, is written up in
+  // components/StartFilm.tsx.)
+  const windowStart = new Date(Date.now() - 10 * 60_000).toISOString()
+  const isOwner = (me.email || '').toLowerCase() === OWNER_EMAIL
+  const [recentRes, bal] = await Promise.all([
+    db.database
+      .from('runs')
+      .select('id')
+      .eq('user_id', me.id)
+      .gte('created_at', windowStart),
+    // The owner is exempt from the credit cap, so their balance is never read.
+    isOwner ? Promise.resolve(null) : creditBalances(db, me.id),
+  ])
+
   // Rate limit: cap builds per user per window so a scripted loop can't drain the
   // Nemotron/render budget. Time-based + status-agnostic (stuck rows never wedge it).
-  const windowStart = new Date(Date.now() - 10 * 60_000).toISOString()
-  const { data: recent } = await db.database
-    .from('runs')
-    .select('id')
-    .eq('user_id', me.id)
-    .gte('created_at', windowStart)
+  const recent = recentRes.data as { id: string }[] | null
   if (recent && recent.length >= 10) {
     throw new Error('Too many builds in a short window — give it a minute and try again.')
   }
@@ -209,13 +232,13 @@ export async function createBuild(input: {
   // without a cliff, so the date bought nothing that the caps don't. Do not
   // reintroduce a wall-clock expiry; if the free tier ever ends, that is a
   // deliberate product decision that ships with its own messaging.
-  if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
+  if (bal) {
     // CREDITS (beta): costs and caps are the constants above — never restate
     // them here, or the comment rots the moment they move. Balance is the SUM
     // of an append-only ledger (spends negative; failed builds refunded by the
     // worker), so failed attempts do not consume the allowance. Server-side,
-    // admin client — can't be gamed.
-    const bal = await creditBalances(db, me.id)
+    // admin client — can't be gamed. `bal` is null for exactly one reason: the
+    // owner is exempt, so the read above was never issued.
     if (bal.dailyUsed + VIDEO_CREDIT_COST > DAILY_CREDIT_CAP) {
       return {
         limit: true as const,
@@ -279,7 +302,17 @@ export async function createBuild(input: {
   // Charge the video at creation (owner exempt). The worker refunds this row
   // if the build fails, so failed attempts never consume the allowance. The
   // partial unique index (run_id, reason) makes the charge idempotent.
-  if ((me.email || '').toLowerCase() !== OWNER_EMAIL) {
+  //
+  // STAYS AFTER THE JOBS INSERT, AND STAYS AWAITED. Both are tempting to move:
+  // running it concurrently with the enqueue would save a round trip, and
+  // firing it off unawaited would save one more. Neither is safe. The order is
+  // an invariant — a jobs.insert failure throws above, so a reader is never
+  // charged for a build that was never enqueued — and a serverless function may
+  // be killed the moment it responds, so an unawaited write is a write that
+  // sometimes does not happen. Charging "sometimes" is the same as not charging.
+  // The wait these two cost is paid behind the arrival cover, not in front of
+  // the reader (components/StartFilm.tsx).
+  if (!isOwner) {
     await withRetry(() => db.database.from('credit_ledger').insert([{
       user_id: me.id, delta: -VIDEO_CREDIT_COST, reason: 'video', run_id: runId,
     }]))
@@ -1630,4 +1663,213 @@ export async function getSuggestions(
   }
 
   return { suggestions: out.slice(0, SUGGESTION_CAP) }
+}
+
+// ═══════════════════ THE RAIL'S LIVE-FILM ENTRY ═══════════════════
+//
+// Feeds components/rail/LiveFilmEntry — the one entry that follows the reader
+// off the studio so a running film stays visible on Overview, Filmos and
+// Assets. It answers exactly one question, "which of my films are open or just
+// finished, and is anything actually happening to them", and it is allowed to
+// answer only from rows that exist.
+//
+// ── LIVENESS IS STATUS *AND* A HEARTBEAT ───────────────────────────────────
+// A terminal event is not a reliable signal — the sink browns out, a worker
+// dies mid-render, and the row that would have said "done" never lands. The
+// studio already learned this (its `working` flag ends on a terminal STATUS
+// precisely because "a sink brownout used to leave it spinning forever on a
+// finished film"). So a run counts as LIVE only when its status is non-terminal
+// AND something has happened to it recently. A run that has gone quiet is
+// reported STALLED and the entry stops animating: a moving dot on a wedged run
+// is a claim that work is being done, and it would be false.
+//
+// ── WHERE THE HEARTBEAT COMES FROM, AND WHY IT IS TWO TABLES ────────────────
+// NOT `runs.updated_at`, and NOT `runs.phase`. Measured on a run that was live
+// while this was written: updated_at was stamped 2 seconds after created_at and
+// then sat still for 12 minutes while the film rendered, and phase still read
+// 'planning' when agent_events was on 'assemble.render'. Both move at creation
+// and again at the terminal write; neither tracks the middle. Keying staleness
+// on updated_at would park every healthy run about thirty seconds in.
+//
+// The pulse is the run's own event stream — and the two pipelines write to
+// DIFFERENT tables. Measured over the last 60 runs: all 45 `classic` runs have
+// zero agent_events and write run_events; all 15 `walkrec` runs write
+// agent_events. They are disjoint, so reading only agent_events (the obvious
+// choice, because that is what the walkrec studio polls) would report every
+// classic run as stalled from the moment it started. `film_mode` picks the
+// table. If a third pipeline is ever added, it belongs in RAIL_BEAT_TABLE.
+const RAIL_BEAT_TABLE = (filmMode: string | null): 'agent_events' | 'run_events' =>
+  filmMode === 'walkrec' ? 'agent_events' : 'run_events'
+
+// ── HOW LONG SILENCE IS ALLOWED TO LAST ─────────────────────────────────────
+// 20 minutes, and the number is measured rather than felt. Across the whole
+// event history (~4,100 gaps between consecutive events):
+//   · walkrec (agent_events): p95 185s, p99 274s
+//   · classic (run_events):   p95 105s, p99 305s
+// so this is roughly 4x the p99 of both and a healthy run does not come close
+// to tripping it. Going the other way, a delivered film's whole wall-clock life
+// is p90 1,629s / max 1,871s — so a run silent for 20 minutes has been quiet
+// for longer than most complete films take, and 20 minutes is still short
+// enough that it parks WELL before a healthy film of the same age would have
+// finished.
+// The evidence that this is the right side of the line: in the entire history
+// exactly ONE agent_events gap ever exceeded it (1,155s, at assemble.render) —
+// and that run's status is `failed`. The one time the walkrec pipeline went
+// that quiet, it really was dying. Two classic runs did exceed it and go on to
+// deliver (1,304s and 1,042s, both single retrying steps), so this will
+// occasionally render a live classic run as stalled. That is the direction to
+// err in: showing a still dot on a working run understates, showing a moving
+// dot on a dead one lies.
+const RAIL_STALE_AFTER_MS = 20 * 60_000
+
+// ── HOW LONG A FINISH STAYS NEWS ────────────────────────────────────────────
+// A delivered film keeps its entry until it is opened, which is Dennis's rule —
+// nothing finishes without him noticing. But "until opened" cannot mean
+// forever: this account holds 173 delivered runs, and without a bound the rail
+// would announce every film ever made as unopened news. A day is the bound. Past
+// it, a film is not news, it is library, and the Filmos entry two rows up is
+// already where library lives.
+const RAIL_NEWS_WINDOW_MS = 24 * 60 * 60_000
+
+// The rail looks at this account's most recent runs only. Anything open is by
+// definition recent, and a small fixed window keeps this the cheapest read in
+// the app — one narrow query, indexed the same way listMyRuns already is.
+const RAIL_RUN_WINDOW = 12
+// Newest heartbeats across the (few) open runs. Comfortably more than enough to
+// contain the newest row for each: only a handful of runs can be open at once,
+// and a run whose beat is not in this window has been out-emitted by its
+// siblings for long enough that it is stale anyway.
+const RAIL_BEAT_ROWS = 60
+
+// Same three words the run page and the studio already treat as terminal.
+// `completed_with_warnings` ships a film, so it is an end, not a middle.
+const RAIL_TERMINAL = new Set(['delivered', 'completed_with_warnings', 'failed'])
+
+/** live    — non-terminal, and something happened recently. The dot moves.
+ *  stalled — non-terminal, but silent past RAIL_STALE_AFTER_MS. Still, not gone.
+ *  ready   — finished with a film to watch.
+ *  stopped — finished with nothing to watch (failed, or delivered with no
+ *            final_url, which the run page already calls out as an upload that
+ *            never landed). Never dressed as "ready". */
+export type LiveFilmState = 'live' | 'stalled' | 'ready' | 'stopped'
+
+export interface LiveFilm {
+  id: string
+  /** The customer's own site, for the tooltip and the screen-reader name. The
+   *  ONLY run-derived string that reaches the rail: no brain, no model, no
+   *  price, no phase, no finish_reason. */
+  label: string
+  state: LiveFilmState
+}
+
+/** `unavailable` is a real member and not laziness. Every other outcome here is
+ *  a claim about the account's films, and a failed read is not one — rendering
+ *  it as `{ films: [] }` would tell a reader with a film in the studio that
+ *  nothing is running. The client keeps its last good answer instead. (Same
+ *  rule the Overview's reads state at length: a read that did not happen must
+ *  be indistinguishable from a read that failed.) */
+export type LiveFilmsResult =
+  | { authError: true }
+  | { unavailable: true }
+  | { films: LiveFilm[] }
+
+/** Newest event time per run id, in ms. Returns null if the read FAILED — the
+ *  caller must not turn our own blindness into a stalled dot. */
+async function railHeartbeats(
+  db: ReturnType<typeof adminClient>,
+  table: 'agent_events' | 'run_events',
+  runIds: string[],
+): Promise<Map<string, number> | null> {
+  const out = new Map<string, number>()
+  if (!runIds.length) return out
+  const { data, error } = await db.database
+    .from(table)
+    .select('run_id, created_at')
+    .in('run_id', runIds)
+    .order('created_at', { ascending: false })
+    .limit(RAIL_BEAT_ROWS)
+  if (error || data == null) return null
+  for (const row of (data as { run_id: string; created_at: string }[])) {
+    const t = Date.parse(row.created_at)
+    if (!isFinite(t)) continue
+    const cur = out.get(row.run_id)
+    if (cur == null || t > cur) out.set(row.run_id, t)
+  }
+  return out
+}
+
+export async function getLiveFilms(
+  accessToken: string | null | undefined,
+): Promise<LiveFilmsResult> {
+  const me = await verifyUser(accessToken)
+  if (!me) return { authError: true }
+  const db = adminClient()
+
+  // `.eq('user_id')` IS the boundary — the admin client bypasses RLS, exactly
+  // as in listMyRuns / listAssets / the Overview reads.
+  const { data, error } = await db.database
+    .from('runs')
+    .select('id, brand, company_url, status, film_mode, final_url, created_at, updated_at')
+    .eq('user_id', me.id)
+    .order('created_at', { ascending: false })
+    .limit(RAIL_RUN_WINDOW)
+  if (error || data == null) return { unavailable: true }
+
+  const rows = (data as {
+    id: string; brand: string | null; company_url: string | null
+    status: string; film_mode: string | null; final_url: string | null
+    created_at: string; updated_at: string | null
+  }[])
+
+  const open = rows.filter((r) => !RAIL_TERMINAL.has(r.status))
+  // Only the OPEN runs need a heartbeat — a finished run's state is settled by
+  // its status, so nothing is spent asking when it last spoke. When nothing is
+  // open this is the whole cost of the call: one query.
+  let beats = new Map<string, number>()
+  if (open.length) {
+    const walkrec = open.filter((r) => RAIL_BEAT_TABLE(r.film_mode) === 'agent_events')
+    const classic = open.filter((r) => RAIL_BEAT_TABLE(r.film_mode) === 'run_events')
+    const [a, b] = await Promise.all([
+      railHeartbeats(db, 'agent_events', walkrec.map((r) => r.id)),
+      railHeartbeats(db, 'run_events', classic.map((r) => r.id)),
+    ])
+    if (a == null || b == null) return { unavailable: true }
+    beats = new Map([...a, ...b])
+  }
+
+  const now = Date.now()
+  const films: LiveFilm[] = []
+  for (const r of rows) {
+    const label = siteHost(r.company_url) || r.brand || 'Your film'
+
+    if (RAIL_TERMINAL.has(r.status)) {
+      // Terminal: the run row's own last write is when it ended.
+      const endedAt = Date.parse(r.updated_at || r.created_at)
+      if (!isFinite(endedAt) || now - endedAt > RAIL_NEWS_WINDOW_MS) continue
+      // A film to watch, or not. `delivered` without a final_url is the upload
+      // that never completed — the run page says so in as many words, and it is
+      // not something to hang a ready mark on.
+      const watchable = isDelivered(r.status) && !!r.final_url
+      films.push({ id: r.id, label, state: watchable ? 'ready' : 'stopped' })
+      continue
+    }
+
+    // Open: the newest of everything that could mark activity. created_at is in
+    // here so a just-enqueued run with no events yet reads as fresh rather than
+    // as instantly silent, and updated_at because it is stamped at the claim.
+    // Neither is trusted to track the MIDDLE of a run — that is the heartbeat's
+    // job — but both are real activity when they are the newest thing there is.
+    const marks = [
+      Date.parse(r.created_at),
+      r.updated_at ? Date.parse(r.updated_at) : NaN,
+      beats.get(r.id) ?? NaN,
+    ].filter((t) => isFinite(t))
+    const last = marks.length ? Math.max(...marks) : 0
+    films.push({
+      id: r.id, label,
+      state: now - last <= RAIL_STALE_AFTER_MS ? 'live' : 'stalled',
+    })
+  }
+
+  return { films }
 }

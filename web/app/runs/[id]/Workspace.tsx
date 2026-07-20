@@ -7,6 +7,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
+// WHICH RUN AM I STANDING IN? Read from the route rather than threaded down as
+// a prop or lifted out of the poll: this component only ever renders under
+// /runs/[id], and that segment IS the run's id (the page reads the run with it).
+// Taking it from the route keeps the live-film entry below from needing a new
+// prop on the page, and keeps this file's poll — which owns arrival state —
+// untouched.
+import { useParams } from 'next/navigation'
 import { getAgentRun, listMyRuns, sendDirectorMessage, type AgentEvent } from '../../actions'
 // ONE status chip for the whole product: the Filmos tiles wear the same chip as
 // the /videos cards, so a status can never mean two different things in two
@@ -16,6 +23,14 @@ import FilmoLoader from '../../components/FilmoLoader'
 import NewFilmComposer from './NewFilmComposer'
 import FeedbackModal from './FeedbackModal'
 import AccountMenu from './AccountMenu'
+import RunMark from './RunMark'
+// ── THE FILM THAT IS HAPPENING, WHEN IT IS NOT THIS ONE ─────────────────────
+// The SAME file OverviewRail imports — not a copy that agrees with it today.
+// The twin note below is the reason: every other entry on this rail is a glyph
+// and a handler, and a drift shows up the moment someone looks at both files,
+// but this entry carries state, motion and four visual conditions and would
+// diverge the first time either copy was fixed. One file, two rails.
+import LiveFilmEntry from '../../components/rail/LiveFilmEntry'
 
 const VERBS: Record<string, string> = {
   read: 'Scouting', decide: 'Framing', film: 'Rolling',
@@ -257,6 +272,14 @@ export default function Workspace(props: {
 function WorkspaceRun({ runKey, getToken }: {
   runKey: string; getToken: () => Promise<string | null>
 }) {
+  // The run this workspace is STANDING IN, as the rail's live-film entry needs
+  // it. `runKey` is the pipeline's own key (web-<ts>-<rand>) and the rail speaks
+  // in run ids, so it is taken from the route segment instead — which is the run
+  // id, since that is what the page reads the run with. Nothing else uses it,
+  // and it is deliberately not derived from the poll: that effect owns arrival
+  // state and does not need another reason to change.
+  const params = useParams<{ id: string }>()
+  const hereRunId = params?.id || ''
   const [evts, setEvts] = useState<AgentEvent[]>([])
   const [liveUrl, setLiveUrl] = useState('')
   const [liveFresh, setLiveFresh] = useState(false)
@@ -743,6 +766,19 @@ function WorkspaceRun({ runKey, getToken }: {
           <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>
           <i>Film</i>
         </button>
+        {/* ── ANOTHER FILM, RUNNING BEHIND THIS ONE ─────────────────────────
+            The same entry OverviewRail carries, from the same file. Here it is
+            given the run you are standing in, and it DROPS that run from
+            itself: the Film tab directly above already speaks for this film, and
+            two entries for one film is the twin-drift problem in miniature —
+            two things claiming one truth, free to disagree. A DIFFERENT run
+            going in the background is exactly what this rail could not say
+            before, so that one still appears, beside the Film tab rather than
+            instead of it.
+            It sits last for the same reason it does on the Overview: it is the
+            only entry that comes and goes, and anywhere but the end it would
+            shove the entries below it down the moment a film started. */}
+        <LiveFilmEntry getToken={getToken} currentRunId={hereRunId} />
         <div className="wk-railspace" />
         {/* Bottom of the rail, below the fold of the work: who you are, what
             you have left, and the two acts that belong to a person rather than
@@ -766,7 +802,7 @@ function WorkspaceRun({ runKey, getToken }: {
               activity; the tail blob (wk-tailblob) is the thing that moves
               while the studio is working. No logo captured yet → no icon, and
               the title carries the brand on its own. */}
-          {S.logo ? <img className="wk-runlogo" src={S.logo} alt="" /> : null}
+          <RunMark src={S.logo} brand={brandTitle} />
           <div>
             <h1>{brandTitle} <span className="wk-betachip">beta</span></h1>
             {/* Says nothing until it knows something; then it reports the same
@@ -957,11 +993,28 @@ function WorkspaceRun({ runKey, getToken }: {
           padding:0 20px; }
         .wk-railhead h1 { font-size:14.5px; font-weight:700; margin:0; }
         .wk-railhead .sub { color:#8A8A86; font-size:12px; min-height:16px; }
-        /* The customer's mark, kept in a dark tile so transparent logos stay
-           legible. Run identity, not product identity. */
-        .wk-runlogo { width:32px; height:32px; border-radius:10px;
-          flex-shrink:0; object-fit:cover; background:#1B1B1A; display:block;
-          box-shadow:0 2px 8px rgba(0,0,0,0.12); }
+        /* The customer's mark. Run identity, not product identity. The GROUND
+           is not set here: RunMark measures the mark's own ink and picks it,
+           because a fixed tile colour is guaranteed to swallow either the
+           dark-ink marks or the light-ink ones. object-fit contain + padding
+           because a wordmark is not a square and must never be cropped to fit
+           one.
+           (The backticks that were around that property name terminated this
+           template literal and broke the whole file — the two notes below and
+           under wk-tailblob warn about exactly this. Still no backticks here.) */
+        .wk-runmark { width:32px; height:32px; border-radius:10px;
+          flex-shrink:0; object-fit:contain; padding:3px; box-sizing:border-box;
+          display:block; border:1px solid transparent;
+          box-shadow:0 2px 8px rgba(0,0,0,0.12);
+          transition:background-color .18s ease, border-color .18s ease; }
+        /* Until the probe has read the ink we have no honest ground to draw,
+           so the tile stays empty rather than flashing a colour it may undo. */
+        .wk-runmark-probing { box-shadow:none; }
+        /* Visibly a placeholder, never a logo: dashed slot, muted glyph. */
+        .wk-runmark-absent { display:flex; align-items:center;
+          justify-content:center; color:#B4B4AE; background:transparent;
+          border:1px dashed #D2D2CC; box-shadow:none; padding:5px; }
+        .wk-runmark-absent svg { width:100%; height:100%; display:block; }
         @keyframes wkmorph {
           0%,100% { border-radius:58% 42% 55% 45% / 48% 60% 40% 52%; transform:scale(1); }
           33% { border-radius:42% 58% 38% 62% / 60% 42% 58% 40%; transform:scale(0.92); }

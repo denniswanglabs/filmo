@@ -99,7 +99,18 @@ export default function VideosPage() {
     setRuns(res.runs)
   }, [getToken])
 
-  useEffect(() => { if (user) void loadRuns() }, [user, loadRuns])
+  // KEYED ON THE USER'S ID, NEVER THE USER OBJECT. AuthProvider resolves identity
+  // in two steps — the optimistic localStorage restore, then the network reconcile
+  // — and each step calls setUser with a NEWLY BUILT object. Depending on `user`
+  // therefore re-ran this read on every step even though the person never changed,
+  // and because Next.js SERIALIZES server actions those duplicates queued rather
+  // than overlapping: measured 3 identical listMyRuns calls back-to-back on one
+  // navigation (608 + 601 + 603ms = 1,812ms instead of 604ms), and 6 calls /
+  // 5,033ms when the Overview's own leftover actions were still in the queue.
+  // The id is the thing that decides WHOSE runs to read, so it is the correct
+  // dependency; a real account switch still refetches.
+  const userId = user?.id
+  useEffect(() => { if (userId) void loadRuns() }, [userId, loadRuns])
 
   // Search first, then status — so the count on each status pill says what
   // pressing it would actually yield from where the reader is standing, rather
