@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from run_events import emit  # noqa: E402
+import workspace_store  # noqa: E402
 
 # The watch server starts without the shell env — load the brain key here.
 if not os.environ.get("OPENROUTER_API_KEY"):
@@ -322,6 +323,15 @@ def _apply_work(run_id: str, run_dir: str, state: dict, actions,
          artifact=out)
     emit(run_dir, "run.done", "Run finished", "The updated film is ready.")
     _re.flush_sinks()
+    # RE-PERSIST (revision++) — the NEXT edit, possibly on another replica after
+    # another deploy, must rehydrate THIS cut, not the pre-edit one. AFTER
+    # delivery + flush, so it only keeps the job claimed a few seconds longer;
+    # only stops.json + the manifest change on a drop/swap (clips are immutable).
+    try:
+        workspace_store.persist(run_dir, run_id, reason="edit")
+    except Exception as e:
+        print(f"[workspace!] edit persist skipped: {type(e).__name__}: {e}",
+              file=sys.stderr)
 
 
 def handle_job(run_key: str, insforge_run_id: str, message: str,
@@ -353,6 +363,15 @@ def _handle_job(run_key: str, insforge_run_id: str, message: str,
                 f.write(insforge_run_id)
         except Exception:
             pass
+    # REHYDRATE (survives a redeploy): if this replica doesn't already hold the
+    # working files — the common case after a deploy, which wipes every
+    # container disk — pull the persisted workspace so _load_state finds
+    # stops.json and the clips it references. A warm local hit skips the pull.
+    # Download lines go to the operator log; the thread narrates the edit
+    # itself. Only a truly absent manifest (a film delivered before this
+    # shipped) or a failed pull still reaches the honest fallback below.
+    if not workspace_store.has_local_workspace(run_dir):
+        workspace_store.rehydrate(run_dir, run_key)
     try:
         state = _load_state(run_dir)
     except Exception:

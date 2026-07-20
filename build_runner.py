@@ -1153,6 +1153,16 @@ def main():
         emit(run_dir, "run.done", "Film delivered",
              "The tour film is rendered and shipped.")
         run_events.flush_sinks()
+        # PERSIST THE WORKSPACE (survives a redeploy) — AFTER delivery + flush,
+        # so the customer already has the film and this only keeps the job
+        # claimed a few seconds longer. A later director edit rehydrates from
+        # this, on any replica, after any deploy. Best-effort by contract.
+        try:
+            import workspace_store
+            workspace_store.persist(run_dir, a.run_id, reason="build")
+        except Exception as e:
+            print(f"[workspace!] build persist skipped: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
         print(f"[walkrec] final: {os.path.join(run_dir, 'final.mp4')}")
         return
     goal = a.goal or ("%d-second promo plus a short product walkthrough" % a.duration)
