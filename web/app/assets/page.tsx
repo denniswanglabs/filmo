@@ -20,7 +20,9 @@
 //   · FILTERING BY KIND, and each filter saying what the kind IS — the library
 //     doubles as an explanation of what the agent actually collects.
 //   · EVERY TILE LINKS TO ITS RUN. Provenance is the point (see AssetTile).
-//   · A STALE TOKEN PROMPTS SIGN-IN, never a false-empty library.
+//   · A STALE TOKEN NEVER YIELDS A FALSE-EMPTY LIBRARY. As of 2026-07-20 it no
+//     longer prompts sign-in either: an authError is a hypothesis, and `load`
+//     runs the /overview refresh-retry belt before any gate is considered.
 //
 // One thing was fixed rather than kept: the old read swallowed a thrown server
 // action whole (`catch { return }`), which on a FIRST load left the page saying
@@ -32,6 +34,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
+import { ensureFreshAccessToken } from '../../lib/insforge'
 import { listAssets, type AssetKind, type AssetRow } from '../actions'
 import FilmoLoader from '../components/FilmoLoader'
 import LibraryShell from '../components/library/LibraryShell'
@@ -64,22 +67,46 @@ export default function AssetsPage() {
 
   const load = useCallback(async () => {
     setReadFailed(false)
-    const token = await getToken()
-    let res
+    const read = async () => listAssets(await getToken())
+    const denied = (r: Awaited<ReturnType<typeof read>>) => 'authError' in r
     try {
-      res = await listAssets(token)
+      let res = await read()
+      // ONE STALE 401 IS NOT A SIGNOUT — the /overview belt, adopted here
+      // (2026-07-20). The access token can expire mid-session while a valid
+      // refresh token still sits in localStorage; the read carries the dead
+      // bearer and verifyUser answers a clean 401. So before the gate is even
+      // considered: force ONE refresh (the server outranks the client's clock)
+      // and retry the read ONCE on the fresh token. The invariant this
+      // establishes: a user holding a valid refresh token never sees the
+      // sign-in gate — they see their assets, or a "try again", never the door.
+      if (denied(res)) {
+        const freshness = await ensureFreshAccessToken({ force: true })
+        if (freshness === 'ok') res = await read()
+        if (denied(res)) {
+          if (freshness === 'unavailable') {
+            // The auth service itself was unreachable: the session is UNKNOWN,
+            // not dead — a blip with a retry, never the gate. Treated exactly
+            // like a thrown read below: KEEP a list already on screen (Refresh
+            // is right there), and only say "try again" with nothing to keep.
+            setAssets((prev) => { if (prev == null) setReadFailed(true); return prev })
+            return
+          }
+          // Definitive: the refresh credential is gone/revoked ('signed-out'),
+          // or a token minted seconds ago was still rejected. The gate is honest.
+          setAuthError(true)
+          return
+        }
+      }
+      if ('authError' in res) return // unreachable after the block; narrows below
+      setAuthError(false)
+      setAssets(res.assets)
     } catch {
       // A thrown server action is a network/timeout blip. If a library is
       // already on screen, KEEP it — blanking a good list on a hiccup is worse
       // than a stale one, and Refresh is right there. If there is nothing on
       // screen, say so, because the alternative is a spinner that never ends.
       setAssets((prev) => { if (prev == null) setReadFailed(true); return prev })
-      return
     }
-    // Expired/invalid token → the sign-in gate, never a false-empty library.
-    if ('authError' in res) { setAuthError(true); return }
-    setAuthError(false)
-    setAssets(res.assets)
   }, [getToken])
 
   // KEYED ON THE USER'S ID, NEVER THE USER OBJECT — same reason as /videos, which

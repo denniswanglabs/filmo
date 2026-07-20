@@ -19,8 +19,9 @@
 //   · THE READ IS SERVER-SIDE AND OWNER-SCOPED (listMyRuns). The browser's
 //     anon/RLS client used to do it, and a stale token — e.g. after a Stripe
 //     redirect — came back as an EMPTY list, so the page cheerfully reported
-//     "No builds yet" to someone with a dozen films. An authError now routes to
-//     the sign-in gate. Never a false-empty library.
+//     "No builds yet" to someone with a dozen films. An authError is now a
+//     HYPOTHESIS, not a verdict (loadRuns runs the /overview refresh-retry
+//     belt) — never a false-empty library, and never a false gate either.
 //   · SEARCH over brand + address.
 //   · A REFRESH, and a transient blip leaving the list alone.
 //
@@ -41,6 +42,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '../../lib/auth'
+import { ensureFreshAccessToken } from '../../lib/insforge'
 import { listMyRuns } from '../actions'
 import { isDelivered, type Run } from '../../lib/types'
 import FilmoLoader from '../components/FilmoLoader'
@@ -82,21 +84,46 @@ export default function VideosPage() {
     // listMyRuns, so it never depends on browser-token freshness. getToken
     // falls back to the durable localStorage copy; verifyUser re-validates
     // server-side.
-    const accessToken = await getToken()
-    let res
+    const read = async () => listMyRuns(await getToken())
+    const denied = (r: Awaited<ReturnType<typeof read>>) => 'authError' in r
     try {
-      res = await listMyRuns(accessToken)
+      let res = await read()
+      // ONE STALE 401 IS NOT A SIGNOUT — the /overview belt, adopted here
+      // (2026-07-20). The access token can expire mid-session while a valid
+      // refresh token still sits in localStorage; the read carries the dead
+      // bearer and verifyUser answers a clean 401. So before the gate is even
+      // considered: force ONE refresh (the server outranks the client's clock)
+      // and retry the read ONCE on the fresh token. The invariant this
+      // establishes: a user holding a valid refresh token never sees the
+      // sign-in gate — they see their filmos, or a "try again", never the door.
+      if (denied(res)) {
+        const freshness = await ensureFreshAccessToken({ force: true })
+        if (freshness === 'ok') res = await read()
+        if (denied(res)) {
+          if (freshness === 'unavailable') {
+            // The auth service itself was unreachable: the session is UNKNOWN,
+            // not dead — a blip with a retry, never the gate. Treated exactly
+            // like a thrown read below: KEEP a list already on screen (Refresh
+            // is right there), and only say "try again" with nothing to keep.
+            setRuns((prev) => { if (prev == null) setReadFailed(true); return prev })
+            return
+          }
+          // Definitive: the refresh credential is gone/revoked ('signed-out'),
+          // or a token minted seconds ago was still rejected. The gate is honest.
+          setAuthError(true)
+          return
+        }
+      }
+      if ('authError' in res) return // unreachable after the block; narrows below
+      setAuthError(false)
+      setRuns(res.runs)
     } catch {
-      // Blip. KEEP a list that is already on screen — blanking a good library
-      // on a hiccup is worse than a slightly stale one, and Refresh is right
-      // there. With nothing on screen there is nothing to preserve, and a
-      // silent return would be a loader that never resolves.
+      // Blip (a thrown server action). KEEP a list that is already on screen —
+      // blanking a good library on a hiccup is worse than a slightly stale one,
+      // and Refresh is right there. With nothing on screen there is nothing to
+      // preserve, and a silent return would be a loader that never resolves.
       setRuns((prev) => { if (prev == null) setReadFailed(true); return prev })
-      return
     }
-    if ('authError' in res) { setAuthError(true); return }
-    setAuthError(false)
-    setRuns(res.runs)
   }, [getToken])
 
   // KEYED ON THE USER'S ID, NEVER THE USER OBJECT. AuthProvider resolves identity
@@ -154,8 +181,9 @@ export default function VideosPage() {
     // already spent on a rail and a heading.
     body = <FilmoLoader fit="block" />
   } else if (!user || authError) {
-    // Signed out, OR a stale/expired session token. A sign-in prompt only — no
-    // data is queried and none is exposed.
+    // Signed out, OR a session the refresh belt could not save — a revoked/gone
+    // refresh credential (see loadRuns). A merely stale/expired token never
+    // reaches here. A sign-in prompt only; no data is queried and none exposed.
     body = (
       <div className="lib-gate">
         <b>Sign in to see your filmos</b>
