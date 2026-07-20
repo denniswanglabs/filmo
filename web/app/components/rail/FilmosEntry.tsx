@@ -408,11 +408,15 @@ export default function FilmosEntry({ getToken, lit, bar, currentRunId }: {
         }
 
         /* Matches OverviewRail's narrow-viewport rule so the entry shrinks with
-           the rail it is in rather than becoming its widest item. */
+           the rail it is in. Scoped to :not(.railfilm--bar) — i.e. the overview
+           rail only — because that rail shrinks to 56px at this width while the
+           studio's (.wk-iconrail, which passes bar) stays 72px at every width; a
+           blanket shrink would render the studio's Filmos glyph 2px smaller than
+           its .wk-ic siblings. */
         @media (max-width:760px) {
-          .railfilm svg { width:20px; height:20px; }
-          .railfilm-mark { width:20px; height:20px; }
-          .railfilm i { font-size:9px; } }
+          .railfilm:not(.railfilm--bar) svg { width:20px; height:20px; }
+          .railfilm:not(.railfilm--bar) .railfilm-mark { width:20px; height:20px; }
+          .railfilm:not(.railfilm--bar) i { font-size:9px; } }
       `}</style>
     </Link>
   )
