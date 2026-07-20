@@ -47,6 +47,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { insforge } from '../../lib/insforge'
 import { useAuth } from '../../lib/auth'
+import Link from 'next/link'
 import FilmoMark from '../components/landing2/FilmoMark'
 import FilmoLoader, { GROUND_STUDIO } from '../components/FilmoLoader'
 
@@ -153,10 +154,13 @@ export default function LoginPage() {
         <div className="lgn-plate" aria-hidden="true" />
         <div className="lgn-scrim" aria-hidden="true" />
 
-        <div className="lgn-lockup lgn-lockup-art">
+        {/* The mark is the way home — from a page you mostly reach by signing
+            out, the logo answering "back to the landing" is the expected exit
+            (Dennis, 2026-07-20). Same on both lockups below. */}
+        <Link href="/" className="lgn-lockup lgn-lockup-art" aria-label="Back to the Filmo landing page">
           <FilmoMark />
           <span>Filmo</span>
-        </div>
+        </Link>
 
         <div className="lgn-say">
           <h2 className="lgn-display">
@@ -176,10 +180,10 @@ export default function LoginPage() {
           {/* The art panel carries the lockup on a wide screen; below 900px it
               is gone, so the brand reappears here at FilmoLoader's `compact`
               ratio. Only ever one of the two is in the layout. */}
-          <div className="lgn-lockup lgn-lockup-form">
+          <Link href="/" className="lgn-lockup lgn-lockup-form" aria-label="Back to the Filmo landing page">
             <FilmoMark />
             <span>Filmo</span>
-          </div>
+          </Link>
 
           <div className="lgn-card">
             {needsCode ? (
@@ -418,7 +422,13 @@ export default function LoginPage() {
            at, not waited on. */
         .lgn-lockup { display:flex; align-items:center; gap:11px;
           font:600 38px/1 Inter,ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
-          letter-spacing:-.022em; }
+          letter-spacing:-.022em;
+          /* The lockup became a LINK home; it must keep reading as the brand
+             mark, not as browser-default hyperlink chrome. Focus stays visible
+             (chrome-less is a look, not a licence). */
+          text-decoration:none; color:inherit; cursor:pointer; }
+        .lgn-lockup:focus-visible { outline:2px solid #3B82F6;
+          outline-offset:4px; border-radius:8px; }
         .lgn-lockup svg { width:50px; height:50px; flex:0 0 auto; }
         /* Not a new colour: exactly what FilmoLoader.inkFor() returns for a
            dark ground. */
