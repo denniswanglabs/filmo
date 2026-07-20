@@ -1,10 +1,15 @@
 import Link from 'next/link'
 import { Wordmark } from '../Brand'
 
+// This footer ships on /videos, /assets and /how-it-works too, so these are
+// cross-page links. `landing=1` is required: bare `/` sends a signed-in visitor
+// into the studio, so a footer link would teleport them out of the page they
+// were reading. (The old #examples / #editor-demo / #lookbook ids belonged to
+// the retired landing and match nothing now.)
 const SECTION_LINKS = [
-  { href: '/#examples', label: 'Examples' },
-  { href: '/#editor-demo', label: 'Editor' },
-  { href: '/#lookbook', label: 'Patterns' },
+  { href: '/?landing=1#work', label: 'Work' },
+  { href: '/?landing=1#studio', label: 'The studio' },
+  { href: '/?landing=1#pricing', label: 'Pricing' },
   { href: '/how-it-works', label: 'How it works' },
 ] as const
 

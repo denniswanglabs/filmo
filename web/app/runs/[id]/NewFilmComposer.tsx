@@ -11,6 +11,7 @@ import { useCallback, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBuild } from '../../actions'
 import { AuthGate } from '../../components/AuthGate'
+import { isValidBuildUrl, writePendingBuild } from '../../../lib/pending-build'
 
 // ── TWO COMPOSERS, ONE FILM ─────────────────────────────────────────────────
 // The landing (`web/app/page.tsx`) and this screen are two doors into the same
@@ -65,25 +66,18 @@ function stickyLook(): 'walkrec' | 'engineered-night' | undefined {
 // Signing in with Google navigates the WHOLE BROWSER away and comes back to
 // `/` — not here (AuthGate calls signInWithGoogle() with no redirectTo, which
 // resolves to origin + '/'). So this screen cannot resume its own build: the
-// landing does it, by reading this exact sessionStorage key on mount and
-// firing createBuild for us. Stashing under the same key in the same shape is
-// therefore the ONLY thing standing between a user and losing the URL they
-// just typed to a redirect they didn't ask for.
+// landing does it, by reading the stash on mount and firing createBuild for us.
+// Stashing is therefore the ONLY thing standing between a user and losing the
+// URL they just typed to a redirect they didn't ask for.
 //
-// ⚠ The key and the shape are duplicated from `web/app/page.tsx` (PENDING_KEY /
-// PendingBuild) because that module keeps them private and this task may not
-// edit it. If either side moves, this stops resuming and fails SILENTLY — the
-// user just lands on the landing with an empty box. Hoist them to a shared
-// module the next time page.tsx is open.
-const PENDING_KEY = 'ws_pending_build'
-
-// The same shape the server enforces (createBuild → 'Enter a valid website
-// URL.'). Validate here FIRST: createBuild THROWS on a bad URL, and a thrown
-// server action is an opaque "Server Components render … digest" 500 in
-// production, so the message the user would see is no message at all.
-function isValidBuildUrl(raw: string): boolean {
-  return /^https?:\/\/[^\s]+\.[^\s]+/i.test((raw || '').trim())
-}
+// The key and the shape used to be duplicated here from `web/app/page.tsx`,
+// with a warning on both sides that whichever one moved first would break
+// resume silently. They now live in ONE module that both doors import
+// (`lib/pending-build.ts`), so a rename is a compile error rather than a bug
+// report. `isValidBuildUrl` comes from there for the same reason: createBuild
+// THROWS on a bad URL, and a thrown server action is an opaque "Server
+// Components render … digest" 500 in production — so the two doors must agree
+// on what a URL is, or one of them shows the user no message at all.
 
 // Typing "acme.com" is the same intent as typing "https://acme.com". Fill in
 // the scheme rather than failing a URL the user got right.
@@ -155,16 +149,15 @@ export default function NewFilmComposer({ getToken }: {
   }, [url, getToken, router])
 
   function stash(target: string) {
-    try {
-      sessionStorage.setItem(PENDING_KEY, JSON.stringify({
-        url: target,
-        brain: BUILD_DEFAULTS.brain,
-        look: stickyLook() || STUDIO_LOOK,
-        // Stashes written before payments were switched off carry requirePay:
-        // true and would resurrect the checkout gate on resume. Always false.
-        requirePay: false,
-      }))
-    } catch { /* private mode — the Google return just won't auto-resume */ }
+    writePendingBuild({
+      url: target,
+      brain: BUILD_DEFAULTS.brain,
+      look: stickyLook() || STUDIO_LOOK,
+      // Pinned false by the module on both read and write: stashes written
+      // before payments were switched off carry true and would resurrect the
+      // checkout gate on resume.
+      requirePay: false,
+    })
   }
 
   const canSend = url.trim().length > 3 && !busy

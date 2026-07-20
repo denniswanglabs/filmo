@@ -12,10 +12,18 @@ import { Wordmark } from '../Brand'
 // Mirrors the run-page TopBar + the analytics server gate (the real boundary).
 const OWNER_EMAIL = 'denniswanglabs@gmail.com'
 
+// ── THESE ANCHORS POINT AT A PAGE THIS NAV IS USUALLY NOT ON ────────────────
+// This nav ships on /videos, /assets and /how-it-works as well as the landing,
+// and `scrollToHash` falls back to a HARD navigation when the id isn't on the
+// current page. So every href here is a real cross-page link, and it has to
+// carry `landing=1`: `/` sends a signed-in visitor into the studio, which would
+// turn "Patterns" on their own Videos page into a teleport out of it. The old
+// #examples / #editor-demo / #lookbook ids belonged to the retired landing's
+// sections and now match nothing anywhere.
 const NAV_LINKS = [
-  { href: '/#examples', label: 'Examples', kind: 'hash' as const },
-  { href: '/#editor-demo', label: 'Editor', kind: 'hash' as const },
-  { href: '/#lookbook', label: 'Patterns', kind: 'hash' as const },
+  { href: '/?landing=1#work', label: 'Work', kind: 'hash' as const },
+  { href: '/?landing=1#studio', label: 'The studio', kind: 'hash' as const },
+  { href: '/?landing=1#pricing', label: 'Pricing', kind: 'hash' as const },
   { href: '/how-it-works', label: 'How it works', kind: 'route' as const },
 ] as const
 
@@ -100,7 +108,12 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick, showBui
     if (typeof document === 'undefined') return
     const start = document.getElementById('start')
     if (!start) {
-      router.push('/#start')
+      // Off the landing (Videos, Assets, How it works). "Build" means "start a
+      // new film", so it asks `/` for the composer specifically — `/` on its own
+      // would open their most recent film instead, which is not what the word
+      // says. `#start` was the retired landing's composer anchor; nothing
+      // defines it any more.
+      router.push('/?new=1')
       return
     }
     scrollToHeroComposer('smooth')
@@ -287,9 +300,14 @@ export default function FloatingNav({ buildEnabled = true, onBuildClick, showBui
                         <div className="h-full rounded-full bg-[#3B82F6]"
                           style={{ width: `${Math.min(100, (credits.dailyUsed / credits.dailyCap) * 100)}%` }} />
                       </div>
+                      {/* No film count: a film and a re-cut spend from the same
+                          allowance at different rates, so "about three films" is a
+                          promise the meter cannot keep — someone who re-cuts heavily
+                          gets fewer and the number quietly becomes a lie. Same words
+                          as the studio's popover, by design. */}
                       <div className="mt-3 text-[11px] leading-snug text-[#8A94A6]">
-                        Enough for about three films and ten edits a day. Credits refresh
-                        every morning; failed builds are refunded.
+                        Credits are metered on the work itself — a film costs more than a
+                        re-cut. They refresh every morning; failed builds are refunded.
                       </div>
                     </div>
                   )}

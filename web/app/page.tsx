@@ -1,372 +1,319 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../lib/auth'
-import { createBuild } from './actions'
+import { createBuild, listMyRuns } from './actions'
 import { AuthGate } from './components/AuthGate'
-import FloatingNav from './components/landing/FloatingNav'
-import Examples from './components/landing/Examples'
-import EditorDemo from './components/landing/EditorDemo'
-import PatternLookbook from './components/landing/PatternLookbook'
-import LuceoShowcase from './components/landing/LuceoShowcase'
-import ReadyToCreate from './components/landing/ReadyToCreate'
-import SiteFooter from './components/landing/SiteFooter'
-import LandingBackdrop, { HeroBrandLayer } from './components/landing/LandingBackdrop'
-import { HeroBelowFold, PinnedHero, scrollToHeroComposer } from './components/landing/Motion'
-import VerticalCutReveal from './components/fancy/VerticalCutReveal'
-import { BRAINS } from '../lib/types'
+import PloyLanding from './components/landing2/PloyLanding'
+import BootScreen from './components/landing2/BootScreen'
+import StudioEntry from './components/landing2/StudioEntry'
+import {
+  clearPendingBuild,
+  isValidBuildUrl,
+  readPendingBuild,
+  writePendingBuild,
+  type PendingBuild,
+} from '../lib/pending-build'
 
-// Composer state stashed across the Google OAuth round-trip so the prompt survives
-// the redirect and the build resumes automatically on return.
-const PENDING_KEY = 'ws_pending_build'
+/* ───────────────────────────────────────────────────────────────────────────
+   `/` IS A DOOR, NOT A PAGE.
 
-interface PendingBuild {
-  url: string
-  brain: string
-  look?: string
-  // Stripe TEST payment gate. DORMANT since the open beta: always false → pay_mode
-  // 'auto' (simulated payment, no checkout). The full Stripe path stays in the
-  // codebase — flip the useState default back to true to re-enable it.
-  requirePay: boolean
+   The studio is the product; the landing is the front door. So this route
+   resolves to one of three things and renders exactly one of them:
+
+     signed out ................ the landing
+     signed in, has films ...... their most recent film, in the studio
+     signed in, no films ....... the studio's own "New film" surface, in place
+
+   Three things about that are load-bearing enough to state out loud:
+
+   1. NO HTTP REDIRECT IS INVOLVED, ANYWHERE. The session lives in
+      origin-scoped localStorage (`insforge.ts`), which no server and no
+      middleware can read — a redirect decided on the server would fire for
+      nobody. Every hand-off here is a client `router.replace`, which also
+      means there is no status code to get wrong: a 301/308 would be cached by
+      the browser permanently and rolling the deploy back would NOT free the
+      people who had already hit it. There is no way to make that mistake from
+      here, and that is deliberate.
+
+   2. THE ZERO-FILM ACCOUNT IS RENDERED, NOT SENT. The studio has no route of
+      its own — it is `runs/[id]` with a walkrec run — so a brand-new signup
+      has no id to be sent to. Redirecting them anywhere would either invent an
+      id (greeting a first-time user with "This run could not be found") or
+      bounce them back here forever. So `/` becomes the empty studio for that
+      account. An account with nothing in it cannot loop if nothing moves.
+
+   3. THE REDIRECT IS GATED ON A SERVER-VERIFIED SESSION, NOT ON `user`.
+      `lib/auth.tsx` paints `user` optimistically from localStorage and drops
+      `loading` before anything is validated. Trusting that would take a
+      returning visitor whose session actually died, redirect them into the
+      studio on the strength of a stale cache, bounce them to "please sign in",
+      and — because every later visit to `/` repeats the trick — never let them
+      reach the marketing page again. So the optimistic user only decides
+      whether it is WORTH ASKING; `listMyRuns` (whose `verifyUser` runs on the
+      server) decides the answer, and its `authError` sends them to the
+      landing. Anything that isn't a definitive yes fails open to the landing.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+// The landing is the DEFAULT, and it is what the server renders for everyone —
+// it has to be. The server cannot read the session, so if this started as a
+// "deciding" blank, every anonymous visitor and every crawler would get an
+// empty document and wait for JS to fill it. The signed-in visitor is handled
+// the other way round: the markup ships, and the pre-paint stamp hides it.
+type View = 'landing' | 'studio-entry'
+
+// `?landing=1` — always show the marketing page, even signed in. Without an
+// escape hatch a signed-in visitor (Dennis included) literally cannot look at
+// the landing, and every in-app link back to it becomes a teleport into the
+// studio. `?new=1` — go straight to the composer instead of the last film,
+// which is what "Build" means from anywhere else in the app.
+function readIntent(): { landing: boolean; fresh: boolean } {
+  try {
+    const q = new URLSearchParams(window.location.search)
+    return { landing: q.get('landing') === '1', fresh: q.get('new') === '1' }
+  } catch {
+    return { landing: false, fresh: false }
+  }
 }
 
-// Same shape the server action enforces (createBuild → 'Enter a valid website URL.').
-// We validate client-side FIRST so an empty/garbage URL never reaches the server
-// action: a thrown error inside a server action surfaces in production as the opaque
-// "Server Components render … digest" 500. The classic trigger is the OAuth round-trip
-// — a logged-out visitor opens the sign-in gate with an empty composer, we stash
-// `{url:''}`, and on return the auto-resume would fire createBuild('') → throw → 500.
-// Guarding here keeps that 500 (and its digest) from ever happening.
-function isValidBuildUrl(raw: string): boolean {
-  return /^https?:\/\/[^\s]+\.[^\s]+/i.test((raw || '').trim())
+// ── PRE-PAINT COVER ─────────────────────────────────────────────────────────
+// `/` is server-rendered as the landing for EVERYONE — it has to be, because
+// the session lives in localStorage and no server can read it. So without a
+// signal that runs before the first paint, a visitor who is already signed in
+// watches the marketing page paint and hydrate before it disappears, which is
+// the entire complaint this work exists to answer.
+//
+// This script runs ahead of the landing markup and, when it has reason to think
+// the visitor is signed in, injects a stylesheet that hides the landing and
+// raises the boot cover. React removes that stylesheet by id the moment it
+// learns otherwise.
+//
+// It injects a <style> rather than stamping an attribute on <html> DELIBERATELY.
+// The obvious version — `documentElement.setAttribute(...)` — works, but React
+// then finds an attribute on the root that the server never rendered and logs a
+// hydration mismatch on every signed-in load; `suppressHydrationWarning` does
+// not cover the App Router's root element (verified, Next 15 / React 19). A node
+// React never rendered has nothing to reconcile, so there is no mismatch to
+// suppress. The rules are !important because BootScreen's own <style> lives in
+// the body and would otherwise win on document order.
+//
+// ⚠ `insforge_session_v1` is `SESSION_KEY` in `lib/insforge.ts`, duplicated here
+// because this has to be a literal inside a script that runs before any module
+// loads. If that key moves, this degrades to a landing flash for signed-in
+// users — not a break, but fix it here too.
+const BOOT_STYLE_ID = 'filmo-boot-cover'
+const BOOT_PROBE = `try{var q=location.search;if(q.indexOf('landing=1')<0&&(localStorage.getItem('insforge_session_v1')||q.indexOf('insforge_code')>-1)){var s=document.createElement('style');s.id='${BOOT_STYLE_ID}';s.textContent='[data-filmo-landing]{visibility:hidden!important}.fl-boot{opacity:1!important;visibility:visible!important}';document.head.appendChild(s)}}catch(e){}`
+
+function clearBootStamp() {
+  try {
+    document.getElementById(BOOT_STYLE_ID)?.remove()
+  } catch {
+    /* ignore */
+  }
 }
 
 export default function Home() {
   const router = useRouter()
   const { user, loading, getToken } = useAuth()
 
-  // Composer state
-  const [url, setUrl] = useState('')
-  // Default to the flagship paid Ultra; Super (free) stays selectable in the dropdown.
-  const [brain, setBrain] = useState<string>('ultra-paid')
-  // Visual style family — 'classic' light or the Engineered Night dark one-world look.
-  const [look, setLook] = useState<string>('')
-  // Walkrec beta entry: /?look=walkrec selects the agent-toured film mode and
-  // the choice STICKS (localStorage) so every later plain visit keeps the new
-  // pipeline; /?look=classic explicitly switches back and sticks the same way.
-  useEffect(() => {
-    try {
-      const q = new URLSearchParams(window.location.search).get('look')
-      if (q === 'walkrec' || q === 'classic' || q === 'engineered-night') {
-        setLook(q)
-        localStorage.setItem('filmo-look', q)
-      } else {
-        const saved = localStorage.getItem('filmo-look')
-        if (saved === 'walkrec' || saved === 'engineered-night') setLook(saved)
-      }
-    } catch { /* ssr */ }
-  }, [])
-  // Payments are OFF for the open beta (no Stripe roadblock for new users) — every
-  // build goes pay_mode 'auto'. The checkout UI + claimer gate remain in the codebase.
-  const [requirePay] = useState(false)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [building, setBuilding] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // Sign-in gate (opens when a logged-out visitor hits Build)
+  const [view, setView] = useState<View>('landing')
+  const [booting, setBooting] = useState(false)
   const [gateOpen, setGateOpen] = useState(false)
+  // A build that failed on its way in has to say so somewhere, and the landing
+  // has no composer to say it in — so it is carried onto the studio surface.
+  const [notice, setNotice] = useState<string | null>(null)
 
-  // "Remix" from the Examples gallery seeds the composer with that cut's source
-  // URL, then scrolls the composer into view and focuses the URL input — same
-  // landing pattern as FloatingNav.jumpToComposer.
-  useEffect(() => {
-    function onSeed(e: Event) {
-      const detail = (e as CustomEvent<{ url?: string }>).detail
-      if (!detail?.url) return
-      setUrl(detail.url)
-      scrollToHeroComposer('smooth')
-    }
-    window.addEventListener('filmo:seed-composer', onSeed)
-    return () => window.removeEventListener('filmo:seed-composer', onSeed)
+  // The stamp lives on <html>, outside React's tree, so React will not clean it
+  // up on unmount. Leaving it set would hide the landing on a later client
+  // navigation back to `/`.
+  useEffect(() => clearBootStamp, [])
+
+  const showLanding = useCallback(() => {
+    clearBootStamp()
+    setBooting(false)
+    setView('landing')
   }, [])
 
-  // Kick off a build and navigate to its run page. Identity travels as the verified
-  // access token (the server derives the owner from it), never a client-set user id.
+  // Kick off a build and navigate to its run. Identity travels as the verified
+  // access token (the server derives the owner from it), never a client-set id.
+  // Every parameter is pinned to the same value the studio's own composer pins,
+  // because two doors that disagree about one of them make two different films
+  // from the same URL. `brain` especially: createBuild's fallback for an absent
+  // brain is 'super-free', so omitting it silently downgrades the paid flagship.
   const runBuild = useCallback(
     async (p: PendingBuild) => {
-      setError(null)
-      // Validate BEFORE touching the server action. createBuild throws on a bad URL,
-      // and a thrown server-action error becomes an opaque production 500 (the digest
-      // "Server Components render" error). Fail here with a friendly inline message.
-      if (!isValidBuildUrl(p.url)) {
-        setError('Enter a valid website URL.')
-        return
-      }
-      setBuilding(true)
+      setBooting(true)
       try {
         const accessToken = await getToken()
         if (!accessToken) {
-          setBuilding(false)
+          writePendingBuild(p)
+          setBooting(false)
+          setNotice('Sign in again to start the film — your link is saved.')
           setGateOpen(true)
+          setView('studio-entry')
+          clearBootStamp()
           return
         }
         const res = await createBuild({
           accessToken,
           url: p.url.trim(),
           brain: p.brain,
-          look: p.look === 'walkrec' ? 'walkrec'
-            : p.look === 'engineered-night' ? 'engineered-night'
-              : p.look === 'classic' ? 'classic' : undefined,
+          look:
+            p.look === 'walkrec'
+              ? 'walkrec'
+              : p.look === 'engineered-night'
+                ? 'engineered-night'
+                : p.look === 'classic'
+                  ? 'classic'
+                  : undefined,
           mode: 'mock',
           payMode: p.requirePay ? 'human' : 'auto',
         })
-        // Beta cap (non-owner accounts) returns a structured { limit } instead of a run —
-        // show its message inline; it is NOT an auth/session error, so don't re-open the gate.
+        // The beta cap answers with a structured { limit } rather than a run. It
+        // is a real answer, not a broken session — say it and stop.
         if ('limit' in res) {
-          setBuilding(false)
-          setError(res.message)
+          setNotice(res.message)
+          setBooting(false)
+          setView('studio-entry')
+          clearBootStamp()
           return
         }
+        // Leave the cover up: the client transition keeps this route mounted
+        // until the run page is ready, so the wait reads as one beat.
         router.push(`/runs/${res.runId}`)
       } catch {
-        // A thrown server-action error is OPAQUE in production (the "Server Components
-        // render … digest" 500), so we can't read its real message. The dominant cause is
-        // a stale/expired session token: the UI still looks signed-in (optimistic localStorage
-        // restore), but the server's verifyUser rejected the token, so createBuild throws
-        // "Please sign in to start a build." Re-open the sign-in gate so the user re-auths
-        // cleanly — onSignedIn then re-runs the build with a FRESH token — instead of
-        // surfacing the scary opaque server error in the composer.
-        setBuilding(false)
-        setError('Your session expired — please sign in again to start the build.')
+        // A thrown server action is OPAQUE in production (the "Server Components
+        // render … digest" 500), so its real message is unreadable. The dominant
+        // cause is a stale token — the UI looks signed in because the session was
+        // restored optimistically, but the server's verifyUser rejected it. Put
+        // the URL back so signing in a second time doesn't cost it.
+        writePendingBuild(p)
+        setBooting(false)
+        setNotice('Your session expired — sign in again to start the film.')
         setGateOpen(true)
+        setView('studio-entry')
+        clearBootStamp()
       }
     },
-    [router, getToken],
+    [getToken, router],
   )
 
-  const currentPending = useCallback(
-    (): PendingBuild => ({ url, brain, look, requirePay }),
-    [url, brain, look, requirePay],
-  )
-
-  function stashPending() {
+  // Resolve where a signed-in visitor belongs. Returns only when it has decided
+  // to render something here; otherwise it has already started a navigation.
+  const enterStudio = useCallback(async () => {
+    setBooting(true)
+    const { fresh } = readIntent()
+    let token: string | null = null
     try {
-      sessionStorage.setItem(PENDING_KEY, JSON.stringify(currentPending()))
+      token = await getToken()
     } catch {
-      /* sessionStorage unavailable (private mode) — Google return just won't auto-resume */
+      /* fall through — listMyRuns treats an empty token as unauthenticated */
     }
-  }
-
-  // Resume a build after returning from the Google OAuth redirect. Runs once auth
-  // resolves: restores the typed prompt, and auto-builds if the user came back signed in.
-  const resumedRef = useRef(false)
-  useEffect(() => {
-    if (loading || resumedRef.current) return
-    let raw: string | null = null
+    let runs: Array<{ id: string; film_mode?: string | null }> = []
     try {
-      raw = sessionStorage.getItem(PENDING_KEY)
+      const res = await listMyRuns(token || '')
+      // THE DEFINITIVE ANSWER. verifyUser ran on the server; a rejection here
+      // means the optimistically-painted session is genuinely dead, so the
+      // honest destination is the front door, not a studio they can't load.
+      if ('authError' in res) {
+        showLanding()
+        return
+      }
+      runs = res.runs
     } catch {
-      /* ignore */
-    }
-    if (!raw) return
-    resumedRef.current = true
-    try {
-      sessionStorage.removeItem(PENDING_KEY)
-    } catch {
-      /* ignore */
-    }
-    let p: PendingBuild
-    try {
-      p = JSON.parse(raw)
-    } catch {
+      // Network/server blip. Fail OPEN to the landing rather than stranding
+      // them on a cover that never lifts; "Enter the studio" retries.
+      showLanding()
       return
     }
-    // Restore the composer so the prompt isn't lost (covers a cancelled sign-in too).
-    setUrl(p.url ?? '')
-    setBrain(p.brain ?? 'ultra-paid')
-    setLook(p.look === 'walkrec' ? 'walkrec'
-      : p.look === 'engineered-night' ? 'engineered-night'
-        : p.look === 'classic' ? 'classic' : '')
-    // NOTE: deliberately NOT restoring p.requirePay — stashes from before payments
-    // were turned off carry requirePay:true and would resurrect the checkout gate.
-    // Auto-resume the build only when we returned signed-in AND the stashed URL is real.
-    // A blank/garbage stash (e.g. the nav "Build" button opened the gate with an empty
-    // composer) must NOT auto-fire createBuild — that would throw server-side and crash
-    // the post-login landing with the opaque digest 500. We just restore the composer.
-    if (user && isValidBuildUrl(p.url ?? '')) void runBuild(p)
-  }, [loading, user, runBuild])
-
-  function onBuild(e: React.FormEvent) {
-    e.preventDefault()
-    if (user) {
-      void runBuild(currentPending())
-    } else {
-      // Logged out: stash the prompt and open the Gmail gate.
-      stashPending()
-      setGateOpen(true)
+    if (!fresh && runs.length) {
+      // The studio proper is a walkrec run, so prefer the most recent one of
+      // those; otherwise the most recent film of any kind is still their work.
+      // `listMyRuns` already orders newest-first.
+      const target = runs.find((r) => r.film_mode === 'walkrec') ?? runs[0]
+      router.replace(`/runs/${target.id}`)
+      return
     }
-  }
+    clearBootStamp()
+    setBooting(false)
+    setView('studio-entry')
+  }, [getToken, router, showLanding])
 
-  function handleNavBuild() {
-    scrollToHeroComposer('smooth')
-    if (user) return
-    stashPending()
+  // ── The one decision, made once, after auth resolves ──────────────────────
+  const decidedRef = useRef(false)
+  useEffect(() => {
+    if (loading || decidedRef.current) return
+    decidedRef.current = true
+    void (async () => {
+      const { landing, fresh } = readIntent()
+
+      // 1. A URL typed elsewhere and interrupted by the Google round-trip
+      //    outranks everything: it is the only thing on this page that can be
+      //    lost, and it is lost silently.
+      const pending = readPendingBuild()
+      if (pending && isValidBuildUrl(pending.url)) {
+        if (user) {
+          clearPendingBuild()
+          await runBuild(pending)
+          return
+        }
+        // Came back signed OUT (sign-in cancelled or failed). KEEP the stash —
+        // unlike the old landing there is no composer to restore it into, so
+        // consuming it here would destroy the URL with nothing to show for it.
+        // It resumes on the next return instead.
+      } else if (pending) {
+        // Unreadable or empty: it can never be acted on, and leaving it would
+        // re-check it on every visit forever.
+        clearPendingBuild()
+      }
+
+      // 2. The escape hatch, and everyone we have no reason to think is signed in.
+      if (landing || !user) {
+        showLanding()
+        // `?new=1` is someone who pressed a Build/Start button elsewhere in the
+        // app. Signed out, the honest next step is the sign-in gate over the
+        // landing rather than dropping them at the top of a marketing page with
+        // no sign that their click did anything.
+        if (fresh && !user && !landing) setGateOpen(true)
+        return
+      }
+
+      // 3. Optimistically signed in — worth asking the server about.
+      await enterStudio()
+    })()
+  }, [loading, user, runBuild, enterStudio, showLanding])
+
+  // The landing's CTA. Signed out, this is where sign-in begins; the Google
+  // path returns to `/` and the decision above takes it from there.
+  function onEnterStudio() {
+    if (user) {
+      void enterStudio()
+      return
+    }
     setGateOpen(true)
   }
 
-  const canBuild = url.trim().length > 3 && !building
-  const heroRef = useRef<HTMLElement>(null)
-
   return (
-    <div className="landing-dark min-h-screen">
-      <LandingBackdrop />
-      <div className="relative z-[1]">
-      <FloatingNav buildEnabled={canBuild} onBuildClick={handleNavBuild} />
+    <>
+      <script dangerouslySetInnerHTML={{ __html: BOOT_PROBE }} />
+      <BootScreen on={booting} />
 
-
-
-      <PinnedHero
-        ref={heroRef}
-        id="start"
-        className="mx-auto max-w-3xl"
-        decoration={
-          <>
-            <div aria-hidden="true" className="stage-aura pointer-events-none absolute inset-0 z-0" />
-            <HeroBrandLayer />
-          </>
-        }
-        title={
-          <div className="mx-auto flex max-w-full justify-center px-1 text-[clamp(2.25rem,8.5vw,3.25rem)] font-semibold leading-[1.04] tracking-tight text-[#0E1320] sm:px-0 sm:text-[clamp(3.25rem,6vw,4.5rem)] sm:leading-[1.03]">
-            <VerticalCutReveal
-              splitBy="lines"
-              staggerDuration={0.14}
-              transition={{ type: 'spring', stiffness: 200, damping: 24 }}
-              containerClassName="items-center text-center"
-            >
-              {'Your AI Product\nLaunch Producer'}
-            </VerticalCutReveal>
-          </div>
-        }
-        composer={
-          <>
-            {/* The composer bar — below the headline, Hera-style. One pill: URL
-                input, advanced toggle, and Build as the arrow button inside it.
-                PinnedHero keeps it on stage through the hero runway; the nav's
-                Build scrolls back here from anywhere below. */}
-            <div className="mx-auto mt-8 w-full max-w-xl text-left">
-            <form
-              onSubmit={onBuild}
-              className="flex items-center gap-1 rounded-full border border-white/70 bg-white/90 py-1.5 pl-4 pr-1.5 shadow-[0_16px_48px_-18px_rgba(30,58,120,0.42)] backdrop-blur-xl"
-            >
-              <span className="select-none text-sm text-[#9AA6B8]">https://</span>
-              <input
-                id="hero-url"
-                value={url.replace(/^https?:\/\//, '')}
-                onChange={(e) => setUrl('https://' + e.target.value.replace(/^https?:\/\//, ''))}
-                placeholder="acme.com"
-                className="min-w-0 flex-1 bg-transparent py-2 text-[15px] text-[#0E1320] outline-none placeholder:text-[#9AA6B8]"
-              />
-              <button
-                type="button"
-                onClick={() => setAdvancedOpen((o) => !o)}
-                aria-expanded={advancedOpen}
-                aria-label="Advanced options"
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-full transition ${
-                  advancedOpen ? 'bg-[#EAF1FF] text-[#2563EB]' : 'text-[#8A94A6] hover:bg-black/[0.04] hover:text-[#0E1320]'
-                }`}
-              >
-                <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                  <path d="M4 7h10M18 7h2M4 17h2M10 17h10" strokeLinecap="round" />
-                  <circle cx="16" cy="7" r="2.2" />
-                  <circle cx="8" cy="17" r="2.2" />
-                </svg>
-              </button>
-              <button
-                type="submit"
-                disabled={!canBuild}
-                aria-label={building ? 'Starting build' : 'Build'}
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition active:scale-95 ${
-                  canBuild
-                    ? 'bg-amber text-white shadow-[0_8px_22px_-8px_rgba(59,130,246,0.7)] hover:opacity-90'
-                    : 'cursor-not-allowed bg-[#EAF1FF] text-[#9AA6B8]'
-                } ${building ? 'animate-pulse' : ''}`}
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
-                  <path d="M12 19V5M6 11l6-6 6 6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </form>
-
-            {advancedOpen && (
-              <div className="mt-2 rounded-2xl border border-[#EAF1FF] bg-white/95 p-3.5 shadow-[0_16px_48px_-18px_rgba(30,58,120,0.35)] backdrop-blur-xl">
-                <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[#8A94A6]">
-                  Model
-                </span>
-                <select
-                  value={brain}
-                  onChange={(e) => setBrain(e.target.value)}
-                  className="w-full rounded-lg border border-[#D4E2FB] bg-white px-2.5 py-1.5 text-sm text-[#0E1320] outline-none focus:border-amber"
-                >
-                  {BRAINS.map((b) => (
-                    <option key={b.value} value={b.value} className="bg-white text-[#0E1320]">
-                      {b.label} ({b.note})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {error && (
-              <p className="mt-2 rounded-2xl border border-red-100 bg-white/95 px-4 py-2 text-center text-sm text-red-600 shadow-[0_12px_36px_-16px_rgba(30,58,120,0.3)] backdrop-blur-xl">
-                {error}
-              </p>
-            )}
-            </div>
-            {!user && !loading && (
-              <p className="mx-auto mt-3 text-center text-xs leading-relaxed text-[#8A94A6]">
-                Sign in with Google to start — your prompt is saved.
-              </p>
-            )}
-          </>
-        }
-        body={
-          <>
-            <p className="section-lede mx-auto mt-4 max-w-xl text-base sm:mt-5 sm:text-lg md:text-[1.125rem]">
-              Paste your URL. Filmo reads your product, plans the cut, prices the job, and ships
-              a finished launch video — on autopilot.
-            </p>
-
-
-          </>
-        }
-      />
-
-      <HeroBelowFold heroRef={heroRef}>
-      {/* Proof — real videos the pipeline produced. The featured player here is the
-          big autoplaying demo (a real Filmo-produced launch cut). */}
-      <Examples />
-      {/* Product demo — a looping faux editor showing live text-size editing. */}
-      <EditorDemo />
-      {/* The curation moat — the hand-curated pattern library, read straight as
-          one narrative beat with the Luceo films it's distilled from (below). */}
-      <PatternLookbook />
-      {/* Built on Luceo Studio's launch films. */}
-      <LuceoShowcase />
-      {/* Closing CTA — deep-navy band, scrolls back to the composer. */}
-      <ReadyToCreate />
-      <SiteFooter />
-      </HeroBelowFold>
-      </div>
+      {view === 'landing' ? <PloyLanding onEnterStudio={onEnterStudio} /> : null}
+      {view === 'studio-entry' ? <StudioEntry getToken={getToken} notice={notice} /> : null}
 
       <AuthGate
         open={gateOpen}
         onClose={() => setGateOpen(false)}
-        onBeforeRedirect={stashPending}
+        // Nothing to stash: this door has no composer. Deliberately does NOT
+        // clear an existing stash either — a URL typed in the studio and
+        // interrupted here should still resume when Google returns.
+        onBeforeRedirect={() => {}}
         onSignedIn={() => {
           setGateOpen(false)
-          void runBuild(currentPending())
+          setNotice(null)
+          void enterStudio()
         }}
       />
-    </div>
+    </>
   )
 }

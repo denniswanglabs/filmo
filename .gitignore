@@ -143,3 +143,25 @@ DEMO-RUNBOOK.md
 !studio/public/night-sfx/*.mp3
 !assets/night/bed-60.mp3
 !web/public/examples/*.mp4
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf
+
+# --- shipped landing assets ---
+# The blanket *.mp4 above is right for renders, runs and evidence — those are
+# build output. These two are PRODUCT: the landing's hero glide and its sample
+# film. Ignored, they vanish from the Vercel build and the page deploys green
+# with a black hero and no film, failing nothing. Track them explicitly.
+!web/public/landing/*.mp4

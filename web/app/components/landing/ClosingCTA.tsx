@@ -3,14 +3,17 @@
 import { useRouter } from 'next/navigation'
 import { Reveal } from './Motion'
 
-// Closing band: a light-blue panel that drives the visitor to the hero composer.
-// Lives on /how-it-works, so the CTA routes back to the landing's composer
-// (/#start) rather than scrolling within this page.
+// Closing band: a light-blue panel that drives the visitor to the composer.
+// Lives on /how-it-works, so the CTA leaves this page for it. The composer is
+// the studio's now, not the landing's — `/?new=1` asks `/` for that surface
+// specifically, which resolves to the sign-in gate when signed out and to the
+// "New film" stage when signed in. (Bare `/` would open their most recent film,
+// and `/#start` was the retired landing's composer anchor.)
 export default function ClosingCTA() {
   const router = useRouter()
 
   function jumpToComposer() {
-    router.push('/#start')
+    router.push('/?new=1')
   }
 
   return (
