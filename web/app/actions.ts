@@ -929,6 +929,7 @@ const FEEDBACK_MAX = 5000
  *  safely in the table waiting to be swept, not that it was lost. */
 async function notifyFeedback(body: string): Promise<boolean> {
   const resend = process.env.RESEND_API_KEY || ''
+  const web3 = process.env.FEEDBACK_ACCESS_KEY || ''
   const hook = process.env.FEEDBACK_WEBHOOK_URL || ''
   try {
     if (resend) {
@@ -946,6 +947,31 @@ async function notifyFeedback(body: string): Promise<boolean> {
         }),
       })
       return r.ok
+    }
+    // WEB3FORMS. A form-relay service: you give it an email, it gives you an
+    // access key, and it mails you whatever you POST. No domain to verify, no
+    // DNS, and the access key is designed to be public — it can only ever send
+    // to the address it was issued for, so it is not a credential in the way an
+    // API key is. That makes it the cheapest honest path to a real inbox.
+    //
+    // ⚠ IT RETURNS HTTP 200 ON FAILURE. A rejected submission is
+    // `200 {"success": false, "message": "..."}`, so trusting `r.ok` here would
+    // mark the row notified and swear an email went out that never did — the
+    // exact class of lie we spent the day removing. Parse the body.
+    if (web3) {
+      const r = await fetch('https://api.web3forms.com/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          access_key: web3,
+          subject: 'Filmo feedback',
+          from_name: 'Filmo',
+          message: body,
+        }),
+      })
+      if (!r.ok) return false
+      const out = await r.json().catch(() => null) as { success?: boolean } | null
+      return out?.success === true
     }
     if (hook) {
       const r = await fetch(hook, {
