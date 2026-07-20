@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -728,9 +729,20 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
              artifact=shot if os.path.exists(shot) else "")
     pages = {"home": home_text}
     page_urls = {"home": url}
+    # THE READ PASS ALREADY PHOTOGRAPHED EVERY PAGE, at the recorder's own
+    # viewport (capture_screenshots uses full_page=False, so these are the
+    # same framing a shot opens on). Keeping the paths turns the recorder's
+    # duplicate question into a free lookup instead of a 9s capture — see
+    # _mirrors_a_kept_page. Indexed by URL because that is all a stop carries.
+    home_shot = (rp.get("hero_screenshot_path")
+                 or os.path.join(run_dir, "screenshots-read", "shot-01.png"))
+    page_shots = {url: home_shot if os.path.exists(home_shot) else ""}
     for p in (ledger.get("pages") or []):
         pages[p["slug"]] = p.get("body_text", "") or ""
         page_urls[p["slug"]] = p.get("url") or url
+        shot = os.path.join(run_dir, "site-read", p["slug"], "shot-01.png")
+        page_shots.setdefault(p.get("url") or url,
+                              shot if os.path.exists(shot) else "")
     corpus_lc = _norm_ws(" ".join(pages.values()))
 
     stops = None
@@ -955,6 +967,14 @@ def plan_tour(url: str, run_dir: str, brain: str = "sonnet5", max_stops: int = 3
     # is a vignette by nature, not because a page was taken.
     claimed = set()
     for s in stops:
+        # Every stop carries the read pass's photograph of its own page,
+        # attached HERE for the same reason graphic_only is decided here: one
+        # enforcement point that every construction path flows through (the
+        # brain's picks, the promoted hero, the synthetic hero stop, the
+        # deterministic fallback, the ecosystem wall). "" when the page was
+        # never browsed — the recorder then has no cheap signal and pays the
+        # normal price, which is the correct behaviour, not a fallback.
+        s["read_shot"] = page_shots.get(s["page"], "")
         if s.get("earned"):
             continue
         if s["page"] in claimed:
@@ -1020,6 +1040,24 @@ def _clip_fp(mp4: str, n: int = 3):
     return frames
 
 
+def _still_fp(png: str):
+    """The SAME fingerprint as _clip_fp, taken from a still the read pass
+    already saved. Returned as a 1-frame list so it drops straight into
+    _clips_similar — the pre-capture guard and the post-capture guard must
+    compare like with like or their verdicts drift apart (see the pre-capture
+    gate in build_tour_film). ~0.04s: no browser, no network, no decode."""
+    if not png or not os.path.exists(png):
+        return []
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", png, "-frames:v", "1",
+             "-vf", "scale=16:16,format=gray", "-f", "rawvideo", "-"],
+            capture_output=True, timeout=30)
+        return [r.stdout] if len(r.stdout) == 256 else []
+    except Exception:
+        return []
+
+
 def _clips_similar(fa, fb, thresh: float = 5.0) -> bool:
     """True when two clips share a near-identical frame (SPA-mirror guard).
     Calibrated 2026-07-18 on BOTH worlds: homefeed (light) distinct folds
@@ -1030,6 +1068,41 @@ def _clips_similar(fa, fb, thresh: float = 5.0) -> bool:
             if sum(abs(x - y) for x, y in zip(a, b)) / 256.0 < thresh:
                 return True
     return False
+
+
+def _mirrors_a_kept_page(still, kept) -> str:
+    """PRE-CAPTURE half of the duplicate guard: does this page's already-saved
+    read screenshot mirror a page we have ALREADY filmed? Returns that page's
+    stop title (a truthy receipt) or "".
+
+    TWO agreements required, deliberately. A page is skipped only when its
+    still mirrors BOTH (a) the still of an already-filmed page and (b) the
+    footage actually kept from it. A post-capture drop is fully informed and
+    costs only the capture; a pre-capture skip is unrecoverable and would lose
+    footage we would have kept — so the cheap tier must be the more
+    conservative one, not merely the earlier one.
+
+    Measured 2026-07-19 on the three calibration worlds, using each run's own
+    on-disk read screenshots and kept clips (still-vs-still / still-vs-clip):
+      insforge.dev (dark) — agents 1.70/1.45, alternatives 1.91/1.71,
+        customers 4.34/3.76 vs the kept home shot: all three skip, matching
+        the post-capture guard's verdict on the same three pages exactly.
+        pricing 8.38/8.07: captured, and kept. 5/5 agreement.
+      palmier (light) — demo-vs-pricing stills read 4.22, inside the
+        threshold; their footage reads 30.6, far outside. Rule (b) refuses
+        the skip. A single-signal gate would have thrown away a real shot.
+      homefeed (SPA) — home/pricing stills are a literal 0.00 mirror, but the
+        kept footage is a deep scroll at 22.38. No skip; the post-capture
+        guard still catches it. A miss here costs one capture, not a shot.
+    Both signals reuse _clips_similar at its calibrated threshold — there is
+    no second magic number to keep in sync."""
+    for k in kept:
+        if not k["still"] or not k["clip"]:
+            continue
+        if (_clips_similar(still, k["still"])
+                and _clips_similar(still, k["clip"])):
+            return k["title"]
+    return ""
 
 
 # Concept vignettes first (they ENACT the title — Dennis 2026-07-18: "there
@@ -1416,6 +1489,13 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     run_dir = os.path.join(HERE, "runs", run_id)
     os.makedirs(run_dir, exist_ok=True)
     pub = os.path.join(HERE, "studio", "public")
+    # THE WHOLE BUILD'S CLOCK, started before the read pass — the capture
+    # backstop below spends against the same ceiling the worker enforces, and
+    # the read + plan phases are charged to it. Starting this at the first
+    # capture would let a slow read phase (the worker's InsForge calls were
+    # timing out at 10s each during run 58badcac) hand the recorder a budget
+    # the build could no longer afford.
+    t_build0 = time.monotonic()
 
     stops = plan_tour(url, run_dir, brain=brain, max_stops=5)
 
@@ -1423,8 +1503,48 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
     # place (Dennis 2026-07-18: "each screen recording should be different") —
     # one recording per distinct PAGE; a stop on an already-filmed page (or
     # whose footage mirrors a kept clip) becomes a motion-graphic beat instead.
+    #
+    # COST INVARIANT (2026-07-19): NEVER PAY FOR A CAPTURE TO LEARN SOMETHING A
+    # CHEAPER CHECK ALREADY KNOWS. The duplicate question is now asked at three
+    # tiers, cheapest first, and a tier may only skip what the tier below it
+    # would also have thrown away:
+    #   FREE      plan time — graphic_only: this page is already another stop's
+    #             (F14 page-once, decided while the film's shape is still
+    #             arguable).
+    #   ~0.04s    pre-capture — _mirrors_a_kept_page: the read pass's own
+    #             photograph of this page mirrors a page we already filmed.
+    #   ~90s+     post-capture — the footage itself mirrors a kept clip. STILL
+    #             THE AUTHORITY, unchanged: it is the only tier that has seen
+    #             the actual shot, and it decides every case the cheap tiers
+    #             decline to.
+    # The regression this closes: F14 made the plan name 5 distinct recordable
+    # pages (correct — it used to collapse to 2), but the recorder attempted a
+    # full 9s scripted glide + 60fps minterpolate on each and discovered three
+    # duplicates only afterwards. insforge.dev run 58badcac spent its whole
+    # 25-minute build budget on capture and was SIGKILLed before it rendered;
+    # the delivered run of the same site kept the same 2 shots from 3 attempts.
+    # The fix is the cost, not the ceiling — the plan is not walked back.
     import walk_shot
-    filmed_pages, kept_fps, used_motifs = [], [], set()
+    filmed_pages, kept, used_motifs = [], [], set()
+    # WALL-CLOCK BACKSTOP, SELF-CALIBRATING. The tiers above remove waste; this
+    # bounds what is left when a site genuinely has many distinct pages on a
+    # slow worker. It measures what a capture costs on THIS machine from the
+    # attempts already made, and stops before the next one would breach the
+    # budget — so a slow worker takes fewer shots and a fast one takes more,
+    # with no per-machine constant to keep true. Budget tracks the worker's own
+    # ceiling through the env it already inherits (curated-claimer spawns the
+    # pipeline with `env: {...process.env}`), so the two cannot drift. The
+    # clock (t_build0) starts at the top of the build, not here.
+    try:
+        _total_budget_s = float(os.environ.get("RENDER_TIMEOUT_MS") or 1500000) / 1000.0
+    except ValueError:
+        _total_budget_s = 1500.0
+    try:
+        _capture_frac = float(os.environ.get("WALKREC_CAPTURE_BUDGET_FRAC") or 0.55)
+    except ValueError:
+        _capture_frac = 0.55
+    capture_budget_s = _total_budget_s * max(0.1, min(0.9, _capture_frac))
+    attempt_costs = []
     for i, s in enumerate(stops):
         s["seg"] = ""
         if s.get("graphic_only"):
@@ -1443,10 +1563,34 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
                  f"“{s['title'][:48]}”: page already filmed",
                  "This stop becomes a motion graphic instead of a second recording.")
             continue
+        # TIER 2 — the cheap question, asked BEFORE the expensive one.
+        twin = _mirrors_a_kept_page(_still_fp(s.get("read_shot", "")), kept)
+        if twin:
+            s["motif"] = ""  # graphic; treatment assigned at build
+            emit(run_dir, "decide.guard",
+                 f"“{s['title'][:48]}”: page looks like one I've filmed",
+                 f"It reads almost identically to “{twin[:48]}”, so a second "
+                 "glide would retread the same screen. Skipping the recording "
+                 "before filming it; this beat is built from your own copy.")
+            continue
+        # WALL-CLOCK BACKSTOP. Only ever applies once the film HAS footage —
+        # the no-recordings refusal below stays reachable, so a slow site
+        # cannot quietly become a film of nothing but graphics.
+        elapsed = time.monotonic() - t_build0
+        if kept and attempt_costs and elapsed + max(attempt_costs) > capture_budget_s:
+            s["motif"] = ""  # graphic; treatment assigned at build
+            emit(run_dir, "decide.guard",
+                 f"“{s['title'][:48]}”: out of filming time",
+                 f"{len(kept)} recording{'s' if len(kept) != 1 else ''} in and "
+                 f"{elapsed / 60:.0f} minutes spent; another glide would not "
+                 "leave room to cut and render the film. Building this beat "
+                 "from your own copy instead.")
+            continue
         seg = os.path.join(run_dir, f"shot-{i + 1}.mp4")
         emit(run_dir, "film.recording",
              f"Recording: {s['title'][:56]}",
              f"Gliding through {s['page']}")
+        t_attempt0 = time.monotonic()
         ok = walk_shot.shot(s["page"], "" if i == 0 else s["target"], seg,
                             run_dir, duration=9.0)
         capture_err = ""
@@ -1504,19 +1648,31 @@ def build_tour_film(url: str, run_id: str, logo_from: str = "",
         if ok and os.path.exists(seg):
             smooth = _smooth60(seg, os.path.join(run_dir, f"shot-{i + 1}-60.mp4"))
             fp = _clip_fp(smooth)
-            if any(_clips_similar(fp, kf) for kf in kept_fps):
+            # TIER 3 \u2014 the authority. Unchanged: it is the only tier that has
+            # seen the real footage, and it still decides every case tier 2
+            # declined to (a page whose top is distinct but whose target
+            # section retreads kept ground reaches here and is dropped).
+            if any(_clips_similar(fp, k["clip"]) for k in kept):
                 s["motif"] = ""
                 emit(run_dir, "decide.guard",
                      f"\u201c{s['title'][:48]}\u201d: footage mirrors a kept clip",
                      "Dropping the duplicate recording; this beat becomes a motion graphic.")
             else:
                 s["seg"] = smooth
-                kept_fps.append(fp)
+                # The kept record carries BOTH fingerprints: the footage for
+                # tier 3, and this page's still so tier 2 can answer the same
+                # question about the NEXT stop without filming it.
+                kept.append({"title": s["title"], "clip": fp,
+                             "still": _still_fp(s.get("read_shot", ""))})
                 filmed_pages.append(s["page"])
                 emit(run_dir, "film.shot", f"Shot kept: {s['title'][:56]}",
                      "Smoothed to 60fps.", artifact=smooth)
         else:
             s["motif"] = ""
+        # What one attempt cost on THIS machine, measured whatever the outcome
+        # \u2014 a failed capture still burns the wall clock, so the backstop must
+        # count it.
+        attempt_costs.append(time.monotonic() - t_attempt0)
     stops = [s for s in stops if s.get("seg") or s.get("motif") is not None]
     if not any(s.get("seg") for s in stops):
         raise RuntimeError(

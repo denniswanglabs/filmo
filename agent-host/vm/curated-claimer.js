@@ -349,29 +349,73 @@ function mapLedgerToRun(ledger) {
 // large upload mid-flight. The SDK uses Node's undici fetch, which keep-alives /
 // pools connections per origin by default, so steady-state calls reuse the warm
 // connection (the ~0.8s cold-TLS penalty only hits the first call after restart).
-// CREDITS: a failed build gives back exactly what it took. The refund MIRRORS
-// the spend row instead of restating the price — a literal here is a second
-// source of truth for the tariff and silently desyncs the moment the web's
-// VIDEO_CREDIT_COST moves (it already had, sitting at a stale 640/"charged 100"
-// while the comment and the constant disagreed). Reading the spend also means
-// a run that was never charged — owner-exempt, or a charge whose insert lost
-// its retries — cannot be refunded into existence.
-// The (run_id, reason) partial unique index makes this idempotent — a run that
-// fails twice (retry + wall-clock) refunds once. Best-effort: a refund that
+// CREDITS: a failed build gives back exactly what it took.
+//
+// INVARIANT: every spend on a run is refundable EXACTLY ONCE, INDEPENDENTLY.
+// A run is not one charge — the film costs `video` (web/app/actions.ts) and
+// EACH director edit costs `edit:<job_id>` (run_events.charge_credits) — so the
+// refund is a per-spend sweep, not a single row. Two properties make that safe:
+//   1. Each refund MIRRORS its spend row's delta instead of restating the price.
+//      A literal here is a second source of truth for the tariff and silently
+//      desyncs the moment the web's VIDEO_CREDIT_COST moves (it already had,
+//      sitting at a stale 640/"charged 100" while the comment and the constant
+//      disagreed). Reading the spend also means a spend that never happened —
+//      owner-exempt, or a charge whose insert lost its retries — cannot be
+//      refunded into existence.
+//   2. Each refund's reason is DERIVED from the spend it reverses
+//      (`video` -> `refund:video`, `edit:j1` -> `refund:edit:j1`), so the
+//      (run_id, reason) partial unique index enforces idempotency PER SPEND
+//      rather than capping the whole run at one refund row. The old constant
+//      reason:'refund' collided with itself: a run carrying one film and three
+//      edits could never be made whole, because the index admits exactly one
+//      row per (run_id, reason). Deriving the reason is what puts the index
+//      back to doing real work instead of blocking correctness — no schema
+//      change needed, the index already permits N distinct-reason refunds.
+// Two consequences worth keeping: this function is CONVERGENT (safe to call any
+// number of times — it re-reads what is already reversed and only fills gaps),
+// and a duplicate-key rejection is SUCCESS, not an error — it means a concurrent
+// caller already reversed that spend. Best-effort throughout: a refund that
 // loses a race never blocks the failure path.
+const REFUND_PREFIX = 'refund'
+const refundReasonFor = (spendReason) => `${REFUND_PREFIX}:${spendReason}`
+// A refund row is never itself a spend (guards `refund:refund:video`). Also
+// matches the bare pre-2026-07-20 constant so legacy rows stay recognisable.
+const isRefundReason = (reason) =>
+  reason === REFUND_PREFIX || String(reason || '').startsWith(REFUND_PREFIX + ':')
+// The only unique constraint these inserts can violate is credit_ledger_run_reason_uniq,
+// i.e. "already refunded" — classify it so it logs as settled, not as a failure.
+const isDuplicateKey = (error) => {
+  const s = JSON.stringify(error || '').toLowerCase()
+  return s.includes('duplicate key') || s.includes('23505') || s.includes('unique')
+}
+
 async function refundCredits(runId) {
   if (!runId) return
   try {
-    const { data: spend } = await ifCall('credit_ledger.select(spend)',
+    const { data: rows } = await ifCall('credit_ledger.select(run)',
       () => db.database.from('credit_ledger')
-        .select('user_id, delta').eq('run_id', runId).eq('reason', 'video')
-        .maybeSingle())
-    // No spend row → nothing was charged → nothing to give back.
-    if (!spend || !spend.user_id || !(spend.delta < 0)) return
-    const { error } = await db.database.from('credit_ledger').insert([{
-      user_id: spend.user_id, delta: -spend.delta, reason: 'refund', run_id: runId,
-    }])
-    if (!error) log(`  credits: refunded ${-spend.delta} for run ${runId}`)
+        .select('user_id, delta, reason').eq('run_id', runId))
+    // On an exhausted read we see an empty ledger and refund NOTHING — never
+    // refund blind, a later call converges once the read succeeds.
+    const ledger = rows || []
+    // Every reason already on this run; a spend whose mirror is present is settled.
+    const settled = new Set(ledger.map((r) => r && r.reason))
+    for (const spend of ledger) {
+      // Only negative rows are spends — grants and refunds are never reversed.
+      if (!spend || !spend.user_id || !(spend.delta < 0)) continue
+      if (isRefundReason(spend.reason)) continue
+      const reason = refundReasonFor(spend.reason)
+      if (settled.has(reason)) continue
+      // Legacy: the lone video refund used to land under the bare constant.
+      if (spend.reason === 'video' && settled.has(REFUND_PREFIX)) continue
+      settled.add(reason)
+      const { error } = await db.database.from('credit_ledger').insert([{
+        user_id: spend.user_id, delta: -spend.delta, reason, run_id: runId,
+      }])
+      if (!error) log(`  credits: refunded ${-spend.delta} (${reason}) for run ${runId}`)
+      else if (isDuplicateKey(error)) log(`  credits: ${reason} already settled for run ${runId}`)
+      else log(`  ! credits refund ${reason} for run ${runId}`, JSON.stringify(error))
+    }
   } catch (e) { log('  credits refund error', String(e && e.message || e)) }
 }
 
@@ -487,9 +531,11 @@ async function setRun(runId, patch) {
 
 // jobs.update — bounded+retried mirror of setRun. Marking a job done/failed must
 // never block the loop; if it ultimately fails we log (the wall-clock guard in
-// processJob still returns the loop to polling regardless).
-async function setJob(jobId, patch) {
-  const { error } = await ifCall('jobs.update', () => db.database.from('jobs').update(patch).eq('id', jobId))
+// processJob still returns the loop to polling regardless). `opts` passes ifCall
+// bounds through for callers on a deadline — the SIGTERM release runs inside an
+// undefined shutdown grace and cannot afford the default 10s x4 (~43s).
+async function setJob(jobId, patch, opts) {
+  const { error } = await ifCall('jobs.update', () => db.database.from('jobs').update(patch).eq('id', jobId), opts)
   if (error) log('  ! jobs.update', JSON.stringify(error))
 }
 
@@ -1180,7 +1226,25 @@ async function processDirectorJob(job) {
 }
 
 // ───────────────────────────── processJob ─────────────────────────────
+// INVARIANT: a job is REGISTERED AS CLAIMED THE MOMENT IT IS CLAIMED — before
+// any dispatch decision. processJob is the single funnel every claim flows
+// through (the daemon loop via runJobBounded, and processOne for --once/--url,
+// which writes status='claimed' too), and nothing can return above its first
+// statement, so registration here is total by construction.
+//
+// This assignment used to sit ~18 lines down, beside the classic build's
+// logging — BELOW the `rerender` and `director` type branches, which return
+// early. Those job types were therefore never registered, and the SIGTERM
+// handler released nothing for them: a rerender holds its claim for a whole
+// RENDER_TIMEOUT_MS (25min) Remotion render, so any deploy inside that window
+// stranded the job as 'claimed' — invisible to claim_next_job, with the
+// customer waiting until the STALE_CLAIM_MS (35min) reaper FAILED it, and the
+// reaper does not retry.
+//
+// Keep this FIRST. It is what makes a job type added below inherit deploy-safe
+// release for free, instead of silently re-opening the same hole.
 async function processJob(job) {
+  CURRENT_CLAIMED_JOB_ID = job.id
   const p = job.params || {}
   const runId = job.run_id
   const runKey = p.run_key || p.runKey
@@ -1198,7 +1262,6 @@ async function processJob(job) {
   const url = p.company_url || p.url
   const t0 = Date.now()
   const activeProducer = CLAIMER_MODE === 'hermes' ? HERMES_PRODUCER : PRODUCER
-  CURRENT_CLAIMED_JOB_ID = job.id
   log(`claimed job ${job.id} -> run ${runKey} (${url}) [mode=${CLAIMER_MODE}, producer=${activeProducer}]`)
   await setRun(runId, { status: 'running', phase: 'planning' })
 
@@ -1547,27 +1610,57 @@ const JOB_WALLCLOCK_MS = Number(process.env.JOB_WALLCLOCK_MS || 30 * 60 * 1000) 
 // seconds — orphaning it for STALE_CLAIM_MS. On SIGTERM, release THIS
 // worker's in-flight claims back to 'queued' so the next container picks
 // them up immediately.
+// The release runs inside an UNDEFINED grace period — RAILWAY_DEPLOYMENT_DRAINING_SECONDS
+// is unset, so Railway's default of 0 promises nothing. It currently wins the
+// race in practice, but two DEFAULT-bounded InsForge calls are ~87s worst case
+// (10s x4 + backoff, twice), which no grace period guarantees. So the shutdown
+// path bounds ITSELF: tight per-call bounds plus a hard SIGTERM_RELEASE_MS
+// deadline on the whole handler. The exit is then deterministic — we either
+// released or we gave up, but we always exit promptly rather than on luck.
 let CURRENT_CLAIMED_JOB_ID = null
-process.on('SIGTERM', async () => {
+const SIGTERM_RELEASE_MS = Number(process.env.SIGTERM_RELEASE_MS || 5000)
+const SIGTERM_CALL_BOUNDS = { attempts: 2, timeoutMs: 1800 }
+let SHUTTING_DOWN = false
+
+async function releaseClaimOnShutdown(signal) {
+  const jobId = CURRENT_CLAIMED_JOB_ID
+  if (!jobId) return
+  // Release ONLY a job that is still genuinely in flight — releasing a
+  // finished job resurrects it on the next container (observed: a failed
+  // walkrec job re-ran after a deploy because the claim var outlived
+  // its job).
+  const { data: j } = await ifCall('jobs.select(shutdown)',
+    () => db.database.from('jobs').select('status').eq('id', jobId).maybeSingle(),
+    SIGTERM_CALL_BOUNDS)
+  if (j && j.status === 'claimed') {
+    await setJob(jobId, { status: 'queued', claimed_at: null, claimed_by: null },
+      SIGTERM_CALL_BOUNDS)
+    log(`${signal}: released claim on job ${jobId}`)
+  } else {
+    log(`${signal}: claim var held ${jobId} but status=${j && j.status} — not releasing`)
+  }
+}
+
+// ONE shutdown contract for every stop signal: a claim this worker holds is
+// released before the process goes away. Railway only ever sends SIGTERM, but a
+// local Ctrl-C leaks the claim in exactly the same way — the invariant is about
+// stopping, not about which signal did it. A second signal exits immediately so
+// the process is never un-killable while the release is in flight.
+async function shutdown(signal) {
+  if (SHUTTING_DOWN) { log(`${signal}: second signal — exiting now`); process.exit(0) }
+  SHUTTING_DOWN = true
   try {
-    if (CURRENT_CLAIMED_JOB_ID) {
-      // Release ONLY a job that is still genuinely in flight — releasing a
-      // finished job resurrects it on the next container (observed: a failed
-      // walkrec job re-ran after a deploy because the claim var outlived
-      // its job).
-      const { data: j } = await ifCall('jobs.select(sigterm)',
-        () => db.database.from('jobs').select('status').eq('id', CURRENT_CLAIMED_JOB_ID).maybeSingle())
-      if (j && j.status === 'claimed') {
-        await setJob(CURRENT_CLAIMED_JOB_ID,
-          { status: 'queued', claimed_at: null, claimed_by: null })
-        log(`SIGTERM: released claim on job ${CURRENT_CLAIMED_JOB_ID}`)
-      } else {
-        log(`SIGTERM: claim var held ${CURRENT_CLAIMED_JOB_ID} but status=${j && j.status} — not releasing`)
-      }
-    }
+    await Promise.race([
+      releaseClaimOnShutdown(signal)
+        .catch((e) => log(`${signal}: release failed`, String(e && e.message || e))),
+      sleep(SIGTERM_RELEASE_MS)
+        .then(() => log(`${signal}: release deadline ${SIGTERM_RELEASE_MS}ms hit — exiting`)),
+    ])
   } catch {}
   process.exit(0)
-})
+}
+process.on('SIGTERM', () => { shutdown('SIGTERM') })
+process.on('SIGINT', () => { shutdown('SIGINT') })
 
 const STALE_CLAIM_MS = Number(process.env.STALE_CLAIM_MS || 35 * 60 * 1000) // a job 'claimed' longer than this by a non-current worker is a zombie
 const STALE_SWEEP_INTERVAL_MS = Number(process.env.STALE_SWEEP_INTERVAL_MS || 2 * 60 * 1000)
@@ -1595,7 +1688,13 @@ async function runJobBounded(job) {
     await Promise.race([
       processJob(job)
         .catch((e) => log('processJob threw', String(e && e.stack || e)))
-        .finally(() => { CURRENT_CLAIMED_JOB_ID = null }),
+        // COMPARE-AND-CLEAR, not a blind clear. When the wall-clock guard wins
+        // the race this function returns while processJob keeps running
+        // detached; the loop then claims the NEXT job and registers it. If the
+        // abandoned run's .finally later cleared unconditionally it would wipe
+        // the LIVE job's registration, silently un-protecting it from SIGTERM —
+        // the same defect class, one level up. Only the owner clears the slot.
+        .finally(() => { if (CURRENT_CLAIMED_JOB_ID === job.id) CURRENT_CLAIMED_JOB_ID = null }),
       guard,
     ])
   } finally { clearTimeout(timer) }
