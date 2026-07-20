@@ -731,8 +731,12 @@ function WorkspaceRun({ runKey, getToken }: {
               {pending ? 'Thinking…' : `${verb}… ${elapsed}s`}
             </div>
           ) : items.length ? (
+            /* NO WORK, NO MARK. The blob is the studio's activity indicator —
+               it exists to say "something is happening right now". A parked
+               blob on a finished film is an indicator pointing at nothing, so
+               the run's end removes it rather than freezing it. The line keeps
+               its word; only the moving part goes. */
             <div className="t-verb rest">
-              <span className="wk-tailblob still" />
               {S.status === 'failed' ? 'Stopped' : 'Finished'}
             </div>
           ) : null}
@@ -814,7 +818,12 @@ function WorkspaceRun({ runKey, getToken }: {
           border-radius:44% 56% 52% 48% / 50% 46% 54% 50%;
           animation:wkmorph 2.4s ease-in-out infinite; }
         /* AT REST: perfectly round and still. Motion is the only signal. */
-        .wk-tailblob.still { animation:none; border-radius:50%; }
+        /* No "still" variant: a blob that isn't moving isn't rendered at all
+           (see the thread's rest branch), so a parked state has no styling to
+           reach for and can't be reintroduced by accident.
+           NB: this whole block is a template literal — never use backticks in
+           these comments, they terminate the string and the type error lands
+           somewhere else entirely. */
         .wk-tabs { display:flex; gap:2px; background:#F1F1EF; border-radius:8px;
           padding:2px; }
         .wk-tabs button { border:none; background:none; font:12px Inter,sans-serif;
