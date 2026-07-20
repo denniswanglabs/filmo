@@ -313,9 +313,21 @@ export async function createBuild(input: {
   // The wait these two cost is paid behind the arrival cover, not in front of
   // the reader (components/StartFilm.tsx).
   if (!isOwner) {
-    await withRetry(() => db.database.from('credit_ledger').insert([{
+    // The charge is the DATA BEHIND THE CAP: creditBalances sums this table, so a
+    // charge that silently fails makes the daily/lifetime caps fiction for that
+    // build. The build itself must still proceed (the run is already enqueued —
+    // failing the caller here would charge them a confusing error instead of a
+    // film), but the failure can never be invisible: log it with enough identity
+    // to reconcile the ledger by hand.
+    const { error: chargeErr } = await withRetry(() => db.database.from('credit_ledger').insert([{
       user_id: me.id, delta: -VIDEO_CREDIT_COST, reason: 'video', run_id: runId,
     }]))
+    if (chargeErr) {
+      console.error(
+        `[credits] video charge FAILED for run ${runId} (user ${me.id}): ` +
+        `${JSON.stringify(chargeErr)} — ledger is now missing a -${VIDEO_CREDIT_COST} spend row`,
+      )
+    }
   }
 
   return { runId, runKey }
