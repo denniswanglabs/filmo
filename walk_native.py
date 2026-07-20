@@ -1353,7 +1353,12 @@ def run(url: str, goal: str, emphasis: str, out_path: str,
         from playwright.sync_api import sync_playwright
     except Exception as e:
         _write_state(state_path, url, "Playwright unavailable", "failed")
-        print("WALK_NATIVE: failed playwright-import: %s" % e)
+        # NOT AN ERROR ON THE HOSTED WORKER. The base interpreter has no
+        # playwright; the caller catches a non-zero exit and re-runs this
+        # script under .venv-capture, which does. This line is the FIRST of
+        # two planned attempts — it reads like a failure in the logs and has
+        # already cost one person an investigation. Say so here.
+        print("WALK_NATIVE: no playwright in this interpreter (%s) — caller retries under .venv-capture" % e)
         return False
 
     browser = None

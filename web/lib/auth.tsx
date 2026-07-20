@@ -1,12 +1,6 @@
 'use client'
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import {
-  insforge,
-  persistSession,
-  readPersistedSession,
-  rehydrateSessionIntoClient,
-  ensureFreshAccessToken,
-} from './insforge'
+import { insforge, persistSession, readPersistedSession, rehydrateSessionIntoClient, ensureFreshAccessToken, OAUTH_RETURN } from './insforge'
 
 interface AuthUser {
   id: string
@@ -135,7 +129,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Lax-CSRF refresh fails) dropping to the signed-out gate. The async reconcile below then
     // validates/refreshes in the background and corrects the cache if the session is truly gone.
     const restored = rehydrateSessionIntoClient()
-    if (restored) {
+    // …EXCEPT when we are mid-OAuth-exchange. The optimistic paint answers "who
+    // was signed in last time", which during a Google return is the WRONG
+    // question: signInWithGoogle sends `prompt: 'select_account'`, so the person
+    // coming back may deliberately be a different account. Dropping `loading`
+    // here would let a consumer make an identity decision — which run to open,
+    // where to redirect — using the previous user's token while the new user's
+    // exchange is still in flight, landing them on someone else's film.
+    // OAUTH_RETURN is captured in lib/insforge.ts at module scope because the
+    // SDK strips `insforge_code` from the URL before this code ever runs.
+    if (restored && !OAUTH_RETURN) {
       setUser(restored as AuthUser)
       // We have a usable session right now — render the authed UI immediately and let the
       // background reconcile validate. Without this the run page sits on its loading spinner

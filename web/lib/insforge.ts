@@ -99,6 +99,24 @@ const authAwareFetch: typeof fetch = async (input, init) => {
 //   • retryCount (default 3) + retryDelay still recover transient 5xx/network errors
 //     under the 8s ceiling; bumped retryDelay down a touch so a couple of retries can
 //     still fit. 401 is never retried, so a genuine signed-out state still resolves fast.
+// ── ARE WE MID-OAUTH-EXCHANGE? MUST BE READ BEFORE createClient ─────────────
+// The SDK's Auth constructor runs `detectAuthCallback()` at construction time —
+// it reads `insforge_code` off the query string and STRIPS it with
+// history.replaceState BEFORE awaiting the exchange. So by the time any other
+// module imports this one, the evidence that we are returning from Google is
+// already gone from the URL. ES import hoisting guarantees this file evaluates
+// before auth.tsx, which is exactly why the flag has to be captured HERE, on
+// the line above the client, and cannot be recomputed later.
+//
+// Consumers use it to hold off on trusting the optimistic localStorage session:
+// during an OAuth return the cached session belongs to whoever was signed in
+// BEFORE, which is not necessarily who is signing in now — signInWithGoogle
+// sends `prompt: 'select_account'`, so switching accounts is an invited action,
+// not an edge case.
+export const OAUTH_RETURN =
+  typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).has('insforge_code')
+
 export const insforge = createClient({
   baseUrl: process.env.NEXT_PUBLIC_INSFORGE_URL!,
   anonKey: process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
