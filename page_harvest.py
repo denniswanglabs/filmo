@@ -248,14 +248,35 @@ def marks(url: str, run_dir: str = ""):
 def mark_data_uri(src: str) -> str:
     """The partner's OWN mark as a data URI (the film renders offline).
     Only same-run http(s) fetches, size-capped. '' when unavailable — the
-    caller then shows an honest initial badge."""
-    if not src.startswith(("http://", "https://")):
+    caller then shows an honest initial badge.
+
+    SSRF-guarded: `src` is an <img src> harvested from an UNTRUSTED target site
+    (the logo wall), and this runs on the shared Railway worker — so the URL is
+    validated with url_guard (public http/https only; internal/loopback/link-local/
+    metadata hosts refused; DNS-rebind resistant) BEFORE the fetch, and every
+    redirect hop is re-validated so a public URL that 30x-redirects to
+    169.254.169.254 / localhost / RFC1918 is refused mid-chain. This matches the
+    guard the capture + brand_extract fetch sinks already apply. Fail-closed: any
+    rejection returns '' (the honest initial-badge fallback)."""
+    try:
+        import url_guard
+        safe = url_guard.assert_public_url(src)  # http/https + public-IP or raises
+    except Exception:
         return ""
     try:
         import base64
         import urllib.request
-        req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
+
+        # Re-validate every redirect target: urllib follows 30x by default, so
+        # without this a public URL could bounce the fetch to an internal host.
+        class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                url_guard.validate_redirect_target(newurl)  # raises on internal target
+                return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+        opener = urllib.request.build_opener(_GuardedRedirect)
+        req = urllib.request.Request(safe, headers={"User-Agent": "Mozilla/5.0"})
+        with opener.open(req, timeout=15) as r:
             ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
             data = r.read(400_000)
         if not data or not ctype.startswith("image/"):
