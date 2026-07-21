@@ -1,5 +1,5 @@
 [auth]
-allowed_redirect_urls = ["http://localhost:3000", "https://walk.studio", "https://walkstudioprojects.vercel.app", "https://www.walk.studio", "http://localhost:3000/", "https://walkstudioprojects.vercel.app/", "https://filmostudio.vercel.app", "https://filmostudio.vercel.app/", "https://filmo.dev", "https://filmo.dev/", "https://www.filmo.dev", "https://www.filmo.dev/"]
+allowed_redirect_urls = ["http://localhost:3000", "http://localhost:3000/", "https://filmostudio.vercel.app", "https://filmostudio.vercel.app/", "https://filmo.dev", "https://filmo.dev/", "https://www.filmo.dev", "https://www.filmo.dev/"]
 require_email_verification = false
 verify_email_method = "code"
 reset_password_method = "code"
