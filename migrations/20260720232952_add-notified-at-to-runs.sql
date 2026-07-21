@@ -1,0 +1,11 @@
+-- Ready-email idempotency marker. Stamped the FIRST time a run reaches delivered
+-- with a final_url and the "your film is ready" notification is handled (sent, or
+-- under the dry-run gate composed + logged). run_events.ship_final is the single
+-- shared shipper for both the build and director paths, so a director re-render
+-- lands there too — but finds notified_at non-null and sends NOTHING. Only the
+-- initial delivery notifies.
+--
+-- Additive nullable column: the worker writes it with the admin key (RLS-exempt),
+-- and the existing "runs owner select/update" policies + the table-wide grants to
+-- `authenticated` already cover it, so no policy or grant changes are required.
+alter table public.runs add column if not exists notified_at timestamptz; -- ready-email sent/handled marker

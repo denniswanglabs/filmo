@@ -889,8 +889,19 @@ async function notifyVideoReady(runId, finalUrl, userEmail) {
     if (!AGENTMAIL_API_KEY) { log(`  notify: AGENTMAIL_API_KEY not set; skipping ready-email for run ${runId}`); return }
     if (!looksLikeEmail(userEmail)) { log(`  notify: no valid user email for run ${runId} (got ${JSON.stringify(userEmail)}); skipping`); return }
     const to = userEmail.trim()
+    // OUTWARD-ACTION SAFETY (mirrors run_events.notify_video_ready): this
+    // hermes-mode delivery path is out of the production hot path (curated/direct
+    // deliver via run_events.ship_final), but it must never send an un-gated email
+    // either. Dry-run unless FILMO_EMAIL_LIVE is set; otherwise only the allowlist
+    // (default: exactly denniswanglabs@gmail.com) actually sends.
+    const emailLive = ['1', 'true', 'yes', 'on'].includes(String(process.env.FILMO_EMAIL_LIVE || '').trim().toLowerCase())
+    const allowlist = new Set(String(process.env.FILMO_EMAIL_ALLOWLIST || 'denniswanglabs@gmail.com').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))
+    if (!(emailLive || allowlist.has(to.toLowerCase()))) {
+      log(`  notify: [DRY-RUN] would email ${to} for run ${runId} (set FILMO_EMAIL_LIVE=1 to send); not sending`)
+      return
+    }
     const runLink = `${FILMO_SITE_BASE}/runs/${encodeURIComponent(String(runId))}`
-    const subject = '\u{1F3AC} Your Filmo video is ready'
+    const subject = 'Your Filmo video is ready'
     const preheader = 'Your launch video is rendered — watch, edit, or download it now.'
     const text = [
       'Your Filmo video is ready.',
@@ -909,11 +920,11 @@ async function notifyVideoReady(runId, finalUrl, userEmail) {
 <div style="font-size:20px;font-weight:700;letter-spacing:-0.01em;color:#0b0f1a;">Filmo</div>
 </td></tr>
 <tr><td style="padding:20px 36px 0;">
-<div style="font-size:22px;line-height:1.3;font-weight:700;letter-spacing:-0.01em;color:#0b0f1a;">Your video is ready \u{1F3AC}</div>
+<div style="font-size:22px;line-height:1.3;font-weight:700;letter-spacing:-0.01em;color:#0b0f1a;">Your video is ready</div>
 <p style="margin:12px 0 0;font-size:15px;line-height:1.55;color:#475067;">We’ve finished producing your launch video. Watch it, fine-tune it in the editor, or download the final cut.</p>
 </td></tr>
 <tr><td style="padding:24px 36px 4px;">
-<a href="${runLink}" style="display:inline-block;background:#3B82F6;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 22px;border-radius:10px;">Watch your video →</a>
+<a href="${runLink}" style="display:inline-block;background:#3B82F6;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 22px;border-radius:10px;">Watch your video</a>
 </td></tr>
 <tr><td style="padding:14px 36px 32px;">
 <p style="margin:0;font-size:12px;line-height:1.5;color:#8a93a6;">Or paste this link into your browser:<br><a href="${runLink}" style="color:#3B82F6;text-decoration:none;word-break:break-all;">${runLink}</a></p>
