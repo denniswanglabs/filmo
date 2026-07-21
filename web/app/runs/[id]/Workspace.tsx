@@ -27,6 +27,9 @@ import RunMark from './RunMark'
 // diverge the first time either copy was fixed. One file, two rails; here it is
 // given the studio's accent bar and the id of the run being viewed.
 import FilmosEntry from '../../components/rail/FilmosEntry'
+// The delivered-run gate for the Download control below — the SAME predicate the
+// /api/runs/[id]/download route uses to decide it has a video to hand back.
+import { isDelivered } from '../../../lib/types'
 
 const VERBS: Record<string, string> = {
   read: 'Scouting', decide: 'Framing', film: 'Rolling',
@@ -613,6 +616,16 @@ function WorkspaceRun({ runKey, getToken }: {
   const verb = VERBS[S.phase] || 'Working'
   const elapsed = Math.round((Date.now() - phaseStart.current) / 1000)
 
+  // ── SAVE THE FILM ───────────────────────────────────────────────────────────
+  // A delivered film is a finished MP4 the user owns, so once it is watchable the
+  // canvas chrome offers a Download opposite the back control. The gate mirrors
+  // the /download route exactly — isDelivered AND a final_url to serve, which
+  // `filmUrl` is the proxied form of — so a queued/building/failed run (nothing
+  // to hand back) shows no button rather than a link that would 404. It targets
+  // this run by its route id; the route forces the filename, so a plain
+  // same-origin <a download> is the whole affordance (no fetch, no blob).
+  const canDownload = isDelivered(runStatus) && !!filmUrl
+
   // ── ASK 1: WHAT THE THREAD SAYS WHILE IT WAITS ─────────────────────────────
   // Distinct honest states, so "lagging", "queued" and "stuck" stop looking alike.
   // For a director turn (pending): "reading your note" while a healthy reply is
@@ -1063,6 +1076,22 @@ function WorkspaceRun({ runKey, getToken }: {
                 onLoad={() => setLiveFresh(true)}
                 onError={() => setLiveFresh(false)} alt="" />
             ) : null}
+            {/* ── SAVE THIS FILMO ───────────────────────────────────────────
+                Opposite the "All filmos" back control, in the same quiet chrome
+                grammar: the film's own action lives where a browser keeps its
+                download affordance — the right of its bar. Only a delivered run
+                with a video to serve renders it (see `canDownload`); it is a
+                real <a href> to the /download route, so it carries the route's
+                forced filename and works even mid page-transition. */}
+            {canDownload ? (
+              <a className="wk-download" href={`/api/runs/${hereRunId}/download`}
+                download aria-label="Download this filmo" title="Download this filmo">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Download
+              </a>
+            ) : null}
           </div>
           <div className="wk-screen">{screen}</div>
         </div>
@@ -1154,6 +1183,18 @@ function WorkspaceRun({ runKey, getToken }: {
         .wk-allfilmos svg { width:16px; height:16px; }
         .wk-allfilmos:hover { color:#1B1B1A; background:#F5F5F3; }
         .wk-allfilmos:focus-visible { outline:2px solid #3B82F6;
+          outline-offset:2px; }
+        /* The film's Download, at the right of the canvas chrome — the mirror of
+           the back control at its left, on the same greys, the same hover ink,
+           and the same focus ring. flex:0 0 auto so the centred url pill keeps
+           its room; a delivered run is the only one that renders it. */
+        .wk-download { display:inline-flex; align-items:center; gap:5px;
+          flex:0 0 auto; border:none; background:none; padding:4px 8px;
+          border-radius:8px; font:12px Inter,sans-serif; color:#8A8A86;
+          cursor:pointer; text-decoration:none; white-space:nowrap; }
+        .wk-download svg { width:16px; height:16px; }
+        .wk-download:hover { color:#1B1B1A; background:#F5F5F3; }
+        .wk-download:focus-visible { outline:2px solid #3B82F6;
           outline-offset:2px; }
         .t-verb.rest { color:#B6B6B2; }
         .t-user.dim { opacity:0.45; }

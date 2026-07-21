@@ -22,7 +22,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { StatusChip } from '../Brand'
 import MediaThumb from './MediaThumb'
-import type { Run } from '../../../lib/types'
+import { isDelivered, type Run } from '../../../lib/types'
 
 // ⚠ TWIN of the helpers in `components/overview/RecentFilmos.tsx` and
 // `runs/[id]/Workspace.tsx`. Copied rather than imported, on the same terms the
@@ -83,7 +83,7 @@ export default function FilmoCard({ run }: { run: Run }) {
     .filter(Boolean).join(' · ')
 
   return (
-    <li>
+    <li className="libcell">
       <Link className="libfilmo" href={`/runs/${run.id}`}>
         {/* No still is in hand for a library row — the beat frames live in each
             run's own event stream and this list read returns run rows only. A
@@ -108,6 +108,29 @@ export default function FilmoCard({ run }: { run: Run }) {
         </div>
       </Link>
 
+      {/* ── SAVE WITHOUT OPENING ────────────────────────────────────────────
+          A delivered film is a finished MP4 the account owns, so its card lets
+          you grab it straight from the shelf. This is a SIBLING of the card's
+          <Link>, never nested inside it — an <a> within an <a> is invalid and
+          the browser drops the inner one, so the download has to sit outside
+          the card link and hang off the cell instead. Only a delivered run with
+          a real final_url gets it; a still-building or failed card has nothing
+          to hand back and shows none. The route forces the filename, so a plain
+          same-origin <a download> is all this needs — no fetch, no blob. */}
+      {isDelivered(run.status) && run.final_url ? (
+        <a
+          className="libfilmo-dl"
+          href={`/api/runs/${run.id}/download`}
+          download
+          aria-label="Download this filmo"
+          title="Download this filmo"
+        >
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
+      ) : null}
+
       <style>{`
         .libfilmo { display:flex; flex-direction:column; border-radius:14px;
           overflow:hidden; background:#fff; border:1px solid #E6E6E3;
@@ -131,8 +154,27 @@ export default function FilmoCard({ run }: { run: Run }) {
           font-size:13px; padding:7px 0; border:1px solid #E6E6E3;
           border-radius:99px; color:#1B1B1A; transition:background-color .15s; }
         .libfilmo:hover .libfilmo-open { background:#F5F5F3; }
+        /* ── THE DOWNLOAD, OVER THE THUMBNAIL ────────────────────────────────
+           A quiet icon button in the frame's top-right, on the SAME accent
+           grammar as the rest of the library (#3B82F6 focus + hover ink). It
+           stays visible rather than hover-only so a phone can reach it too, and
+           its white pill keeps the glyph legible over any frame — bright or
+           dark. Absolutely positioned on the cell, so it never squeezes the
+           tile's flex layout at any width (including a single 390px column). */
+        .libcell { position:relative; }
+        .libfilmo-dl { position:absolute; top:10px; right:10px; z-index:2;
+          width:32px; height:32px; display:inline-flex; align-items:center;
+          justify-content:center; border-radius:9px; color:#1B1B1A;
+          background:rgba(255,255,255,0.94); border:1px solid #E6E6E3;
+          box-shadow:0 1px 3px rgba(0,0,0,0.14); text-decoration:none;
+          transition:background-color .15s, border-color .15s, color .15s; }
+        .libfilmo-dl svg { width:17px; height:17px; }
+        .libfilmo-dl:hover { background:#fff; border-color:#3B82F6;
+          color:#3B82F6; }
+        .libfilmo-dl:focus-visible { outline:2px solid #3B82F6;
+          outline-offset:2px; }
         @media (prefers-reduced-motion:reduce) {
-          .libfilmo, .libfilmo-open { transition:none; } }
+          .libfilmo, .libfilmo-open, .libfilmo-dl { transition:none; } }
       `}</style>
     </li>
   )
