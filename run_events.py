@@ -100,8 +100,15 @@ def upload_object(key: str, path: str, overwrite: bool = False) -> str:
     local direct PUT). Returns the object URL, '' on failure. Never raises."""
     try:
         ext = os.path.splitext(path)[1].lower()
-        ctype = ("video/mp4" if ext == ".mp4" else
-                 "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png")
+        # The content-type the object is STORED with. .json/.mp3/.svg used to
+        # fall through to image/png (cosmetic — downloads are unaffected, but
+        # the metadata lied). Map the extensions this helper actually uploads;
+        # anything else is honest binary, not a wrong image type.
+        ctype = {
+            ".mp4": "video/mp4", ".mp3": "audio/mpeg",
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".svg": "image/svg+xml", ".json": "application/json",
+        }.get(ext, "application/octet-stream")
         with open(path, "rb") as f:
             data = f.read()
         if overwrite:

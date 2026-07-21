@@ -1345,13 +1345,16 @@ def _is_stat_line(line: str) -> bool:
     return bool(_STAT_RE.search(line or ""))
 
 
-# ---- THE GREEN-CHECK GATE -------------------------------------------------
+# ---- THE CHECK-SHAPE GATE -------------------------------------------------
 # A ticked row asserts "the product does this for you". Harvested strings are
 # verbatim by construction but NOT automatically benefit-shaped: "Test Failed"
 # is the status label of a preview-branch demo widget, and the check-list
-# treatment promoted it into a benefits list under a green tick (insforge.dev
+# treatment promoted it into a benefits list under a check (insforge.dev
 # 2026-07-19) — the words traced to the page, the meaning was inverted.
-# SHAPE decides what may wear a check, never provenance.
+# (The check renders in the brand's ACCENT ink — see WalkrecWorld's "accent
+# checkmarks" — so the gate and every claim about it say "check", never a
+# colour the render doesn't use.) SHAPE decides what may wear a check, never
+# provenance.
 # The gate is deliberately biased toward DROPPING: "No credit card needed"
 # reads as a negation and goes with it. A list one item shorter is honest; a
 # list padded back up with a failure state is not.
@@ -1371,11 +1374,42 @@ _NEGATION_START = ("no ", "not ", "never", "cannot", "can't", "won't",
 # "Build Passed", "Payment Declined") — including the ones that sound good.
 _PAST_OUTCOME = re.compile(r"\b[a-z]{3,}ed\b\s*$", re.I)
 
+# Conversion CTAs — the words on a BUTTON, not a benefit. A check beside
+# "Contact sales" ticks an action asked OF the visitor, not something the
+# product does FOR them (stripe rescue proof, 2026-07-20: a check-list ticked
+# "Contact sales" and "Start accepting payments"). Matched as a LEADING phrase
+# so a feature row that merely opens with a verb survives — "Export to Premiere
+# and DaVinci", "Trim, split, speed, opacity, and transform" (palmier-live) are
+# untouched because none of them OPENS with a CTA. Drawn from the delivered
+# corpus (runs/*/stops.json) plus the common conversion buttons around them.
+_CTA_PHRASES = (
+    "contact sales", "contact us", "talk to sales", "talk to us",
+    "get in touch", "get started", "get a demo", "get a quote", "get demo",
+    "book a demo", "book a call", "request a demo", "request access",
+    "schedule a demo", "schedule a call", "start now", "start free",
+    "start for free", "start your free", "start building", "start accepting",
+    "sign up", "sign in", "log in", "try it free", "try for free",
+    "try it now", "start free trial", "free trial", "learn more",
+    "read docs", "read the docs", "buy now", "add to cart", "join now",
+    "join the waitlist",
+)
+# Audience/scope phrases — WHO it's for, not WHAT it does. "from scaling
+# startups to global enterprises" (stripe rescue proof) ticks a market segment;
+# "businesses of all sizes" ticks a reach. A "from X to Y" spread only counts
+# when Y names a customer segment, so "Export to Premiere and DaVinci" (no
+# "from", no segment noun) is left alone.
+_SCOPE_RE = re.compile(
+    r"\bfrom\b.+\bto\b.+\b(startups?|enterprises?|businesses|companies|teams)\b"
+    r"|\bof\s+all\s+sizes\b", re.I)
+
 
 def _is_benefit_shaped(item: str) -> bool:
-    """May this line wear a green check? A status, an error, a negation or a
-    bare past-tense outcome describes what HAPPENED on a page, not what the
-    product does for you — each is true as text and a lie under a tick."""
+    """May this line wear a check? A benefit says what the product DOES for you.
+    A status, an error, a negation or a bare past-tense outcome reports what
+    HAPPENED on a page; a CTA is the words on a button; a scope phrase names who
+    it's for — each is true as text and a lie under a check (stripe rescue
+    proof, 2026-07-20, ticked "Contact sales" and "from scaling startups to
+    global enterprises")."""
     t = (item or "").strip()
     if not t:
         return False
@@ -1385,6 +1419,14 @@ def _is_benefit_shaped(item: str) -> bool:
     if lc.startswith(_NEGATION_START):
         return False
     if len(t.split()) <= 3 and _PAST_OUTCOME.search(lc):
+        return False
+    # A CTA is matched at the line's OPEN (trailing arrows/punctuation ignored)
+    # so only the button's own wording qualifies, never a feature that happens
+    # to start with the same verb.
+    cta = lc.rstrip(" .!?›»→>")
+    if any(cta == p or cta.startswith(p + " ") for p in _CTA_PHRASES):
+        return False
+    if _SCOPE_RE.search(lc):
         return False
     return True
 
@@ -1398,7 +1440,7 @@ def _beat_lines(s: dict, motif: str):
 
 
 def _tickable(items):
-    """The subset of a list eligible for a green check. Callers use the
+    """The subset of a list eligible for a check. Callers use the
     LENGTH of this for a treatment's material floor and the list itself for
     the beat's lines, so a gated-out item can never be counted toward a floor
     it then fails to fill."""
@@ -2245,7 +2287,7 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
 # A gate that cannot fail is not a gate, and a pass may only assert what was
 # actually evaluated. Both halves failed together on insforge.dev 2026-07-19:
 # "Watched it back and it holds — every title matches what's under it and
-# nothing repeats" was emitted over a cut carrying a green-ticked "Test
+# nothing repeats" was emitted over a cut carrying a ticked "Test
 # Failed" and an 8.4s empty Customer Stories beat. No check had looked at
 # either property, and no outcome of the review could have stopped the film.
 #
@@ -2259,7 +2301,7 @@ def _assemble_and_render(run_id, run_dir, pub, stops, ctx):
 #      narrows its claim instead of inheriting the silence.
 #   3. THE GATE CAN FAIL. Findings are re-checked against the RE-CUT rather
 #      than assumed fixed. Anything still standing is a rejection: honesty
-#      failures (a beat with nothing to show, a green check on a non-benefit)
+#      failures (a beat with nothing to show, a check on a non-benefit)
 #      REFUSE DELIVERY; the rest are disclosed in the handover, and the film
 #      never describes itself as clean.
 #
@@ -2280,7 +2322,7 @@ _CHECKS = (
     # fix; blocking would only add refuse-delivery on an alarm with 1-in-3
     # precision. Revisit only if the still-sampling itself changes.
     ("beat-visible", "every beat is actually legible on screen", False),
-    ("ticked-items", "nothing wears a green check that isn't a benefit", True),
+    ("ticked-items", "nothing wears a check that isn't a benefit", True),
     ("treatment-fit", "each treatment has the material it needs", False),
     ("no-repeat-run", "no two beats in a row share a treatment", False),
     ("no-redundancy", "no two beats make the same point twice", False),
@@ -2298,13 +2340,46 @@ _REVIEW_ROUNDS = 2   # the first cut plus ONE re-cut; a re-render is ~4 minutes
 def _finding(beat, what: str, issue: str, fix: str = None) -> dict:
     """One reviewer finding. `beat` is the stop index (None for the parts of
     the film that are not beats, e.g. the opening card); `fix` is a treatment
-    the reviewer may swap to, or None when nothing automatic will help."""
+    the reviewer may swap to, or None when nothing automatic will help.
+    `issue` is stored in FULL — the customer's disclosure composes from it, so
+    it is never pre-clipped here; only the display TITLE is shortened."""
     return {"beat": beat, "what": what, "issue": issue, "fix": fix}
 
 
+# ONE TRUNCATION RULE. A feed event TITLE may be shortened for the UI; the FULL
+# finding text always rides in the event DETAIL and in the customer handover.
+# The defect this closes: the critic's issue was stored already clipped to 117
+# chars, so that half-sentence was the ONLY copy — it became the event title
+# AND the line the customer read about their own film ("a clean price-card
+# woul…", stripe/insforge 2026-07-20). Truncation now happens in exactly one
+# place, on the way to a label, and never on stored text.
+_TITLE_CLIP = 80
+
+
+def _clip(text: str, limit: int = _TITLE_CLIP) -> str:
+    """Shorten text for a DISPLAY label only. Never call this on text that will
+    be stored in a finding or composed into a disclosure — those carry the full
+    text; this is the only place a "…" is allowed, and only on a UI title."""
+    t = text or ""
+    return t if len(t) <= limit else t[:limit - 1].rstrip() + "…"
+
+
 def _finding_title(f: dict) -> str:
+    """The short feed LABEL for a finding — clipped for the UI. The full issue
+    rides in the detail (see _finding_detail), so shortening here loses
+    nothing."""
     head = f"Beat {f['beat'] + 1}" if f["beat"] is not None else f["what"]
-    return f"{head}: {f['issue']}"
+    return _clip(f"{head}: {f['issue']}")
+
+
+def _finding_detail(f: dict, check: str) -> str:
+    """The feed DETAIL for a finding: the issue in FULL (never clipped), the
+    check it came from, and the automatic fix if any. The title may be short;
+    this is where the whole finding is preserved for the reader."""
+    fix = ("Fix: cut the beat." if f["fix"] == _CUT
+           else f"Fix: swap to {f['fix']}." if f["fix"]
+           else "No automatic fix.")
+    return f"{f['issue']} — check {check}. {fix}"
 
 
 # Calibrated 2026-07-20 against runs/walkrec-palmier-live/beat-{0..5}.jpg (six
@@ -2411,21 +2486,23 @@ def _lint_content(stops):
 
 
 def _lint_ticks(stops):
-    """TICKED-ITEMS: a treatment that puts green checks on its rows may only
-    carry rows that earned one (see _is_benefit_shaped). Enforced upstream by
-    _beat_lines; checked here because a green check on a failure state is a
-    claim the film makes on the customer's behalf."""
+    """TICKED-ITEMS: every row that RENDERS under a check must be benefit-shaped
+    (see _is_benefit_shaped). Reads _beat_lines — the exact rows the renderer
+    ticks — so the verdict is over what the viewer sees, not the raw harvest.
+    _tickable already drops non-benefits upstream, so this is the backstop that
+    makes the handover claim ("nothing wears a check that isn't a benefit") a
+    verdict over the ticked rows rather than a hope: a row that reached a check
+    without being benefit-shaped (a relaxed gate, a new ticked treatment) is
+    caught here, and the row text ships in the finding IN FULL."""
     out = []
     for i, s in enumerate(stops):
         motif = s.get("motif") or ""
         if s.get("seg") or motif not in _TICKED_MOTIFS:
             continue
-        bad = [d for d in (s.get("details") or []) if not _is_benefit_shaped(d)]
-        shown = _beat_lines(s, motif)
-        for d in bad:
-            if d in shown:
+        for d in _beat_lines(s, motif):
+            if not _is_benefit_shaped(d):
                 out.append(_finding(i, s.get("title", ""),
-                                    f"“{d[:40]}” is ticked as a benefit"))
+                                    f"“{d}” is ticked but isn't a benefit"))
     return out
 
 
@@ -2723,15 +2800,20 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
         if bi < 0 or bi >= len(stops) or act not in _CRITIC_MENU:
             continue
         seen.add(bi)
-        short = (lambda t: t[:117] + "…" if len(t) > 120 else t)(
-            str(c.get("issue") or ""))
+        # FULL TEXT, stored once. The critic's issue used to be clipped to 117
+        # chars HERE, and that half-sentence was the only copy the finding ever
+        # held — so it became both the feed title and the line the customer read
+        # about their own film. The finding keeps the whole sentence; the feed
+        # title is shortened downstream (_finding_title), the disclosure is not.
+        full_issue = str(c.get("issue") or "")
         # AN OBJECTION IS A FINDING even when the critic asks for nothing.
         # Verdicts whose action was "none" used to be discarded, so a beat the
         # reviewer had flagged as wrong vanished between seeing it and
         # reporting it — and the film shipped described as holding.
         if str(c.get("verdict") or "") == "issue":
-            objections.append(_finding(bi, stops[bi].get("title", ""),
-                                       short or "the reviewer flagged this beat"))
+            objections.append(_finding(
+                bi, stops[bi].get("title", ""),
+                full_issue or "the reviewer flagged this beat"))
         if act == "drop":
             if drops >= 2 or stops[bi].get("seg"):
                 continue  # never drop recordings; max 2 drops
@@ -2749,7 +2831,7 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
             c = dict(c, to=to)
         if act != "none":
             actions.append({"beat": bi, "action": act,
-                            "to": str(c.get("to") or ""), "issue": short})
+                            "to": str(c.get("to") or ""), "issue": full_issue})
     # COVERAGE, NOT PRESENCE: a reply about four of six beats has not
     # evaluated "every title matches what's under it" — and neither has a
     # reply that covered every beat without seeing any of them.
@@ -2758,23 +2840,32 @@ def _critic_review(run_dir, stops, beats, brain="sonnet5"):
 
 
 def _data_results(stops, beats, film_s, pending=None):
-    """The six DATA lints — pure code over stops/beats, no frames, no model.
-    All of them are complete before any render exists, which is why the
-    plan-stage review (Tier 2) can run them for free; the post-render pass
-    runs the same table again so every claim in the handover is a verdict
-    over the FINAL cut, not a memory of the plan that preceded it.
+    """The DATA lints — pure code over stops/beats, no frames, no model. All of
+    them are complete before any render exists, which is why the plan-stage
+    review (Tier 2) can run them for free; the post-render pass runs the same
+    table again so every claim in the handover is a verdict over the FINAL cut,
+    not a memory of the plan that preceded it.
 
-    `pending` is the round's shared cut budget (see _cut_allowed) — every
-    lint below that can propose _CUT draws from the same set."""
+    `pending` is the round's shared cut budget (see _cut_allowed) — every lint
+    below that can propose _CUT draws from the same set."""
     pending = set() if pending is None else pending
-    return {
+    results = {
         "beat-content": (True, _lint_content(stops)),
-        "ticked-items": (True, _lint_ticks(stops)),
         "treatment-fit": (True, _lint_treatment_fit(stops, pending)),
         "no-repeat-run": (True, _lint_repeats(stops)),
         "no-redundancy": (True, _lint_redundancy(stops, pending)),
         "pacing": (True, _lint_pacing(beats, film_s)),
     }
+    # TICKED-ITEMS is a claim the film only gets to make when it actually TICKS
+    # something. With no check-list/price-card beat, nothing wears a check, so
+    # the property is not asserted — the pass sentence composes only from checks
+    # present here (see _checks_from), so an absent check is silently omitted
+    # rather than claimed vacuously. When a ticked beat IS present, the check is
+    # present and its claim is earned only if every ticked row held.
+    if any(not s.get("seg") and (s.get("motif") or "") in _TICKED_MOTIFS
+           for s in stops):
+        results["ticked-items"] = (True, _lint_ticks(stops))
+    return results
 
 
 def _checks_from(results):
@@ -2919,10 +3010,7 @@ def _review_plan(run_id, run_dir, pub, stops, ctx):
         for c in checks:
             for f in c["findings"]:
                 emit(run_dir, "review.lint", _finding_title(f),
-                     f"Check {c['name']}. "
-                     + ("Fix: cut the beat." if f["fix"] == _CUT
-                        else f"Fix: swap to {f['fix']}." if f["fix"]
-                        else "No automatic fix."))
+                     _finding_detail(f, c["name"]))
         lint_fixes = [f for c in checks for f in c["findings"] if f["fix"]]
         if not lint_fixes:
             break
@@ -3002,14 +3090,13 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats, film_s,
                     else "review.lint")
             for f in c["findings"]:
                 emit(run_dir, kind, _finding_title(f),
-                     f"Check {c['name']}. "
-                     + ("Fix: cut the beat." if f["fix"] == _CUT
-                        else f"Fix: swap to {f['fix']}." if f["fix"]
-                        else "No automatic fix."))
+                     _finding_detail(f, c["name"]))
         for a in actions:
+            # Title short for the feed; the critic's full sentence in the detail.
             emit(run_dir, "review.finding",
-                 f"Beat {a['beat'] + 1}: {a['issue'] or a['action']}",
-                 f"Action: {a['action']}"
+                 _clip(f"Beat {a['beat'] + 1}: {a['issue'] or a['action']}"),
+                 (f"{a['issue']} — " if a['issue'] else "")
+                 + f"Action: {a['action']}"
                  + (f" → {a['to']}" if a['to'] else ""))
         open_findings = [f for c in checks for f in c["findings"]]
         if not open_findings and not actions:
@@ -3075,7 +3162,7 @@ def _review_and_fix(run_id, run_dir, pub, stops, ctx, beats, film_s,
          f"Review did not pass — {len(unresolved)} issue"
          f"{'s' if len(unresolved) != 1 else ''} left in the cut", detail)
     if blocking:
-        # REFUSE DELIVERY. A beat with nothing to show, or a green check on a
+        # REFUSE DELIVERY. A beat with nothing to show, or a check on a
         # failure state, is the film making a claim on the customer's behalf
         # that isn't true. The assembler prevents both by construction, so
         # reaching here means a contract broke — ship nothing and say why.
