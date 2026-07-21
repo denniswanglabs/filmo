@@ -25,6 +25,8 @@ import unittest
 from unittest import mock
 
 import director
+import run_events
+import workspace_store
 
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -349,6 +351,246 @@ class DirectorHelperTests(unittest.TestCase):
 
     def test_chat_tail_empty_for_fresh_thread(self):
         self.assertEqual(director._chat_tail(self.run_dir, "hi"), "")
+
+
+def _event_kinds(run_dir):
+    """The kind of every event emitted so far, in order."""
+    out = []
+    try:
+        with open(os.path.join(run_dir, "events.jsonl")) as f:
+            for line in f:
+                out.append(json.loads(line).get("kind"))
+    except FileNotFoundError:
+        pass
+    return out
+
+
+# ── Part 1 (persist every turn) + Part 3 (a rerun that actually ships), driven
+# through handle_job as production does — a fresh process, chat.jsonl the only
+# memory, the render/credits/ship/persist tail mocked so the suite is free ────
+class DirectorHardeningTests(unittest.TestCase):
+    def setUp(self):
+        self.key = "test-director-hardening"
+        self.run_dir = _write_fixture(self.key)
+        self.brain = _Brain()
+        self.persisted = []      # (run_key, reason) per workspace_store.persist
+
+        def fake_assemble(run_id, run_dir, pub, stops, ctx):
+            with open(os.path.join(run_dir, "stops.json"), "w") as f:
+                json.dump({"stops": stops, "ctx": ctx}, f)
+            return ("final.mp4", [], 10.0)
+
+        def fake_persist(run_dir, run_key, reason="build"):
+            self.persisted.append((run_key, reason))
+            return None
+
+        self.charge = mock.Mock(return_value=None)
+        self.ship = mock.Mock(return_value="https://cdn.test/final.mp4?v=1")
+        self.flush = mock.Mock(return_value=None)
+        # build_tour_film RETURNS the new film path (the real one writes a new
+        # stops.json + clips then returns `out`); the rerun branch must ship it.
+        self.build = mock.Mock(
+            return_value=os.path.join(self.run_dir, "film-tour.mp4"))
+        self._patches = [
+            mock.patch("validate_planner.call_model", self.brain),
+            mock.patch("proto_walkrec._assemble_and_render",
+                       side_effect=fake_assemble),
+            mock.patch("proto_walkrec.build_tour_film", self.build),
+            mock.patch("run_events.charge_credits", self.charge),
+            mock.patch("run_events.ship_final", self.ship),
+            mock.patch("run_events.flush_sinks", self.flush),
+            mock.patch("workspace_store.persist", side_effect=fake_persist),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        shutil.rmtree(self.run_dir, ignore_errors=True)
+
+    def test_clarification_turn_persists_chat_delta(self):
+        """A pure clarification (no actions) must persist reason="chat" so a
+        mid-conversation redeploy + rehydrate does not drop the turn — and it
+        neither ships nor charges."""
+        self.brain.queue = [json.dumps({
+            "reply": "Which one — the getting started checklist or the "
+                     "everything-you-need one?", "actions": []})]
+        director.handle_job(self.key, "", "change the checklist scene")
+        self.assertIn((self.key, "chat"), self.persisted)
+        self.assertFalse(self.ship.called)
+        self.assertFalse(self.charge.called)
+
+    def test_applied_edit_persists_edit_not_chat(self):
+        """The regression guard: an APPLIED edit still persists reason="edit"
+        (its heavier workspace), charges, and does NOT also fire a chat delta."""
+        self.brain.queue = [json.dumps({
+            "reply": "Perfect — switching that beat to a logo wall.",
+            "actions": [{"action": "swap_treatment",
+                         "beat_title": "Getting started in three steps",
+                         "to": "logo-wall"}]})]
+        director.handle_job(self.key, "",
+                            "make the getting started beat a logo wall")
+        self.assertIn((self.key, "edit"), self.persisted)
+        self.assertNotIn((self.key, "chat"), self.persisted)
+        self.assertTrue(self.charge.called)
+
+    def test_rerun_ships_persists_and_emits_completion(self):
+        """Part 3: 'redo the whole film' re-produces AND delivers — it ships the
+        film build_tour_film returned, emits run.done, flushes, and re-persists
+        with edit semantics so the next edit rehydrates THIS re-run."""
+        self.brain.queue = [json.dumps({
+            "reply": "Redoing the whole film from scratch.",
+            "actions": [{"action": "rerun"}]})]
+        rc = director.handle_job(self.key, "", "redo the whole film")
+        self.assertEqual(rc, 0)
+        # re-produced from the site host carried in ctx
+        self.build.assert_called_once()
+        self.assertEqual(self.build.call_args[0][0], "https://acme.test/")
+        # shipped exactly the film build_tour_film returned
+        self.ship.assert_called_once()
+        self.assertEqual(self.ship.call_args[0][2],
+                         os.path.join(self.run_dir, "film-tour.mp4"))
+        # completion narrated through the same event grammar
+        kinds = _event_kinds(self.run_dir)
+        self.assertIn("run.start", kinds)
+        self.assertIn("run.done", kinds)
+        # re-persisted (edit semantics) and flushed
+        self.assertIn((self.key, "edit"), self.persisted)
+        self.assertTrue(self.flush.called)
+
+    def test_rerun_charges_nothing_pending_pricing(self):
+        """Part 3 pricing: a rerun charge is UNDEFINED (web gates on the 70
+        edit allowance; a full production is 640). Until Dennis decides, NO
+        charge is written — the rerun must not silently debit an edit or a
+        video price."""
+        self.brain.queue = [json.dumps({
+            "reply": "Redoing the whole film from scratch.",
+            "actions": [{"action": "rerun"}]})]
+        director.handle_job(self.key, "", "regenerate the entire film")
+        self.assertFalse(self.charge.called)
+
+
+# ── Part 2: provenance survives a redeploy — _events_tail prefers the local
+# ledger and falls back to the run's agent_events in InsForge when it is thin ─
+class EventsTailTests(unittest.TestCase):
+    def setUp(self):
+        self.key = "test-events-tail"
+        self.run_dir = _write_fixture(self.key)
+
+    def tearDown(self):
+        shutil.rmtree(self.run_dir, ignore_errors=True)
+
+    def test_local_full_is_the_fast_path_no_db(self):
+        with open(os.path.join(self.run_dir, "events.jsonl"), "w") as f:
+            for i in range(20):
+                f.write(json.dumps({"seq": i, "kind": "decide.motif",
+                                    "title": f"beat {i}", "detail": ""}) + "\n")
+        with mock.patch("run_events._if_req") as ifreq:
+            out = director._events_tail(self.run_dir, n=18)
+        ifreq.assert_not_called()        # a warm replica never hits the DB
+        self.assertIn("beat 19", out)
+
+    def test_falls_back_to_db_when_local_absent(self):
+        # a rehydrated replica: events.jsonl was never persisted, so it is gone
+        self.assertFalse(
+            os.path.exists(os.path.join(self.run_dir, "events.jsonl")))
+        with open(os.path.join(self.run_dir, "insforge-run-id"), "w") as f:
+            f.write("run-abc")
+        rows = [   # newest-first, as PostgREST returns order=seq.desc
+            {"kind": "review.done", "title": "Change applied", "detail": ""},
+            {"kind": "decide.motif",
+             "title": "Getting started -> check-list",
+             "detail": "Four labeled steps read as a checklist, not a stat."}]
+        resp = mock.Mock()
+        resp.read.return_value = json.dumps(rows).encode()
+        with mock.patch.multiple("run_events", _IF_BASE="https://if.test",
+                                 _IF_KEY="k"), \
+                mock.patch("run_events._if_req", return_value=resp) as ifreq:
+            out = director._events_tail(self.run_dir, n=18)
+        ifreq.assert_called_once()
+        method, path = ifreq.call_args[0][0], ifreq.call_args[0][1]
+        self.assertEqual(method, "GET")
+        self.assertIn("agent_events?run_id=eq.run-abc", path)
+        self.assertIn("order=seq.desc", path)
+        self.assertIn("limit=18", path)
+        # provenance is present and re-ordered oldest-first for the prompt
+        self.assertIn("decide.motif", out)
+        self.assertIn("Four labeled steps", out)
+        self.assertLess(out.index("decide.motif"), out.index("review.done"))
+        self.assertNotEqual(out, "(no events)")
+
+    def test_no_events_when_off_hosted(self):
+        # no local ledger, no insforge-run-id -> honest "(no events)", no DB
+        with mock.patch("run_events._if_req") as ifreq:
+            out = director._events_tail(self.run_dir, n=18)
+        self.assertEqual(out, "(no events)")
+        ifreq.assert_not_called()
+
+
+# ── Part 1 at the storage layer: reason="chat" is a chat.jsonl + manifest
+# DELTA; reason="edit" keeps the pre-existing always-upload-stops contract ────
+class WorkspaceChatDeltaTests(unittest.TestCase):
+    def setUp(self):
+        self.key = "test-ws-chat-delta"
+        self.run_dir = _write_fixture(self.key)
+        with open(os.path.join(self.run_dir, "chat.jsonl"), "w") as f:
+            f.write(json.dumps({"role": "user", "text": "hi there"}) + "\n")
+        self.uploaded = []
+        self.env = mock.patch.dict(os.environ,
+                                   {"INSFORGE_BASE_URL": "https://if.test",
+                                    "INSFORGE_API_KEY": "k"})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        shutil.rmtree(self.run_dir, ignore_errors=True)
+
+    def _prior_manifest(self):
+        """A prior build manifest listing stops.json + the clip at their CURRENT
+        sizes (so a chat delta sees them unchanged) and chat.jsonl at an OLD
+        size (so the delta sees it changed)."""
+        run_dir, clip = self.run_dir, "shot-1-60.mp4"
+        return {"schema": 1, "run_key": self.key, "revision": 3,
+                "reason": "build", "created_ts": 1.0,
+                "files": [
+                    {"key": f"workspace/{self.key}/stops.json",
+                     "name": "stops.json", "dest": "run", "role": "essential",
+                     "bytes": os.path.getsize(
+                         os.path.join(run_dir, "stops.json"))},
+                    {"key": f"workspace/{self.key}/{clip}", "name": clip,
+                     "dest": "run", "role": "essential",
+                     "bytes": os.path.getsize(os.path.join(run_dir, clip))},
+                    {"key": f"workspace/{self.key}/chat.jsonl",
+                     "name": "chat.jsonl", "dest": "run", "role": "asset",
+                     "bytes": 1}]}
+
+    def _run_persist(self, reason):
+        def fake_upload(key, path, overwrite=False):
+            self.uploaded.append(os.path.basename(key))
+            return f"https://if.test/{key}"
+        with mock.patch("workspace_store._read_manifest",
+                        return_value=self._prior_manifest()), \
+                mock.patch("workspace_store.upload_object",
+                           side_effect=fake_upload):
+            return workspace_store.persist(self.run_dir, self.key, reason=reason)
+
+    def test_chat_delta_uploads_only_chat_and_manifest(self):
+        manifest = self._run_persist("chat")
+        self.assertIsNotNone(manifest)
+        # unchanged stops.json + clip are NOT re-uploaded (the delta win)
+        self.assertNotIn("stops.json", self.uploaded)
+        self.assertNotIn("shot-1-60.mp4", self.uploaded)
+        # only the changed chat.jsonl and the commit-point manifest go up
+        self.assertEqual(set(self.uploaded), {"chat.jsonl", "workspace.json"})
+        # the manifest still LISTS every file, so rehydrate stays whole
+        self.assertEqual({f["name"] for f in manifest["files"]},
+                         {"stops.json", "shot-1-60.mp4", "chat.jsonl"})
+
+    def test_edit_delta_still_reuploads_stops(self):
+        # the control: reason="edit" keeps the pre-existing contract intact
+        self._run_persist("edit")
+        self.assertIn("stops.json", self.uploaded)
 
 
 if __name__ == "__main__":

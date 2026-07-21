@@ -194,6 +194,15 @@ def persist(run_dir: str, run_key: str, reason: str = "build") -> dict | None:
     always re-upload), so an edit's re-persist tail is a few KB. Returns the
     written manifest, or None when there is nothing/no storage to persist to.
 
+    reason="chat" is the CONVERSATION DELTA (2026-07-20): a clarification /
+    decline / answer turn re-rendered nothing — it touched ONLY chat.jsonl — so
+    stops.json is NOT force-re-uploaded and, matching the prior manifest by
+    size, is skipped like every immutable clip. The whole delta is then
+    chat.jsonl + the manifest (a few KB, two uploads), which keeps the on-turn
+    persist inside the hot-path budget while still letting a mid-conversation
+    redeploy + rehydrate on another replica recover those turns. The manifest it
+    writes still LISTS every file (skipped or uploaded), so rehydrate stays whole.
+
     The manifest is written LAST — it is the commit point, so a partial upload
     never advertises a workspace that cannot be rehydrated. An essential upload
     failure leaves the PRIOR manifest intact (a stale-but-whole workspace beats
@@ -219,9 +228,13 @@ def persist(run_dir: str, run_key: str, reason: str = "build") -> dict | None:
     files, essential_ok, uploaded, skipped = [], True, 0, 0
     for e in entries:
         key = f"{_prefix(run_key)}/{e['name']}"
-        # stops.json always re-uploads (it changed); an immutable file already
-        # in storage at the same size is skipped — it is still listed.
-        unchanged = (e["name"] != "stops.json"
+        # stops.json always re-uploads (a build/edit changed it); an immutable
+        # file already in storage at the same size is skipped — it is still
+        # listed. A reason="chat" delta re-rendered nothing, so stops.json is
+        # NOT force-uploaded there: it is skipped when its bytes match the prior
+        # manifest, leaving the delta as chat.jsonl + the manifest.
+        force_stops = (e["name"] == "stops.json" and reason != "chat")
+        unchanged = (not force_stops
                      and prior_bytes.get(e["name"]) == e["bytes"])
         if unchanged:
             skipped += 1

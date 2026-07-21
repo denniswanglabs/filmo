@@ -342,15 +342,68 @@ def _outcome_reply(stops, applied, rejected) -> str:
     return " ".join(parts)
 
 
-def _events_tail(run_dir: str, n: int = 18):
+def _local_events(run_dir: str, n: int):
+    """The last n events from the local events.jsonl, oldest-first; [] when
+    absent/unreadable. The FAST PATH — a warm builder replica holds the run's
+    whole event history on disk."""
     try:
         with open(os.path.join(run_dir, "events.jsonl")) as f:
-            evts = [json.loads(l) for l in f][-n:]
-        return "\n".join(f"[{e['kind']}] {e['title']}"
-                         + (f" — {e['detail'][:90]}" if e.get("detail") else "")
-                         for e in evts)
+            return [json.loads(l) for l in f][-n:]
     except Exception:
-        return "(no events)"
+        return []
+
+
+def _db_events(run_dir: str, n: int):
+    """The run's last n agent_events from InsForge, oldest-first; [] when
+    off-hosted, empty, or unreachable. Provenance's SURVIVAL PATH across a
+    redeploy: events.jsonl is deliberately NOT persisted (workspace_store), so a
+    replica that rehydrated a film has none of the build's decide.*/read.*/film.*
+    events on disk — but every event was ALSO sinked to public.agent_events
+    (run_events._hosted_sink), which outlives the ephemeral container disk.
+    Mirrors the sink's own auth/query shape by reusing run_events._if_req, so the
+    key never leaves that module and is never echoed here. Single-shot (not the
+    retrying variant): a provenance read must degrade fast, never retry into the
+    hot path."""
+    import run_events as _re
+    rid = _re._hosted_run_id(run_dir)
+    if not (rid and _re._IF_BASE and _re._IF_KEY):
+        return []
+    try:
+        resp = _re._if_req(
+            "GET",
+            f"/api/database/records/agent_events?run_id=eq.{rid}"
+            f"&select=kind,title,detail&order=seq.desc&limit={int(n)}",
+            None, "application/json")
+        rows = json.loads(resp.read())
+    except Exception:
+        return []
+    if not isinstance(rows, list):
+        return []
+    rows.reverse()   # DB returns newest-first; the prompt reads oldest-first
+    return rows
+
+
+def _fmt_events(evts) -> str:
+    return "\n".join(
+        f"[{e.get('kind')}] {e.get('title')}"
+        + (f" — {e['detail'][:90]}" if e.get("detail") else "")
+        for e in evts)
+
+
+def _events_tail(run_dir: str, n: int = 18) -> str:
+    """The recent run events for the prompt's provenance section. Local
+    events.jsonl is the FAST PATH; when it is absent or thinner than the tail —
+    the common case on a replica that rehydrated a film after a redeploy, since
+    events.jsonl is not persisted — fall back to the run's agent_events in
+    InsForge so a "why did you…" question still has provenance to cite. Same
+    tail size either way; "(no events)" only when neither source has any."""
+    local = _local_events(run_dir, n)
+    if len(local) >= n:
+        return _fmt_events(local)
+    db = _db_events(run_dir, n)
+    if db:
+        return _fmt_events(db)
+    return _fmt_events(local) if local else "(no events)"
 
 
 def _log_chat(run_dir: str, role: str, text: str):
@@ -371,6 +424,25 @@ def _say(run_dir: str, text: str):
     read half."""
     emit(run_dir, "chat.director", text, "")
     _log_chat(run_dir, "director", text)
+
+
+def _persist_chat(run_dir: str, run_key: str) -> None:
+    """Persist the CONVERSATION DELTA after a turn that wrote only to chat.jsonl
+    (a clarification / decline / answer — no re-render). Without this, only
+    APPLIED edits persisted (2026-07-20): a worker deploy mid-conversation, then
+    a rehydrate on another replica, silently dropped every turn since the last
+    edit — so "yes, the checklist one" resolved against a stale thread. The
+    edit/build paths persist their own heavier workspace; this covers the turns
+    that never reach them. reason="chat" makes workspace_store skip the
+    unchanged stops.json + clips, so the delta is chat.jsonl + the manifest (a
+    few KB). Best-effort and OFF the reply's critical path — the line is already
+    spoken and flushed before this runs, so it only extends the job-hold by the
+    upload of those few KB, never the user's perceived latency."""
+    try:
+        workspace_store.persist(run_dir, run_key, reason="chat")
+    except Exception as e:
+        print(f"[workspace!] chat persist skipped: {type(e).__name__}: {e}",
+              file=sys.stderr)
 
 
 def _render_async(run_id: str, run_dir: str, state: dict, applied):
@@ -463,7 +535,35 @@ def _apply_work(run_id: str, run_dir: str, state: dict, actions, said,
              "from scratch.")
         emit(run_dir, "run.start", "Director: full re-run requested",
              "Re-reading the site and re-filming from scratch.")
-        pw.build_tour_film(ctx.get("host", ""), run_id)
+        # FINISH LIKE THE BUILD PATH (build_runner.py): build_tour_film
+        # re-reads the site, re-films, and writes a NEW stops.json + clips, then
+        # RETURNS the film path WITHOUT delivering it — main()/build_runner own
+        # the ship. The director is this rerun's ONLY wrapper, so a bare return
+        # (the pre-2026-07-20 bug) renders a film nobody receives. Ship the new
+        # cut through the same shipper, announce completion in the same event
+        # grammar, flush, then re-persist so the NEXT edit rehydrates THIS
+        # re-run, not the pre-rerun cut. A failure inside build_tour_film
+        # propagates to _handle_job, which emits run.error and flushes.
+        import run_events as _re
+        out = pw.build_tour_film(ctx.get("host", ""), run_id)
+        _re.ship_final(run_dir, run_id, out)
+        emit(run_dir, "run.done", "Film delivered",
+             "The re-filmed tour is rendered and shipped.")
+        _re.flush_sinks()
+        # RERUN CHARGE — DELIBERATELY ABSENT, FLAGGED FOR DENNIS. An applied
+        # edit charges EDIT_CREDIT_COST (70); a from-scratch production charges
+        # VIDEO_CREDIT_COST (640) at creation (web/app/actions.ts). The web
+        # gates a director turn on the EDIT allowance (70), so charging 640 here
+        # would admit-at-70 / debit-at-640 — the exact mismatch the
+        # EDIT_CREDIT_COST note warns against — and charging 70 would price a
+        # full re-production as an edit. No spec defines a rerun price, so NONE
+        # is written here (today's free behavior, unchanged) pending Dennis's
+        # pricing call: inventing one is worse than leaving the seam visible.
+        try:
+            workspace_store.persist(run_dir, run_id, reason="edit")
+        except Exception as e:
+            print(f"[workspace!] rerun persist skipped: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
         return
     _say(run_dir, _outcome_reply(stops, applied, rejected))
     for title, why, kind in rejected:
@@ -557,13 +657,17 @@ def _handle_job(run_key: str, insforge_run_id: str, message: str,
         _log_chat(run_dir, "user", message)
         _say(run_dir,
              f"I hit a snag reading that ({type(e).__name__}) — try again?")
+        _persist_chat(run_dir, run_key)
         return 0
     _log_chat(run_dir, "user", message)
     said = _said_treatments(run_dir, message)
     if not actions:
         # Answers and declines: the model's own voice IS the outcome. _say also
-        # records it so the next turn remembers the question it just asked.
+        # records it so the next turn remembers the question it just asked. The
+        # chat delta is persisted so a redeploy mid-conversation does not drop
+        # this turn (only APPLIED edits persisted before 2026-07-20).
         _say(run_dir, reply)
+        _persist_chat(run_dir, run_key)
         return 0
     try:
         _apply_work(run_key, run_dir, state, actions, said, job_id)
