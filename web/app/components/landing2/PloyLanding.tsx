@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import FilmoMark from './FilmoMark'
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -44,6 +44,73 @@ const SITES = [
   { src: '/landing/vercel.jpg', host: 'vercel.com' },
 ]
 
+// ── THE WORK FILM (the real delivered InsForge cut, 2026-07-20) ──────────────
+// ONE film, and the copy beside it speaks in the singular to match it. This is
+// the canonical stored deliverable of the most recent insforge.dev run
+// (runs.final_url — NOT the old trimmed /landing/insforge.mp4 placeholder),
+// streamed through /api/media, which stamps the MIME storage drops and forwards
+// Range. It is a click-to-play poster, not an autoplaying video: the section
+// adds one ≤200KB poster to the first paint (lazy, below the fold) and the
+// film's megabytes move only when someone actually asks to watch it. Kept as a
+// one-item list so the markup and the styling do not have to change if the
+// gallery ever grows back.
+const GALLERY = [
+  {
+    host: 'insforge.dev',
+    descriptor: 'Agent-native backend platform',
+    poster: '/landing/gallery/insforge.jpg',
+    src: 'https://jd3mdkqr.ap-southeast.insforge.app/api/storage/buckets/walk-videos/objects/web-1784602257447-19ozq%2Ffinal.mp4?v=1784603379',
+  },
+]
+
+// Storage serves binary/octet-stream, which <video> refuses to sniff, so a
+// played URL rides the same proxy the studio uses (actions.ts proxyPlayableUrl /
+// RunMark.tsx): same-origin, no auth, Range-correct.
+const proxied = (u: string) => `/api/media?u=${encodeURIComponent(u)}`
+
+// One gallery tile: a lazy poster that becomes its film on click. The click is a
+// user gesture, so the film plays with its voiceover; until then it is a single
+// <img>, never a buffering <video>.
+function GalleryFilm({
+  host,
+  descriptor,
+  poster,
+  src,
+}: {
+  host: string
+  descriptor: string
+  poster: string
+  src: string
+}) {
+  const [playing, setPlaying] = useState(false)
+  return (
+    <div className="film">
+      {playing ? (
+        <video src={proxied(src)} controls autoPlay playsInline preload="auto" />
+      ) : (
+        <button
+          type="button"
+          className="filmplay"
+          onClick={() => setPlaying(true)}
+          aria-label={`Play the ${host} film`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={poster} alt="" loading="lazy" />
+          <span className="pbtn" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </span>
+        </button>
+      )}
+      <div className="cap">
+        <b>{host}</b>
+        <span>{descriptor}</span>
+      </div>
+    </div>
+  )
+}
+
 // ── THE CTA IS STATE-AWARE (Ploy-style, 2026-07-20) ──────────────────────────
 // A first-time visitor and a returning-but-signed-out one want different first
 // words. A first-timer sees the pair Ploy leads with — a quiet "Log in" and a
@@ -76,7 +143,6 @@ export default function PloyLanding({
   const rootRef = useRef<HTMLDivElement>(null)
   const navRef = useRef<HTMLElement>(null)
   const viewRef = useRef<HTMLDivElement>(null)
-  const markRef = useRef<SVGSVGElement>(null)
   const urlRef = useRef<HTMLSpanElement>(null)
 
   // The landing is a screening room, so the dark ground has to reach past the
@@ -93,13 +159,13 @@ export default function PloyLanding({
   }, [])
 
   // ── The browsing loop ────────────────────────────────────────────────────
-  // A real page gliding under a wandering mark. Every frame is a site we
-  // actually filmed — no mockups.
+  // A real page panning under the recorder's frame — each one a site we
+  // actually captured, cycling as a recording would. No mockups, and no brand
+  // ornament riding over it: the frame shows the product working, nothing else.
   useEffect(() => {
     const view = viewRef.current
-    const mark = markRef.current
     const urlEl = urlRef.current
-    if (!view || !mark || !urlEl) return
+    if (!view || !urlEl) return
     const pages = Array.from(view.querySelectorAll<HTMLImageElement>('.fl-bpages img'))
     if (!pages.length) return
 
@@ -111,7 +177,6 @@ export default function PloyLanding({
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-    const spots: Array<[number, number]> = [[18, 22], [62, 38], [30, 64], [72, 74], [44, 30]]
     let i = 0
     let step = 0
     let stopped = false
@@ -130,14 +195,6 @@ export default function PloyLanding({
         const travel = Math.max(0, p.offsetHeight - view.offsetHeight)
         p.style.transition = 'transform 5.2s linear, opacity .9s ease'
         p.style.transform = `translateY(${-travel * (step ? 0.62 : 0.08)}px)`
-        const [x, y] = spots[(i * 2 + step) % spots.length]
-        // The approved spots are viewport-relative, which is right up to about
-        // 1500px wide and wrong past it: the frame stops growing at the
-        // section's 1180px max, so on a large display 72vw parks the mark
-        // outside the shot and .fl-bview clips it away for that whole beat.
-        // Same positions, clamped to stay in frame.
-        const px = Math.min((x / 100) * window.innerWidth, view.clientWidth - 50)
-        mark.style.transform = `translate(${px}px, ${y}%)`
       }
       step++
       if (step > 1) {
@@ -326,9 +383,23 @@ html { scroll-behavior:smooth }
 .fl .films{display:grid;grid-template-columns:1fr;gap:16px;margin-top:48px;max-width:900px}
 .fl .film{border-radius:12px;overflow:hidden;background:var(--ground-2);box-shadow:inset 0 0 0 1px var(--line)}
 .fl .film video{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#000}
-.fl .film .cap{padding:16px 18px}
-.fl .film .cap b{display:block;font-size:15px;font-weight:600}
-.fl .film .cap span{font-size:13px;color:var(--muted)}
+/* Click-to-play poster: a full-tile button, the film only loads on the click. */
+.fl .filmplay{display:block;position:relative;width:100%;aspect-ratio:16/9;padding:0;border:0;
+  cursor:pointer;background:#000;overflow:hidden}
+.fl .filmplay img{display:block;width:100%;height:100%;object-fit:cover;
+  transition:transform .5s var(--spring),filter .3s}
+.fl .filmplay:hover img{transform:scale(1.03);filter:brightness(1.06)}
+/* Glassmorphic play chip — blur + low-opacity ground + a bright hairline. */
+.fl .filmplay .pbtn{position:absolute;inset:0;margin:auto;width:56px;height:56px;border-radius:50%;
+  background:rgba(10,10,11,.5);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  border:1px solid rgba(244,243,240,.42);display:flex;align-items:center;justify-content:center;
+  transition:transform .3s var(--spring),background .2s}
+.fl .filmplay:hover .pbtn{transform:scale(1.09);background:rgba(10,10,11,.68)}
+.fl .filmplay .pbtn svg{width:20px;height:20px;margin-left:2px;fill:var(--ink)}
+.fl .filmplay:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.fl .film .cap{padding:15px 17px}
+.fl .film .cap b{display:block;font-size:14.5px;font-weight:600}
+.fl .film .cap span{font-size:12.5px;color:var(--muted)}
 .fl .browser{margin-top:48px;border-radius:14px;overflow:hidden;background:var(--ground-2);
   box-shadow:inset 0 0 0 1px var(--line),0 40px 90px -50px rgba(0,0,0,.8)}
 .fl .bchrome{display:flex;align-items:center;gap:14px;padding:12px 16px;
@@ -346,10 +417,6 @@ html { scroll-behavior:smooth }
 .fl .fl-bpages img{position:absolute;top:0;left:0;width:100%;opacity:0;
   transition:opacity .9s ease}
 .fl .fl-bpages img.on{opacity:1}
-/* The mark leads the eye across the page, the way the recorder's camera does. */
-.fl .wanderer{position:absolute;width:38px;height:38px;pointer-events:none;
-  filter:drop-shadow(0 6px 18px rgba(0,0,0,.5));
-  transition:transform 2.6s cubic-bezier(.4,0,.2,1)}
 .fl .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:28px;margin-top:56px}
 .fl .step{border-top:1px solid var(--line);padding-top:22px}
 .fl .step .n{font-size:12px;color:var(--accent);letter-spacing:.1em}
@@ -450,20 +517,13 @@ html { scroll-behavior:smooth }
           Your product shipped. Its video didn&rsquo;t.
         </h2>
         <p className="sub">
-          Every one of these started as a link and finished as a cut. No brief, no storyboard
-          call, no stock footage — the palette, the words, and the footage all came off the site.
+          This started as a link and finished as a cut. No brief, no storyboard call, no stock
+          footage — the palette, the words, and the footage all came off the site.
         </p>
         <div className="films">
-          <div className="film">
-            <video src="/landing/insforge.mp4" muted loop playsInline autoPlay />
-            <div className="cap">
-              <b>insforge.dev</b>
-              <span>
-                Agent-native backend platform · 6 beats, 2 real recordings, partner wall built
-                from the logos on their own page
-              </span>
-            </div>
-          </div>
+          {GALLERY.map((f) => (
+            <GalleryFilm key={f.host} {...f} />
+          ))}
         </div>
       </section>
 
@@ -528,13 +588,6 @@ html { scroll-behavior:smooth }
                 <img key={s.host} src={s.src} alt="" data-host={s.host} />
               ))}
             </div>
-            <svg className="wanderer" viewBox="14 13 56 56" aria-hidden="true" ref={markRef}>
-              <path
-                fillRule="evenodd"
-                fill="#4B8DF8"
-                d="M42 17 C56 15 67 27 65 41 C63 55 52 67 38 65 C25 63 16 51 19 37 C21 25 30 19 42 17 Z M47 28.5 A8.5 8.5 0 1 1 47 45.5 A8.5 8.5 0 1 1 47 28.5 Z"
-              />
-            </svg>
           </div>
         </div>
       </section>
