@@ -65,10 +65,10 @@ def test_amount_coerced_int():
        "string amount coerced to int cents")
 
 
-def test_live_key_refused(monkeypatched_kind):
+def _check_live_key_refused(kind_result):
     """With a live-looking key, every live entrypoint must refuse before any network call."""
     orig = stripe_earn.stripe_money.detect_key
-    stripe_earn.stripe_money.detect_key = lambda: monkeypatched_kind
+    stripe_earn.stripe_money.detect_key = lambda: kind_result
     try:
         try:
             stripe_earn._assert_test_key()
@@ -79,12 +79,19 @@ def test_live_key_refused(monkeypatched_kind):
         stripe_earn.stripe_money.detect_key = orig
 
 
+def test_live_key_refused():
+    """A live-looking key AND a missing key must both refuse. (No-arg so pytest
+    collects it as a plain test; the parameterized cases are driven internally
+    instead of via a fixture named 'monkeypatched_kind'.)"""
+    _check_live_key_refused({"present": True, "source": "x", "kind": "live", "length": 30})
+    _check_live_key_refused({"present": False, "source": None, "kind": None, "length": 0})
+
+
 def main():
     test_dryrun_params_wellformed()
     test_custom_urls_respected()
     test_amount_coerced_int()
-    test_live_key_refused({"present": True, "source": "x", "kind": "live", "length": 30})
-    test_live_key_refused({"present": False, "source": None, "kind": None, "length": 0})
+    test_live_key_refused()
     print("\n%d checks, %d failures" % (_checks, _fails))
     return 1 if _fails else 0
 
