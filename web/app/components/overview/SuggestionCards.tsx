@@ -8,6 +8,7 @@
 // TIME, because a date is the one fact the server cannot state correctly — a
 // timestamp formatted on the server is the server's day, not the reader's.
 import { useCallback, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { type Suggestion, type SuggestionKind } from '../../actions'
 import { useStartFilm, type FilmStartRefusal } from '../StartFilm'
@@ -97,15 +98,21 @@ function Card({ s, getToken }: {
   // its tone says which kind of thing it is (same rule as the composer's hint).
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null)
 
-  // This surface has no sign-in gate of its own — the Overview is already a
-  // signed-in room, so a rejected session here means the whole page is about to
-  // stop working, not that this one card needs a sheet over it. So the card
-  // says the sentence and stops. The URL is stashed by `startFilm` either way,
-  // which is new: a card that met a dead session used to lose the reader's
-  // intent outright, while the composer's identical failure kept it.
+  const router = useRouter()
+
+  // The Overview is a signed-in room, so a sign-in refusal here means the
+  // session died under the reader — the honest answer is the one sign-in
+  // surface, /login (the modal is retired). `startFilm` has already stashed the
+  // URL, so `/` resumes this exact build after sign-in; the card loses nothing.
+  // Every other refusal — a credit cap, a backend blip — is a real answer, not a
+  // dead session, so it stays as a line on the card and never leaves the page.
   const onRefused = useCallback((r: FilmStartRefusal) => {
+    if (r.kind === 'sign-in') {
+      router.push('/login')
+      return
+    }
     setNote({ text: r.message, bad: true })
-  }, [])
+  }, [router])
 
   const { startFilm, starting, cover } = useStartFilm({ getToken, onRefused })
 

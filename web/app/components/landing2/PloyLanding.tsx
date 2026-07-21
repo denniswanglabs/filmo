@@ -44,7 +44,35 @@ const SITES = [
   { src: '/landing/vercel.jpg', host: 'vercel.com' },
 ]
 
-export default function PloyLanding({ onEnterStudio }: { onEnterStudio: () => void }) {
+// ── THE CTA IS STATE-AWARE (Ploy-style, 2026-07-20) ──────────────────────────
+// A first-time visitor and a returning-but-signed-out one want different first
+// words. A first-timer sees the pair Ploy leads with — a quiet "Log in" and a
+// primary "Start free"; someone who has signed in here before (the durable
+// `filmo_has_signed_in` flag, which outlives sign-out) sees the single "Enter
+// the studio" this landing has always shown. `firstTime` is decided in page.tsx
+// (it owns the flag read and the session) and handed down; this component only
+// renders it. Every button lands on `/login` when signed out — "Start free"
+// carries `?signup=1` so it opens on the create-account state.
+export default function PloyLanding({
+  firstTime,
+  onEnter,
+  onLogIn,
+  onStartFree,
+}: {
+  /** No record of ever signing in AND signed out now → the two-button first-run CTA. */
+  firstTime: boolean
+  /** "Enter the studio" — the returning/signed-in primary. */
+  onEnter: () => void
+  /** "Log in" — the quiet first-run action (nav only, as Ploy places it). */
+  onLogIn: () => void
+  /** "Start free" — the first-run primary; replaces "Enter the studio" everywhere. */
+  onStartFree: () => void
+}) {
+  // The repeated primary button (hero, pricing, close): its words and its
+  // destination flip together, so a first-timer never sees "Enter the studio"
+  // and a returning visitor never sees "Start free".
+  const primaryLabel = firstTime ? 'Start free' : 'Enter the studio'
+  const onPrimary = firstTime ? onStartFree : onEnter
   const rootRef = useRef<HTMLDivElement>(null)
   const navRef = useRef<HTMLElement>(null)
   const viewRef = useRef<HTMLDivElement>(null)
@@ -252,6 +280,15 @@ html { scroll-behavior:smooth }
 .fl .cta:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .fl .cta.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px rgba(244,243,240,.28)}
 .fl .cta.ghost:hover{background:rgba(244,243,240,.08)}
+/* The first-run pair. "Log in" is a quiet text button (not a second pill), so
+   the eye still lands on "Start free" and the two fit the nav at 390px. */
+.fl .navcta{display:flex;align-items:center;gap:14px}
+.fl .loginlink{background:none;border:none;cursor:pointer;
+  color:rgba(244,243,240,.72);letter-spacing:-.01em;padding:8px 4px;
+  font:600 14px/1 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  transition:color .15s}
+.fl .loginlink:hover{color:var(--ink)}
+.fl .loginlink:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
 
 /* ── hero: two layers, matching height calcs ──────────────────────────────── */
 .fl .hero{position:relative;padding:88px var(--pad) 0}
@@ -357,9 +394,20 @@ html { scroll-behavior:smooth }
           <a href="#studio">The studio</a>
           <a href="#pricing">Pricing</a>
         </div>
-        <button type="button" className="cta" onClick={onEnterStudio}>
-          Enter the studio
-        </button>
+        {firstTime ? (
+          <div className="navcta">
+            <button type="button" className="loginlink" onClick={onLogIn}>
+              Log in
+            </button>
+            <button type="button" className="cta" onClick={onStartFree}>
+              Start free
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="cta" onClick={onEnter}>
+            Enter the studio
+          </button>
+        )}
       </nav>
 
       <div className="hero">
@@ -386,8 +434,8 @@ html { scroll-behavior:smooth }
             in it taken from your own pages.
           </p>
           <div className="herobtns in-up" style={delay(320)}>
-            <button type="button" className="cta" onClick={onEnterStudio}>
-              Enter the studio
+            <button type="button" className="cta" onClick={onPrimary}>
+              {primaryLabel}
             </button>
             <a className="cta ghost" href="#work">
               Watch what it made
@@ -524,9 +572,9 @@ html { scroll-behavior:smooth }
             type="button"
             className="cta"
             style={{ marginTop: 26, width: '100%', justifyContent: 'center' }}
-            onClick={onEnterStudio}
+            onClick={onPrimary}
           >
-            Enter the studio
+            {primaryLabel}
           </button>
         </div>
       </section>
@@ -538,8 +586,8 @@ html { scroll-behavior:smooth }
         <p className="sub" style={{ margin: '22px auto 34px' }}>
           Free while Filmo is in beta — 3,000 credits a day, no card to add.
         </p>
-        <button type="button" className="cta" onClick={onEnterStudio}>
-          Enter the studio
+        <button type="button" className="cta" onClick={onPrimary}>
+          {primaryLabel}
         </button>
       </div>
 

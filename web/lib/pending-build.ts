@@ -1,9 +1,10 @@
-// ── ONE PENDING BUILD, TWO DOORS ────────────────────────────────────────────
+// ── ONE PENDING BUILD, ONE DOOR ─────────────────────────────────────────────
 // Signing in with Google navigates the WHOLE BROWSER away, and it always comes
-// back to `/` — AuthGate calls signInWithGoogle() with no redirectTo, which
-// resolves to origin + '/'. So a URL typed anywhere else in the product cannot
-// resume its own build. It stashes here, and the landing (`web/app/page.tsx`)
-// reads this key once auth resolves and fires createBuild on its behalf.
+// back to `/` — `/login`'s Google button calls signInWithGoogle(origin + '/').
+// So a URL typed anywhere else in the product cannot resume its own build: the
+// door stashes it here and routes to `/login` (the single sign-in surface since
+// the modal was retired, 2026-07-20), and the landing (`web/app/page.tsx`) reads
+// this key once auth resolves and fires createBuild on its behalf.
 //
 // THIS MODULE IS THE CONTRACT. It used to be two private copies — one in
 // page.tsx, one in runs/[id]/NewFilmComposer.tsx — each carrying a comment

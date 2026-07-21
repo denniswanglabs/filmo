@@ -148,12 +148,10 @@ export const BAD_URL = 'Enter a valid website URL.'
  * the parameters `startFilm` would have used.
  *
  * Signing in with Google navigates the WHOLE BROWSER away and always returns to
- * `/` — AuthGate calls signInWithGoogle() with no redirectTo — so no door can
- * resume its own build; the landing does it, by reading this stash on mount.
- * `startFilm` calls this on every refusal, so a gate is never opened over an
- * un-stashed URL. It is exported for the one case that leaves: a reader who
- * EDITS the box while the sign-in sheet is open, whose newer URL would
- * otherwise be thrown away in favour of the one that failed.
+ * `/` — `/login`'s Google button calls signInWithGoogle(origin + '/') — so no
+ * door can resume its own build; the landing does it, by reading this stash on
+ * mount. `startFilm` calls this on every refusal, so a reader is never sent to
+ * `/login` over an un-stashed URL: the door stashes here first, then routes.
  *
  * Silently ignores a URL that could never build — a stash of `{url:''}` is the
  * classic cause of an empty auto-fire on the OAuth return.

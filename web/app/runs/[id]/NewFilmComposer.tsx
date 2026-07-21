@@ -18,34 +18,37 @@
 // normalisation, the pending-build stash, the wording of every refusal, the
 // arrival cover and the navigation all moved to `components/StartFilm.tsx`,
 // which the Overview's suggestion cards call too. What is left here is the
-// stage, and the one thing a door genuinely owns: this one has a sign-in gate,
-// so it opens it.
+// stage, and the one thing a door genuinely owns: what it does when the answer
+// is "sign in first". This one used to raise the modal AuthGate; now it goes to
+// /login, the single sign-in surface (the modal is retired, 2026-07-20). The URL
+// is already stashed by `startFilm` on the refusal, so `/` resumes the build
+// after sign-in — the door keeps nothing of its own to lose.
 import { useCallback, useState } from 'react'
-import { AuthGate } from '../../components/AuthGate'
-import {
-  useStartFilm,
-  stashPendingFilm,
-  type FilmStartRefusal,
-} from '../../components/StartFilm'
+import { useRouter } from 'next/navigation'
+import { useStartFilm, type FilmStartRefusal } from '../../components/StartFilm'
 
 export default function NewFilmComposer({ getToken }: {
   getToken: () => Promise<string | null>
 }) {
+  const router = useRouter()
   const [url, setUrl] = useState('')
   // ONE line under the input carries every thing this screen has to say, and
   // its tone says which kind of thing it is. `bad` is reserved for something
   // the user must act on; progress and reassurance stay quiet.
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null)
-  const [gateOpen, setGateOpen] = useState(false)
 
-  // The door's own half of the contract: say the sentence, and — because this
-  // surface HAS a sign-in gate — open it when the answer is "you need to sign
-  // in". A credit-cap refusal is a real answer rather than a broken session, so
-  // it must never re-open the gate over it.
+  // The door's own half of the contract: when the answer is "sign in first",
+  // go to /login (the URL is already stashed by startFilm, so `/` resumes the
+  // build after sign-in). Every other refusal — a credit cap, a backend blip —
+  // is a real answer, not a broken session, so it stays here as a line under the
+  // box and never sends the reader to the door.
   const onRefused = useCallback((r: FilmStartRefusal) => {
-    setNote({ text: r.message, bad: r.kind !== 'sign-in' })
-    if (r.kind === 'sign-in') setGateOpen(true)
-  }, [])
+    if (r.kind === 'sign-in') {
+      router.push('/login')
+      return
+    }
+    setNote({ text: r.message, bad: true })
+  }, [router])
 
   const { startFilm, starting, cover } = useStartFilm({ getToken, onRefused })
 
@@ -108,19 +111,6 @@ export default function NewFilmComposer({ getToken }: {
           </button>
         </div>
       </form>
-
-      {/* The product's real sign-in surface, not a second copy of it. It hands
-          back a fresh token on the email path (onSignedIn → start again), and
-          on the Google path the URL is already stashed (StartFilm does it on
-          every refusal) and the landing resumes the build when Google returns.
-          `onBeforeRedirect` re-stashes whatever is in the box RIGHT NOW, which
-          covers the reader who edits the URL while the gate is open. */}
-      <AuthGate
-        open={gateOpen}
-        onClose={() => setGateOpen(false)}
-        onBeforeRedirect={() => stashPendingFilm(url)}
-        onSignedIn={() => { setGateOpen(false); void start() }}
-      />
 
       <style>{`
         .nf-stage { flex:1 1 0; min-width:0; position:relative; display:flex;

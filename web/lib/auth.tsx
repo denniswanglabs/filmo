@@ -85,6 +85,14 @@ async function persistAfterResolve(user: AuthUser | null): Promise<void> {
     persistSession(null)
     return
   }
+  // THE DURABLE "HAS EVER SIGNED IN" FLAG (2026-07-20). Written once here, on the
+  // first definitive signed-in resolve, and — unlike the session — it SURVIVES
+  // sign-out (signOut clears SESSION_KEY + the pending build, never this). That is
+  // the whole point: the landing CTA needs to tell a first-time visitor ("Log in"
+  // + "Start free") from a returning one now signed out ("Enter the studio"), and
+  // only a signal that outlives the session can. Read in app/page.tsx as
+  // `filmo_has_signed_in`; keep the literal in step there.
+  try { localStorage.setItem('filmo_has_signed_in', '1') } catch { /* private mode — CTA just stays first-run */ }
   const token = await readAccessToken()
   if (token) persistSession({ accessToken: token, user: { id: user.id, email: user.email } })
 }

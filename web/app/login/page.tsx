@@ -43,10 +43,21 @@
 // `autoComplete` the browser's password manager reads — all unchanged. Only the
 // surface and the order are new: fields → primary → "or" → Google, which is the
 // order of the sign-in this was modelled on.
+//
+// NOW ALSO THE ONLY SIGN-IN SURFACE (2026-07-20). The modal AuthGate is retired;
+// every door that used to open it — the landing CTA, the studio composer, the
+// suggestion cards — navigates here instead. So this page learns the two things
+// the modal knew: a `?retry=1` return wears the honest red sentence, and a
+// stashed build turns the subtitle into "your prompt is ready" (only when it is).
+// The modal's split-panel demo player did NOT come with it: the left panel is a
+// composed night screening room (a blurred real plate under display type), and
+// dropping a light-ground video box with a scrubber into it would mean redoing
+// that panel, not joining it. It dies with the modal, deliberately.
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { insforge } from '../../lib/insforge'
 import { useAuth } from '../../lib/auth'
+import { readPendingBuild } from '../../lib/pending-build'
 import Link from 'next/link'
 import FilmoMark from '../components/landing2/FilmoMark'
 import FilmoLoader, { GROUND_STUDIO } from '../components/FilmoLoader'
@@ -68,8 +79,34 @@ export default function LoginPage() {
   // Verification fallback (only used if the project still requires email verification)
   const [needsCode, setNeedsCode] = useState(false)
   const [code, setCode] = useState('')
+  // ── WHAT THE ARRIVAL SAYS ABOUT ITSELF ──────────────────────────────────────
+  // Two things the door learns from HOW it was opened, both read after hydrate
+  // (localStorage/URL are unreadable on the server, and the loader below covers
+  // the frames before this settles, so there is no flash):
+  //   · retry — `?retry=1`, set only by a FAILED OAuth return (app/page.tsx). It
+  //     earns the honest red sentence above the form, the one the retired modal
+  //     used to wear: nothing was saved, try again.
+  //   · hasStash — a build was typed elsewhere and stashed before the sign-in
+  //     hop. NOW the "your prompt is ready" line only appears when it is TRUE;
+  //     the modal said it to everyone. The stash itself resumes through `/`'s
+  //     existing decision after auth — this page only tells the reader it is there.
+  //   · `?signup=1` — "Start free" off the landing lands on the create-account
+  //     state, which is genuinely distinct here (its own copy + name field).
+  const [retry, setRetry] = useState(false)
+  const [hasStash, setHasStash] = useState(false)
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search)
+      if (q.get('retry') === '1') setRetry(true)
+      if (q.get('signup') === '1') setMode('signup')
+    } catch { /* ignore — defaults stand */ }
+    try {
+      setHasStash(!!readPendingBuild()?.url)
+    } catch { /* ignore */ }
+  }, [])
 
-  // Already signed in → go home.
+  // Already signed in → go home. `/`'s own decision then resumes a stashed build
+  // (signed-in + stash → resume, any arrival path) or shows the landing.
   useEffect(() => {
     if (!loading && user) router.replace('/')
   }, [loading, user, router])
@@ -216,13 +253,23 @@ export default function LoginPage() {
             ) : (
               <form onSubmit={onSubmit} className="lgn-form">
                 <div>
+                  {/* The failed-OAuth-return sentence, verbatim from the retired
+                      modal (5c74691). Above everything, because "it threw me back"
+                      is the first thing to answer. */}
+                  {retry && (
+                    <p className="lgn-retry" role="alert">
+                      That sign-in didn&rsquo;t complete — nothing was saved. Try again.
+                    </p>
+                  )}
                   <h1 className="lgn-h1">
                     {mode === 'signin' ? 'Welcome back' : 'Create your account'}
                   </h1>
                   <p className="lgn-sub">
-                    {mode === 'signin'
-                      ? 'Your films are where you left them.'
-                      : 'Start turning URLs into finished videos.'}
+                    {hasStash
+                      ? 'Your prompt is ready — sign in and Filmo picks up where you left off.'
+                      : mode === 'signin'
+                        ? 'Your films are where you left them.'
+                        : 'Start turning URLs into finished videos.'}
                   </p>
                 </div>
 
@@ -504,6 +551,15 @@ export default function LoginPage() {
         .lgn-primary:hover:not(:disabled) { background:#000; border-color:#000; }
         .lgn-primary:focus-visible { outline:2px solid #3B82F6; outline-offset:2px; }
         .lgn-primary:disabled { opacity:.55; cursor:default; }
+
+        /* The failed-return notice. A filled red panel (not just red ink) so it
+           reads as a state the page arrived in, not a validation error on a
+           field. Palette is StudioEntry's red notice — #B4342F on a soft red
+           over #F0D2D2 — so the two "something went wrong on the way in" panels
+           in the product match. */
+        .lgn-retry { margin:0 0 14px; border:1px solid #F0D2D2; border-radius:10px;
+          background:#FCEDED; padding:10px 12px; font-size:13px; line-height:1.5;
+          color:#B4342F; }
 
         /* #DC2626 is the app's existing "something went wrong" ink
            (SuggestionCards .ovsug-note.bad) — not a new colour. */

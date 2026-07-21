@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '../lib/auth'
 import { OAUTH_RETURN } from '../lib/insforge'
 import { createBuild, listMyRuns } from './actions'
-import { AuthGate } from './components/AuthGate'
 import PloyLanding from './components/landing2/PloyLanding'
 import BootScreen from './components/landing2/BootScreen'
 import StudioEntry from './components/landing2/StudioEntry'
@@ -126,26 +125,43 @@ export default function Home() {
 
   const [view, setView] = useState<View>('landing')
   const [booting, setBooting] = useState(false)
-  const [gateOpen, setGateOpen] = useState(false)
   // A build that failed on its way in has to say so somewhere, and the landing
   // has no composer to say it in — so it is carried onto the studio surface.
   const [notice, setNotice] = useState<string | null>(null)
+  // ── THE LANDING CTA'S STATE (Ploy-style, 2026-07-20) ────────────────────────
+  // firstTime = never signed in here AND signed out now → "Log in" + "Start free".
+  // Anyone else → "Enter the studio". This is CLIENT chrome: the durable
+  // `filmo_has_signed_in` flag (written in lib/auth.tsx, and it OUTLIVES sign-out
+  // — the session key does not, which is the whole reason it, not the session, is
+  // the signal) is unreadable on the server, so the read runs after hydrate and
+  // the CTA settles then. It is deliberately NOT wired to the pre-paint BOOT_PROBE
+  // (which keys on the session for the signed-in cover) — a late-settling button
+  // is invisible; a late-settling cover is the flash this file exists to kill.
+  const [ctaFirstTime, setCtaFirstTime] = useState(false)
 
   // The stamp lives on <html>, outside React's tree, so React will not clean it
   // up on unmount. Leaving it set would hide the landing on a later client
   // navigation back to `/`.
   useEffect(() => clearBootStamp, [])
 
-  // A FAILED OAUTH RETURN REOPENS THE GATE, NAMED (2026-07-20 outage). Google
-  // bounced the reader back here and the exchange produced no session; without
-  // this, they land on an ordinary signed-out landing with no sign anything
-  // went wrong — "it threw me back to the landing page" — and their next click
-  // reopens the gate as if the first attempt never happened. The gate reopens
-  // ITSELF instead, wearing the failure, so retry is one click and the reader
-  // knows the product saw it too.
+  // WHICH CTA THE LANDING SHOWS. Read the durable flag after hydrate; a signed-in
+  // visitor is never "first time" whatever the flag says (belt and braces — the
+  // flag is written for them anyway). A failed read (private mode) leaves the
+  // safe default, "Enter the studio", which routes correctly for everyone.
   useEffect(() => {
-    if (oauthReturnFailed && !loading && !user) setGateOpen(true)
-  }, [oauthReturnFailed, loading, user])
+    if (user) {
+      setCtaFirstTime(false)
+      return
+    }
+    let seen = false
+    try {
+      seen = localStorage.getItem('filmo_has_signed_in') === '1'
+    } catch {
+      /* private mode — treat as returning; the CTA still works signed out */
+      seen = true
+    }
+    setCtaFirstTime(!seen)
+  }, [user])
 
   const showLanding = useCallback(() => {
     clearBootStamp()
@@ -177,12 +193,13 @@ export default function Home() {
       try {
         const accessToken = await getToken()
         if (!accessToken) {
+          // The session died under the resume. The URL is the one thing that can
+          // be lost here, so re-stash it (it was consumed on the way in) and send
+          // the reader to the one sign-in surface; /login's stash-aware subtitle
+          // says it is waiting, and `/`'s resume decision fires it after they sign
+          // in. The boot cover stays up through the replace — no flash to the door.
           writePendingBuild(p)
-          setBooting(false)
-          setNotice('Sign in again to start the film — your link is saved.')
-          setGateOpen(true)
-          setView('studio-entry')
-          clearBootStamp()
+          router.replace('/login')
           return
         }
         const res = await createBuild({
@@ -205,15 +222,12 @@ export default function Home() {
         // reads the SAME four shapes rather than treating every non-run as a run.
 
         // authError — the server VERIFIED the token and rejected it (a real
-        // 401/403, not a brownout). The one case that earns the sign-in sheet:
-        // keep the URL for the round-trip and open the gate.
+        // 401/403, not a brownout). The one resume outcome that needs a fresh
+        // sign-in: keep the URL for the round-trip and send them to /login (which
+        // now IS the sign-in surface — the modal is retired).
         if ('authError' in res) {
           writePendingBuild(p)
-          setBooting(false)
-          setNotice('Sign in again to start the film — your link is saved.')
-          setGateOpen(true)
-          setView('studio-entry')
-          clearBootStamp()
+          router.replace('/login')
           return
         }
         // limit — the credit cap or the short-window throttle. A real answer, not
@@ -305,9 +319,22 @@ export default function Home() {
     void (async () => {
       const { landing, fresh } = readIntent()
 
+      // 0. A FAILED OAUTH RETURN → the door, wearing the failure. Google bounced
+      //    the reader back with no session; instead of the retired modal
+      //    reopening over the landing, forward to /login?retry=1, which shows the
+      //    same honest red sentence ("nothing was saved. Try again."). The stash,
+      //    if any, is deliberately LEFT for /login to advertise and `/` to resume
+      //    after a successful retry — so this outranks the stash cleanup below.
+      //    `user` is null on a failed return (auth.tsx: oauthReturnFailed + no
+      //    session), so a SUCCESSFUL return never lands here.
+      if (oauthReturnFailed && !user) {
+        router.replace('/login?retry=1')
+        return
+      }
+
       // 1. A URL typed elsewhere and interrupted by the Google round-trip
-      //    outranks everything: it is the only thing on this page that can be
-      //    lost, and it is lost silently.
+      //    outranks everything else: it is the only thing on this page that can
+      //    be lost, and it is lost silently.
       const pending = readPendingBuild()
       if (pending && isValidBuildUrl(pending.url)) {
         if (user) {
@@ -344,46 +371,59 @@ export default function Home() {
       //         ("no signed in still go through the landing page").
       //       • user — SUCCESS only. A FAILED return resolves `user = null`
       //         (auth.tsx sets oauthReturnFailed + no session), so this cannot
-      //         fire on it; that path falls through to the gate-reopen effect
-      //         above, which must keep showing the red notice (5c74691), not be
-      //         preempted by a redirect.
+      //         fire on it; that path was already caught by step 0 above and
+      //         forwarded to /login?retry=1 (5c74691's red sentence, now on the
+      //         door), never reaching here.
       if (OAUTH_RETURN && user) {
         setBooting(true)
         router.replace('/overview')
         return
       }
 
-      // 2. EVERYONE GETS THE LANDING. `/` is the front door, not a router
+      // 2. `?new=1` SIGNED OUT → THE DOOR. Someone who pressed a Build/Start
+      //    button elsewhere in the app arrives here with `?new=1`. Signed out,
+      //    the honest next step is the one sign-in surface — send them straight
+      //    to /login rather than dropping them at the top of a marketing page
+      //    with no sign that their click did anything. Routed BEFORE showLanding
+      //    so the marketing page never flashes on the way to the door.
+      if (fresh && !user && !landing) {
+        setBooting(true)
+        router.replace('/login')
+        return
+      }
+
+      // 3. EVERYONE ELSE GETS THE LANDING. `/` is the front door, not a router
       //    (Dennis, 2026-07-19: "no signed in still go through the landing
       //    page"). It used to bounce a signed-in visitor straight into the
       //    studio, which meant the one person who most needed to see the front
-      //    door — the person who owns it — was the only one who never did. A
-      //    landing nobody on the team ever looks at is a landing that rots.
-      //    Entering the studio is now something you DO, via the CTA below,
-      //    rather than something that happens to you.
-      //
-      //    This also deletes the entire redirect: no auth-shaped navigation
-      //    fires on load at all, so there is no ordering hazard against the
-      //    OAuth exchange above, no flash-then-bounce, and nothing for a stale
-      //    optimistic session to get wrong. The only auto-navigation left is
-      //    step 1, which is a URL the user typed and would otherwise lose.
+      //    door — its owner — was the only one who never did. A signed-in
+      //    visitor with no stash lands here too; entering the studio is now
+      //    something you DO, via the state-aware CTA below, not something that
+      //    happens to you. No auth-shaped navigation fires on a plain load, so
+      //    there is no ordering hazard against the OAuth exchange above and
+      //    nothing for a stale optimistic session to get wrong.
       showLanding()
-      // `?new=1` is someone who pressed a Build/Start button elsewhere in the
-      // app. Signed out, the honest next step is the sign-in gate over the
-      // landing rather than dropping them at the top of a marketing page with
-      // no sign that their click did anything.
-      if (fresh && !user && !landing) setGateOpen(true)
     })()
-  }, [loading, user, runBuild, enterStudio, showLanding, router])
+  }, [loading, user, oauthReturnFailed, runBuild, showLanding, router])
 
-  // The landing's CTA. Signed out, this is where sign-in begins; the Google
-  // path returns to `/` and the decision above takes it from there.
+  // The landing's CTAs. Sign-in no longer happens HERE — every signed-out door
+  // goes to /login, the single sign-in surface (the modal is retired). Signed in,
+  // "Enter the studio" resolves the destination the same way it always did.
   function onEnterStudio() {
     if (user) {
       void enterStudio()
       return
     }
-    setGateOpen(true)
+    router.push('/login')
+  }
+  // The first-run pair (shown only when signed out AND never signed in here).
+  // "Start free" carries the create-account intent — /login opens on its signup
+  // state — while "Log in" lands on the default sign-in state.
+  function onLogIn() {
+    router.push('/login')
+  }
+  function onStartFree() {
+    router.push('/login?signup=1')
   }
 
   return (
@@ -391,27 +431,15 @@ export default function Home() {
       <script dangerouslySetInnerHTML={{ __html: BOOT_PROBE }} />
       <BootScreen on={booting} />
 
-      {view === 'landing' ? <PloyLanding onEnterStudio={onEnterStudio} /> : null}
+      {view === 'landing' ? (
+        <PloyLanding
+          firstTime={ctaFirstTime}
+          onEnter={onEnterStudio}
+          onLogIn={onLogIn}
+          onStartFree={onStartFree}
+        />
+      ) : null}
       {view === 'studio-entry' ? <StudioEntry getToken={getToken} notice={notice} /> : null}
-
-      <AuthGate
-        open={gateOpen}
-        notice={
-          oauthReturnFailed && !user
-            ? 'That sign-in didn’t complete — nothing was saved. Try again.'
-            : undefined
-        }
-        onClose={() => setGateOpen(false)}
-        // Nothing to stash: this door has no composer. Deliberately does NOT
-        // clear an existing stash either — a URL typed in the studio and
-        // interrupted here should still resume when Google returns.
-        onBeforeRedirect={() => {}}
-        onSignedIn={() => {
-          setGateOpen(false)
-          setNotice(null)
-          void enterStudio()
-        }}
-      />
     </>
   )
 }
