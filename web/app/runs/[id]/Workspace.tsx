@@ -915,11 +915,25 @@ function WorkspaceRun({ runKey, getToken }: {
                   </div>
                 )
               }
-              // A NEW reply waiting behind the one animating: hold its place empty,
-              // in arrival order, until the driver reaches it. History and finished
-              // reveals render complete, exactly as before.
+              // A NEW reply that has ARRIVED but whose word-by-word reveal has not
+              // begun — the one seam where the mark could slip out of the thread.
+              // Presence must be continuous from the wait to the first revealed
+              // word (Dennis: "before the text starts appearing the blue blob
+              // should be there"), and two paths land here with the tail's blob
+              // already gone: a failed send clears `pending` in the very commit it
+              // speaks its apology, and a genuine reply can queue here behind
+              // another row still animating. In both, the row itself carries the
+              // blob — placed exactly where its first word is about to appear, so
+              // the blob yields INTO the reveal rather than blinking out before it.
+              // Only when the tail is NOT already showing one (not pending, not
+              // working): the mark is present once, never twice, and a settled
+              // thread — which reaches neither branch — still parks nothing.
               if (revealSeeded.current && !revealDone.has(it.id)) {
-                return <div key={i} className="t-dir t-dir-hold" aria-hidden="true" />
+                return (
+                  <div key={i} className="t-dir t-dir-hold" aria-hidden="true">
+                    {!(pending || working) ? <span className="wk-tailblob" /> : null}
+                  </div>
+                )
               }
               return <div key={i} className="t-dir"
                 dangerouslySetInnerHTML={{ __html: md(it.text) }} />
@@ -1121,10 +1135,12 @@ function WorkspaceRun({ runKey, getToken }: {
           background:radial-gradient(circle at 32% 30%, #7FB0FF, #3B82F6 58%, #1D4ED8);
           border-radius:44% 56% 52% 48% / 50% 46% 54% 50%;
           animation:wkmorph 2.4s ease-in-out infinite; }
-        /* AT REST: perfectly round and still. Motion is the only signal. */
-        /* No "still" variant: a blob that isn't moving isn't rendered at all
-           (see the thread's rest branch), so a parked state has no styling to
-           reach for and can't be reintroduced by accident.
+        /* The blob means the studio is working THIS turn. A SETTLED run parks
+           nothing — the thread's rest branch renders no blob, so an idle studio
+           has no still mark to reach for. The one still-yet-present blob is the
+           reduced-motion case below: the reader asked for no motion, so it holds
+           its shape but stays, because presence is the contract and only the
+           morph is the motion being dropped.
            NB: this whole block is a template literal — never use backticks in
            these comments, they terminate the string and the type error lands
            somewhere else entirely. */
@@ -1226,6 +1242,10 @@ function WorkspaceRun({ runKey, getToken }: {
         @media (prefers-reduced-motion:reduce) {
           .t-caret { animation:none; opacity:0; }
           .wk-ellip i { animation:none; opacity:.5; }
+          /* Presence is the contract; motion is the part reduced-motion drops.
+             The blob holds its shape and STAYS — a reader who asked for no motion
+             still sees the studio is at work, just without the morph. */
+          .wk-tailblob { animation:none; }
         }
         .t-work { color:#8A8A86; font-size:12.5px; display:flex; gap:8px;
           align-items:flex-start; }
