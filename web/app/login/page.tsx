@@ -105,10 +105,16 @@ export default function LoginPage() {
     } catch { /* ignore */ }
   }, [])
 
-  // Already signed in → go home. `/`'s own decision then resumes a stashed build
-  // (signed-in + stash → resume, any arrival path) or shows the landing.
+  // Already signed in → onward. WITH a stash, `/` is the right hop: its decision
+  // effect resumes the build. WITHOUT one, `/` would show the marketing landing —
+  // the exact bounce Dennis reported for the Google path ("i have to click on
+  // enter the studio again"), fixed there in 07eebc2. A password sign-in is the
+  // same mid-journey moment, so it gets the same destination: the studio.
   useEffect(() => {
-    if (!loading && user) router.replace('/')
+    if (loading || !user) return
+    let stashed = false
+    try { stashed = !!readPendingBuild()?.url } catch { /* ignore */ }
+    router.replace(stashed ? '/' : '/overview')
   }, [loading, user, router])
 
   async function onSubmit(e: React.FormEvent) {
@@ -130,7 +136,7 @@ export default function LoginPage() {
         }
         // Verification off → session is live.
         await refresh()
-        router.replace('/')
+        router.replace(hasStash ? '/' : '/overview')
         return
       }
       // sign in
@@ -140,7 +146,7 @@ export default function LoginPage() {
         throw new Error(error.message || 'Sign in failed')
       }
       await refresh()
-      router.replace('/')
+      router.replace(hasStash ? '/' : '/overview')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -157,7 +163,7 @@ export default function LoginPage() {
       const { error } = await insforge.auth.verifyEmail({ email, otp: code })
       if (error) throw new Error(error.message || 'Invalid or expired code')
       await refresh()
-      router.replace('/')
+      router.replace(hasStash ? '/' : '/overview')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
