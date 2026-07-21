@@ -56,8 +56,14 @@ style comes from the customer's own website, and every word shown comes \
 verbatim from that site. You never invent copy, colors, or styles.
 
 THE FILM'S CURRENT BEATS (the ONLY editable beats; recordings of the site
-itself are not editable and are not listed):
+itself — the real screen footage — are NOT editable and are NOT listed):
 {beats}
+
+THE CONVERSATION SO FAR — this is your MEMORY. Every turn is a fresh start, so
+resolve every reference ("that scene", "the checklist one", "the second one",
+"yes", "do it", "that treatment") against these turns, not against this last
+message alone:
+{chat}
 
 TREATMENTS AVAILABLE FOR SWAPS: check-list, chip-sweep, kinetic-line, \
 quote-card, people-wall, stat-pop, logo-wall, request-table, context-cards, \
@@ -78,6 +84,32 @@ If the user references a beat by treatment ("the globe beat"), map it to the
 title carrying that treatment in the list; if no listed beat carries it, or
 two could match, ask instead (actions=[]).
 
+ACT, DON'T RE-ASK: when the ACTION and the TARGET beat are BOTH determined
+across the conversation — even if they arrived in different turns — emit the
+action THIS turn. Ask at most ONE clarifying question per ambiguity; once the
+user answers it, it is settled and the next turn ACTS on the answer. Never
+re-offer a choice the user already made, and never ask what the conversation
+above already answers.
+
+THE TREATMENT IS THE USER'S WORD: a swap's target treatment must be one the
+USER named (in this message or earlier in the conversation). NEVER choose the
+treatment yourself. If the user wants a swap but has not named a treatment, ask
+exactly once — "Swap it to what — a logo wall, a stat pop, a quote card?" — with
+actions=[]. Emitting a swap to a treatment the user never said is the one thing
+you must never do.
+
+RECORDINGS ARE REAL FOOTAGE: the opening and any screen recording of the site
+are NOT in the beat list and CANNOT be dropped, cut, restyled, or edited. If the
+user asks to delete or change "the first scene", "the opening", "the intro", or
+any real footage, tell the plain truth — the recordings are real footage of
+their site, so you can't cut or restyle them; you can only drop or re-treat the
+graphic beats — and then LIST those beats. Never steer them into a forced choice
+among unrelated beats to satisfy a request aimed at a recording.
+
+ACT WITH THE NOTE, don't flag-and-wait: when the instruction is explicit and the
+beat resolves, APPLY it; if you have a concern, VOICE it in the SAME reply while
+doing it, never instead of doing it.
+
 VOICE (match this exactly):
 - Open a reply with a 1-3 word acknowledgment token, an em-dash, then the move: "Perfect — …", "No problem — …", "Good catch — …". Never spend a sentence acknowledging, and never apologise.
 - First person, present tense, saying what you are doing and WHY: "I'm swapping that beat so the title and what's under it agree."
@@ -90,7 +122,8 @@ neon cyberpunk', 'use red', 'add emojis'): actions=[], and the reply \
 honestly declines: brand truth comes from their site; offer the nearest \
 in-system move if one exists (e.g. a darker treatment mix, a kinetic beat).
 - 'Why' questions: answer from the provenance events; actions=[].
-- Ambiguous beat references: ask which beat; actions=[].
+- Ambiguous beat references: ask which beat ONCE; actions=[]. A reference the
+  conversation already resolves is NOT ambiguous — act on it.
 - 'Redo/regenerate the whole film': one action {{"action": "rerun"}}.
 - Keep replies under 80 words. No emojis."""
 
@@ -116,15 +149,107 @@ def _norm_title(t: str) -> str:
     return " ".join(str(t or "").split()).lower()
 
 
-def _resolve_actions(stops, actions):
+# The closed treatment vocabulary the user may name (mirrors the SWAP menu in
+# _SYSTEM). A swap the director APPLIES must land on one of these AND on one the
+# USER actually said — see _said_treatments and _resolve_actions.
+_TREATMENTS = ("check-list", "chip-sweep", "kinetic-line", "quote-card",
+               "people-wall", "stat-pop", "logo-wall", "request-table",
+               "context-cards", "house", "chat", "globe", "card", "tag")
+
+
+def _canon_treatment(t: str) -> str:
+    """Canonical hyphenated menu form so "logo wall", "Logo-Wall" and
+    "logo-wall" all compare equal."""
+    return "-".join(str(t or "").lower().replace("-", " ").split())
+
+
+def _chat_user_texts(run_dir: str):
+    """Every USER line from chat.jsonl, oldest-first — the corpus the treatment
+    guard checks a swap's target against."""
+    out = []
+    try:
+        with open(os.path.join(run_dir, "chat.jsonl")) as f:
+            for line in f:
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                if o.get("role") == "user" and o.get("text"):
+                    out.append(str(o["text"]))
+    except Exception:
+        pass
+    return out
+
+
+def _said_treatments(run_dir: str, message: str) -> set:
+    """The treatments the USER has named — in this message or any earlier turn —
+    canonicalized. Enforces fix #3 in code, not just prompt: the director may
+    PROPOSE a swap, but the treatment it lands on must be a word the user
+    actually said (a swap to "context-cards" nobody asked for shipped
+    2026-07-20 because nothing checked this). Ambient words are permissive by
+    design — the guard only has to stop a treatment the user NEVER mentioned."""
+    said = set()
+    for text in _chat_user_texts(run_dir) + [message or ""]:
+        low = " " + " ".join(str(text).lower().replace("-", " ").split()) + " "
+        for m in _TREATMENTS:
+            if " " + m.replace("-", " ") + " " in low:
+                said.add(m)
+    return said
+
+
+def _chat_tail(run_dir: str, message: str = "", turns: int = 12,
+               max_chars: int = 2400) -> str:
+    """The last few conversation turns from chat.jsonl for the prompt's memory
+    section — oldest-first, most-recent kept within the char budget; "" for a
+    fresh thread. THIS is what turns a pile of fresh processes into a director
+    with memory: "the checklist scene", "yes", "do that" resolve only when the
+    turns before them are in the prompt. A trailing user row equal to `message`
+    is dropped so the current turn is not double-counted (it is passed
+    separately as the user content)."""
+    rows = []
+    try:
+        with open(os.path.join(run_dir, "chat.jsonl")) as f:
+            for line in f:
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                role, text = o.get("role"), str(o.get("text") or "").strip()
+                if role in ("user", "director") and text:
+                    rows.append((role, text))
+    except Exception:
+        return ""
+    if rows and rows[-1] == ("user", (message or "").strip()):
+        rows = rows[:-1]
+    rows = rows[-turns:]
+    kept, used = [], 0
+    for role, text in reversed(rows):
+        line = ("User: " if role == "user" else "You (the director): ") + text
+        if kept and used + len(line) + 1 > max_chars:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    kept.reverse()
+    return "\n".join(kept)
+
+
+def _resolve_actions(stops, actions, said):
     """Resolve model actions to CURRENT stops by verbatim title — one source
     of truth for targeting (F7: index-based targeting dropped the wrong beat
-    after treatments shifted between rounds). Mutates stops for applied
-    drops/swaps; returns (applied, rejected, rerun) where applied/rejected
-    are outcome facts for the reply."""
+    after treatments shifted between rounds). `said` is the set of treatments
+    the USER named (see _said_treatments): an applied swap must land on one of
+    them, so the director can never invent a treatment. Mutates stops for
+    applied drops/swaps; returns (applied, rejected, rerun) where each rejected
+    entry is (title, why, kind) — kind in {recording, unnamed_treatment, floor,
+    no_beat} steers the honest reply."""
     import proto_walkrec as pw
     vign = _vignettes(stops)
     by_title = {_norm_title(s["title"]): s for s in vign}
+    # The recordings — real screen footage — carry titles too but are NOT
+    # editable; keep them separate so a request aimed at one gets the honest
+    # limit, not a generic "no such beat" (fix #4).
+    rec_titles = {_norm_title(s.get("title") or "") for s in stops
+                  if s.get("seg")}
     applied, rejected = [], []
     rerun = False
     for a in actions:
@@ -138,28 +263,46 @@ def _resolve_actions(stops, actions):
             if 0 <= bi < len(vign):
                 s = vign[bi]
         if s is None:
-            rejected.append((title or "(unnamed beat)",
-                             "no beat with that title in the current cut"))
+            if _norm_title(title) in rec_titles:
+                rejected.append((title or "(the opening)",
+                                 "that's real footage of the site, which I "
+                                 "can't cut or restyle", "recording"))
+            else:
+                rejected.append((title or "(unnamed beat)",
+                                 "no beat with that title in the current cut",
+                                 "no_beat"))
             continue
         if a.get("action") == "drop":
             s["_drop"] = True
             applied.append(("drop", s["title"]))
         elif a.get("action") == "swap_treatment":
-            to = a.get("to", "")
+            # THE TREATMENT IS THE USER'S WORD (fix #3, in code): the model may
+            # target a beat, but the treatment it swaps to must be one the user
+            # actually named — otherwise ASK, never invent.
+            req = _canon_treatment(a.get("to", ""))
+            if not req or req not in said:
+                rejected.append((s["title"],
+                                 "no treatment was named for that swap",
+                                 "unnamed_treatment"))
+                continue
             # Same tie-break the reviewer uses: the floor, plus what the rest
             # of the cut has already spent. `stops` is the current cut, so the
             # index has to be resolved from it rather than from `vign`.
             bi = stops.index(s)
-            picked = pw._pick_repair(stops, bi, to)
-            if picked == pw._CUT:
+            picked = pw._pick_repair(stops, bi, req)
+            # The floor may refuse the treatment outright (_CUT) or only be able
+            # to land it on a DIFFERENT treatment (a content-wins downgrade).
+            # Either way we do NOT silently apply a treatment the user did not
+            # name — decline honestly and let them pick again.
+            if picked == pw._CUT or _canon_treatment(picked) not in said:
                 rejected.append(
                     (s["title"],
-                     f"“{to}” fails its material floor on this beat"))
+                     f"“{req}” doesn't hold its material floor on this beat",
+                     "floor"))
                 continue
-            to = picked
-            s["motif"] = to
+            s["motif"] = picked
             s["motif_locked"] = True
-            applied.append(("swap", s["title"], to))
+            applied.append(("swap", s["title"], picked))
     stops[:] = [s for s in stops if not s.get("_drop")]
     return applied, rejected, rerun
 
@@ -175,8 +318,18 @@ def _outcome_reply(stops, applied, rejected) -> str:
         head = [(f"dropped “{a[1]}”" if a[0] == "drop"
                  else f"swapped “{a[1]}” to {a[2]}") for a in applied]
         parts.append("Done — " + ", ".join(head) + ".")
-    for title, why in rejected:
-        parts.append(f"I left “{title}” alone — {why}.")
+    for title, why, kind in rejected:
+        if kind == "recording":
+            vign = _vignettes(stops)
+            names = ", ".join(f"“{s['title']}”" for s in vign) or "(none)"
+            parts.append(
+                f"“{title}” is real footage of your site — I can't cut or "
+                f"restyle the recordings, only the graphic beats: {names}.")
+        elif kind == "unnamed_treatment":
+            parts.append(f"Swap “{title}” to what — a logo wall, a stat pop, "
+                         "or a quote card?")
+        else:
+            parts.append(f"I left “{title}” alone — {why}.")
     if applied:
         vign = _vignettes(stops)
         if vign:
@@ -207,6 +360,17 @@ def _log_chat(run_dir: str, role: str, text: str):
                                 "text": text}) + "\n")
     except Exception:
         pass
+
+
+def _say(run_dir: str, text: str):
+    """Speak one director line: narrate it on the bus AND record it in
+    chat.jsonl, so the NEXT turn — a fresh process — remembers what was said.
+    The hosted path never wrote chat.jsonl before (2026-07-20): the reply was
+    emitted to the DB for the UI but never fed back to the model, so every turn
+    started amnesiac. This is the write half of that memory; _chat_tail is the
+    read half."""
+    emit(run_dir, "chat.director", text, "")
+    _log_chat(run_dir, "director", text)
 
 
 def _render_async(run_id: str, run_dir: str, state: dict, applied):
@@ -242,6 +406,8 @@ def _parse(run_dir: str, state: dict, message: str):
     import validate_planner as vp
     sys_prompt = _SYSTEM.format(
         beats=_beats_summary(state["stops"]),
+        chat=(_chat_tail(run_dir, message)
+              or "(no earlier turns — this is the first message in the thread)"),
         events=_events_tail(run_dir))
     raw = vp.call_model([{"role": "system", "content": sys_prompt},
                          {"role": "user", "content": message}],
@@ -282,25 +448,25 @@ def _parse(run_dir: str, state: dict, message: str):
 EDIT_CREDIT_COST = 70
 
 
-def _apply_work(run_id: str, run_dir: str, state: dict, actions,
+def _apply_work(run_id: str, run_dir: str, state: dict, actions, said,
                 job_id: str = "") -> None:
     """Resolve + gate + apply + re-render, synchronously. The chat reply is
     authored from the OUTCOME (never from intent) and emitted before the
-    slow render so the user sees truth immediately."""
+    slow render so the user sees truth immediately. `said` = the treatments the
+    user named — the swap guard in _resolve_actions enforces it."""
     import proto_walkrec as pw
     stops, ctx = state["stops"], state["ctx"]
-    applied, rejected, rerun = _resolve_actions(stops, actions)
+    applied, rejected, rerun = _resolve_actions(stops, actions, said)
     if rerun:
-        emit(run_dir, "chat.director",
+        _say(run_dir,
              "Redoing the whole film — re-reading the site and re-filming "
-             "from scratch.", "")
+             "from scratch.")
         emit(run_dir, "run.start", "Director: full re-run requested",
              "Re-reading the site and re-filming from scratch.")
         pw.build_tour_film(ctx.get("host", ""), run_id)
         return
-    emit(run_dir, "chat.director", _outcome_reply(stops, applied, rejected),
-         "")
-    for title, why in rejected:
+    _say(run_dir, _outcome_reply(stops, applied, rejected))
+    for title, why, kind in rejected:
         emit(run_dir, "review.finding", f"Rejected: “{title[:60]}”", why + ".")
     if not applied:
         emit(run_dir, "review.pass", "No changes applied",
@@ -375,24 +541,32 @@ def _handle_job(run_key: str, insforge_run_id: str, message: str,
     try:
         state = _load_state(run_dir)
     except Exception:
-        emit(run_dir, "chat.director",
+        _log_chat(run_dir, "user", message)
+        _say(run_dir,
              "This film's working files were recycled by a redeploy, so I "
              "can't re-cut it in place. Start a new filmo of the same URL "
              "from New filmo — about ten minutes — and ask for this change "
-             "while it's fresh.", "")
+             "while it's fresh.")
         return 0
     try:
+        # _parse reads the PRIOR turns from chat.jsonl for its memory; the
+        # current user turn is logged just below, AFTER it is read, so it is
+        # not double-counted.
         reply, actions = _parse(run_dir, state, message)
     except (Exception, SystemExit) as e:
-        emit(run_dir, "chat.director",
-             f"I hit a snag reading that ({type(e).__name__}) — try again?", "")
+        _log_chat(run_dir, "user", message)
+        _say(run_dir,
+             f"I hit a snag reading that ({type(e).__name__}) — try again?")
         return 0
+    _log_chat(run_dir, "user", message)
+    said = _said_treatments(run_dir, message)
     if not actions:
-        # Answers and declines: the model's own voice IS the outcome.
-        emit(run_dir, "chat.director", reply, "")
+        # Answers and declines: the model's own voice IS the outcome. _say also
+        # records it so the next turn remembers the question it just asked.
+        _say(run_dir, reply)
         return 0
     try:
-        _apply_work(run_key, run_dir, state, actions, job_id)
+        _apply_work(run_key, run_dir, state, actions, said, job_id)
     except BaseException as e:
         emit(run_dir, "run.error", "Director change failed",
              f"{type(e).__name__}: {e}")
@@ -419,8 +593,9 @@ def handle(run_id: str, message: str) -> dict:
     try:
         reply, actions = _parse(run_dir, state, message)
         if actions:
+            said = _said_treatments(run_dir, message)
             applied, rejected, rerun = _resolve_actions(state["stops"],
-                                                        actions)
+                                                        actions, said)
             if rerun:
                 emit(run_dir, "run.start", "Director: full re-run requested",
                      "Re-reading the site and re-filming from scratch.")
@@ -432,7 +607,7 @@ def handle(run_id: str, message: str) -> dict:
                 _log_chat(run_dir, "director", reply)
                 return {"reply": reply, "working": True}
             reply = _outcome_reply(state["stops"], applied, rejected)
-            for title, why in rejected:
+            for title, why, kind in rejected:
                 emit(run_dir, "review.finding",
                      f"Rejected: “{title[:60]}”", why + ".")
             if applied:
