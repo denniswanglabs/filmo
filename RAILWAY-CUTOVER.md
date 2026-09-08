@@ -40,7 +40,7 @@ are already out of the hot path (CLAIMER_MODE=curated on Hetzner since 2026-07-1
    `mode: curated (deterministic build_runner)`.
 
 ## Verify (Railway proves itself while Hetzner still runs)
-5. Stop Hetzner claiming temporarily: `ssh root@204.168.128.193 systemctl stop filmo-claimer`
+5. Stop Hetzner claiming temporarily: `ssh root@<decommissioned-vm-ip> systemctl stop filmo-claimer`
    (claim is atomic, but stopping removes any race for the test).
 6. Enqueue an e2e run (owner account, run_key `e2e-railway-<ts>`, brain super-free,
    mode mock — mirror the 2026-07-16 curated e2e insert) and watch it deliver with
