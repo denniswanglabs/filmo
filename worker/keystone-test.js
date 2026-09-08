@@ -1,3 +1,4 @@
+// Requires KEYSTONE_TEST_PASSWORD in the environment (never hardcode it).
 // Keystone test: prove the Node worker can do its whole InsForge data path against
 // the live cloud backend — create a user, insert a run + events, upload a video,
 // mark it delivered, read it back, then clean up. Run: node --env-file=.env keystone-test.js
@@ -25,7 +26,7 @@ console.log(`\n=== InsForge keystone test (${baseUrl}) ===`)
 {
   userId = process.env.TEST_USER_ID
   if (!userId) {
-    const { data, error } = await anon.auth.signUp({ email, password: 'Keystone-passw0rd!' })
+    const { data, error } = await anon.auth.signUp({ email, password: process.env.KEYSTONE_TEST_PASSWORD })
     if (error) die('auth.signUp', error)
     userId = data?.user?.id || data?.user?.user_id || data?.id
   }
