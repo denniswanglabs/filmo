@@ -1,21 +1,27 @@
-// Filmo CURATED claimer — runs on the Hetzner VM host.
+// Filmo CURATED claimer — the production worker.
+//
+// SINCE 2026-07-16 this runs on RAILWAY (service `walk-studio-hosted`, 2 replicas),
+// from the repo Dockerfile, which pins CLAIMER_MODE=curated and PRODUCER=railway-curated.
+// It was written for the now-decommissioned Hetzner VM, so the DEFAULT values below
+// still read `hetzner-*`; the image overrides them. The CLAIMER_MODE='hermes' branches
+// are dead in production (Hermes/NemoClaw retired 2026-07-16) — see deploy/retired/.
 //
 // Polls InsForge `jobs` (atomic claim_next_job), runs the CURATED python
 // build_runner.py pipeline (real screenshots via Playwright .venv-capture + real
 // logos via _sanitize_logo_svg + the curated pattern library) as a subprocess,
 // streams its ledger events into `run_events`, uploads the finished MP4 +
-// per-scene assets to the walk-videos bucket, and marks the run delivered with a
-// `hetzner-curated` producer tag.
+// per-scene assets to the walk-videos bucket, and marks the run delivered with the
+// PRODUCER tag.
 //
-// This is the proven Railway `worker/run.js` produce+ship path (build_runner is
-// untouched), with two host-side additions:
+// This is the proven `worker/run.js` produce+ship path (build_runner is untouched),
+// with two additions:
 //   1. An SSRF guard (refuse private/internal/metadata target URLs BEFORE any
-//      egress) — ported from the previous VM worker.js.
-//   2. A `hetzner-curated` producer tag so a delivered run is provably from the VM:
-//      - jobs.claimed_by  = WORKER_ID (`hetzner-curated-<host>-<pid>`)
-//      - runs.props.producer = 'hetzner-curated' (the `producer` column does not
+//      egress) — ported from the previous worker.js.
+//   2. A producer tag so a delivered run is provably from this worker:
+//      - jobs.claimed_by  = WORKER_ID (`<producer>-<host>-<pid>`)
+//      - runs.props.producer = PRODUCER (the `producer` column does not
 //        exist in this schema; props is a jsonb that the editor already reads)
-//      - a `run_events` line  "Produced on Hetzner VM (producer=hetzner-curated)."
+//      - a `run_events` line naming the producer.
 //
 // VO: ElevenLabs is the DEFAULT. We set WS_VO_PROVIDER=elevenlabs so align_vo.py
 // tries ElevenLabs first and AUTOMATICALLY falls back to the free edge-tts +

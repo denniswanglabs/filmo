@@ -1,5 +1,15 @@
 # Railway cutover runbook (Hetzner → Railway, curated mode)
 
+> **STATUS: COMPLETED 2026-07-16.** The cutover ran and stuck. Production is the Railway
+> service `walk-studio-hosted` (2 replicas), curated mode. **Hetzner is decommissioned** —
+> the VM, its `filmo-claimer` / `mcp-toolserver` units, the Hermes agent harness, and the
+> NemoClaw/OpenShell sandbox are all out of the production path and are no longer available
+> as a rollback. Steps 5–7 below (the "keep Hetzner warm" verification) are therefore
+> HISTORICAL; the deploy steps (1–4) and the env list are still the live runbook. The
+> retired VM/Hermes/NemoClaw configuration is kept for reference under `deploy/retired/`.
+> Current architecture: `DEPLOY.md`.
+
+
 Goal: production worker moves to Railway; Hetzner claimer retires. Hermes/NemoClaw
 are already out of the hot path (CLAIMER_MODE=curated on Hetzner since 2026-07-16).
 

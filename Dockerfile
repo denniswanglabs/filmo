@@ -1,7 +1,7 @@
-# Filmo cloud worker image.
+# Filmo production worker image (Railway service `walk-studio-hosted`).
 # Bundles the python pipeline (build_runner.py + deps) and the Node claimer
-# (agent-host/vm/curated-claimer.js, CLAIMER_MODE=curated — the same deterministic
-# path production ran on Hetzner) into one container for Railway. Remotion render +
+# (agent-host/vm/curated-claimer.js, CLAIMER_MODE=curated — the deterministic
+# build_runner path) into one container. Remotion render +
 # Playwright capture + ElevenLabs VO via env key (edge-tts fallback) + whisper
 # word-timing. No Hermes, no NemoClaw, no Higgsfield.
 FROM node:22-bookworm

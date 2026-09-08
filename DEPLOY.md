@@ -1,122 +1,109 @@
 # Filmo — Deploy & Infrastructure (the live system)
 
-Filmo is an AI Product Launch Producer for the **Hermes × NVIDIA × Stripe**
-hackathon: a URL goes in, and a launch video comes out — Conversion Read → plan →
-price → pay → produce → ship. This document is the reproducible snapshot of the
-**currently live** system. The app code is in this repo and matches the running
-VM; `deploy/` is the infra that makes it RUN.
+Filmo is an AI Product Launch Producer: a URL goes in, and a launch video comes out —
+Conversion Read → plan → price → gate → produce → ship. This document is the
+reproducible snapshot of the **currently live** system.
 
-- **Hermes = the AI harness** (the agent runtime that conducts the pipeline).
-- **NVIDIA Nemotron = the brain** (every LLM/reasoning call — Conversion Read and
-  planning — on `nvidia/nemotron-3-ultra-550b-a55b`, the 550B flagship).
-- **Stripe = payments** (a TEST-mode pre-produce checkout gate).
+Production is three managed services and nothing else:
+
+- **Vercel** — the Next.js frontend at `https://filmo.dev`.
+- **InsForge** — Postgres, auth, the `jobs` queue, and the `walk-videos` storage bucket.
+- **Railway** — the async worker service `walk-studio-hosted` that produces the videos.
+
+There is **no VM**. The June-2026 Hetzner worker, the Hermes agent harness, and the
+NemoClaw/OpenShell sandbox were retired on **2026-07-16** (see
+[`RAILWAY-CUTOVER.md`](RAILWAY-CUTOVER.md)); their configuration is kept for reference
+under [`deploy/retired/`](deploy/retired/) and is **not** used by the Railway image.
 
 ## Live components
 
 | Component | Where it runs | What it is |
 |---|---|---|
-| **Web** (Next.js) | **Vercel** → `https://filmostudio.vercel.app` | the site: submit a URL, watch the live agent feed, edit + download the video |
-| **InsForge** | hosted Postgres + storage `https://jd3mdkqr.ap-southeast.insforge.app` | the shared backend: `runs` / `jobs` / `run_events` / `developers` tables + the public **`walk-videos`** bucket |
-| **Worker** (`filmo-claimer`) | **Hetzner VM** `REDACTED-VM-HOST` (`ubuntu-8gb-hel1-1`) | polls InsForge `jobs`, conducts the produce step, uploads the MP4, marks the run delivered |
-| **Host MCP tool-server** | same Hetzner VM, `:8770` | the 5 sanctioned tools (`conversion_read`, `plan`, `price`, `gate`, `produce_and_ship`) the agent conducts |
-| **NemoClaw sandbox** (`filmo`) | Docker on the same VM | NVIDIA's containment; runs the Hermes agent on Nemotron, behind a per-job egress allowlist |
+| **Web** (Next.js 15 / React 19) | **Vercel** → `https://filmo.dev` | the site: submit a URL, watch the live run feed, edit + download the video. `web/middleware.ts` redirects the legacy `filmostudio.vercel.app` and `www.filmo.dev` to the canonical origin |
+| **InsForge** | hosted Postgres + storage, project `jd3mdkqr.ap-southeast.insforge.app` | the shared backend: `runs` / `jobs` / `run_events` / `agent_events` / `credit_ledger` / `developers` tables, auth, and the public **`walk-videos`** bucket |
+| **Worker** (`walk-studio-hosted`) | **Railway**, 2 replicas (`railway.json`) | polls InsForge `jobs`, runs the deterministic `build_runner.py` pipeline, uploads the MP4, marks the run delivered |
 
-> Historical note: an earlier worker ran on Railway (service `walk-studio-hosted`,
-> deploy branch `hosted-saas`). The **current** produce worker is the Hetzner
-> `filmo-claimer`; that is what this document and `deploy/` describe.
+The worker image is built from the repo `Dockerfile`: it bundles the Python pipeline,
+Playwright/Chromium, Remotion + its browser, ffmpeg, `edge-tts`, and a locally-built
+`whisper.cpp`, then boots `agent-host/vm/curated-claimer.js` with
+`CLAIMER_MODE=curated`, `PRODUCER=railway-curated`.
 
 ## How a job flows: URL → video
 
 ```
-  Browser (Vercel)                 InsForge (Postgres + storage)            Hetzner VM
- ─────────────────                ───────────────────────────────        ─────────────────────────────
-  submit URL  ───────────────────►  insert runs + jobs(queued)
-                                          ▲                                 filmo-claimer polls jobs
-  live feed  ◄──── run_events ◄──────────┼──────────────────────────────   claim_next_job (atomic)
-                                          │                                    │ CLAIMER_MODE=hermes
-                                          │                                    ▼
-                                          │                       nemoclaw filmo exec → hermes -s filmo-producer
-                                          │                                    │ conducts 5 MCP tools on :8770
-                                          │                                    ▼
-                                          │            conversion_read → plan → price → gate → produce_and_ship
-                                          │            (Nemotron read+plan · Playwright capture · Remotion render)
-  download  ◄──── runs.final_url ◄────────┴──────────── upload MP4 → walk-videos/<run_key>/final.mp4
+  Browser (Vercel)               InsForge (Postgres + storage)          Railway worker
+ ─────────────────              ───────────────────────────────      ─────────────────────────────
+  submit URL  ─────────────────►  insert runs + jobs(queued)
+                                        ▲                              curated-claimer polls jobs
+  live feed  ◄──── run_events ◄────────┼───────────────────────────   claim_next_job (atomic RPC)
+                                        │                                  │ CLAIMER_MODE=curated
+                                        │                                  ▼
+                                        │                     build_runner.py (deterministic)
+                                        │        Conversion Read → plan → price → gate → produce
+                                        │        (Nemotron read+plan · Playwright capture ·
+                                        │         align_vo + style_fill · Remotion render · ffmpeg)
+  download  ◄──── runs.final_url ◄──────┴──────── upload MP4 → walk-videos/<run_key>/final.mp4
 ```
 
-1. The site (or a direct insert) creates a `runs` row + a `queued` `jobs` row.
-2. `filmo-claimer` on the VM claims the oldest job (`claim_next_job`, atomic).
-3. In `CLAIMER_MODE=hermes`, the claimer runs the Hermes agent **inside the
-   `filmo` NemoClaw sandbox** (`nemoclaw filmo exec … hermes chat -s
-   filmo-producer`). The agent is a strict **conductor**: it calls the 5
-   `filmo-host` MCP tools once each, in order, passing a `plan_id` handle (not the
-   full plan) between them, and threading the `run_id` into every call so each
-   step emits a `run_events` row (the live "watch the agent work" feed).
-4. The tools do the real work on the **host** (Nemotron Conversion Read + plan,
-   Playwright screenshot capture, Remotion render). `produce_and_ship` uploads the
-   finished video to the `walk-videos` bucket and returns `final_url`.
-5. The claimer parses `Shipped: <final_url>`, stamps `runs.final_url` +
-   `props.producer=hetzner-hermes`, and marks the job done. On any conduct
-   failure/timeout it **falls back** to the deterministic `build_runner`
-   (`producer=hetzner-curated`) so a render never fails.
-6. The site shows the delivered video; the editor re-renders edits to `edited_url`.
+1. The site (or a direct insert) creates a `runs` row + a `queued` `jobs` row, and charges
+   the film to the user's `credit_ledger` (`web/app/actions.ts`).
+2. A worker replica claims the oldest job via the atomic `claim_next_job` RPC and
+   SSRF-guards the target URL (`assertPublicUrl` — private/loopback/link-local and cloud
+   metadata addresses are refused before any egress).
+3. `build_runner.py` runs the pipeline: Conversion Read (`read_pass` → `analyze`) → plan
+   (`plan_job`) → price (`producer`) → payment gate → produce (`orchestrator`) → picture
+   (Playwright capture → `align_vo` → `build_timeline` → `style_fill` → Remotion render).
+   Every ledger step is streamed into `run_events` as the live "watch it work" feed.
+4. The claimer uploads `final.mp4` plus per-scene stills to the `walk-videos` bucket,
+   stamps `runs.final_url` + `props.producer`, and marks the job done. A failed build
+   **refunds** the credit row, so a failed attempt never consumes the allowance.
+5. The site shows the delivered video; the editor and the chat director re-render edits
+   (`rerender` / `director` job types on the same worker).
 
-For a `pay_mode=human` job with `PAYMENTS_REQUIRED=true`, the claimer first opens a
-real Stripe **TEST** checkout (`gate.py`, card `4242…`) and waits for payment
-before conducting. `gate.py` refuses any live/missing key.
-
-## Sandbox isolation + egress (security posture)
-
-The agent runs in NVIDIA's NemoClaw sandbox behind **two** egress layers:
-
-1. **OpenShell L7 allowlist** — the sandbox can only reach the hosts named in its
-   policy presets (OpenRouter + NVIDIA for inference, the host `:8770` tool-server,
-   Stripe, and — rewritten **per job** — the one SSRF-vetted customer URL).
-2. **uid-998 host firewall** — an iptables rule (applied host-side via `nsenter`)
-   drops any raw socket the agent (uid 998) opens itself, so a hijacked agent
-   cannot exfiltrate or pivot; it can only use the cooperating L7 path.
-
-Plus capability hardening (`no-new-privileges`, dropped ptrace/syslog). Full
-detail in `deploy/nemoclaw/README.md`.
+For a `pay_mode=human` job with `PAYMENTS_REQUIRED=true`, the claimer first opens a real
+Stripe **TEST** checkout (`gate.py`, card `4242…`) and waits for payment before producing.
+`gate.py` refuses any live/missing key. This path is opt-in; the default gate is credits.
 
 ## `deploy/` map
 
 | Path | Captures |
 |---|---|
-| `deploy/systemd/` | the VM's systemd units: `filmo-claimer.service` (+ `.d/` drop-ins: home, prewarm, payments, hermes-mode), `mcp-toolserver.service`, `gateway-watchdog.service` + `.timer`, `filmo-egress-firewall.service` |
-| `deploy/nemoclaw/` | the `filmo` sandbox: `Dockerfile`, `sandboxes.json`, `onboard-session.json`, `openshell-gateway.json`, `policies/*.yaml` (the egress allowlist), the egress-firewall + hardening scripts, and a `README.md` |
-| `deploy/hermes/` | the `filmo-producer` Hermes skill (`SKILL.md`) the conduct runs + a `README.md` |
 | `deploy/insforge/schema.md` | the DB schema (`runs`/`jobs`/`run_events`/`developers`) + the `walk-videos` bucket |
-| `deploy/worker/` | host scripts the units reference (`start-mcp-toolserver.sh`, `prewarm-gateway.sh`, `gateway-watchdog.sh`, `gate.py`) + `.env.example` |
-| `deploy/*/.env.example` | every env the system needs — names + placeholders, no real values |
+| `deploy/web/.env.example` | the frontend env — names + placeholders, no real values |
+| `deploy/worker/` | `gate.py` (the Stripe TEST checkout gate the claimer spawns) + `.env.example` for the worker |
+| `deploy/retired/` | **RETIRED 2026-07-16, reference only** — the Hetzner systemd units + VM host scripts, the Hermes skills, and the NemoClaw sandbox/egress config. Nothing in the build or runtime path reads these; see `deploy/retired/README.md` |
 
-## Deploy steps (brief)
+## Deploy steps
 
 **Web (Vercel):**
 ```
 cd web && vercel --prod --yes
-vercel alias set <new-deploy-url> filmostudio.vercel.app   # apex alias does NOT auto-follow
+vercel alias set <new-deploy-url> filmo.dev    # the alias does NOT auto-follow — always re-alias
 ```
 Env: `web/.env.local` (see `deploy/web/.env.example`).
 
-**Worker (Hetzner VM):** the units are installed under `/etc/systemd/system/` and
-reference host paths (`/root/filmo-worker`, `/root/filmo-pipeline`,
-`/root/filmo-venv`) and secret `EnvironmentFile`s (`/root/.insforge-key`,
-`/root/.orkey`, `/root/.el-key`, mode 600). To (re)install from this snapshot:
+**Worker (Railway):** deploy from the repo working tree — the image is built from the
+root `Dockerfile`.
 ```
-# copy the units + drop-ins
-cp deploy/systemd/*.service deploy/systemd/*.timer        /etc/systemd/system/
-cp -r deploy/systemd/filmo-claimer.service.d             /etc/systemd/system/
-# copy the host scripts (chmod +x) and the sandbox/nemoclaw config
-cp deploy/worker/*.sh deploy/worker/gate.py              /root/filmo-worker/   # (start-mcp-toolserver.sh -> /root/)
-cp deploy/nemoclaw/policies/*.yaml deploy/nemoclaw/*.sh  /root/filmo-sandbox/
-# create the secret KEY=VALUE files (mode 600) from deploy/worker/.env.example
-systemctl daemon-reload
-systemctl enable --now filmo-claimer mcp-toolserver gateway-watchdog.timer filmo-egress-firewall
+railway link                                    # project walk-studio / service walk-studio-hosted / env production
+railway up --service walk-studio-hosted         # build + deploy from the working tree
+railway logs --service walk-studio-hosted       # expect: "mode: curated (deterministic build_runner)"
 ```
-The NemoClaw sandbox is built from `deploy/nemoclaw/Dockerfile` and onboarded with
-the `filmo` policies (`nemoclaw … policy-add`), per `deploy/nemoclaw/README.md`.
 
-**Backend (InsForge):** the `runs`/`jobs`/`run_events`/`developers` tables and the
-public `walk-videos` bucket already exist on the shared project; schema in
-`deploy/insforge/schema.md`. Do NOT rename the bucket (`walk-videos`) — renaming
+> **Heads-up on `scripts/railway-push-env.sh`.** It still fetches `OPENROUTER_API_KEY`,
+> `ELEVENLABS_API_KEY`, and `AGENTMAIL_API_KEY` over SSH from the decommissioned Hetzner
+> VM, so it cannot run as written. Set those three variables from a local source (or
+> `railway variables --set …` by hand) until the script is repointed; the rest of it —
+> the name list and the "never echo a value" discipline — is still correct.
+
+Required variables: `INSFORGE_URL`, `INSFORGE_API_KEY`, `OPENROUTER_API_KEY` (the brain —
+every Nemotron call goes through OpenRouter), `ELEVENLABS_API_KEY` (optional; the image
+falls back to `edge-tts` + `whisper.cpp`), `FILMO_PUBLIC_BASE=https://filmo.dev`,
+`WALK_BUCKET=walk-videos`, `PAYMENTS_REQUIRED`, `PAYMENT_TIMEOUT_MS`. `CLAIMER_MODE` /
+`PRODUCER` / `PYTHON_BIN` are baked into the image. Full runbook:
+[`RAILWAY-CUTOVER.md`](RAILWAY-CUTOVER.md).
+
+**Backend (InsForge):** the tables and the public `walk-videos` bucket already exist on the
+shared project; schema in `deploy/insforge/schema.md`, migrations in `migrations/`. Auth
+redirect hosts live in `insforge.toml`. Do NOT rename the bucket (`walk-videos`) — renaming
 breaks the live deploy.

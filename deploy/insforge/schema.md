@@ -1,6 +1,6 @@
 # InsForge schema — the Filmo backend (Postgres + storage)
 
-InsForge is the shared backend for the website (Vercel) and the worker (Hetzner).
+InsForge is the shared backend for the website (Vercel) and the worker (Railway service `walk-studio-hosted`).
 Project URL: `https://jd3mdkqr.ap-southeast.insforge.app`. Postgres tables + one
 public storage bucket. Columns below were confirmed against the LIVE project with
 read-only `select … limit 1` and cross-checked against the code's usage. RLS is
@@ -49,7 +49,7 @@ web app / insert  ──►  runs (1)  ──►  jobs (1, queued)
 | `plan` | jsonb \| null | the resolved scene plan (when persisted) |
 | `selection` | jsonb \| null | selection stamp |
 | `final_url` | text \| null | delivered video URL (walk-videos object) |
-| `props` | jsonb \| null | per-run extras; the worker stamps `props.producer` (`hetzner-curated`/`hetzner-hermes`) + `props.produced_on` |
+| `props` | jsonb \| null | per-run extras; the worker stamps `props.producer` (`railway-curated` today; runs from before the 2026-07-16 cutover carry `hetzner-curated`/`hetzner-hermes`) + `props.produced_on` |
 | `props_edited` | jsonb \| null | editor overrides |
 | `edited_url` | text \| null | re-rendered (edited) video URL |
 | `checkout_url` | text \| null | Stripe checkout URL for a human-pays job |
@@ -67,7 +67,7 @@ web app / insert  ──►  runs (1)  ──►  jobs (1, queued)
 | `params` | jsonb | the build params (goal, url, mode, brain, pay_mode, …) |
 | `attempts` | int | claim attempt count |
 | `claimed_at` | timestamptz \| null | |
-| `claimed_by` | text \| null | worker id, e.g. `hetzner-curated-<host>-<pid>` |
+| `claimed_by` | text \| null | worker id, e.g. `railway-curated-<host>-<pid>` |
 | `error` | text \| null | failure reason |
 | `created_at` | timestamptz | |
 | `updated_at` | timestamptz | |

@@ -1,16 +1,17 @@
 # Filmo — LOCKED FACTS (read this first, every chat)
 
-Filmo is an AI Product Launch Producer (hosted SaaS) for the **Hermes × NVIDIA × Stripe** hackathon. URL in → Conversion Read → plan → price → pay → produce → ship a launch video.
+Filmo is an AI Product Launch Producer (hosted SaaS), live at **https://filmo.dev**. URL in → Conversion Read → plan → price → gate → produce → ship a launch video.
+It began as a Hermes-hackathon entry (Nous × NVIDIA × Stripe, June 2026); since the 2026-07-16 cutover the production path is the deterministic Railway pipeline (see `RAILWAY-CUTOVER.md`).
 
 ## Architecture — DO NOT muddle this (I have repeatedly; don't)
-- **Hermes = the AI HARNESS** — the agent runtime / orchestration. It is NOT a model that does a step.
+- **The pipeline is deterministic Python** — `curated-claimer.js` (CLAIMER_MODE=curated) spawns `build_runner.py`; there is no agent harness in the hot path. Hermes/NemoClaw are RETIRED (2026-07-16) and unreachable at CLAIMER_MODE=curated.
 - **NVIDIA Nemotron = the BRAIN** — every LLM/reasoning call (Conversion Read AND planning). The flagship is the **550B** = `ultra-paid` = `nvidia/nemotron-3-ultra-550b-a55b`.
 - **Stripe = payments.**
 - Use **PAID Nemotron** so there are no free-tier OpenRouter 429s. Do NOT reintroduce a Hermes/Nous *model* brain for any step (the old `analyze.py` "one real Nous-model usage" comment is wrong per Dennis).
-- Wiring: `analyze.py ANALYZE_BRAIN_CHAIN = ("ultra-paid","super-paid")`; `build_runner ANALYZE_BRAIN = "ultra-paid"`; planner brain = `ultra-paid`.
+- Wiring: `analyze.py ANALYZE_BRAIN_CHAIN = ("ultra-paid","super-paid")`; `build_runner ANALYZE_BRAIN = "ultra-paid"` (the Conversion Read). The STORYBOARD PLANNER brain is operator-selected and defaults to `super-free` in production — `curated-claimer.js` passes `--brain p.brain || 'super-free'` and `web/app/actions.ts` pins the same fallback. All brains route through OpenRouter (`brain.py brain_endpoint()`); nothing calls build.nvidia.com at runtime.
 
 ## Brand
-- Product = **Filmo**, live at **https://filmostudio.vercel.app**. "Walk Studio" / `walk.studio` is RETIRED — do not use it.
+- Product = **Filmo**, live at **https://filmo.dev** (the canonical origin — `web/middleware.ts` redirects `filmostudio.vercel.app` and `www.filmo.dev` to it). "Walk Studio" / `walk.studio` is RETIRED — do not use it.
 
 ## Cards (feature-card treatments)
 - 4 treatments: `icon-stat` / `split-mosaic` / `split-stat` / `icon-headline` (fallback). Planner picks (LLM + rules guard) with a HONESTY guard: **never fabricate a stat/entities — no real data → `icon-headline`** (centered, full-width, fills the white space).
@@ -26,8 +27,9 @@ Filmo is an AI Product Launch Producer (hosted SaaS) for the **Hermes × NVIDIA 
 - **Lesson:** before wiring a "new capability" into this polished pipeline, READ what the production path already renders for that scene type (the actual archetype + a hosted contact sheet) — NOT an isolated local test. Local renders mislead because the real plan always includes the screenshot scene + mosaic + LLM stat beats. The one non-redundant path to add a pattern is a deliberate redesign of an existing beat (e.g. the opening) — gate it on Dennis's sign-off.
 
 ## This is a HOSTED product (for other users) — it cannot rely on local gen
-- **Web** (Next.js) → Vercel. Deploy: `cd web && vercel --prod --yes` THEN re-alias the apex: `vercel alias set <new-deploy-url> filmostudio.vercel.app` (the apex alias does NOT auto-follow — always re-alias).
-- **Worker (LIVE) = Railway service `walk-studio-hosted`** (Docker: `agent-host/vm/curated-claimer.js` in CLAIMER_MODE=curated + the python pipeline; deploy = `cd ~/filmo && railway up --service walk-studio-hosted`; secrets via `scripts/railway-push-env.sh`; runbook = RAILWAY-CUTOVER.md). Hermes/NemoClaw are OUT of the hot path (2026-07-16, competition over). The Hetzner VM's filmo-claimer + mcp-toolserver are STOPPED+DISABLED — rollback for ~a week (`systemctl enable --now filmo-claimer` re-arms, CLAIMER_MODE=curated), then Dennis cancels the server.
+- **Web** (Next.js) → Vercel. Deploy: `cd web && vercel --prod --yes` THEN re-alias the production domain: `vercel alias set <new-deploy-url> filmo.dev` (the alias does NOT auto-follow — always re-alias). `filmostudio.vercel.app` is the LEGACY alias; middleware redirects it to filmo.dev.
+- **Worker (LIVE, and the ONLY producer) = Railway service `walk-studio-hosted`**, 2 replicas (`railway.json`). Docker image boots `agent-host/vm/curated-claimer.js` with `CLAIMER_MODE=curated` + the python pipeline (`Dockerfile` CMD + ENV). Deploy = `cd ~/filmo && railway up --service walk-studio-hosted`; secrets via `scripts/railway-push-env.sh`; runbook = `RAILWAY-CUTOVER.md`.
+- **There is NO VM and NO Hetzner rollback.** Hermes/NemoClaw left the hot path on 2026-07-16 and Dennis no longer uses Hetzner at all. Never write a runbook step that ssh's to a VM or touches `filmo-claimer`/`mcp-toolserver` systemd units — that infra is gone; the snapshot under `deploy/retired/` is reference only.
 - The worker polls InsForge `jobs` (claim_next_job) and runs `build_runner.py`. A build is created via the web app or by inserting a run+job into InsForge.
 - Local pipeline run (debug only): `set -a; source ~/.hermes/.env; set +a; python3 build_runner.py --url <url> --run-id <id> --mode mock --brain ultra-paid`. Renders `runs/<id>/final.mp4`. (`mode mock` = real Remotion cards, $0 production; planning costs Nemotron tokens.)
 - **★ GOTCHA — `loop_plan.py`/`loop_measure.py` SKIP the orchestrator's `validate_plan` (`plan_schema.py`).** So a change can pass every local loop test and still crash the HOSTED build with `ValueError: invalid plan` (the orchestrator runs `validate_plan` at `orchestrator.py:~238`, build fails "exit 1, ledger failed"). In particular: **adding a new TOP-LEVEL plan key requires adding it to `plan_schema.allowed_top`** (currently `{job, scenes, voiceover, selection, _planner, design_brief}`). When a hosted gen fails, get the real traceback with `railway logs --service walk-studio-hosted | grep -iE "traceback|error|line [0-9]"` — the InsForge "request timed out" lines are noise, not the cause.
@@ -36,15 +38,15 @@ Filmo is an AI Product Launch Producer (hosted SaaS) for the **Hermes × NVIDIA 
 - OpenRouter/ElevenLabs/NVIDIA keys in `~/.hermes/.env`. InsForge admin key in `web/.env.local` (`INSFORGE_API_KEY` bypasses RLS — use `@insforge/sdk createAdminClient` to query `runs`, joined to `auth.users`).
 
 ## Repo + branches
-- **GitHub repo = `denniswanglabs/filmo`** (renamed from `walk-studio` 2026-06-28; the old URL auto-redirects). Will be flipped PUBLIC for the submission (not yet — scrub internal `*.md` docs first).
+- **GitHub repo = `denniswanglabs/filmo`** (renamed from `walk-studio` 2026-06-28; the old URL auto-redirects). It is PUBLIC — assume anything you commit here is readable by anyone; keep internal notes and secrets out.
 - **★ Rename scope — DO NOT rename these (live infra, would break deploys):** the local dir `walk-studio-hosted`, the Railway **service** `walk-studio-hosted`, and the InsForge storage **bucket** `walk-videos`. Only the GitHub repo name + display/brand text changed to Filmo.
-- Branches: `landing-polish` = active web+pipeline work (deployed to Vercel). `hosted-saas` = worker deploy source (Railway). `cards` = original treatment branch (merged into landing-polish). `main` = the `hermes-video-agent` worktree.
+- Branches: `landing-polish` = the DEFAULT branch and active web+pipeline work (deployed to Vercel; Railway deploys from this working tree via `railway up`). `hosted-saas` = older worker deploy source. `cards` = original treatment branch (merged into landing-polish). `main` = the `hermes-video-agent` worktree. Only `landing-polish` is kept current.
 
 ## Latest handoff
 See the newest `HANDOFF-*.md` in this dir for in-progress state.
 
-## Filmo Lab (LOCAL ONLY — do not confuse with production/Hetzner)
+## Filmo Lab (LOCAL ONLY — do not confuse with production)
 - **`filmo-lab/`** = isolated Hermes self-improve experiment on your Mac. Read **`filmo-lab/CLAUDE.md`** before any lab work.
-- Lab uses Hermes profile **`filmo-lab`**, runs under **`filmo-lab/runs/`**, never InsForge/Railway/Hetzner/VM.
-- Production = `worker/`, `web/`, `agent-host/`, Vercel, Hetzner — **never mix with lab scripts.**
+- Lab uses Hermes profile **`filmo-lab`**, runs under **`filmo-lab/runs/`**, never InsForge/Railway.
+- Production = `web/`, `agent-host/`, the python pipeline, Vercel + Railway + InsForge — **never mix with lab scripts.**
 
